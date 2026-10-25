@@ -1,0 +1,29 @@
+# DJINN config. Copy to config.toml.
+#
+# Location: pass --config <path>, or place it next to the binary (Windows)
+# or at ~/.config/djinn/config.toml (Linux). Without a file, the defaults
+# below are used.
+#
+# Any value can be overridden with an env var: DJINN_<SECTION>__<KEY>, e.g.
+#   DJINN_SERVER__LISTEN=127.0.0.1:9000
+#   DJINN_LIBRARY__ROOTS='["/srv/music", "/mnt/more-music"]'
+#
+# Runtime-tunable settings (history window, per-user limit, ...) live in the
+# database and are changed from the admin page, not here.
+#
+# Log level: set RUST_LOG, e.g. RUST_LOG=debug or RUST_LOG=info,djinn=debug.
+
+[server]
+listen = "0.0.0.0:8066"
+
+[library]
+roots = ["/srv/music"]
+
+[database]
+path = "djinn.db"
+
+[audio]
+# Internal mix rate in Hz. Every track is resampled to this at decode time.
+master_rate = 48000
+# Startup default, 0 (gapless) to 12. Adjustable at runtime from the admin page.
+crossfade_secs = 0
