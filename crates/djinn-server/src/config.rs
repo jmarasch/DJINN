@@ -101,8 +101,23 @@ impl Config {
             },
         };
 
-        let config = Self::from_figment(figment(path.as_deref()))?;
+        let mut config = Self::from_figment(figment(path.as_deref()))?;
+        // Relative paths are relative to the config file, so a service finds
+        // its database no matter what directory it was started from.
+        if let Some(dir) = path.as_deref().and_then(Path::parent) {
+            config.resolve_relative_paths(dir);
+        }
         Ok((config, source))
+    }
+
+    fn resolve_relative_paths(&mut self, base: &Path) {
+        let resolve = |p: &mut PathBuf| {
+            if p.is_relative() {
+                *p = base.join(&*p);
+            }
+        };
+        resolve(&mut self.database.path);
+        self.library.roots.iter_mut().for_each(resolve);
     }
 
     fn from_figment(figment: Figment) -> anyhow::Result<Self> {
@@ -220,6 +235,21 @@ mod tests {
             assert!(Config::from_figment(figment(None)).is_err());
             Ok(())
         });
+    }
+
+    #[test]
+    fn relative_paths_resolve_against_config_dir() {
+        let mut config = Config::default();
+        config.library.roots = vec![PathBuf::from("music"), PathBuf::from("/abs/music")];
+        config.resolve_relative_paths(Path::new("/etc/djinn"));
+        assert_eq!(config.database.path, PathBuf::from("/etc/djinn/djinn.db"));
+        assert_eq!(
+            config.library.roots,
+            vec![
+                PathBuf::from("/etc/djinn/music"),
+                PathBuf::from("/abs/music")
+            ]
+        );
     }
 
     #[test]

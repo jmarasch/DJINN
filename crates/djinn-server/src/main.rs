@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use anyhow::Context;
 use axum::Router;
 use clap::Parser;
+use djinn_store::Store;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
 
@@ -45,6 +46,11 @@ async fn main() -> anyhow::Result<()> {
         tracing::warn!("no library roots configured");
     }
 
+    let store = Store::open(&config.database.path)
+        .await
+        .with_context(|| format!("failed to open database {}", config.database.path.display()))?;
+    tracing::info!(path = %config.database.path.display(), "database ready");
+
     let listener = tokio::net::TcpListener::bind(config.server.listen)
         .await
         .with_context(|| format!("failed to bind {}", config.server.listen))?;
@@ -59,6 +65,7 @@ async fn main() -> anyhow::Result<()> {
         .await
         .context("server error")?;
 
+    store.close().await;
     tracing::info!("shut down");
     Ok(())
 }
