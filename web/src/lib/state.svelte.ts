@@ -124,24 +124,34 @@ export function isAdmin(): boolean {
   return app.me?.role === 'admin'
 }
 
-// Short-lived messages at the bottom of the screen.
-export const toasts = $state({ items: [] as { id: number; text: string; error: boolean }[] })
+// Short-lived messages at the bottom of the screen, optionally with one
+// action button (like Undo).
+export interface ToastAction {
+  label: string
+  run: () => void
+}
+
+export const toasts = $state({
+  items: [] as { id: number; text: string; error: boolean; action?: ToastAction }[],
+})
 let toastId = 0
 
-export function toast(text: string, error = false) {
+export function toast(text: string, error = false, action?: ToastAction) {
   const id = ++toastId
-  toasts.items.push({ id, text, error })
-  setTimeout(() => {
-    toasts.items = toasts.items.filter((t) => t.id !== id)
-  }, 3500)
+  toasts.items.push({ id, text, error, action })
+  setTimeout(() => dismissToast(id), action ? 5000 : 3500)
+}
+
+export function dismissToast(id: number) {
+  toasts.items = toasts.items.filter((t) => t.id !== id)
 }
 
 /** Queues a track with an optimistic "pending" state until SSE confirms. */
 export async function requestTrack(trackId: number) {
   app.pending = new Set(app.pending).add(trackId)
   try {
-    await api.addRequest(trackId)
-    toast('Added to the queue')
+    const item = await api.addRequest(trackId)
+    toast('Added to the queue', false, { label: 'Undo', run: () => cancelRequest(item.id) })
   } catch (e) {
     const next = new Set(app.pending)
     next.delete(trackId)
@@ -150,9 +160,36 @@ export async function requestTrack(trackId: number) {
   }
 }
 
-export function trackStatus(trackId: number): 'playing' | 'queued' | 'pending' | null {
+/** Removes one of your own requests (admins can remove any). */
+export async function cancelRequest(queueId: number) {
+  const before = app.queue
+  app.queue = app.queue.filter((q) => q.id !== queueId)
+  try {
+    await api.removeRequest(queueId)
+    toast('Removed from the queue')
+  } catch (e) {
+    app.queue = before
+    toast(e instanceof Error ? e.message : 'Could not remove that song', true)
+  }
+}
+
+/** Your own queued request for a track, if any. */
+export function myRequest(trackId: number) {
+  return app.queue.find((q) => q.track.id === trackId && q.user_id === app.me?.id) ?? null
+}
+
+/** `mine`: queued by you, so you can cancel it. */
+export function trackStatus(trackId: number): 'playing' | 'mine' | 'queued' | 'pending' | null {
   if (app.nowPlaying.current?.track.id === trackId) return 'playing'
+  if (myRequest(trackId)) return 'mine'
   if (app.queue.some((q) => q.track.id === trackId)) return 'queued'
   if (app.pending.has(trackId)) return 'pending'
   return null
+}
+
+/** Queues the track, or cancels your request if it's already queued. */
+export function toggleRequest(trackId: number) {
+  const mine = myRequest(trackId)
+  if (mine) cancelRequest(mine.id)
+  else requestTrack(trackId)
 }

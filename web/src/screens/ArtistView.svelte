@@ -24,8 +24,13 @@
 {#if error}
   <p class="error">{error}</p>
 {:else if artist}
-  <h1>{artist.name}</h1>
-  <PoolButton kind="artist" refId={artist.id} />
+  <header>
+    <Art hash={artist.art_hash} size={120} round={999} letter={artist.name.charAt(0).toUpperCase()} />
+    <div>
+      <h1>{artist.name}</h1>
+      <PoolButton kind="artist" refId={artist.id} />
+    </div>
+  </header>
 
   {#if artist.albums.length}
     <h2>Albums</h2>
@@ -49,8 +54,15 @@
 {/if}
 
 <style>
+  header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 8px;
+  }
+
   h1 {
-    margin: 4px 0 8px;
+    margin: 4px 0;
   }
 
   .album {

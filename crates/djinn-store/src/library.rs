@@ -52,6 +52,7 @@ macro_rules! album_columns {
 pub struct Artist {
     pub id: i64,
     pub name: String,
+    pub art_hash: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]
@@ -73,6 +74,7 @@ pub struct Page<T> {
 pub struct ArtistSummary {
     pub id: i64,
     pub name: String,
+    pub art_hash: Option<String>,
     /// Playable tracks by this artist or on their albums.
     pub track_count: i64,
 }
@@ -132,7 +134,19 @@ pub struct ScannedTrack {
     pub sample_rate: Option<i64>,
     pub channels: Option<i64>,
     pub codec: Option<String>,
-    pub art_hash: Option<String>,
+    /// Cover embedded in the file's tags.
+    pub embedded_art: Option<String>,
+    /// Image in the file's folder (the album folder, usually).
+    pub folder_art: Option<String>,
+    /// Image in the artist's folder.
+    pub artist_art: Option<String>,
+}
+
+impl ScannedTrack {
+    /// The track's own artwork: embedded, else its folder's image.
+    pub fn art_hash(&self) -> Option<&str> {
+        self.embedded_art.as_deref().or(self.folder_art.as_deref())
+    }
 }
 
 /// Album artist used when a file has an album but no artist tags at all.
@@ -149,7 +163,7 @@ macro_rules! available {
 /// artist or album artist.
 macro_rules! artist_counts {
     () => {
-        "SELECT ar.id, ar.name, \
+        "SELECT ar.id, ar.name, ar.art_hash, \
                 (SELECT count(*) FROM tracks t LEFT JOIN albums al ON al.id = t.album_id \
                  WHERE t.removed_at IS NULL AND (t.artist_id = ar.id OR al.artist_id = ar.id)) \
                  AS track_count \
@@ -174,6 +188,66 @@ impl Store {
         for track in tracks {
             save_track(&mut tx, track, now).await?;
         }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// Picks album and artist images from what the scanner found, and
+    /// deletes artists and albums left with no tracks (unless the auto pool
+    /// uses them). Run after a scan.
+    pub async fn refresh_artwork(&self) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        // Albums: the first listed song's embedded cover, then the album
+        // folder's image, then any song's artwork.
+        sqlx::query(
+            "UPDATE albums SET art_hash = coalesce(
+               (SELECT t.embedded_art FROM tracks t
+                WHERE t.album_id = albums.id AND t.removed_at IS NULL
+                ORDER BY t.disc_no IS NULL, t.disc_no, t.track_no IS NULL, t.track_no, t.path
+                LIMIT 1),
+               (SELECT t.folder_art FROM tracks t
+                WHERE t.album_id = albums.id AND t.removed_at IS NULL AND t.folder_art IS NOT NULL
+                ORDER BY t.path LIMIT 1),
+               (SELECT t.art_hash FROM tracks t
+                WHERE t.album_id = albums.id AND t.removed_at IS NULL AND t.art_hash IS NOT NULL
+                ORDER BY t.disc_no, t.track_no, t.path LIMIT 1))",
+        )
+        .execute(&mut *tx)
+        .await?;
+        // Artists: an image in the artist's folder, then their first album's
+        // cover, then any of their songs' artwork.
+        sqlx::query(
+            "UPDATE artists SET art_hash = coalesce(
+               (SELECT t.artist_art FROM tracks t LEFT JOIN albums al ON al.id = t.album_id
+                WHERE t.removed_at IS NULL AND t.artist_art IS NOT NULL
+                  AND (al.artist_id = artists.id OR t.artist_id = artists.id)
+                ORDER BY t.path LIMIT 1),
+               (SELECT al.art_hash FROM albums al
+                WHERE al.artist_id = artists.id AND al.art_hash IS NOT NULL
+                ORDER BY al.year IS NULL, al.year, al.title LIMIT 1),
+               (SELECT t.art_hash FROM tracks t
+                WHERE t.artist_id = artists.id AND t.removed_at IS NULL AND t.art_hash IS NOT NULL
+                ORDER BY t.path LIMIT 1))",
+        )
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(
+            "DELETE FROM albums
+             WHERE NOT EXISTS (SELECT 1 FROM tracks t WHERE t.album_id = albums.id)
+               AND NOT EXISTS (SELECT 1 FROM pool_entries p
+                               WHERE p.kind = 'album' AND p.ref_id = albums.id)",
+        )
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(
+            "DELETE FROM artists
+             WHERE NOT EXISTS (SELECT 1 FROM tracks t WHERE t.artist_id = artists.id)
+               AND NOT EXISTS (SELECT 1 FROM albums al WHERE al.artist_id = artists.id)
+               AND NOT EXISTS (SELECT 1 FROM pool_entries p
+                               WHERE p.kind = 'artist' AND p.ref_id = artists.id)",
+        )
+        .execute(&mut *tx)
+        .await?;
         tx.commit().await?;
         Ok(())
     }
@@ -250,10 +324,11 @@ impl Store {
     }
 
     pub async fn artist(&self, id: i64) -> Result<Option<ArtistDetail>> {
-        let artist: Option<Artist> = sqlx::query_as("SELECT id, name FROM artists WHERE id = ?")
-            .bind(id)
-            .fetch_optional(&self.pool)
-            .await?;
+        let artist: Option<Artist> =
+            sqlx::query_as("SELECT id, name, art_hash FROM artists WHERE id = ?")
+                .bind(id)
+                .fetch_optional(&self.pool)
+                .await?;
         let Some(artist) = artist else {
             return Ok(None);
         };
@@ -294,7 +369,7 @@ impl Store {
     /// Artists with playable tracks, A to Z.
     pub async fn artists_page(&self, offset: i64, limit: i64) -> Result<Page<ArtistSummary>> {
         let items = sqlx::query_as(concat!(
-            "SELECT id, name, track_count FROM (",
+            "SELECT id, name, art_hash, track_count FROM (",
             artist_counts!(),
             ") WHERE track_count > 0 ORDER BY name COLLATE NOCASE LIMIT ? OFFSET ?"
         ))
@@ -420,7 +495,7 @@ impl Store {
         .fetch_all(&self.pool)
         .await?;
         let artists = sqlx::query_as(concat!(
-            "SELECT ar.id, ar.name FROM artists_fts f JOIN artists ar ON ar.id = f.rowid
+            "SELECT ar.id, ar.name, ar.art_hash FROM artists_fts f JOIN artists ar ON ar.id = f.rowid
              WHERE artists_fts MATCH ?
                AND EXISTS (
                  SELECT 1 FROM tracks t LEFT JOIN albums al ON al.id = t.album_id
@@ -455,15 +530,16 @@ async fn save_track(tx: &mut Transaction<'_, Sqlite>, t: &ScannedTrack, now: i64
                 .or(t.artist.as_deref())
                 .unwrap_or(UNKNOWN_ARTIST);
             let album_artist_id = upsert_artist(tx, album_artist).await?;
-            Some(upsert_album(tx, title, album_artist_id, t.year, t.art_hash.as_deref()).await?)
+            Some(upsert_album(tx, title, album_artist_id, t.year).await?)
         }
         None => None,
     };
     sqlx::query(
         "INSERT INTO tracks (path, size, mtime, duration_ms, title, artist, album, album_artist,
                              track_no, disc_no, year, genre, art_hash, sample_rate, channels,
-                             codec, artist_id, album_id, added_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                             codec, artist_id, album_id, added_at, embedded_art, folder_art,
+                             artist_art)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (path) DO UPDATE SET
             size = excluded.size, mtime = excluded.mtime, duration_ms = excluded.duration_ms,
             title = excluded.title, artist = excluded.artist, album = excluded.album,
@@ -471,7 +547,9 @@ async fn save_track(tx: &mut Transaction<'_, Sqlite>, t: &ScannedTrack, now: i64
             disc_no = excluded.disc_no, year = excluded.year, genre = excluded.genre,
             art_hash = excluded.art_hash, sample_rate = excluded.sample_rate,
             channels = excluded.channels, codec = excluded.codec,
-            artist_id = excluded.artist_id, album_id = excluded.album_id, removed_at = NULL",
+            artist_id = excluded.artist_id, album_id = excluded.album_id, removed_at = NULL,
+            embedded_art = excluded.embedded_art, folder_art = excluded.folder_art,
+            artist_art = excluded.artist_art",
     )
     .bind(&t.path)
     .bind(t.size)
@@ -485,13 +563,16 @@ async fn save_track(tx: &mut Transaction<'_, Sqlite>, t: &ScannedTrack, now: i64
     .bind(t.disc_no)
     .bind(t.year)
     .bind(&t.genre)
-    .bind(&t.art_hash)
+    .bind(t.art_hash())
     .bind(t.sample_rate)
     .bind(t.channels)
     .bind(&t.codec)
     .bind(artist_id)
     .bind(album_id)
     .bind(now)
+    .bind(&t.embedded_art)
+    .bind(&t.folder_art)
+    .bind(&t.artist_art)
     .execute(&mut **tx)
     .await?;
     Ok(())
@@ -515,19 +596,15 @@ async fn upsert_album(
     title: &str,
     artist_id: i64,
     year: Option<i64>,
-    art_hash: Option<&str>,
 ) -> Result<i64> {
     let id = sqlx::query_scalar(
-        "INSERT INTO albums (title, artist_id, year, art_hash) VALUES (?, ?, ?, ?)
-         ON CONFLICT (title, artist_id) DO UPDATE SET
-            year = coalesce(albums.year, excluded.year),
-            art_hash = coalesce(albums.art_hash, excluded.art_hash)
+        "INSERT INTO albums (title, artist_id, year) VALUES (?, ?, ?)
+         ON CONFLICT (title, artist_id) DO UPDATE SET year = coalesce(albums.year, excluded.year)
          RETURNING id",
     )
     .bind(title)
     .bind(artist_id)
     .bind(year)
-    .bind(art_hash)
     .fetch_one(&mut **tx)
     .await?;
     Ok(id)
@@ -682,5 +759,57 @@ mod tests {
                 .total,
             2
         );
+    }
+
+    #[tokio::test]
+    async fn artwork_rules_and_tidy() {
+        let store = Store::open_in_memory().await.unwrap();
+        let track =
+            |path: &str, no: i64, embedded: Option<&str>, folder: Option<&str>| ScannedTrack {
+                path: path.into(),
+                title: path.into(),
+                artist: Some("Band".into()),
+                album: Some("Record".into()),
+                track_no: Some(no),
+                embedded_art: embedded.map(Into::into),
+                folder_art: folder.map(Into::into),
+                artist_art: Some("artistpic".into()),
+                ..Default::default()
+            };
+        // Track 2 is scanned first, but track 1's embedded cover wins.
+        store
+            .save_scanned(&[
+                track("/m/b.flac", 2, Some("second"), Some("folder")),
+                track("/m/a.flac", 1, Some("first"), Some("folder")),
+            ])
+            .await
+            .unwrap();
+        store.refresh_artwork().await.unwrap();
+        let album = &store.albums_page(0, 5).await.unwrap().items[0];
+        assert_eq!(album.art_hash.as_deref(), Some("first"));
+        let artist = &store.artists_page(0, 5).await.unwrap().items[0];
+        assert_eq!(artist.art_hash.as_deref(), Some("artistpic"));
+
+        // Without an embedded cover on the first song, the folder image is used.
+        store
+            .save_scanned(&[track("/m/a.flac", 1, None, Some("folder"))])
+            .await
+            .unwrap();
+        store.refresh_artwork().await.unwrap();
+        let album = &store.albums_page(0, 5).await.unwrap().items[0];
+        assert_eq!(album.art_hash.as_deref(), Some("folder"));
+
+        // Renamed artist: the old one disappears once nothing uses it.
+        let mut renamed = track("/m/a.flac", 1, None, None);
+        renamed.artist = Some("New Band".into());
+        let mut renamed_b = track("/m/b.flac", 2, None, None);
+        renamed_b.artist = Some("New Band".into());
+        store.save_scanned(&[renamed, renamed_b]).await.unwrap();
+        store.refresh_artwork().await.unwrap();
+        let names: Vec<String> = sqlx::query_scalar("SELECT name FROM artists")
+            .fetch_all(store.pool())
+            .await
+            .unwrap();
+        assert_eq!(names, ["New Band"]);
     }
 }

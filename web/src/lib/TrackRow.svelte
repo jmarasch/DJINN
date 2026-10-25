@@ -2,7 +2,7 @@
   import Art from './Art.svelte'
   import Icon from './Icon.svelte'
   import { byline, duration } from './format'
-  import { requestTrack, trackStatus } from './state.svelte'
+  import { toggleRequest, trackStatus } from './state.svelte'
   import type { Track } from './types'
 
   let {
@@ -31,13 +31,19 @@
   <button
     class="queue"
     class:done={status !== null}
-    disabled={status !== null}
-    onclick={() => requestTrack(track.id)}
-    aria-label={status ? `Already ${status}` : `Queue ${track.title}`}
+    class:mine={status === 'mine'}
+    disabled={status !== null && status !== 'mine'}
+    onclick={() => toggleRequest(track.id)}
+    aria-label={status === 'mine'
+      ? `Cancel your request for ${track.title}`
+      : status
+        ? `Already ${status}`
+        : `Queue ${track.title}`}
+    title={status === 'mine' ? 'Queued by you. Tap to cancel.' : undefined}
   >
     {#if status === 'playing'}
       <Icon name="play" />
-    {:else if status === 'queued'}
+    {:else if status === 'queued' || status === 'mine'}
       <Icon name="check" />
     {:else if status === 'pending'}
       <Icon name="clock" />
@@ -100,5 +106,9 @@
   .queue.done {
     color: var(--ok);
     background: transparent;
+  }
+
+  .queue.mine {
+    background: color-mix(in srgb, var(--ok) 18%, transparent);
   }
 </style>

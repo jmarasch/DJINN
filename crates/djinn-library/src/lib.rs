@@ -5,7 +5,7 @@ mod tags;
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::UNIX_EPOCH;
 
 use djinn_store::{ScannedTrack, Store, StoreError};
@@ -18,6 +18,10 @@ const AUDIO_EXTENSIONS: &[&str] = &["mp3", "flac", "m4a", "mp4", "aac", "ogg", "
 const BATCH: usize = 64;
 /// Threads reading tags in parallel, which mostly helps on network shares.
 const READERS: usize = 4;
+/// Bumped when the scanner starts extracting something new, so the next
+/// scan re-reads every file once. 2: artwork sources, " - Topic" cleanup.
+const SCAN_VERSION: i64 = 2;
+const SCAN_VERSION_KEY: &str = "scan_version";
 
 #[derive(Debug, thiserror::Error)]
 pub enum LibraryError {
@@ -44,6 +48,9 @@ pub struct ScanProgress {
 struct FoundFile {
     path: PathBuf,
     path_str: String,
+    /// The folder directly below the library root that holds this file
+    /// (its artist's folder in an Artist/Album/Song layout).
+    artist_dir: Option<PathBuf>,
     size: i64,
     mtime: i64,
 }
@@ -64,6 +71,11 @@ pub async fn scan(
         .map_err(|e| LibraryError::Task(e.to_string()))?;
 
     let known = store.known_files().await?;
+    let rescan_all = store
+        .get_setting(SCAN_VERSION_KEY)
+        .await?
+        .and_then(|v| v.parse::<i64>().ok())
+        != Some(SCAN_VERSION);
     let known_by_path: HashMap<&str, &djinn_store::KnownFile> =
         known.iter().map(|k| (k.path.as_str(), k)).collect();
     let to_read: Vec<FoundFile> = found
@@ -71,7 +83,7 @@ pub async fn scan(
         .filter(|f| {
             known_by_path
                 .get(f.path_str.as_str())
-                .is_none_or(|k| k.removed || k.size != f.size || k.mtime != f.mtime)
+                .is_none_or(|k| rescan_all || k.removed || k.size != f.size || k.mtime != f.mtime)
         })
         .cloned()
         .collect();
@@ -83,11 +95,11 @@ pub async fn scan(
     };
     progress(&status);
 
-    let folder_art = Arc::new(Mutex::new(HashMap::new()));
+    let art_cache = Arc::new(tags::ArtCache::default());
     for batch in to_read.chunks(BATCH) {
         let batch = batch.to_vec();
         let art_dir = art_dir.to_path_buf();
-        let cache = Arc::clone(&folder_art);
+        let cache = Arc::clone(&art_cache);
         let scanned = tokio::task::spawn_blocking(move || read_batch(&batch, &art_dir, &cache))
             .await
             .map_err(|e| LibraryError::Task(e.to_string()))?;
@@ -108,6 +120,10 @@ pub async fn scan(
         .map(|k| k.id)
         .collect();
     store.mark_removed(&vanished).await?;
+    store.refresh_artwork().await?;
+    store
+        .set_setting(SCAN_VERSION_KEY, &SCAN_VERSION.to_string())
+        .await?;
     status.removed = vanished.len();
     status.done = true;
     progress(&status);
@@ -147,9 +163,16 @@ fn walk(roots: &[PathBuf]) -> (Vec<FoundFile>, Vec<PathBuf>) {
                 .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
                 .and_then(|d| i64::try_from(d.as_millis()).ok())
                 .unwrap_or(0);
+            let artist_dir = entry.path().strip_prefix(root).ok().and_then(|rel| {
+                let mut parts = rel.components();
+                let first = parts.next()?;
+                // Files directly in the root have no artist folder.
+                parts.next().map(|_| root.join(first))
+            });
             found.push(FoundFile {
                 path: entry.path().to_path_buf(),
                 path_str: path_str.to_owned(),
+                artist_dir,
                 size: i64::try_from(meta.len()).unwrap_or(i64::MAX),
                 mtime,
             });
@@ -164,11 +187,7 @@ fn is_audio(path: &Path) -> bool {
         .is_some_and(|e| AUDIO_EXTENSIONS.iter().any(|a| a.eq_ignore_ascii_case(e)))
 }
 
-fn read_batch(
-    batch: &[FoundFile],
-    art_dir: &Path,
-    cache: &tags::FolderArtCache,
-) -> Vec<ScannedTrack> {
+fn read_batch(batch: &[FoundFile], art_dir: &Path, cache: &tags::ArtCache) -> Vec<ScannedTrack> {
     let per_thread = batch.len().div_ceil(READERS).max(1);
     std::thread::scope(|s| {
         let handles: Vec<_> = batch
@@ -177,7 +196,17 @@ fn read_batch(
                 s.spawn(move || {
                     files
                         .iter()
-                        .map(|f| tags::read(&f.path, &f.path_str, f.size, f.mtime, art_dir, cache))
+                        .map(|f| {
+                            tags::read(
+                                &f.path,
+                                &f.path_str,
+                                f.size,
+                                f.mtime,
+                                f.artist_dir.as_deref(),
+                                art_dir,
+                                cache,
+                            )
+                        })
                         .collect::<Vec<_>>()
                 })
             })

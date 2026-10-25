@@ -41,7 +41,9 @@
   <a class="button primary" href="#/search">Find a song</a>
 {:else}
   <p class="muted small">
-    {app.queue.length} {app.queue.length === 1 ? 'song' : 'songs'}{mine ? `, ${mine} from you` : ''}
+    {app.queue.length} {app.queue.length === 1 ? 'song' : 'songs'}{mine
+      ? `, ${mine} from you (tap × to cancel yours)`
+      : ''}
   </p>
   <ol>
     {#each app.queue as item, i (item.id)}

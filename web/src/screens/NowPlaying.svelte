@@ -4,10 +4,20 @@
   import Art from '../lib/Art.svelte'
   import { byline, duration } from '../lib/format'
   import Icon from '../lib/Icon.svelte'
-  import { app, currentPosition, isAdmin, signInAsHost, toast } from '../lib/state.svelte'
+  import {
+    app,
+    cancelRequest,
+    currentPosition,
+    isAdmin,
+    myRequest,
+    signInAsHost,
+    toast,
+  } from '../lib/state.svelte'
 
   const current = $derived(app.nowPlaying.current)
   const next = $derived(app.nowPlaying.up_next)
+  /** "Up next" is your own request, so you can cancel it. */
+  const nextMine = $derived(next ? myRequest(next.track.id) : null)
   const total = $derived(current?.track.duration_ms ?? 0)
   let position = $state(0)
 
@@ -95,6 +105,9 @@
             {byline(next.track.artist)}{next.requested_by ? ` · for ${next.requested_by}` : ''}
           </div>
         </div>
+        {#if nextMine}
+          <button class="cancel" onclick={() => nextMine && cancelRequest(nextMine.id)}>Cancel</button>
+        {/if}
       </div>
     </div>
   {/if}
@@ -232,6 +245,14 @@
   }
 
   .text {
+    flex: 1;
     min-width: 0;
+  }
+
+  .cancel {
+    flex: none;
+    min-height: 36px;
+    padding: 0 12px;
+    font-size: 0.875rem;
   }
 </style>

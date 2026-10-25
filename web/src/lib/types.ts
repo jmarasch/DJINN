@@ -72,6 +72,7 @@ export interface Album {
 export interface Artist {
   id: number
   name: string
+  art_hash: string | null
 }
 
 export interface SearchResults {
@@ -158,6 +159,7 @@ export interface Page<T> {
 export interface ArtistSummary {
   id: number
   name: string
+  art_hash: string | null
   track_count: number
 }
 

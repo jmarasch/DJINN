@@ -11,16 +11,23 @@ use lofty::prelude::*;
 
 use crate::art;
 
-/// Folder art already resolved during this scan, keyed by directory.
-pub type FolderArtCache = Mutex<HashMap<PathBuf, Option<String>>>;
+/// Images already resolved during this scan, so each folder is read once.
+#[derive(Default)]
+pub struct ArtCache {
+    /// Album folder images, by directory.
+    folders: Mutex<HashMap<PathBuf, Option<String>>>,
+    /// Artist folder images, by artist folder joined with artist name.
+    artists: Mutex<HashMap<PathBuf, Option<String>>>,
+}
 
 pub fn read(
     path: &Path,
     path_str: &str,
     size: i64,
     mtime: i64,
+    artist_dir: Option<&Path>,
     art_dir: &Path,
-    folder_art: &FolderArtCache,
+    cache: &ArtCache,
 ) -> ScannedTrack {
     let mut track = ScannedTrack {
         path: path_str.to_owned(),
@@ -45,13 +52,23 @@ pub fn read(
             .unwrap_or_else(|| path_str.to_owned());
     }
 
-    track.art_hash = match embedded_art {
-        Some(bytes) => art::store(art_dir, &bytes)
+    track.embedded_art = embedded_art.and_then(|bytes| {
+        art::store(art_dir, &bytes)
             .map_err(|e| tracing::warn!(path = path_str, error = %e, "cannot cache cover art"))
-            .ok(),
-        None => path
-            .parent()
-            .and_then(|dir| folder_art_hash(dir, art_dir, folder_art)),
+            .ok()
+    });
+    track.folder_art = path
+        .parent()
+        .and_then(|dir| cached(&cache.folders, dir, || art::find_folder_art(dir), art_dir));
+    let artist = track.album_artist.clone().or_else(|| track.artist.clone());
+    track.artist_art = match (artist_dir, artist) {
+        (Some(dir), Some(artist)) => cached(
+            &cache.artists,
+            &dir.join(&artist),
+            || art::find_artist_art(dir, &artist),
+            art_dir,
+        ),
+        _ => None,
     };
     track
 }
@@ -70,13 +87,27 @@ fn fill_from_tags(track: &mut ScannedTrack, file: &TaggedFile) {
         value.map(|v| v.trim().to_owned()).filter(|v| !v.is_empty())
     };
     track.title = text(tag.title()).unwrap_or_default();
-    track.artist = text(tag.artist());
+    track.artist = text(tag.artist()).map(clean_artist);
     track.album = text(tag.album());
-    track.album_artist = text(tag.get_string(ItemKey::AlbumArtist).map(Into::into));
+    track.album_artist =
+        text(tag.get_string(ItemKey::AlbumArtist).map(Into::into)).map(clean_artist);
     track.genre = text(tag.genre());
     track.track_no = tag.track().map(i64::from);
     track.disc_no = tag.disk().map(i64::from);
     track.year = tag.date().map(|d| i64::from(d.year));
+}
+
+/// Drops the " - Topic" that YouTube Music adds to auto-generated artist
+/// channel names ("KREAM - Topic"), which downloads often carry as tags.
+fn clean_artist(name: String) -> String {
+    const SUFFIX: &str = " - topic";
+    let lower = name.to_lowercase();
+    match lower.strip_suffix(SUFFIX) {
+        Some(rest) if !rest.trim().is_empty() && lower.len() == name.len() => {
+            name[..name.len() - SUFFIX.len()].trim_end().to_owned()
+        }
+        _ => name,
+    }
 }
 
 /// Front cover if tagged as such, otherwise the first embedded picture.
@@ -89,17 +120,23 @@ fn cover_picture(file: &TaggedFile) -> Option<Vec<u8>> {
         .map(|p| p.data().to_vec())
 }
 
-fn folder_art_hash(dir: &Path, art_dir: &Path, cache: &FolderArtCache) -> Option<String> {
+/// Looks `key` up in `cache`, finding and storing the image on a miss.
+fn cached(
+    cache: &Mutex<HashMap<PathBuf, Option<String>>>,
+    key: &Path,
+    find: impl FnOnce() -> Option<PathBuf>,
+    art_dir: &Path,
+) -> Option<String> {
     if let Ok(cache) = cache.lock() {
-        if let Some(hash) = cache.get(dir) {
+        if let Some(hash) = cache.get(key) {
             return hash.clone();
         }
     }
-    let hash = art::find_folder_art(dir)
+    let hash = find()
         .and_then(|file| std::fs::read(file).ok())
         .and_then(|bytes| art::store(art_dir, &bytes).ok());
     if let Ok(mut cache) = cache.lock() {
-        cache.insert(dir.to_path_buf(), hash.clone());
+        cache.insert(key.to_path_buf(), hash.clone());
     }
     hash
 }
@@ -112,8 +149,8 @@ mod tests {
     fn reads_tags_and_embedded_art() {
         let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/tagged.flac");
         let art_dir = std::env::temp_dir().join(format!("djinn-tags-{}", std::process::id()));
-        let cache = FolderArtCache::default();
-        let t = read(&fixture, "tagged.flac", 1, 2, &art_dir, &cache);
+        let cache = ArtCache::default();
+        let t = read(&fixture, "tagged.flac", 1, 2, None, &art_dir, &cache);
 
         assert_eq!(t.title, "Jóga");
         assert_eq!(t.artist.as_deref(), Some("Björk"));
@@ -128,9 +165,18 @@ mod tests {
         assert_eq!((t.sample_rate, t.channels), (Some(44_100), Some(1)));
         assert_eq!(t.duration_ms, Some(272));
 
-        let hash = t.art_hash.expect("embedded art");
+        let hash = t.embedded_art.expect("embedded art");
         let bytes = std::fs::read(art::path(&art_dir, &hash).unwrap()).unwrap();
         assert_eq!(art::mime_type(&bytes), "image/jpeg");
         std::fs::remove_dir_all(art_dir).unwrap();
+    }
+
+    #[test]
+    fn topic_suffix_is_dropped() {
+        assert_eq!(clean_artist("KREAM - Topic".into()), "KREAM");
+        assert_eq!(clean_artist("Björk - TOPIC".into()), "Björk");
+        assert_eq!(clean_artist("Topic".into()), "Topic");
+        assert_eq!(clean_artist(" - Topic".into()), " - Topic");
+        assert_eq!(clean_artist("Hot Topic".into()), "Hot Topic");
     }
 }
