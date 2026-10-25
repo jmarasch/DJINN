@@ -1,18 +1,24 @@
 :root {
   --bg: #14111f;
-  --surface: #1e1a2e;
+  --surface: #1c1829;
+  --surface-2: #272237;
+  --surface-3: #332d47;
+  --line: #2a2539;
   --text: #ece8f6;
   --muted: #9a93b3;
   --accent: #b48cff;
+  --accent-text: #1a1030;
   --ok: #6fdc9b;
   --bad: #ff7a85;
+  --bad-surface: #5a2430;
 
   color-scheme: dark;
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  line-height: 1.5;
+  line-height: 1.45;
   color: var(--text);
   background: var(--bg);
   -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
 }
 
 * {
@@ -23,4 +29,148 @@ body {
   margin: 0;
   min-height: 100dvh;
   background: var(--bg);
+}
+
+h1 {
+  font-size: 1.625rem;
+  margin: 8px 0 12px;
+}
+
+h2 {
+  font-size: 1rem;
+  margin: 20px 0 8px;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+a {
+  color: var(--accent);
+}
+
+button,
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+button.primary,
+.button.primary {
+  background: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+
+button.round {
+  width: 56px;
+  height: 56px;
+  padding: 0;
+  border-radius: 50%;
+}
+
+button.round.big {
+  width: 72px;
+  height: 72px;
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+/* Icon-only buttons inside rows stay flat. */
+li button,
+.row button:not(.round),
+.item button,
+.order button,
+.queue {
+  padding: 0;
+  background: transparent;
+}
+
+button.back {
+  min-height: 40px;
+  padding: 0 8px 0 0;
+  background: transparent;
+  color: var(--muted);
+}
+
+input,
+select {
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+}
+
+.search-box input {
+  border: 0;
+  background: var(--surface-2);
+}
+
+input[type='range'] {
+  min-height: 32px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  accent-color: var(--accent);
+}
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0 0 16px;
+  padding: 16px;
+  border-radius: 14px;
+  background: var(--surface);
+}
+
+.card h1,
+.card h2 {
+  margin: 0;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.small {
+  font-size: 0.8125rem;
+}
+
+.center {
+  text-align: center;
+  margin-top: 32px;
+}
+
+.error {
+  color: var(--bad);
+}
+
+.ellipsis {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
