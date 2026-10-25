@@ -14,7 +14,7 @@ auto pool when the queue empties (spec section 15).
 3. Start `djinn`. The log prints a setup link the first time:
    `Create one at http://localhost:8066/setup?token=...`. Open it on the
    server machine and create the admin account.
-4. Wait for `library scan finished` in the log (or watch Admin > Library).
+4. Wait for `library check finished` in the log (or watch Admin > Library).
 5. Either turn on **guest mode** (Admin > Rules) so guests join with just
    a name, or create an account for each guest in Admin > Users.
 6. Build the auto pool: search for albums or artists, open them, and tap
