@@ -168,6 +168,9 @@ struct Settings {
     max_queue: i64,
     /// Guests join with just a name instead of an account.
     guest_mode: bool,
+    /// Look up artist photos and bios online (Deezer, Wikipedia).
+    #[serde(default)]
+    online_artist_info: bool,
 }
 
 async fn settings(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json<Settings>> {
@@ -187,6 +190,7 @@ async fn settings(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json
         .await?,
         max_queue: jukebox::setting(store, jukebox::MAX_QUEUE, 0).await?,
         guest_mode: state.guest_mode(),
+        online_artist_info: jukebox::setting(store, jukebox::ONLINE_INFO, 0).await? == 1,
     }))
 }
 
@@ -222,6 +226,16 @@ async fn update_settings(
     state
         .guest_mode
         .store(body.guest_mode, std::sync::atomic::Ordering::Relaxed);
+    let was_online = jukebox::setting(store, jukebox::ONLINE_INFO, 0).await? == 1;
+    store
+        .set_setting(
+            jukebox::ONLINE_INFO,
+            if body.online_artist_info { "1" } else { "0" },
+        )
+        .await?;
+    if body.online_artist_info && !was_online {
+        crate::library_api::start_artist_lookup(&state, false);
+    }
     Ok(Json(body))
 }
 

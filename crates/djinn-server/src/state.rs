@@ -38,6 +38,8 @@ pub struct AppState {
 #[derive(Default)]
 pub struct ScanState {
     pub running: AtomicBool,
+    /// An online artist info lookup is running.
+    pub lookup_running: AtomicBool,
     pub last: Mutex<Option<ScanProgress>>,
 }
 

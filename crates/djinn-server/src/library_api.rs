@@ -34,6 +34,7 @@ pub fn router() -> Router<AppState> {
         .route("/artists/{id}", get(artist))
         .route("/art/{hash}", get(cover_art))
         .route("/library/rescan", post(rescan))
+        .route("/library/artist-info", post(artist_info))
         .route("/library/status", get(status))
 }
 
@@ -187,6 +188,55 @@ async fn rescan(_: AdminUser, State(state): State<AppState>) -> StatusCode {
     }
 }
 
+#[derive(Deserialize, Default)]
+struct LookupRequest {
+    /// Look up every artist again, not just new or stale ones.
+    #[serde(default)]
+    force: bool,
+}
+
+/// Looks up artist photos and bios online now (admin).
+async fn artist_info(
+    _: AdminUser,
+    State(state): State<AppState>,
+    body: Option<Json<LookupRequest>>,
+) -> StatusCode {
+    let force = body.map(|Json(b)| b.force).unwrap_or_default();
+    if start_artist_lookup(&state, force) {
+        StatusCode::ACCEPTED
+    } else {
+        StatusCode::CONFLICT
+    }
+}
+
+/// Starts an online artist lookup in the background. Returns false if one
+/// is already running.
+pub fn start_artist_lookup(state: &AppState, force: bool) -> bool {
+    if state.scan.lookup_running.swap(true, Ordering::AcqRel) {
+        return false;
+    }
+    let state = state.clone();
+    tokio::spawn(async move {
+        tracing::info!("looking up artist photos and bios online");
+        let result =
+            djinn_library::online::lookup_artists(&state.store, &state.art_dir, force).await;
+        state.scan.lookup_running.store(false, Ordering::Release);
+        match result {
+            Ok(summary) => {
+                tracing::info!(
+                    checked = summary.checked,
+                    photos = summary.photos,
+                    bios = summary.bios,
+                    "artist lookup finished"
+                );
+                let _ = state.events.send(ServerEvent::LibraryChanged);
+            }
+            Err(e) => tracing::error!(error = %e, "artist lookup failed"),
+        }
+    });
+    true
+}
+
 /// Starts a library scan in the background. Returns false if one is
 /// already running.
 pub fn start_scan(state: &AppState) -> bool {
@@ -225,6 +275,13 @@ pub fn start_scan(state: &AppState) -> bool {
                     secs = started.elapsed().as_secs_f32(),
                     "library check finished"
                 );
+                let _ = state.events.send(ServerEvent::LibraryChanged);
+                if crate::jukebox::setting(&state.store, crate::jukebox::ONLINE_INFO, 0)
+                    .await
+                    .is_ok_and(|v| v == 1)
+                {
+                    start_artist_lookup(&state, false);
+                }
                 // New tracks may have joined albums and artists in the
                 // active playlist.
                 if let Err(e) = state.jukebox.lock().await.auto_mix_changed().await {

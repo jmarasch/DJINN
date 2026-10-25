@@ -31,6 +31,8 @@ pub const VOLUME: &str = "volume";
 pub const MAX_QUEUE: &str = "max_queue";
 /// 1 when guests may join with just a name.
 pub const GUEST_MODE: &str = "guest_mode";
+/// 1 to look up artist photos and bios online.
+pub const ONLINE_INFO: &str = "online_artist_info";
 /// Playlist that plays when nobody has requested anything; 0 or missing
 /// means none.
 pub const ACTIVE_PLAYLIST: &str = "active_playlist";

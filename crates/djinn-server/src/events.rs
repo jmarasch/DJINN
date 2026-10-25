@@ -10,11 +10,16 @@ use serde::Serialize;
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum ServerEvent {
     NowPlaying(Box<NowPlaying>),
-    Position { track_id: i64, position_ms: u64 },
+    Position {
+        track_id: i64,
+        position_ms: u64,
+    },
     QueueChanged(Vec<QueueItem>),
     PlayerState(PlayerState),
     OutputStatus(OutputStatus),
     ScanProgress(ScanProgress),
+    /// Artists, albums, or pictures changed; cached lists are stale.
+    LibraryChanged,
 }
 
 impl ServerEvent {
@@ -26,6 +31,7 @@ impl ServerEvent {
             Self::PlayerState(_) => "player_state",
             Self::OutputStatus(_) => "output_status",
             Self::ScanProgress(_) => "scan_progress",
+            Self::LibraryChanged => "library_changed",
         }
     }
 }

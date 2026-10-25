@@ -55,6 +55,15 @@ pub struct Artist {
     pub art_hash: Option<String>,
 }
 
+/// An artist due for an online info lookup.
+#[derive(Clone, Debug, FromRow)]
+pub struct InfoLookupArtist {
+    pub id: i64,
+    pub name: String,
+    /// Has a picture in their own folder, so no photo is needed.
+    pub has_folder_art: bool,
+}
+
 /// A song with how often it's been requested and played, for "top songs".
 #[derive(Clone, Debug, PartialEq, Serialize, FromRow)]
 pub struct TopTrack {
@@ -230,14 +239,15 @@ impl Store {
         )
         .execute(&mut *tx)
         .await?;
-        // Artists: an image in the artist's folder, then their first album's
-        // cover, then any of their songs' artwork.
+        // Artists: an image in the artist's folder, then a photo looked up
+        // online, then their first album's cover, then any song's artwork.
         sqlx::query(
             "UPDATE artists SET art_hash = coalesce(
                (SELECT t.artist_art FROM tracks t LEFT JOIN albums al ON al.id = t.album_id
                 WHERE t.removed_at IS NULL AND t.artist_art IS NOT NULL
                   AND (al.artist_id = artists.id OR t.artist_id = artists.id)
                 ORDER BY t.path LIMIT 1),
+               artists.online_art_hash,
                (SELECT al.art_hash FROM albums al
                 WHERE al.artist_id = artists.id AND al.art_hash IS NOT NULL
                 ORDER BY al.year IS NULL, al.year, al.title LIMIT 1),
@@ -396,6 +406,56 @@ impl Store {
             albums,
             other_tracks,
         }))
+    }
+
+    /// Artists with playable tracks whose online info was never looked up
+    /// or was last looked up before `older_than` (Unix ms).
+    pub async fn artists_for_info_lookup(&self, older_than: i64) -> Result<Vec<InfoLookupArtist>> {
+        let artists = sqlx::query_as(
+            "SELECT ar.id, ar.name,
+                    EXISTS (SELECT 1 FROM tracks t LEFT JOIN albums al ON al.id = t.album_id
+                            WHERE t.artist_art IS NOT NULL AND t.removed_at IS NULL
+                              AND (t.artist_id = ar.id OR al.artist_id = ar.id))
+                        AS has_folder_art
+             FROM artists ar
+             WHERE (ar.info_checked_at IS NULL OR ar.info_checked_at < ?)
+               AND EXISTS (SELECT 1 FROM tracks t LEFT JOIN albums al ON al.id = t.album_id
+                           WHERE t.removed_at IS NULL
+                             AND (t.artist_id = ar.id OR al.artist_id = ar.id))
+             ORDER BY ar.name",
+        )
+        .bind(older_than)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(artists)
+    }
+
+    /// Saves what an online lookup found, keeping earlier finds for anything
+    /// it didn't find this time. `checked` marks the artist as done until
+    /// the next periodic recheck; leave it false after a failed request.
+    pub async fn save_artist_info(
+        &self,
+        id: i64,
+        photo: Option<&str>,
+        bio: Option<&str>,
+        bio_url: Option<&str>,
+        checked: bool,
+    ) -> Result<()> {
+        sqlx::query(
+            "UPDATE artists SET online_art_hash = coalesce(?, online_art_hash),
+                                bio = coalesce(?, bio), bio_url = coalesce(?, bio_url),
+                                info_checked_at = CASE WHEN ? THEN ? ELSE info_checked_at END
+             WHERE id = ?",
+        )
+        .bind(photo)
+        .bind(bio)
+        .bind(bio_url)
+        .bind(checked)
+        .bind(now_ms())
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 
     /// The artist's songs, most requested first, then most played.

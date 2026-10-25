@@ -1,6 +1,7 @@
 //! DJINN music library: scanner, tags, cover art, and search.
 
 pub mod art;
+pub mod online;
 mod tags;
 
 use std::collections::{HashMap, HashSet};
