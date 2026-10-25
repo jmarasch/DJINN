@@ -16,6 +16,8 @@ pub struct AppState {
     pub store: Store,
     /// Cover art cache, next to the database.
     pub art_dir: Arc<PathBuf>,
+    /// Library folders from config.toml. Folders added in the app are in
+    /// the database; see `folders::library_roots`.
     pub library_roots: Arc<Vec<PathBuf>>,
     /// One-time token for creating the first admin, while none exists.
     pub bootstrap_token: Arc<Mutex<Option<String>>>,

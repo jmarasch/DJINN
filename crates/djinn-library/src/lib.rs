@@ -58,7 +58,7 @@ struct FoundFile {
 /// Scans `roots`, saving new and changed files and marking vanished ones as
 /// removed. Unchanged files (same size and mtime) are skipped. A root that
 /// is missing (an unmounted share, say) is skipped without removing its
-/// tracks.
+/// tracks; tracks under a folder that is no longer a root are removed.
 pub async fn scan(
     store: &Store,
     roots: &[PathBuf],
@@ -113,9 +113,11 @@ pub async fn scan(
         .iter()
         .filter(|k| !k.removed && !present.contains(k.path.as_str()))
         .filter(|k| {
-            available_roots
-                .iter()
-                .any(|r| Path::new(&k.path).starts_with(r))
+            let path = Path::new(&k.path);
+            // Gone from a root we could read, or its root was removed from
+            // the library. A root that is merely missing keeps its tracks.
+            available_roots.iter().any(|r| path.starts_with(r))
+                || !roots.iter().any(|r| path.starts_with(r))
         })
         .map(|k| k.id)
         .collect();
@@ -267,6 +269,11 @@ mod tests {
         let third = scan(&store, &roots, &art_dir, |_| {}).await.unwrap();
         assert_eq!((third.found, third.removed), (1, 1));
         assert_eq!(store.track_count().await.unwrap(), 1);
+
+        // Taking the folder out of the library removes its tracks.
+        let fourth = scan(&store, &[], &art_dir, |_| {}).await.unwrap();
+        assert_eq!(fourth.removed, 1);
+        assert_eq!(store.track_count().await.unwrap(), 0);
 
         std::fs::remove_dir_all(tmp).unwrap();
     }

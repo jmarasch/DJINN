@@ -12,6 +12,7 @@ mod config;
 mod desktop;
 mod error;
 mod events;
+mod folders;
 mod jukebox;
 mod library_api;
 mod player_api;
@@ -72,9 +73,6 @@ async fn main() -> anyhow::Result<()> {
             looked_at = ?looked_at.as_ref().map(|p| p.display().to_string()),
             "no config file found, using defaults"
         ),
-    }
-    if config.library.roots.is_empty() {
-        tracing::warn!("no library roots configured");
     }
 
     let store = Store::open(&config.database.path)

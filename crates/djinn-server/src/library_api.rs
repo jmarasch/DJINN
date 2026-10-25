@@ -198,19 +198,22 @@ pub fn start_scan(state: &AppState) -> bool {
         tracing::info!("checking the library for changes");
         let started = std::time::Instant::now();
         let progress_state = state.clone();
-        let result = djinn_library::scan(
-            &state.store,
-            &state.library_roots,
-            &state.art_dir,
-            move |progress| {
-                if let Ok(mut last) = progress_state.scan.last.lock() {
-                    *last = Some(progress.clone());
-                }
-                let _ = progress_state
-                    .events
-                    .send(ServerEvent::ScanProgress(progress.clone()));
-            },
-        )
+        let roots = match crate::folders::library_roots(&state).await {
+            Ok(roots) => roots,
+            Err(e) => {
+                tracing::error!(error = %format!("{e:#}"), "reading library folders failed");
+                state.scan.running.store(false, Ordering::Release);
+                return;
+            }
+        };
+        let result = djinn_library::scan(&state.store, &roots, &state.art_dir, move |progress| {
+            if let Ok(mut last) = progress_state.scan.last.lock() {
+                *last = Some(progress.clone());
+            }
+            let _ = progress_state
+                .events
+                .send(ServerEvent::ScanProgress(progress.clone()));
+        })
         .await;
         state.scan.running.store(false, Ordering::Release);
         match result {
