@@ -1,7 +1,10 @@
 //! `djinn`: headless party jukebox server.
 
 mod api;
+mod auth;
 mod config;
+mod error;
+mod state;
 mod web;
 
 use std::path::PathBuf;
@@ -14,6 +17,7 @@ use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
 
 use crate::config::{Config, Source};
+use crate::state::AppState;
 
 #[derive(Parser)]
 #[command(version, about)]
@@ -51,6 +55,33 @@ async fn main() -> anyhow::Result<()> {
         .await
         .with_context(|| format!("failed to open database {}", config.database.path.display()))?;
     tracing::info!(path = %config.database.path.display(), "database ready");
+    let removed = store.delete_expired_sessions().await?;
+    if removed > 0 {
+        tracing::debug!(removed, "expired sessions cleaned up");
+    }
+
+    let art_dir = config
+        .database
+        .path
+        .parent()
+        .map_or_else(|| PathBuf::from("art"), |dir| dir.join("art"));
+    let state = AppState::new(store.clone(), art_dir);
+
+    if !store.admin_exists().await? {
+        let token = auth::new_token()?;
+        let port = config.server.listen.port();
+        let host = if config.server.listen.ip().is_unspecified() {
+            "localhost".to_owned()
+        } else {
+            config.server.listen.ip().to_string()
+        };
+        tracing::warn!(
+            "no admin account yet. Create one at http://{host}:{port}/setup?token={token}"
+        );
+        if let Ok(mut slot) = state.bootstrap_token.lock() {
+            *slot = Some(token);
+        }
+    }
 
     let listener = tokio::net::TcpListener::bind(config.server.listen)
         .await
@@ -61,7 +92,7 @@ async fn main() -> anyhow::Result<()> {
         "DJINN listening"
     );
 
-    axum::serve(listener, app())
+    axum::serve(listener, app(state))
         .with_graceful_shutdown(shutdown_signal())
         .await
         .context("server error")?;
@@ -71,11 +102,12 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn app() -> Router {
+fn app(state: AppState) -> Router {
     Router::new()
         .nest("/api", api::router())
         .fallback(web::static_handler)
         .layer(TraceLayer::new_for_http())
+        .with_state(state)
 }
 
 /// Resolves on Ctrl+C, or SIGTERM on Unix (systemd stop).
@@ -117,7 +149,7 @@ mod tests {
     use tower::ServiceExt;
 
     async fn status(path: &str) -> StatusCode {
-        app()
+        app(AppState::for_tests().await)
             .oneshot(Request::get(path).body(Body::empty()).unwrap())
             .await
             .unwrap()
