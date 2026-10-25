@@ -3,14 +3,19 @@ import type {
   AlbumDetail,
   ArtistDetail,
   ArtistSummary,
+  EntryKind,
+  FolderListing,
   GuestSummary,
+  LibraryRoot,
   Mode,
   NowPlaying,
   OutputStatus,
   Page,
   PlayerState,
-  PoolEntry,
-  PoolKind,
+  PlaylistDetail,
+  PlaylistEntry,
+  PlaylistListItem,
+  PlaylistSummary,
   QueueItem,
   RequestLogEntry,
   Role,
@@ -89,17 +94,37 @@ export const api = {
   skip: () => post<void>('/player/skip'),
   setVolume: (volume: number) => put<void>('/player/volume', { volume }),
 
-  pool: () => get<PoolEntry[]>('/pool'),
-  addToPool: (kind: PoolKind, refId: number) => post<PoolEntry>('/pool', { kind, ref_id: refId }),
-  removeFromPool: (id: number) => del<void>(`/pool/${id}`),
+  playlists: () => get<PlaylistListItem[]>('/playlists'),
+  playlist: (id: number) => get<PlaylistDetail>(`/playlists/${id}`),
+  createPlaylist: (name: string) => post<PlaylistSummary>('/playlists', { name }),
+  updatePlaylist: (id: number, changes: { name?: string; shuffle?: boolean }) =>
+    patch<void>(`/playlists/${id}`, changes),
+  deletePlaylist: (id: number) => del<void>(`/playlists/${id}`),
+  addToPlaylist: (id: number, kind: EntryKind, refId: number) =>
+    post<PlaylistEntry>(`/playlists/${id}/entries`, { kind, ref_id: refId }),
+  removeFromPlaylist: (id: number, entryId: number) => del<void>(`/playlists/${id}/entries/${entryId}`),
+  movePlaylistEntry: (id: number, entryId: number, position: number) =>
+    patch<void>(`/playlists/${id}/entries/${entryId}`, { position }),
+  playPlaylist: (id: number, fromTrackId?: number) =>
+    post<void>(`/playlists/${id}/play`, { from_track_id: fromTrackId ?? null }),
+  stopPlaylist: () => post<void>('/playlists/stop'),
+
+  libraryRoots: () => get<LibraryRoot[]>('/library/roots'),
+  addLibraryRoot: (path: string) => post<LibraryRoot[]>('/library/roots', { path }),
+  removeLibraryRoot: (path: string) => request<LibraryRoot[]>('DELETE', '/library/roots', { path }),
+  browseFolders: (path?: string) =>
+    get<FolderListing>(path === undefined ? '/fs/dirs' : `/fs/dirs?path=${encodeURIComponent(path)}`),
+  lookUpArtistInfo: (force = false) => post<void>('/library/artist-info', { force }),
 
   users: () => get<User[]>('/users'),
   createUser: (username: string, password: string, role: Role) =>
     post<User>('/users', { username, password, role }),
   deleteUser: (id: number) => del<void>(`/users/${id}`),
-  setUnlimited: (id: number, unlimited: boolean) => patch<void>(`/users/${id}`, { unlimited }),
+  updateUser: (id: number, changes: { unlimited?: boolean; role?: Role; password?: string }) =>
+    patch<void>(`/users/${id}`, changes),
   guests: () => get<GuestSummary[]>('/guests'),
   requestLog: (limit = 100) => get<RequestLogEntry[]>(`/requests/log?limit=${limit}`),
+  clearRequestLog: () => del<void>('/requests/log'),
 
   settings: () => get<Settings>('/settings'),
   saveSettings: (settings: Settings) => put<Settings>('/settings', settings),

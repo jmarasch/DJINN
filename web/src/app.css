@@ -1,4 +1,5 @@
 :root {
+  /* Dark theme (default). */
   --bg: #14111f;
   --surface: #1c1829;
   --surface-2: #272237;
@@ -13,12 +14,49 @@
   --bad-surface: #5a2430;
 
   color-scheme: dark;
+
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   line-height: 1.45;
   color: var(--text);
   background: var(--bg);
   -webkit-font-smoothing: antialiased;
   -webkit-tap-highlight-color: transparent;
+}
+
+/* Light theme: when the system prefers it (unless dark was picked), or
+   when picked on this device. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme='dark']) {
+    --bg: #f6f4fb;
+    --surface: #ffffff;
+    --surface-2: #ece8f5;
+    --surface-3: #ddd7ec;
+    --line: #e2ddef;
+    --text: #1d1830;
+    --muted: #6b6485;
+    --accent: #6f3fd6;
+    --accent-text: #ffffff;
+    --ok: #1d8a4c;
+    --bad: #c9303f;
+    --bad-surface: #f9d7db;
+    color-scheme: light;
+  }
+}
+
+:root[data-theme='light'] {
+  --bg: #f6f4fb;
+  --surface: #ffffff;
+  --surface-2: #ece8f5;
+  --surface-3: #ddd7ec;
+  --line: #e2ddef;
+  --text: #1d1830;
+  --muted: #6b6485;
+  --accent: #6f3fd6;
+  --accent-text: #ffffff;
+  --ok: #1d8a4c;
+  --bad: #c9303f;
+  --bad-surface: #f9d7db;
+  color-scheme: light;
 }
 
 * {

@@ -85,7 +85,15 @@ export interface AlbumDetail extends Album {
   tracks: Track[]
 }
 
+export interface TopTrack extends Track {
+  requests: number
+  plays: number
+}
+
 export interface ArtistDetail extends Artist {
+  bio: string | null
+  bio_url: string | null
+  top_tracks: TopTrack[]
   albums: Album[]
   other_tracks: Track[]
 }
@@ -114,9 +122,17 @@ export interface NowPlaying {
 
 export type PlayState = 'idle' | 'playing' | 'paused'
 
+export interface PlaylistRef {
+  id: number
+  name: string
+  shuffle: boolean
+}
+
 export interface PlayerState {
   state: PlayState
   volume: number
+  /** Plays when nobody has requested anything. */
+  playlist: PlaylistRef | null
 }
 
 export interface OutputStatus {
@@ -133,14 +149,52 @@ export interface ScanProgress {
   done: boolean
 }
 
-export type PoolKind = 'track' | 'album' | 'artist' | 'playlist'
+export type EntryKind = 'track' | 'album' | 'artist'
 
-export interface PoolEntry {
+export interface PlaylistSummary {
   id: number
-  kind: PoolKind
+  name: string
+  shuffle: boolean
+  entry_count: number
+  created_at: number
+  updated_at: number
+}
+
+export interface PlaylistListItem extends PlaylistSummary {
+  active: boolean
+}
+
+export interface PlaylistEntry {
+  id: number
+  kind: EntryKind
   ref_id: number
   name: string | null
-  added_at: number
+  subtitle: string | null
+  art_hash: string | null
+  position: number
+}
+
+export interface PlaylistDetail extends PlaylistSummary {
+  entries: PlaylistEntry[]
+  tracks: Track[]
+}
+
+export interface LibraryRoot {
+  path: string
+  from_config: boolean
+  available: boolean
+}
+
+export interface Folder {
+  name: string
+  path: string
+}
+
+export interface FolderListing {
+  path: string | null
+  parent: string | null
+  dirs: Folder[]
+  places: Folder[]
 }
 
 export interface Settings {
@@ -149,6 +203,7 @@ export interface Settings {
   /** 0 means no cap. */
   max_queue: number
   guest_mode: boolean
+  online_artist_info: boolean
 }
 
 export interface Page<T> {

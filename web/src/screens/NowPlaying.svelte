@@ -13,6 +13,7 @@
     signInAsHost,
     toast,
   } from '../lib/state.svelte'
+  import { cycleTheme, theme } from '../lib/theme.svelte'
 
   const current = $derived(app.nowPlaying.current)
   const next = $derived(app.nowPlaying.up_next)
@@ -20,6 +21,7 @@
   const nextMine = $derived(next ? myRequest(next.track.id) : null)
   const total = $derived(current?.track.duration_ms ?? 0)
   let position = $state(0)
+  let volume = $state(app.player.volume)
 
   onMount(() => {
     let frame = 0
@@ -31,6 +33,17 @@
     return () => cancelAnimationFrame(frame)
   })
 
+  // Follow volume changes made elsewhere.
+  $effect(() => {
+    volume = app.player.volume
+  })
+
+  let volumeTimer: ReturnType<typeof setTimeout>
+  function onVolume() {
+    clearTimeout(volumeTimer)
+    volumeTimer = setTimeout(() => control(() => api.setVolume(volume)), 120)
+  }
+
   async function control(action: () => Promise<void>) {
     try {
       await action()
@@ -38,7 +51,24 @@
       toast(e instanceof Error ? e.message : 'That did not work', true)
     }
   }
+
+  const themeLabel = $derived({ auto: 'Auto', light: 'Light', dark: 'Dark' }[theme.mode])
 </script>
+
+<div class="top">
+  {#if app.player.playlist}
+    <a class="source" href="#/playlist/{app.player.playlist.id}" class:plain={!isAdmin()}>
+      <Icon name={app.player.playlist.shuffle ? 'shuffle' : 'ordered'} size={16} />
+      {app.player.playlist.name}
+    </a>
+  {:else}
+    <span></span>
+  {/if}
+  <button class="theme" onclick={cycleTheme} aria-label="Theme: {themeLabel}" title="Theme: {themeLabel}">
+    <Icon name="theme" size={18} />
+    {themeLabel}
+  </button>
+</div>
 
 <section class="now">
   {#if current}
@@ -79,7 +109,7 @@
 
   {#if isAdmin()}
     <div class="controls">
-      {#if app.player.state === 'paused'}
+      {#if app.player.state !== 'playing'}
         <button class="round big" aria-label="Play" onclick={() => control(api.play)}>
           <Icon name="play" size={32} />
         </button>
@@ -91,6 +121,21 @@
       <button class="round" aria-label="Skip" disabled={!current} onclick={() => control(api.skip)}>
         <Icon name="skip" size={26} />
       </button>
+    </div>
+    <div class="audio">
+      <label class="volume">
+        <span class="row-label">Volume <span class="muted">{volume}</span></span>
+        <input type="range" min="0" max="100" bind:value={volume} oninput={onVolume} />
+      </label>
+      <p class="small muted">
+        {#if app.output.error}
+          <span class="error">Output problem: {app.output.error}</span>
+        {:else if app.output.device}
+          {app.output.device} · {(app.output.sample_rate ?? 0) / 1000} kHz
+        {:else}
+          No audio output yet
+        {/if}
+      </p>
     </div>
   {/if}
 
@@ -111,6 +156,7 @@
       </div>
     </div>
   {/if}
+
   {#if !isAdmin()}
     <p class="host-link">
       {#if app.me?.role === 'guest'}You're in as <b>{app.me.display_name}</b>. {/if}
@@ -120,18 +166,38 @@
 </section>
 
 <style>
-  .host-link {
-    margin-top: 32px;
-    color: var(--muted);
-    font-size: 0.875rem;
+  .top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    min-height: 40px;
   }
 
-  .host-link button {
-    min-height: 32px;
-    padding: 0 4px;
-    background: transparent;
+  .source {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: var(--surface);
     color: var(--muted);
-    text-decoration: underline;
+    font-size: 0.8125rem;
+    text-decoration: none;
+  }
+
+  .source.plain {
+    pointer-events: none;
+  }
+
+  .theme {
+    min-height: 34px;
+    padding: 0 10px;
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--muted);
+    font-size: 0.8125rem;
   }
 
   .now {
@@ -140,11 +206,11 @@
     align-items: center;
     text-align: center;
     gap: 6px;
-    padding-top: 12px;
+    padding-top: 4px;
   }
 
   .cover {
-    width: min(320px, 78vw);
+    width: min(320px, 74vw);
     aspect-ratio: 1;
     margin-bottom: 14px;
   }
@@ -152,7 +218,7 @@
   .cover :global(.art) {
     width: 100% !important;
     height: 100% !important;
-    box-shadow: 0 16px 48px rgb(0 0 0 / 0.5);
+    box-shadow: 0 16px 48px rgb(0 0 0 / 0.35);
   }
 
   .title {
@@ -205,7 +271,7 @@
     flex-direction: column;
     align-items: center;
     gap: 4px;
-    padding: 48px 0 16px;
+    padding: 36px 0 16px;
     color: var(--muted);
   }
 
@@ -221,9 +287,33 @@
     margin-top: 14px;
   }
 
+  .audio {
+    width: 100%;
+    margin-top: 8px;
+    text-align: left;
+  }
+
+  .volume {
+    gap: 2px;
+  }
+
+  .row-label {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.875rem;
+  }
+
+  .volume input {
+    width: 100%;
+  }
+
+  .audio p {
+    margin: 2px 0 0;
+  }
+
   .next {
     width: 100%;
-    margin-top: 24px;
+    margin-top: 20px;
     padding: 12px;
     border-radius: 12px;
     background: var(--surface);
@@ -254,5 +344,19 @@
     min-height: 36px;
     padding: 0 12px;
     font-size: 0.875rem;
+  }
+
+  .host-link {
+    margin-top: 28px;
+    color: var(--muted);
+    font-size: 0.875rem;
+  }
+
+  .host-link button {
+    min-height: 32px;
+    padding: 0 4px;
+    background: transparent;
+    color: var(--muted);
+    text-decoration: underline;
   }
 </style>

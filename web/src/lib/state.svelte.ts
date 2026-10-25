@@ -18,11 +18,13 @@ export const app = $state({
   mode: null as Mode | null,
   /** Show the account sign-in form even in guest mode (host sign-in). */
   hostLogin: false,
+  /** First-run setup created the admin; next, pick music folders. */
+  setupLibrary: false,
   /** False until the first /api/me check finishes. */
   ready: false,
   connected: false,
   nowPlaying: { current: null, position_ms: 0, up_next: null } as NowPlaying,
-  player: { state: 'idle', volume: 80 } as PlayerState,
+  player: { state: 'idle', volume: 80, playlist: null } as PlayerState,
   output: { device: null, sample_rate: null, error: null } as OutputStatus,
   queue: [] as QueueItem[],
   scan: null as ScanProgress | null,
@@ -51,7 +53,10 @@ export function connect() {
   events = new EventSource('/api/events')
   events.onopen = () => (app.connected = true)
   const on = <T>(name: string, handle: (data: T) => void) =>
-    events?.addEventListener(name, (e) => handle(JSON.parse((e as MessageEvent).data)))
+    events?.addEventListener(name, (e) => {
+      const data = (e as MessageEvent).data
+      handle(data ? JSON.parse(data) : (null as T))
+    })
 
   on<NowPlaying>('now_playing', (data) => {
     app.nowPlaying = data
@@ -72,6 +77,7 @@ export function connect() {
     app.scan = data
     if (data.done) clearListCache()
   })
+  on('library_changed', () => clearListCache())
 
   events.onerror = async () => {
     app.connected = false
@@ -185,6 +191,23 @@ export function trackStatus(trackId: number): 'playing' | 'mine' | 'queued' | 'p
   if (app.queue.some((q) => q.track.id === trackId)) return 'queued'
   if (app.pending.has(trackId)) return 'pending'
   return null
+}
+
+/** Tapping a song's picture or title: queue it if it isn't already. */
+export function tapTrack(track: { id: number; title: string }) {
+  switch (trackStatus(track.id)) {
+    case null:
+      requestTrack(track.id)
+      break
+    case 'playing':
+      toast('Playing now')
+      break
+    case 'mine':
+      toast('Already in the queue. Tap the check to cancel.')
+      break
+    default:
+      toast('Already in the queue')
+  }
 }
 
 /** Queues the track, or cancels your request if it's already queued. */

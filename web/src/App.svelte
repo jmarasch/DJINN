@@ -1,7 +1,9 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import Icon from './lib/Icon.svelte'
+  import JoinCard from './lib/JoinCard.svelte'
   import { param, route } from './lib/router.svelte'
+  import Sheet from './lib/Sheet.svelte'
   import { app, connect, isAdmin, refreshMe, refreshMode } from './lib/state.svelte'
   import Toasts from './lib/Toasts.svelte'
   import Admin from './screens/Admin.svelte'
@@ -11,13 +13,17 @@
   import Join from './screens/Join.svelte'
   import Login from './screens/Login.svelte'
   import NowPlaying from './screens/NowPlaying.svelte'
+  import Playlists from './screens/Playlists.svelte'
+  import PlaylistView from './screens/PlaylistView.svelte'
   import Queue from './screens/Queue.svelte'
   import Search from './screens/Search.svelte'
   import Setup from './screens/Setup.svelte'
+  import SetupLibrary from './screens/SetupLibrary.svelte'
 
   const onSetupPage = $state(location.pathname === '/setup')
   // The join page is for guests who haven't signed in yet.
   const onJoinPage = location.pathname === '/join'
+  let showJoin = $state(false)
 
   onMount(async () => {
     if (onJoinPage) return
@@ -33,14 +39,24 @@
 
   const albumId = $derived(param('/album'))
   const artistId = $derived(param('/artist'))
+  const playlistId = $derived(param('/playlist'))
+  const adminTab = $derived(
+    (route.path.match(/^\/admin\/(library|users|log|rules)$/)?.[1] ?? 'library') as
+      | 'library'
+      | 'users'
+      | 'log'
+      | 'rules',
+  )
   const tab = $derived(
     route.path.startsWith('/search') || albumId || artistId
       ? 'search'
       : route.path.startsWith('/queue')
         ? 'queue'
-        : route.path.startsWith('/admin')
-          ? 'admin'
-          : 'now',
+        : route.path.startsWith('/playlist')
+          ? 'playlists'
+          : route.path.startsWith('/admin')
+            ? 'admin'
+            : 'now',
   )
 </script>
 
@@ -48,6 +64,8 @@
   <Join />
 {:else if !app.ready}
   <div class="center-screen muted">Loading...</div>
+{:else if app.me && app.setupLibrary}
+  <main class="narrow"><SetupLibrary /></main>
 {:else if !app.me}
   <main class="narrow">
     {#if onSetupPage}
@@ -70,28 +88,40 @@
       <AlbumView id={albumId} />
     {:else if artistId}
       <ArtistView id={artistId} />
+    {:else if playlistId && isAdmin()}
+      <PlaylistView id={playlistId} />
     {:else if tab === 'search'}
       <Search />
     {:else if tab === 'queue'}
       <Queue />
+    {:else if tab === 'playlists' && isAdmin()}
+      <Playlists />
     {:else if tab === 'admin' && isAdmin()}
-      <Admin />
+      <Admin tab={adminTab} />
     {:else}
       <NowPlaying />
     {/if}
   </main>
 
-  <nav>
+  <nav class:admin={isAdmin()}>
     <a href="#/" class:active={tab === 'now'}><Icon name="disc" /><span>Playing</span></a>
     <a href="#/search" class:active={tab === 'search'}><Icon name="search" /><span>Library</span></a>
     <a href="#/queue" class:active={tab === 'queue'}>
       <Icon name="queue" />
       <span>Queue{app.queue.length ? ` (${app.queue.length})` : ''}</span>
     </a>
+    <button class:active={showJoin} onclick={() => (showJoin = true)}><Icon name="qr" /><span>Join</span></button>
     {#if isAdmin()}
+      <a href="#/playlists" class:active={tab === 'playlists'}><Icon name="playlist" /><span>Playlists</span></a>
       <a href="#/admin" class:active={tab === 'admin'}><Icon name="settings" /><span>Admin</span></a>
     {/if}
   </nav>
+
+  {#if showJoin}
+    <Sheet title="Help a friend join" onclose={() => (showJoin = false)}>
+      <JoinCard />
+    </Sheet>
+  {/if}
 {/if}
 
 <Toasts />
@@ -105,7 +135,7 @@
 
   main.narrow {
     max-width: 420px;
-    padding-top: 12vh;
+    padding-top: 10vh;
   }
 
   nav {
@@ -122,20 +152,30 @@
     border-top: 1px solid var(--line);
   }
 
-  nav a {
+  nav a,
+  nav button {
     flex: 1;
-    max-width: 160px;
+    max-width: 140px;
+    min-height: 0;
     display: flex;
     flex-direction: column;
     align-items: center;
     gap: 2px;
     padding: 10px 0 8px;
+    border-radius: 0;
+    background: transparent;
     color: var(--muted);
     font-size: 0.75rem;
     text-decoration: none;
   }
 
-  nav a.active {
+  nav.admin a,
+  nav.admin button {
+    font-size: 0.6875rem;
+  }
+
+  nav a.active,
+  nav button.active {
     color: var(--accent);
   }
 

@@ -23,7 +23,7 @@ pub struct PlaylistSummary {
     /// Shuffle when played; otherwise play in order.
     pub shuffle: bool,
     /// Songs, albums, and artists in it.
-    pub entries: i64,
+    pub entry_count: i64,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -63,7 +63,7 @@ pub enum AddEntryError {
 macro_rules! playlist_summary {
     () => {
         "SELECT p.id, p.name, p.shuffle, p.created_at, p.updated_at, \
-                (SELECT count(*) FROM playlist_entries e WHERE e.playlist_id = p.id) AS entries \
+                (SELECT count(*) FROM playlist_entries e WHERE e.playlist_id = p.id) AS entry_count \
          FROM playlists p"
     };
 }
@@ -430,7 +430,7 @@ mod tests {
             .unwrap());
         let summary = &store.playlists().await.unwrap()[0];
         assert_eq!(
-            (summary.name.as_str(), summary.shuffle, summary.entries),
+            (summary.name.as_str(), summary.shuffle, summary.entry_count),
             ("Dance", false, 4)
         );
 

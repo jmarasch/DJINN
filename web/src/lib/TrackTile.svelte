@@ -1,8 +1,8 @@
 <script lang="ts">
-  // A song as a grid tile: cover, title, artist, and the queue button.
+  // A song as a grid tile: tap the cover or title to queue it.
   import Art from './Art.svelte'
   import Icon from './Icon.svelte'
-  import { toggleRequest, trackStatus } from './state.svelte'
+  import { tapTrack, toggleRequest, trackStatus } from './state.svelte'
   import type { Track } from './types'
 
   let { track }: { track: Track } = $props()
@@ -11,7 +11,9 @@
 
 <div class="tile">
   <div class="cover">
-    <Art hash={track.art_hash} size={160} round={10} />
+    <button class="art" onclick={() => tapTrack(track)} aria-label="Queue {track.title}">
+      <Art hash={track.art_hash} size={160} round={10} />
+    </button>
     <button
       class="queue"
       class:done={status !== null}
@@ -25,8 +27,12 @@
       />
     </button>
   </div>
-  <span class="ellipsis">{track.title}</span>
-  <span class="muted small ellipsis">{track.artist ?? ''}</span>
+  <button class="title ellipsis" onclick={() => tapTrack(track)}>{track.title}</button>
+  {#if track.artist_id}
+    <a class="muted small ellipsis artist" href="#/artist/{track.artist_id}">{track.artist}</a>
+  {:else}
+    <span class="muted small ellipsis">{track.artist ?? ''}</span>
+  {/if}
 </div>
 
 <style>
@@ -42,9 +48,31 @@
     aspect-ratio: 1;
   }
 
+  .art {
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    padding: 0;
+    background: transparent;
+  }
+
   .cover :global(.art) {
     width: 100% !important;
     height: 100% !important;
+  }
+
+  .title {
+    display: block;
+    min-height: 0;
+    padding: 0;
+    background: transparent;
+    color: var(--text);
+    text-align: left;
+    font: inherit;
+  }
+
+  .artist {
+    text-decoration: none;
   }
 
   .queue {

@@ -8,18 +8,16 @@ auto pool when the queue empties (spec section 15).
 
 1. Build: `cd web && npm ci && npm run build`, then `cargo build --release`.
    The binary is `target/release/djinn`.
-2. Write `config.toml` next to the binary (Windows) or in
-   `~/.config/djinn/` (Linux). Set `library.roots` to the music folders.
-   Relative paths resolve against the config file's folder.
-3. Start `djinn`. The log prints a setup link the first time:
-   `Create one at http://localhost:8066/setup?token=...`. Open it on the
-   server machine and create the admin account.
+2. Start `djinn` (or DJINN from the app menu after
+   `packaging/linux/install.sh`). The first time, the log (and the tray
+   icon) leads to a setup link. Create the admin account, then pick your
+   music folders. More folders can be added later under Admin > Library.
 4. Wait for `library check finished` in the log (or watch Admin > Library).
 5. Either turn on **guest mode** (Admin > Rules) so guests join with just
    a name, or create an account for each guest in Admin > Users.
-6. Build the auto pool: search for albums or artists, open them, and tap
-   "Add to auto pool". Add enough that the history window (default 25
-   songs) does not exhaust it in a night.
+6. Make a playlist for the night (Playlists tab): add albums, artists, or
+   songs from the Library with the playlist button, then press Play. It
+   fills in whenever nobody has requested anything.
 7. Set the volume in Admin. It is remembered across restarts.
 8. Find the server's LAN address (`ip addr` or `ipconfig`). Guests open
    `http://<address>:8066`. Allow port 8066 through the firewall.
@@ -36,8 +34,8 @@ Tick each one off:
 - [ ] A fourth request from the same guest is refused (default limit 3).
 - [ ] A guest can remove their own request but not someone else's.
 - [ ] Admin can reorder the queue, skip, pause, and resume.
-- [ ] When the queue empties, pool songs start with no silence between.
-- [ ] Pool songs do not repeat within the history window.
+- [ ] When the queue empties, the playlist takes over with no silence between.
+- [ ] Shuffled playlist songs do not repeat within the history window.
 - [ ] Gapless: play an album with continuous tracks (live album, DJ mix,
       or a concept album). There is no gap or click between tracks.
 - [ ] A phone that sleeps or loses Wi-Fi catches up when it comes back.

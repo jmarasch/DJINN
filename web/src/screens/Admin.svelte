@@ -1,45 +1,47 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
   import { api } from '../lib/api'
+  import FolderPicker from '../lib/FolderPicker.svelte'
   import Icon from '../lib/Icon.svelte'
+  import Sheet from '../lib/Sheet.svelte'
   import { app, logout, toast } from '../lib/state.svelte'
-  import type { GuestSummary, PoolEntry, RequestLogEntry, Role, Settings, User } from '../lib/types'
+  import type { GuestSummary, LibraryRoot, RequestLogEntry, Role, Settings, User } from '../lib/types'
 
-  let pool = $state<PoolEntry[]>([])
+  type Tab = 'library' | 'users' | 'log' | 'rules'
+  let { tab = 'library' }: { tab?: Tab } = $props()
+  const tabs: { id: Tab; label: string }[] = [
+    { id: 'library', label: 'Library' },
+    { id: 'users', label: 'Users' },
+    { id: 'log', label: 'Log' },
+    { id: 'rules', label: 'Rules' },
+  ]
+
+  let roots = $state<LibraryRoot[]>([])
+  let trackCount = $state(0)
   let users = $state<User[]>([])
   let guests = $state<GuestSummary[]>([])
   let log = $state<RequestLogEntry[]>([])
   let settings = $state<Settings | null>(null)
-  let trackCount = $state(0)
-  let volume = $state(app.player.volume)
+  let picking = $state(false)
   let newUser = $state({ username: '', password: '', role: 'user' as Role })
 
-  async function load() {
-    ;[pool, users, settings, guests, log] = await Promise.all([
-      api.pool(),
-      api.users(),
-      api.settings(),
-      api.guests(),
-      api.requestLog(50),
-    ])
-    const status = await api.libraryStatus()
-    trackCount = status.tracks
-    if (status.last_scan) app.scan = status.last_scan
-  }
-
-  onMount(() => {
-    load().catch((e) => toast(e.message, true))
-  })
-
-  // Follow volume changes made elsewhere.
   $effect(() => {
-    volume = app.player.volume
+    load(tab).catch((e) => toast(e.message, true))
   })
 
-  let volumeTimer: ReturnType<typeof setTimeout>
-  function onVolume() {
-    clearTimeout(volumeTimer)
-    volumeTimer = setTimeout(() => attempt(() => api.setVolume(volume)), 120)
+  async function load(which: Tab) {
+    if (which === 'library') {
+      const [r, status, s] = await Promise.all([api.libraryRoots(), api.libraryStatus(), api.settings()])
+      roots = r
+      trackCount = status.tracks
+      settings = s
+      if (status.last_scan) app.scan = status.last_scan
+    } else if (which === 'users') {
+      ;[users, guests] = await Promise.all([api.users(), api.guests()])
+    } else if (which === 'log') {
+      log = await api.requestLog(200)
+    } else {
+      settings = await api.settings()
+    }
   }
 
   async function attempt(action: () => Promise<unknown>, done?: string) {
@@ -53,10 +55,30 @@
     }
   }
 
-  async function removePool(entry: PoolEntry) {
-    if (await attempt(() => api.removeFromPool(entry.id))) {
-      pool = pool.filter((p) => p.id !== entry.id)
+  async function addRoot(path: string) {
+    picking = false
+    await attempt(async () => (roots = await api.addLibraryRoot(path)), 'Folder added. Scanning it now.')
+  }
+
+  async function removeRoot(root: LibraryRoot) {
+    if (!confirm(`Remove ${root.path} from the library? Its songs disappear from DJINN (the files stay).`)) return
+    await attempt(async () => (roots = await api.removeLibraryRoot(root.path)), 'Folder removed')
+  }
+
+  async function updateUser(user: User, changes: { unlimited?: boolean; role?: Role }) {
+    if (await attempt(() => api.updateUser(user.id, changes))) {
+      users = users.map((u) => (u.id === user.id ? { ...u, ...changes } : u))
     }
+  }
+
+  async function resetPassword(user: User) {
+    const password = prompt(`New password for ${user.username} (at least 6 characters):`)
+    if (password) await attempt(() => api.updateUser(user.id, { password }), `Password changed for ${user.username}`)
+  }
+
+  async function removeUser(user: User) {
+    if (!confirm(`Delete ${user.username}? Their queued songs are removed too.`)) return
+    if (await attempt(() => api.deleteUser(user.id))) users = users.filter((u) => u.id !== user.id)
   }
 
   async function addUser(e: SubmitEvent) {
@@ -71,182 +93,185 @@
     }
   }
 
-  async function removeUser(user: User) {
-    if (!confirm(`Delete ${user.username}? Their queued songs are removed too.`)) return
-    if (await attempt(() => api.deleteUser(user.id))) {
-      users = users.filter((u) => u.id !== user.id)
-    }
-  }
-
-  async function setUnlimited(id: number, unlimited: boolean) {
-    if (await attempt(() => api.setUnlimited(id, unlimited))) {
-      users = users.map((u) => (u.id === id ? { ...u, unlimited } : u))
-      guests = guests.map((g) => (g.id === id ? { ...g, unlimited } : g))
+  async function setGuestUnlimited(guest: GuestSummary, unlimited: boolean) {
+    if (await attempt(() => api.updateUser(guest.id, { unlimited }))) {
+      guests = guests.map((g) => (g.id === guest.id ? { ...g, unlimited } : g))
     }
   }
 
   async function removeGuest(guest: GuestSummary) {
     if (!confirm(`Remove ${guest.name}? Their queued songs are removed too.`)) return
-    if (await attempt(() => api.deleteUser(guest.id))) {
-      guests = guests.filter((g) => g.id !== guest.id)
-    }
+    if (await attempt(() => api.deleteUser(guest.id))) guests = guests.filter((g) => g.id !== guest.id)
   }
 
-  const time = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
-  const when = (ms: number) =>
-    new Date(ms).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+  async function clearLog() {
+    if (!confirm('Clear the request log? Top songs on artist pages keep counting.')) return
+    if (await attempt(() => api.clearRequestLog(), 'Request log cleared')) log = []
+  }
 
   async function saveSettings(e: SubmitEvent) {
     e.preventDefault()
-    if (settings) await attempt(() => api.saveSettings(settings!), 'Settings saved')
+    if (settings) await attempt(() => api.saveSettings(settings!), 'Saved')
   }
 
   const scanning = $derived(app.scan !== null && !app.scan.done)
+  const time = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+  const when = (ms: number) =>
+    new Date(ms).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 </script>
 
 <h1>Admin</h1>
-
-<a class="button join-link" href="/join" target="_blank" rel="noopener">Show join QR code</a>
-
-<section class="card">
-  <h2>Player</h2>
-  <div class="row">
-    {#if app.player.state === 'paused'}
-      <button class="round" aria-label="Play" onclick={() => attempt(api.play)}><Icon name="play" /></button>
-    {:else}
-      <button class="round" aria-label="Pause" onclick={() => attempt(api.pause)}><Icon name="pause" /></button>
-    {/if}
-    <button class="round" aria-label="Skip" onclick={() => attempt(api.skip)}><Icon name="skip" /></button>
-    <span class="muted">{app.player.state}</span>
-  </div>
-  <label class="volume">
-    <span class="volume-head">Volume <span class="muted">{volume}</span></span>
-    <input type="range" min="0" max="100" bind:value={volume} oninput={onVolume} />
-  </label>
-  <p class="small muted">
-    {#if app.output.error}
-      <span class="error">Output problem: {app.output.error}</span>
-    {:else if app.output.device}
-      Playing on {app.output.device} at {(app.output.sample_rate ?? 0) / 1000} kHz
-    {:else}
-      No audio output yet
-    {/if}
-  </p>
-</section>
-
-<section class="card">
-  <h2>Auto pool</h2>
-  <p class="small muted">
-    Plays when nobody has requested anything. Add albums and artists from their pages.
-  </p>
-  {#each pool as entry (entry.id)}
-    <div class="item">
-      <span class="tag">{entry.kind}</span>
-      <span class="grow ellipsis">{entry.name ?? '(missing)'}</span>
-      <button class="icon" aria-label="Remove {entry.name}" onclick={() => removePool(entry)}>
-        <Icon name="close" />
-      </button>
-    </div>
-  {:else}
-    <p class="muted">The pool is empty, so DJINN stays quiet when the queue runs out.</p>
+<nav class="tabs" aria-label="Admin sections">
+  {#each tabs as t (t.id)}
+    <a href="#/admin/{t.id}" class:active={tab === t.id} aria-current={tab === t.id ? 'page' : undefined}>{t.label}</a>
   {/each}
-</section>
+</nav>
 
-<section class="card">
-  <h2>Library</h2>
-  <p class="muted">{trackCount} songs</p>
-  {#if scanning && app.scan}
-    <p class="small">Scanning: {app.scan.read} of {app.scan.to_read} files read</p>
-    <progress max={app.scan.to_read || 1} value={app.scan.read}></progress>
-  {:else if app.scan}
-    <p class="small muted">
-      Last scan found {app.scan.found} files, read {app.scan.read}, removed {app.scan.removed}.
-    </p>
+{#if tab === 'library'}
+  <section class="card">
+    <h2>Music folders</h2>
+    {#each roots as root (root.path)}
+      <div class="item">
+        <Icon name="folder" size={20} />
+        <div class="grow">
+          <div class="path">{root.path}</div>
+          {#if !root.available}<div class="small error">Not found right now (unplugged or offline?)</div>{/if}
+          {#if root.from_config}<div class="small muted">From config.toml</div>{/if}
+        </div>
+        {#if !root.from_config}
+          <button class="icon" aria-label="Remove {root.path}" onclick={() => removeRoot(root)}><Icon name="close" /></button>
+        {/if}
+      </div>
+    {:else}
+      <p class="muted">No music folders yet. Add the folder where your music lives.</p>
+    {/each}
+    <button class="primary" onclick={() => (picking = true)}>Add a folder</button>
+  </section>
+
+  <section class="card">
+    <h2>Library</h2>
+    <p class="muted">{trackCount} songs</p>
+    {#if scanning && app.scan}
+      <p class="small">Scanning: {app.scan.read} of {app.scan.to_read} files read</p>
+      <progress max={app.scan.to_read || 1} value={app.scan.read}></progress>
+    {:else if app.scan}
+      <p class="small muted">Last check found {app.scan.found} files, read {app.scan.read}, removed {app.scan.removed}.</p>
+    {/if}
+    <button disabled={scanning} onclick={() => attempt(api.rescan, 'Checking for changes')}>Check for changes</button>
+  </section>
+
+  <section class="card">
+    <h2>Artist photos and bios</h2>
+    {#if settings?.online_artist_info}
+      <p class="small muted">Looked up on Deezer and Wikipedia after each library check. Pictures in artist folders always win.</p>
+      <div class="row-buttons">
+        <button onclick={() => attempt(() => api.lookUpArtistInfo(), 'Looking up new artists')}>Look up new artists</button>
+        <button onclick={() => attempt(() => api.lookUpArtistInfo(true), 'Looking up every artist again')}>Recheck all</button>
+      </div>
+    {:else}
+      <p class="small muted">Off. Turn on "Look up artist photos and bios" under <a href="#/admin/rules">Rules</a>.</p>
+    {/if}
+  </section>
+
+  {#if picking}
+    <Sheet title="Pick a music folder" onclose={() => (picking = false)}>
+      <FolderPicker onpick={addRoot} />
+    </Sheet>
   {/if}
-  <button disabled={scanning} onclick={() => attempt(api.rescan, 'Rescan started')}>Rescan library</button>
-</section>
+{:else if tab === 'users'}
+  <section class="card">
+    <h2>Accounts</h2>
+    {#each users as user (user.id)}
+      <div class="user">
+        <div class="grow">
+          <div>{user.username} {#if user.id === app.me?.id}<span class="muted small">(you)</span>{/if}</div>
+          <div class="user-controls">
+            <select
+              value={user.role}
+              disabled={user.id === app.me?.id}
+              aria-label="Role for {user.username}"
+              onchange={(e) => updateUser(user, { role: e.currentTarget.value as Role })}
+            >
+              <option value="user">User</option>
+              <option value="admin">Admin</option>
+            </select>
+            {#if user.role !== 'admin'}
+              <label class="switch">
+                <input type="checkbox" checked={user.unlimited} onchange={(e) => updateUser(user, { unlimited: e.currentTarget.checked })} />
+                No limit
+              </label>
+            {/if}
+            <button class="small-button" onclick={() => resetPassword(user)}>Reset password</button>
+          </div>
+        </div>
+        {#if user.id !== app.me?.id}
+          <button class="icon" aria-label="Delete {user.username}" onclick={() => removeUser(user)}><Icon name="close" /></button>
+        {/if}
+      </div>
+    {/each}
+    <form class="new-user" onsubmit={addUser}>
+      <input placeholder="Username" bind:value={newUser.username} autocapitalize="none" required />
+      <input placeholder="Password" type="password" bind:value={newUser.password} minlength="6" required />
+      <select bind:value={newUser.role}>
+        <option value="user">User</option>
+        <option value="admin">Admin</option>
+      </select>
+      <button class="primary">Add user</button>
+    </form>
+  </section>
 
-<section class="card">
-  <h2>Users</h2>
-  {#each users as user (user.id)}
-    <div class="item">
-      <span class="grow">{user.username}</span>
-      {#if user.role !== 'admin'}
+  <section class="card">
+    <h2>Guests</h2>
+    <p class="small muted">People who joined with just a name, by device. A device is recognized by its MAC address on your network.</p>
+    {#each guests as guest (guest.id)}
+      <div class="user">
+        <div class="grow">
+          <div>{guest.name} <span class="muted small">{guest.requests} {guest.requests === 1 ? 'request' : 'requests'}</span></div>
+          <div class="muted small mono">{guest.mac ?? `no MAC (${guest.last_ip ?? 'unknown'})`}</div>
+          {#if guest.names !== guest.name}<div class="muted small">Also went by: {guest.names}</div>{/if}
+          <div class="muted small">Last seen {when(guest.last_seen)}</div>
+        </div>
         <label class="switch">
-          <input type="checkbox" checked={user.unlimited} onchange={(e) => setUnlimited(user.id, e.currentTarget.checked)} />
+          <input type="checkbox" checked={guest.unlimited} onchange={(e) => setGuestUnlimited(guest, e.currentTarget.checked)} />
           No limit
         </label>
-      {/if}
-      <span class="tag">{user.role}</span>
-      {#if user.id !== app.me?.id}
-        <button class="icon" aria-label="Delete {user.username}" onclick={() => removeUser(user)}>
-          <Icon name="close" />
-        </button>
-      {/if}
-    </div>
-  {/each}
-  <form class="new-user" onsubmit={addUser}>
-    <input placeholder="Username" bind:value={newUser.username} autocapitalize="none" required />
-    <input placeholder="Password" type="password" bind:value={newUser.password} minlength="6" required />
-    <select bind:value={newUser.role}>
-      <option value="user">User</option>
-      <option value="admin">Admin</option>
-    </select>
-    <button class="primary">Add user</button>
-  </form>
-</section>
-
-<section class="card">
-  <h2>Guests</h2>
-  <p class="small muted">
-    People who joined with just a name, by device. A device is recognized by its MAC address on
-    your network, so it keeps its identity next time.
-  </p>
-  {#each guests as guest (guest.id)}
-    <div class="guest">
-      <div class="grow">
-        <div>{guest.name} <span class="muted small">{guest.requests} {guest.requests === 1 ? 'request' : 'requests'}</span></div>
-        <div class="muted small mono">{guest.mac ?? `no MAC (${guest.last_ip ?? 'unknown'})`}</div>
-        {#if guest.names !== guest.name}<div class="muted small">Also went by: {guest.names}</div>{/if}
-        <div class="muted small">Last seen {when(guest.last_seen)}</div>
+        <button class="icon" aria-label="Remove {guest.name}" onclick={() => removeGuest(guest)}><Icon name="close" /></button>
       </div>
-      <label class="switch">
-        <input type="checkbox" checked={guest.unlimited} onchange={(e) => setUnlimited(guest.id, e.currentTarget.checked)} />
-        No limit
-      </label>
-      <button class="icon" aria-label="Remove {guest.name}" onclick={() => removeGuest(guest)}>
-        <Icon name="close" />
-      </button>
+    {:else}
+      <p class="muted">No guests yet. Turn on guest mode under <a href="#/admin/rules">Rules</a>.</p>
+    {/each}
+  </section>
+{:else if tab === 'log'}
+  <section class="card">
+    <div class="log-head">
+      <h2>Request log</h2>
+      <button class="small-button" disabled={!log.length} onclick={clearLog}>Clear</button>
     </div>
-  {:else}
-    <p class="muted">No guests yet. Turn on guest mode under Rules.</p>
-  {/each}
-</section>
-
-<section class="card">
-  <h2>Request log</h2>
-  {#each log as entry, i (i)}
-    <div class="log">
-      <span class="muted small at">{time(entry.at)}</span>
-      <div class="grow">
-        <div class="ellipsis">{entry.title ?? '(removed song)'}{entry.artist ? ` · ${entry.artist}` : ''}</div>
-        <div class="muted small ellipsis">
-          {entry.name ?? 'unknown'} · <span class="mono">{entry.mac ?? entry.ip ?? 'no address'}</span>
+    {#each log as entry, i (i)}
+      <div class="log">
+        <span class="muted small at">{time(entry.at)}</span>
+        <div class="grow">
+          <div class="ellipsis">{entry.title ?? '(removed song)'}{entry.artist ? ` · ${entry.artist}` : ''}</div>
+          <div class="muted small ellipsis">
+            {entry.name ?? 'unknown'} · <span class="mono">{entry.mac ?? entry.ip ?? 'no address'}</span>
+          </div>
         </div>
       </div>
-    </div>
-  {:else}
-    <p class="muted">No requests yet.</p>
-  {/each}
-</section>
-
-{#if settings}
+    {:else}
+      <p class="muted">No requests since the log was last cleared.</p>
+    {/each}
+  </section>
+{:else if settings}
   <section class="card">
     <h2>Rules</h2>
     <form class="settings" onsubmit={saveSettings}>
       <label class="switch big">
         <input type="checkbox" bind:checked={settings.guest_mode} />
         Guest mode: people join with just a name, no account
+      </label>
+      <label class="switch big">
+        <input type="checkbox" bind:checked={settings.online_artist_info} />
+        Look up artist photos and bios (sends artist names to Deezer and Wikipedia)
       </label>
       <label>
         Most songs in the queue at once (0 for no limit)
@@ -257,10 +282,10 @@
         <input type="number" min="1" max="50" bind:value={settings.per_user_limit} />
       </label>
       <label>
-        Songs before a pool song can repeat
+        Songs before a shuffled playlist song can repeat
         <input type="number" min="0" max="500" bind:value={settings.history_window} />
       </label>
-      <button>Save</button>
+      <button class="primary">Save</button>
     </form>
   </section>
 {/if}
@@ -268,30 +293,37 @@
 <button class="signout" onclick={logout}>Sign out</button>
 
 <style>
-  .row {
+  .tabs {
     display: flex;
-    align-items: center;
-    gap: 12px;
+    gap: 4px;
+    margin-bottom: 14px;
+    padding: 4px;
+    border-radius: 12px;
+    background: var(--surface);
   }
 
-  .volume {
-    margin-top: 12px;
+  .tabs a {
+    flex: 1;
+    display: grid;
+    place-items: center;
+    min-height: 40px;
+    border-radius: 8px;
+    color: var(--muted);
+    text-decoration: none;
   }
 
-  .volume input {
-    width: 100%;
+  .tabs a.active {
+    background: var(--surface-3);
+    color: var(--text);
+    font-weight: 600;
   }
 
-  .volume-head {
-    display: flex;
-    justify-content: space-between;
-  }
-
-  .item {
+  .item,
+  .user {
     display: flex;
     align-items: center;
     gap: 10px;
-    min-height: 48px;
+    padding: 8px 0;
     border-bottom: 1px solid var(--line);
   }
 
@@ -300,40 +332,52 @@
     min-width: 0;
   }
 
-  .tag {
-    padding: 2px 8px;
-    border-radius: 6px;
-    background: var(--surface-2);
-    color: var(--muted);
-    font-size: 0.75rem;
-    text-transform: uppercase;
+  .path {
+    overflow-wrap: anywhere;
   }
 
   .icon {
+    flex: none;
     width: 44px;
     height: 44px;
+    padding: 0;
+    background: transparent;
     color: var(--muted);
+  }
+
+  .user-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-top: 6px;
+  }
+
+  .user-controls select {
+    min-height: 36px;
+  }
+
+  .small-button {
+    min-height: 36px;
+    padding: 0 12px;
+    font-size: 0.875rem;
+  }
+
+  .row-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
   }
 
   .new-user {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 8px;
-    margin-top: 12px;
+    margin-top: 6px;
   }
 
   .new-user input {
     min-width: 0;
-  }
-
-  .settings {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-  }
-
-  .settings input {
-    width: 90px;
   }
 
   .switch {
@@ -357,12 +401,10 @@
     accent-color: var(--accent);
   }
 
-  .guest {
+  .log-head {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 8px 0;
-    border-bottom: 1px solid var(--line);
+    justify-content: space-between;
   }
 
   .log {
@@ -383,13 +425,18 @@
     font-family: ui-monospace, monospace;
   }
 
-  progress {
-    width: 100%;
+  .settings {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
   }
 
-  .join-link {
+  .settings input[type='number'] {
+    width: 100px;
+  }
+
+  progress {
     width: 100%;
-    margin-bottom: 16px;
   }
 
   .signout {

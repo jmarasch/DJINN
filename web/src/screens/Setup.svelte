@@ -29,7 +29,7 @@
     error = ''
     try {
       app.me = await api.bootstrap(token, username, password)
-      finish()
+      app.setupLibrary = true
       connect()
     } catch (err) {
       error = err instanceof Error ? err.message : 'Setup failed'

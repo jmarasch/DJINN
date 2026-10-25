@@ -2,7 +2,7 @@
   import { api } from '../lib/api'
   import Art from '../lib/Art.svelte'
   import Icon from '../lib/Icon.svelte'
-  import PoolButton from '../lib/PoolButton.svelte'
+  import AddToPlaylist from '../lib/AddToPlaylist.svelte'
   import TrackRow from '../lib/TrackRow.svelte'
   import type { AlbumDetail } from '../lib/types'
 
@@ -30,7 +30,7 @@
       <h1>{album.title}</h1>
       <a href="#/artist/{album.artist_id}">{album.artist}</a>
       {#if album.year}<span class="muted"> · {album.year}</span>{/if}
-      <PoolButton kind="album" refId={album.id} />
+      <AddToPlaylist kind="album" refId={album.id} label={album.title} />
     </div>
   </header>
   {#each album.tracks as track (track.id)}

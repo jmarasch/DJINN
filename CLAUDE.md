@@ -53,8 +53,9 @@ migrations/        sqlx migrations
 ## Where things live
 
 - Engine: `player.rs` sequences tracks and shares one resampling stage across same-rate tracks (that is what keeps resampled albums gapless); `output.rs` owns the cpal stream and the realtime callback; `engine.rs` is the thread and command loop. `NextNeeded { after }` names the track the engine just took.
-- Server: `desktop.rs` runs the tray (skipped without a display or with `--no-tray` / `server.tray = false`); `banner.rs` picks the LAN URL and prints the terminal QR; the library check runs in the background after the server is listening. `jukebox/` decides what plays (requests first, then the shuffle bag over the pool) and tracks queued, in-flight, and playing tracks; `events.rs` + `sse.rs` push live state; `*_api.rs` are the REST routes.
-- Store: one module per area (`library`, `users`, `queue`); all SQL is static strings (sqlx 0.9 rejects dynamic SQL), with shared column lists as macros used through `concat!`.
+- Server: `desktop.rs` runs the tray (skipped without a display or with `--no-tray` / `server.tray = false`); `banner.rs` picks the LAN URL and prints the terminal QR; the library check runs in the background after the server is listening. `jukebox/` decides what plays (requests first, then the active playlist: shuffle bag or in order) and tracks queued, in-flight, and playing tracks; `playlist_api.rs` manages playlists; `folders.rs` handles library folders (config.toml plus ones added in the app) and the folder browser; `events.rs` + `sse.rs` push live state; `*_api.rs` are the REST routes.
+- Library: `online.rs` looks up artist photos (Deezer) and bios (Wikipedia) when the admin turns it on; strict name matching, retries, 30-day recheck.
+- Store: one module per area (`library`, `playlists`, `users`, `queue`); all SQL is static strings (sqlx 0.9 rejects dynamic SQL), with shared column lists as macros used through `concat!`.
 - Golden-sample audio fixtures: `crates/djinn-engine/tests/fixtures/` (README says how to regenerate). Phase 1 acceptance checklist: `docs/phase1-test-party.md`.
 
 ## Coding rules (spec section 16)
