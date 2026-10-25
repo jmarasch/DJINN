@@ -10,6 +10,10 @@ rtrb = "0.4.1"
 rubato = "5.0.1"
 symphonia = { version = "0.6.1", features = ["mp3", "flac", "aac", "isomp4", "vorbis", "ogg", "wav", "pcm"] }
 thiserror.workspace = true
+tracing.workspace = true
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+tracing-subscriber.workspace = true
