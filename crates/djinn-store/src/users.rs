@@ -161,6 +161,39 @@ impl Store {
         Ok(result.rows_affected() > 0)
     }
 
+    pub async fn set_role(&self, id: i64, role: Role) -> Result<bool> {
+        let result = sqlx::query("UPDATE users SET role = ? WHERE id = ? AND role != 'guest'")
+            .bind(role)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
+    /// Sets a new password and signs the user out everywhere.
+    pub async fn set_password(&self, id: i64, password_hash: &str) -> Result<bool> {
+        let mut tx = self.pool.begin().await?;
+        let result =
+            sqlx::query("UPDATE users SET password_hash = ? WHERE id = ? AND role != 'guest'")
+                .bind(password_hash)
+                .bind(id)
+                .execute(&mut *tx)
+                .await?;
+        sqlx::query("DELETE FROM sessions WHERE user_id = ?")
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(result.rows_affected() > 0)
+    }
+
+    pub async fn admin_count(&self) -> Result<i64> {
+        let count = sqlx::query_scalar("SELECT count(*) FROM users WHERE role = 'admin'")
+            .fetch_one(&self.pool)
+            .await?;
+        Ok(count)
+    }
+
     pub async fn set_unlimited(&self, id: i64, unlimited: bool) -> Result<bool> {
         let result = sqlx::query("UPDATE users SET unlimited = ? WHERE id = ?")
             .bind(unlimited)
@@ -358,6 +391,21 @@ mod tests {
         assert_eq!(store.delete_expired_sessions().await.unwrap(), 1);
 
         assert!(store.set_unlimited(admin.id, true).await.unwrap());
+        let user = store.create_user("dj", "old", Role::User).await.unwrap();
+        store
+            .create_session(user.id, b"dj-session", now_ms() + 60_000)
+            .await
+            .unwrap();
+        assert!(store.set_role(user.id, Role::Admin).await.unwrap());
+        assert_eq!(store.admin_count().await.unwrap(), 2);
+        assert!(store.set_password(user.id, "new").await.unwrap());
+        assert_eq!(
+            store.session_user(b"dj-session").await.unwrap(),
+            None,
+            "signed out"
+        );
+        let (_, hash) = store.user_credentials("dj").await.unwrap().unwrap();
+        assert_eq!(hash, "new");
         assert!(store.user(admin.id).await.unwrap().unwrap().unlimited);
 
         assert!(store.delete_user(admin.id).await.unwrap());

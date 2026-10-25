@@ -303,29 +303,54 @@ async fn list_guests(
 
 #[derive(Deserialize)]
 struct UserUpdate {
-    unlimited: bool,
+    unlimited: Option<bool>,
+    role: Option<Role>,
+    /// New password; signs the user out everywhere.
+    password: Option<String>,
 }
 
-/// Exempts a user or guest from request limits, or not.
+/// Edits a user: request limit exemption, role, or password. Guests only
+/// have the exemption.
 async fn update_user(
-    _: AdminUser,
+    AdminUser(admin): AdminUser,
     State(state): State<AppState>,
     Path(id): Path<i64>,
     Json(body): Json<UserUpdate>,
 ) -> ApiResult<StatusCode> {
-    if !state.store.set_unlimited(id, body.unlimited).await? {
-        return Err(ApiError::not_found());
+    let user = state
+        .store
+        .user(id)
+        .await?
+        .ok_or_else(ApiError::not_found)?;
+    if let Some(role) = body.role.filter(|&r| r != user.role) {
+        if user.role == Role::Guest || role == Role::Guest {
+            return Err(ApiError::bad_request(
+                "guests and accounts can't swap roles",
+            ));
+        }
+        if id == admin.id {
+            return Err(ApiError::bad_request("you can't change your own role"));
+        }
+        if user.role == Role::Admin && state.store.admin_count().await? <= 1 {
+            return Err(ApiError::bad_request("there must be at least one admin"));
+        }
+        state.store.set_role(id, role).await?;
+    }
+    if let Some(password) = body.password {
+        if user.role == Role::Guest {
+            return Err(ApiError::bad_request("guests don't have passwords"));
+        }
+        validate_password(&password)?;
+        let hash = hash_password(password).await?;
+        state.store.set_password(id, &hash).await?;
+    }
+    if let Some(unlimited) = body.unlimited {
+        state.store.set_unlimited(id, unlimited).await?;
     }
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn new_user(
-    state: &AppState,
-    username: &str,
-    password: String,
-    role: Role,
-) -> ApiResult<User> {
-    let username = validate_username(username)?;
+fn validate_password(password: &str) -> ApiResult<()> {
     let length = password.chars().count();
     if length < MIN_PASSWORD {
         return Err(ApiError::bad_request(format!(
@@ -335,6 +360,17 @@ async fn new_user(
     if length > MAX_PASSWORD {
         return Err(ApiError::bad_request("password is too long"));
     }
+    Ok(())
+}
+
+async fn new_user(
+    state: &AppState,
+    username: &str,
+    password: String,
+    role: Role,
+) -> ApiResult<User> {
+    let username = validate_username(username)?;
+    validate_password(&password)?;
     let hash = hash_password(password).await?;
     match state.store.create_user(&username, &hash, role).await {
         Ok(user) => Ok(user),
@@ -544,6 +580,66 @@ mod tests {
             .store(false, std::sync::atomic::Ordering::Relaxed);
         let (status, _) = call(&state, Method::GET, "/api/me", None, Some(&guest)).await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn user_management_guardrails() {
+        use crate::test_util::session;
+        let state = AppState::for_tests().await;
+        let admin = session(&state, "boss", Role::Admin).await;
+        let me = state
+            .store
+            .user_credentials("boss")
+            .await
+            .unwrap()
+            .unwrap()
+            .0;
+        let dj = state
+            .store
+            .create_user("dj", "x", Role::User)
+            .await
+            .unwrap();
+        let patch = |id: i64| format!("/api/users/{id}");
+
+        let (status, _) = call(
+            &state,
+            Method::PATCH,
+            &patch(me.id),
+            Some(r#"{"role":"user"}"#),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "can't demote yourself");
+        let (status, _) = call(
+            &state,
+            Method::PATCH,
+            &patch(dj.id),
+            Some(r#"{"role":"admin"}"#),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        let (status, _) = call(
+            &state,
+            Method::PATCH,
+            &patch(dj.id),
+            Some(r#"{"password":"123"}"#),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "too short");
+        let (status, _) = call(
+            &state,
+            Method::PATCH,
+            &patch(dj.id),
+            Some(r#"{"password":"longenough"}"#),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        let login = r#"{"username":"dj","password":"longenough"}"#;
+        let (status, _) = call(&state, Method::POST, "/api/auth/login", Some(login), None).await;
+        assert_eq!(status, StatusCode::OK, "new password works");
     }
 
     #[test]

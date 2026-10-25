@@ -161,16 +161,18 @@ impl Store {
         Ok(item)
     }
 
-    /// Most recent requests first.
-    pub async fn request_log(&self, limit: i64) -> Result<Vec<RequestLogEntry>> {
+    /// Most recent requests first, from `since` (Unix ms) on.
+    pub async fn request_log(&self, since: i64, limit: i64) -> Result<Vec<RequestLogEntry>> {
         let entries = sqlx::query_as(
             "SELECT r.at, r.track_id, t.title, t.artist, r.user_id,
                     coalesce(r.name, u.display_name, u.username) AS name, r.mac, r.ip
              FROM request_events r
              LEFT JOIN tracks t ON t.id = r.track_id
              LEFT JOIN users u ON u.id = r.user_id
+             WHERE r.at >= ?
              ORDER BY r.at DESC, r.id DESC LIMIT ?",
         )
+        .bind(since)
         .bind(limit)
         .fetch_all(&self.pool)
         .await?;
@@ -419,12 +421,44 @@ mod tests {
             .await
             .unwrap();
 
-        let log = store.request_log(10).await.unwrap();
+        let log = store.request_log(0, 10).await.unwrap();
         assert_eq!(log.len(), 3);
         assert_eq!(log[0].track_id, ids[2]);
         assert_eq!(log[0].title.as_deref(), Some("Song 3"));
         assert_eq!(log[0].mac.as_deref(), Some("aa:bb:cc:00:11:22"));
         assert_eq!(log[0].ip.as_deref(), Some("192.168.0.7"));
         assert_eq!(log[0].name.as_deref(), Some("u"));
+    }
+
+    #[tokio::test]
+    async fn artist_top_tracks_rank_requests_then_plays() {
+        let (store, user, ids) = setup().await;
+        // Songs 1 to 3 are by artist A. Song 2 is requested twice, song 3
+        // played once.
+        for _ in 0..2 {
+            store
+                .add_request(ids[1], user, RequestLimits::default(), &origin())
+                .await
+                .unwrap();
+            let id: i64 = sqlx::query_scalar("SELECT id FROM request_queue")
+                .fetch_one(store.pool())
+                .await
+                .unwrap();
+            store.remove_request(id).await.unwrap();
+        }
+        store
+            .start_play_event(ids[2], PlaySource::Pool, None)
+            .await
+            .unwrap();
+        let artist: i64 = sqlx::query_scalar("SELECT id FROM artists WHERE name = 'A'")
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+        let top = store.artist_top_tracks(artist, 10).await.unwrap();
+        let ranked: Vec<(i64, i64, i64)> = top
+            .iter()
+            .map(|t| (t.track.id, t.requests, t.plays))
+            .collect();
+        assert_eq!(ranked, [(ids[1], 2, 0), (ids[2], 0, 1), (ids[0], 0, 0)]);
     }
 }

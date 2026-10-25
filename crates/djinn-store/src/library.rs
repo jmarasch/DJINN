@@ -55,6 +55,16 @@ pub struct Artist {
     pub art_hash: Option<String>,
 }
 
+/// A song with how often it's been requested and played, for "top songs".
+#[derive(Clone, Debug, PartialEq, Serialize, FromRow)]
+pub struct TopTrack {
+    #[serde(flatten)]
+    #[sqlx(flatten)]
+    pub track: Track,
+    pub requests: i64,
+    pub plays: i64,
+}
+
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct SearchResults {
     pub tracks: Vec<Track>,
@@ -101,6 +111,12 @@ pub struct AlbumDetail {
 pub struct ArtistDetail {
     #[serde(flatten)]
     pub artist: Artist,
+    /// Short biography, when looked up online.
+    pub bio: Option<String>,
+    /// Where the bio came from.
+    pub bio_url: Option<String>,
+    /// Most requested (then most played) songs, best first.
+    pub top_tracks: Vec<TopTrack>,
     pub albums: Vec<Album>,
     /// Tracks by this artist that are not on one of `albums`.
     pub other_tracks: Vec<Track>,
@@ -324,14 +340,27 @@ impl Store {
     }
 
     pub async fn artist(&self, id: i64) -> Result<Option<ArtistDetail>> {
-        let artist: Option<Artist> =
-            sqlx::query_as("SELECT id, name, art_hash FROM artists WHERE id = ?")
+        #[derive(FromRow)]
+        struct Row {
+            #[sqlx(flatten)]
+            artist: Artist,
+            bio: Option<String>,
+            bio_url: Option<String>,
+        }
+        let row: Option<Row> =
+            sqlx::query_as("SELECT id, name, art_hash, bio, bio_url FROM artists WHERE id = ?")
                 .bind(id)
                 .fetch_optional(&self.pool)
                 .await?;
-        let Some(artist) = artist else {
+        let Some(Row {
+            artist,
+            bio,
+            bio_url,
+        }) = row
+        else {
             return Ok(None);
         };
+        let top_tracks = self.artist_top_tracks(id, 10).await?;
         let albums = sqlx::query_as(concat!(
             "SELECT ",
             album_columns!(),
@@ -361,9 +390,34 @@ impl Store {
         .await?;
         Ok(Some(ArtistDetail {
             artist,
+            bio,
+            bio_url,
+            top_tracks,
             albums,
             other_tracks,
         }))
+    }
+
+    /// The artist's songs, most requested first, then most played.
+    pub async fn artist_top_tracks(&self, artist_id: i64, limit: i64) -> Result<Vec<TopTrack>> {
+        let tracks = sqlx::query_as(concat!(
+            "SELECT ",
+            track_columns!(),
+            ", (SELECT count(*) FROM request_events r WHERE r.track_id = t.id) AS requests,
+               (SELECT count(*) FROM play_events p WHERE p.track_id = t.id) AS plays
+             FROM tracks t LEFT JOIN albums al ON al.id = t.album_id
+             WHERE ",
+            available!(),
+            " AND (t.artist_id = ? OR al.artist_id = ?)
+             ORDER BY requests DESC, plays DESC, t.title COLLATE NOCASE
+             LIMIT ?"
+        ))
+        .bind(artist_id)
+        .bind(artist_id)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(tracks)
     }
 
     /// Artists with playable tracks, A to Z.

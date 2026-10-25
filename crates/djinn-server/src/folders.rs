@@ -260,7 +260,10 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::CREATED);
-        assert_eq!(library_roots(&state).await.unwrap(), std::slice::from_ref(&canonical));
+        assert_eq!(
+            library_roots(&state).await.unwrap(),
+            std::slice::from_ref(&canonical)
+        );
         let (status, _) = call(
             &state,
             Method::POST,

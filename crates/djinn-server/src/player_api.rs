@@ -25,7 +25,7 @@ pub fn router() -> Router<AppState> {
         .route("/player/skip", post(skip))
         .route("/player/volume", put(set_volume))
         .route("/settings", get(settings).put(update_settings))
-        .route("/requests/log", get(request_log))
+        .route("/requests/log", get(request_log).delete(clear_request_log))
 }
 
 /// Maps queue rule violations to client errors; anything else is a 500.
@@ -230,6 +230,9 @@ struct LogQuery {
     limit: Option<i64>,
 }
 
+/// When the request log was last cleared (Unix ms).
+const LOG_CLEARED_AT: &str = "request_log_cleared_at";
+
 /// Recent requests with who made them and from which device.
 async fn request_log(
     _: AdminUser,
@@ -237,7 +240,18 @@ async fn request_log(
     axum::extract::Query(query): axum::extract::Query<LogQuery>,
 ) -> ApiResult<Json<Vec<RequestLogEntry>>> {
     let limit = query.limit.unwrap_or(100).clamp(1, 1000);
-    Ok(Json(state.store.request_log(limit).await?))
+    let since = jukebox::setting(&state.store, LOG_CLEARED_AT, 0).await?;
+    Ok(Json(state.store.request_log(since, limit).await?))
+}
+
+/// Empties the request log view. Request counts behind "top songs" are
+/// kept.
+async fn clear_request_log(_: AdminUser, State(state): State<AppState>) -> ApiResult<StatusCode> {
+    state
+        .store
+        .set_setting(LOG_CLEARED_AT, &djinn_store::now_ms().to_string())
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[cfg(test)]
