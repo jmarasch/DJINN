@@ -5,6 +5,14 @@ edition.workspace = true
 publish.workspace = true
 
 [dependencies]
+djinn-store = { path = "../djinn-store" }
+lofty = "0.25.5"
+serde.workspace = true
+sha2 = "0.11.1"
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+walkdir = "2.5.0"
 
 [lints]
 workspace = true

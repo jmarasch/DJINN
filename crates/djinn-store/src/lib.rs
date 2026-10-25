@@ -1,5 +1,9 @@
 //! DJINN storage: SQLite access, migrations, and models.
 
+mod library;
+
+pub use library::*;
+
 use std::path::Path;
 use std::str::FromStr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
