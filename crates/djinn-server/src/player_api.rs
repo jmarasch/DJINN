@@ -1,13 +1,11 @@
-//! The request queue, now playing, player controls, auto pool, and
+//! The request queue, now playing, player controls, and
 //! runtime settings.
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
-use djinn_store::{
-    AddPoolError, AddRequestError, PoolEntry, PoolKind, QueueItem, RequestLogEntry, RequestOrigin,
-};
+use djinn_store::{AddRequestError, QueueItem, RequestLogEntry, RequestOrigin};
 use serde::{Deserialize, Serialize};
 
 use crate::auth::{AdminUser, CurrentUser};
@@ -26,8 +24,6 @@ pub fn router() -> Router<AppState> {
         .route("/player/pause", post(pause))
         .route("/player/skip", post(skip))
         .route("/player/volume", put(set_volume))
-        .route("/pool", get(pool).post(add_pool_entry))
-        .route("/pool/{id}", delete(remove_pool_entry))
         .route("/settings", get(settings).put(update_settings))
         .route("/requests/log", get(request_log))
 }
@@ -164,43 +160,6 @@ async fn set_volume(
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn pool(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json<Vec<PoolEntry>>> {
-    Ok(Json(state.store.pool_entries().await?))
-}
-
-#[derive(Deserialize)]
-struct NewPoolEntry {
-    kind: PoolKind,
-    ref_id: i64,
-}
-
-async fn add_pool_entry(
-    _: AdminUser,
-    State(state): State<AppState>,
-    Json(body): Json<NewPoolEntry>,
-) -> ApiResult<(StatusCode, Json<PoolEntry>)> {
-    let entry = match state.store.add_pool_entry(body.kind, body.ref_id).await {
-        Ok(entry) => entry,
-        Err(AddPoolError::NotFound) => return Err(ApiError::not_found()),
-        Err(e @ AddPoolError::AlreadyInPool) => return Err(ApiError::conflict(e.to_string())),
-        Err(AddPoolError::Store(e)) => return Err(e.into()),
-    };
-    state.jukebox.lock().await.pool_changed().await?;
-    Ok((StatusCode::CREATED, Json(entry)))
-}
-
-async fn remove_pool_entry(
-    _: AdminUser,
-    State(state): State<AppState>,
-    Path(id): Path<i64>,
-) -> ApiResult<StatusCode> {
-    if !state.store.remove_pool_entry(id).await? {
-        return Err(ApiError::not_found());
-    }
-    state.jukebox.lock().await.pool_changed().await?;
-    Ok(StatusCode::NO_CONTENT)
-}
-
 #[derive(Serialize, Deserialize)]
 struct Settings {
     history_window: i64,
@@ -289,7 +248,7 @@ mod tests {
     use djinn_store::{Role, ScannedTrack};
 
     #[tokio::test]
-    async fn queue_and_pool_status_codes() {
+    async fn queue_playlist_and_settings_status_codes() {
         let state = AppState::for_tests().await;
         let tracks: Vec<ScannedTrack> = (0..5)
             .map(|i| ScannedTrack {
@@ -393,13 +352,49 @@ mod tests {
         let (status, _) = call(&state, Method::DELETE, &path, None, Some(&alice)).await;
         assert_eq!(status, StatusCode::NO_CONTENT);
 
-        let pool = format!(r#"{{"kind":"track","ref_id":{}}}"#, ids[4]);
-        let (status, _) = call(&state, Method::POST, "/api/pool", Some(&pool), Some(&alice)).await;
+        let (status, _) = call(
+            &state,
+            Method::POST,
+            "/api/playlists",
+            Some(r#"{"name":"Chill"}"#),
+            Some(&alice),
+        )
+        .await;
         assert_eq!(status, StatusCode::FORBIDDEN);
-        let (status, _) = call(&state, Method::POST, "/api/pool", Some(&pool), Some(&admin)).await;
+        let (status, _) = call(
+            &state,
+            Method::POST,
+            "/api/playlists",
+            Some(r#"{"name":"Chill"}"#),
+            Some(&admin),
+        )
+        .await;
         assert_eq!(status, StatusCode::CREATED);
-        let (status, _) = call(&state, Method::POST, "/api/pool", Some(&pool), Some(&admin)).await;
+        let list = state.store.playlists().await.unwrap()[0].id;
+        let entry = format!(r#"{{"kind":"track","ref_id":{}}}"#, ids[4]);
+        let path = format!("/api/playlists/{list}/entries");
+        let (status, _) = call(&state, Method::POST, &path, Some(&entry), Some(&admin)).await;
+        assert_eq!(status, StatusCode::CREATED);
+        let (status, _) = call(&state, Method::POST, &path, Some(&entry), Some(&admin)).await;
         assert_eq!(status, StatusCode::CONFLICT);
+        let play = format!("/api/playlists/{list}/play");
+        let (status, _) = call(&state, Method::POST, &play, Some("{}"), Some(&admin)).await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        assert_eq!(state.jukebox.lock().await.active_playlist(), Some(list));
+        let (status, _) = call(
+            &state,
+            Method::DELETE,
+            &format!("/api/playlists/{list}"),
+            None,
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        assert_eq!(
+            state.jukebox.lock().await.active_playlist(),
+            None,
+            "deleting stops it"
+        );
 
         let (status, _) = call(
             &state,

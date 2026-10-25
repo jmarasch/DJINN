@@ -1,6 +1,6 @@
 //! Request queue, auto pool, and listening history.
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use sqlx::FromRow;
 
 use crate::{now_ms, Result, Store, StoreError, Track};
@@ -59,36 +59,6 @@ pub struct RequestLogEntry {
     pub name: Option<String>,
     pub mac: Option<String>,
     pub ip: Option<String>,
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
-#[serde(rename_all = "lowercase")]
-#[sqlx(type_name = "TEXT", rename_all = "lowercase")]
-pub enum PoolKind {
-    Track,
-    Album,
-    Artist,
-    Playlist,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, FromRow)]
-pub struct PoolEntry {
-    pub id: i64,
-    pub kind: PoolKind,
-    pub ref_id: i64,
-    /// Display name of the referenced item, if it still exists.
-    pub name: Option<String>,
-    pub added_at: i64,
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum AddPoolError {
-    #[error("not found")]
-    NotFound,
-    #[error("already in the pool")]
-    AlreadyInPool,
-    #[error(transparent)]
-    Store(#[from] StoreError),
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, sqlx::Type)]
@@ -258,93 +228,6 @@ impl Store {
         Ok(true)
     }
 
-    pub async fn pool_entries(&self) -> Result<Vec<PoolEntry>> {
-        let entries = sqlx::query_as(
-            "SELECT p.id, p.kind, p.ref_id, p.added_at,
-                    CASE p.kind
-                      WHEN 'track' THEN (SELECT title FROM tracks WHERE id = p.ref_id)
-                      WHEN 'album' THEN (SELECT title FROM albums WHERE id = p.ref_id)
-                      WHEN 'artist' THEN (SELECT name FROM artists WHERE id = p.ref_id)
-                      WHEN 'playlist' THEN (SELECT name FROM playlists WHERE id = p.ref_id)
-                    END AS name
-             FROM pool_entries p ORDER BY p.added_at, p.id",
-        )
-        .fetch_all(&self.pool)
-        .await?;
-        Ok(entries)
-    }
-
-    pub async fn add_pool_entry(
-        &self,
-        kind: PoolKind,
-        ref_id: i64,
-    ) -> Result<PoolEntry, AddPoolError> {
-        let exists: bool = sqlx::query_scalar(match kind {
-            PoolKind::Track => "SELECT EXISTS (SELECT 1 FROM tracks WHERE id = ?)",
-            PoolKind::Album => "SELECT EXISTS (SELECT 1 FROM albums WHERE id = ?)",
-            PoolKind::Artist => "SELECT EXISTS (SELECT 1 FROM artists WHERE id = ?)",
-            PoolKind::Playlist => "SELECT EXISTS (SELECT 1 FROM playlists WHERE id = ?)",
-        })
-        .bind(ref_id)
-        .fetch_one(&self.pool)
-        .await
-        .map_err(StoreError::from)?;
-        if !exists {
-            return Err(AddPoolError::NotFound);
-        }
-        let inserted = sqlx::query_scalar(
-            "INSERT INTO pool_entries (kind, ref_id, added_at) VALUES (?, ?, ?) RETURNING id",
-        )
-        .bind(kind)
-        .bind(ref_id)
-        .bind(now_ms())
-        .fetch_one(&self.pool)
-        .await;
-        let id: i64 = match inserted {
-            Ok(id) => id,
-            Err(sqlx::Error::Database(e)) if e.is_unique_violation() => {
-                return Err(AddPoolError::AlreadyInPool)
-            }
-            Err(e) => return Err(StoreError::from(e).into()),
-        };
-        let entries = self.pool_entries().await?;
-        entries
-            .into_iter()
-            .find(|e| e.id == id)
-            .ok_or(AddPoolError::NotFound)
-    }
-
-    pub async fn remove_pool_entry(&self, id: i64) -> Result<bool> {
-        let result = sqlx::query("DELETE FROM pool_entries WHERE id = ?")
-            .bind(id)
-            .execute(&self.pool)
-            .await?;
-        Ok(result.rows_affected() > 0)
-    }
-
-    /// Every playable track the pool currently covers. Album, artist, and
-    /// playlist entries are expanded now, so new additions are included.
-    pub async fn pool_track_ids(&self) -> Result<Vec<i64>> {
-        let ids = sqlx::query_scalar(
-            "SELECT t.id FROM tracks t
-             WHERE t.removed_at IS NULL AND (
-               t.id IN (SELECT ref_id FROM pool_entries WHERE kind = 'track')
-               OR t.album_id IN (SELECT ref_id FROM pool_entries WHERE kind = 'album')
-               OR t.artist_id IN (SELECT ref_id FROM pool_entries WHERE kind = 'artist')
-               OR t.album_id IN (
-                 SELECT al.id FROM albums al
-                 JOIN pool_entries p ON p.kind = 'artist' AND p.ref_id = al.artist_id)
-               OR t.id IN (
-                 SELECT pt.track_id FROM playlist_tracks pt
-                 JOIN pool_entries p ON p.kind = 'playlist' AND p.ref_id = pt.playlist_id)
-             )
-             ORDER BY t.id",
-        )
-        .fetch_all(&self.pool)
-        .await?;
-        Ok(ids)
-    }
-
     /// Most recently started tracks, newest first.
     pub async fn recent_track_ids(&self, limit: i64) -> Result<Vec<i64>> {
         let ids = sqlx::query_scalar(
@@ -492,42 +375,6 @@ mod tests {
 
         assert!(store.remove_request(queue[0].id).await.unwrap());
         assert_eq!(store.queue().await.unwrap().len(), 2);
-    }
-
-    #[tokio::test]
-    async fn pool_expands_live() {
-        let (store, _, ids) = setup().await;
-        let album = store.search("second", 5).await.unwrap().albums[0].id;
-        let artist_a = store.search("a", 5).await.unwrap().artists[0].id;
-
-        store.add_pool_entry(PoolKind::Album, album).await.unwrap();
-        assert_eq!(store.pool_track_ids().await.unwrap(), [ids[3], ids[4]]);
-        assert!(matches!(
-            store.add_pool_entry(PoolKind::Album, album).await,
-            Err(AddPoolError::AlreadyInPool)
-        ));
-        let entry = store
-            .add_pool_entry(PoolKind::Artist, artist_a)
-            .await
-            .unwrap();
-        assert_eq!(entry.name.as_deref(), Some("A"));
-        assert_eq!(store.pool_track_ids().await.unwrap(), ids);
-
-        // A new track on a pooled album joins automatically.
-        store
-            .save_scanned(&[ScannedTrack {
-                path: "/m/6.flac".into(),
-                title: "Song 6".into(),
-                artist: Some("B".into()),
-                album: Some("Second".into()),
-                ..Default::default()
-            }])
-            .await
-            .unwrap();
-        assert_eq!(store.pool_track_ids().await.unwrap().len(), 6);
-
-        store.remove_pool_entry(entry.id).await.unwrap();
-        assert_eq!(store.pool_track_ids().await.unwrap().len(), 3);
     }
 
     #[tokio::test]

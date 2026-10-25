@@ -15,6 +15,7 @@ mod events;
 mod jukebox;
 mod library_api;
 mod player_api;
+mod playlist_api;
 mod sse;
 mod state;
 #[cfg(test)]

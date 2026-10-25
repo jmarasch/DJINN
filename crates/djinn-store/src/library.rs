@@ -193,7 +193,7 @@ impl Store {
     }
 
     /// Picks album and artist images from what the scanner found, and
-    /// deletes artists and albums left with no tracks (unless the auto pool
+    /// deletes artists and albums left with no tracks (unless a playlist
     /// uses them). Run after a scan.
     pub async fn refresh_artwork(&self) -> Result<()> {
         let mut tx = self.pool.begin().await?;
@@ -234,7 +234,7 @@ impl Store {
         sqlx::query(
             "DELETE FROM albums
              WHERE NOT EXISTS (SELECT 1 FROM tracks t WHERE t.album_id = albums.id)
-               AND NOT EXISTS (SELECT 1 FROM pool_entries p
+               AND NOT EXISTS (SELECT 1 FROM playlist_entries p
                                WHERE p.kind = 'album' AND p.ref_id = albums.id)",
         )
         .execute(&mut *tx)
@@ -243,7 +243,7 @@ impl Store {
             "DELETE FROM artists
              WHERE NOT EXISTS (SELECT 1 FROM tracks t WHERE t.artist_id = artists.id)
                AND NOT EXISTS (SELECT 1 FROM albums al WHERE al.artist_id = artists.id)
-               AND NOT EXISTS (SELECT 1 FROM pool_entries p
+               AND NOT EXISTS (SELECT 1 FROM playlist_entries p
                                WHERE p.kind = 'artist' AND p.ref_id = artists.id)",
         )
         .execute(&mut *tx)

@@ -222,8 +222,9 @@ pub fn start_scan(state: &AppState) -> bool {
                     secs = started.elapsed().as_secs_f32(),
                     "library check finished"
                 );
-                // New tracks may have joined pooled albums and artists.
-                if let Err(e) = state.jukebox.lock().await.pool_changed().await {
+                // New tracks may have joined albums and artists in the
+                // active playlist.
+                if let Err(e) = state.jukebox.lock().await.auto_mix_changed().await {
                     tracing::error!(error = %format!("{e:#}"), "refreshing the queue failed");
                 }
             }

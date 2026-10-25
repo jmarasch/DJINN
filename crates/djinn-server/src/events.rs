@@ -53,11 +53,20 @@ pub enum PlayState {
     Paused,
 }
 
-#[derive(Copy, Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub struct PlayerState {
     pub state: PlayState,
     /// Master volume, 0 to 100.
     pub volume: u8,
+    /// The playlist playing when nobody has requested anything.
+    pub playlist: Option<PlaylistRef>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct PlaylistRef {
+    pub id: i64,
+    pub name: String,
+    pub shuffle: bool,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]

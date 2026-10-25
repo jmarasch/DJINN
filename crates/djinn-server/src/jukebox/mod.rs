@@ -1,4 +1,4 @@
-//! Decides what plays: requests first, then the auto pool. Feeds the engine
+//! Decides what plays: requests first, then the active playlist. Feeds the engine
 //! and turns its events into history and live updates.
 //!
 //! Tracks move through three stages: `queued` (sent to the engine as the
@@ -20,7 +20,9 @@ use rand::SeedableRng;
 use tokio::sync::broadcast;
 
 use self::bag::ShuffleBag;
-use crate::events::{Entry, NowPlaying, OutputStatus, PlayState, PlayerState, ServerEvent};
+use crate::events::{
+    Entry, NowPlaying, OutputStatus, PlayState, PlayerState, PlaylistRef, ServerEvent,
+};
 
 pub const HISTORY_WINDOW: &str = "history_window";
 pub const PER_USER_LIMIT: &str = "per_user_limit";
@@ -29,6 +31,11 @@ pub const VOLUME: &str = "volume";
 pub const MAX_QUEUE: &str = "max_queue";
 /// 1 when guests may join with just a name.
 pub const GUEST_MODE: &str = "guest_mode";
+/// Playlist that plays when nobody has requested anything; 0 or missing
+/// means none.
+pub const ACTIVE_PLAYLIST: &str = "active_playlist";
+/// Last song the active playlist played, so in-order playback resumes.
+const PLAYLIST_CURSOR: &str = "playlist_cursor";
 pub const DEFAULT_HISTORY_WINDOW: i64 = 25;
 pub const DEFAULT_PER_USER_LIMIT: i64 = 3;
 const DEFAULT_VOLUME: i64 = 80;
@@ -76,6 +83,12 @@ pub struct Jukebox {
     skip_requested_by: Option<i64>,
     output: OutputStatus,
     last_position_second: Option<u64>,
+    /// The playlist feeding the music, if any.
+    active: Option<PlaylistRef>,
+    /// Last song the active playlist played (for in-order playback).
+    cursor: Option<i64>,
+    /// Song to play next from the playlist ("play from here").
+    start_at: Option<i64>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -99,9 +112,10 @@ impl Jukebox {
         events: broadcast::Sender<ServerEvent>,
     ) -> anyhow::Result<Self> {
         let volume = setting(&store, VOLUME, DEFAULT_VOLUME).await?.clamp(0, 100) as u8;
+        let cursor = setting(&store, PLAYLIST_CURSOR, 0).await?;
         let mut seed = [0u8; 8];
         getrandom::fill(&mut seed).map_err(|e| anyhow::anyhow!("no system randomness: {e}"))?;
-        let jukebox = Self {
+        let mut jukebox = Self {
             store,
             engine,
             events,
@@ -116,8 +130,12 @@ impl Jukebox {
             skip_requested_by: None,
             output: OutputStatus::default(),
             last_position_second: None,
+            active: None,
+            cursor: (cursor > 0).then_some(cursor),
+            start_at: None,
         };
         (jukebox.engine)(Command::SetVolume(gain(volume)));
+        jukebox.load_active().await?;
         Ok(jukebox)
     }
 
@@ -137,7 +155,12 @@ impl Jukebox {
         PlayerState {
             state: self.state,
             volume: self.volume,
+            playlist: self.active.clone(),
         }
+    }
+
+    pub fn active_playlist(&self) -> Option<i64> {
+        self.active.as_ref().map(|p| p.id)
     }
 
     pub fn output_status(&self) -> OutputStatus {
@@ -192,11 +215,77 @@ impl Jukebox {
         Ok(())
     }
 
-    /// Call after the auto pool changes.
-    pub async fn pool_changed(&mut self) -> anyhow::Result<()> {
+    /// Call after the active playlist's contents (or the library) change.
+    pub async fn auto_mix_changed(&mut self) -> anyhow::Result<()> {
+        self.load_active().await?;
         self.refresh_next().await?;
         self.broadcast_now_playing();
+        self.send(ServerEvent::PlayerState(self.player_state()));
         Ok(())
+    }
+
+    /// Makes `id` the active playlist and starts it now, optionally from a
+    /// given song. Requests still play first, and a request that is playing
+    /// is not cut off.
+    pub async fn play_playlist(&mut self, id: i64, from_track: Option<i64>) -> anyhow::Result<()> {
+        self.store
+            .set_setting(ACTIVE_PLAYLIST, &id.to_string())
+            .await?;
+        self.store.set_setting(PLAYLIST_CURSOR, "0").await?;
+        self.bag = ShuffleBag::default();
+        self.cursor = None;
+        self.start_at = from_track;
+        // A pool pick already lined up belongs to the old playlist.
+        if let Some(old) = self.queued.take_if(|q| q.source == PlaySource::Pool) {
+            self.replaced.push_back(old);
+        }
+        self.load_active().await?;
+        self.refresh_next().await?;
+        let request_playing = self
+            .playing
+            .as_ref()
+            .is_some_and(|p| p.pending.source == PlaySource::Request);
+        if self.playing.is_some() && !request_playing {
+            self.skip_requested_by = None;
+            (self.engine)(Command::Skip);
+        }
+        (self.engine)(Command::Play);
+        self.broadcast_now_playing();
+        self.send(ServerEvent::PlayerState(self.player_state()));
+        Ok(())
+    }
+
+    /// No playlist plays when the requests run out.
+    pub async fn stop_auto_mix(&mut self) -> anyhow::Result<()> {
+        self.store.set_setting(ACTIVE_PLAYLIST, "0").await?;
+        self.auto_mix_changed().await
+    }
+
+    async fn load_active(&mut self) -> anyhow::Result<()> {
+        let id = setting(&self.store, ACTIVE_PLAYLIST, 0).await?;
+        self.active = match id {
+            0 => None,
+            id => self
+                .store
+                .playlists()
+                .await?
+                .into_iter()
+                .find(|p| p.id == id)
+                .map(|p| PlaylistRef {
+                    id: p.id,
+                    name: p.name,
+                    shuffle: p.shuffle,
+                }),
+        };
+        Ok(())
+    }
+
+    /// Songs the active playlist covers, in order.
+    async fn auto_mix_ids(&self) -> anyhow::Result<Vec<i64>> {
+        Ok(match &self.active {
+            Some(playlist) => self.store.playlist_track_ids(playlist.id).await?,
+            None => Vec::new(),
+        })
     }
 
     pub fn play(&self) {
@@ -322,6 +411,12 @@ impl Jukebox {
             self.store.remove_request(request).await?;
             self.broadcast_queue().await?;
         }
+        if pending.source == PlaySource::Pool {
+            self.cursor = Some(id);
+            self.store
+                .set_setting(PLAYLIST_CURSOR, &id.to_string())
+                .await?;
+        }
         let play_event = self
             .store
             .start_play_event(
@@ -383,7 +478,8 @@ impl Jukebox {
     }
 
     /// Makes sure the engine's next slot holds the right track: the first
-    /// request not already on its way, otherwise a draw from the pool.
+    /// request not already on its way, otherwise the active playlist's next
+    /// song.
     async fn refresh_next(&mut self) -> anyhow::Result<()> {
         for _ in 0..5 {
             let in_flight: Vec<i64> = self.in_flight.iter().filter_map(|p| p.request_id).collect();
@@ -403,8 +499,8 @@ impl Jukebox {
                     track: head.track,
                 },
                 (None, Some(q)) if q.source == PlaySource::Pool => {
-                    let pool = self.store.pool_track_ids().await?;
-                    if pool.contains(&q.track.id) {
+                    let pool = self.auto_mix_ids().await?;
+                    if pool.contains(&q.track.id) && self.start_at.is_none() {
                         return Ok(());
                     }
                     match self.draw(&pool).await? {
@@ -413,7 +509,7 @@ impl Jukebox {
                     }
                 }
                 (None, _) => {
-                    let pool = self.store.pool_track_ids().await?;
+                    let pool = self.auto_mix_ids().await?;
                     match self.draw(&pool).await? {
                         Some(track) => track,
                         None => return self.clear_next(),
@@ -447,7 +543,41 @@ impl Jukebox {
         Ok(())
     }
 
+    /// The active playlist's next song: shuffled through the bag, or the
+    /// one after the last it played.
     async fn draw(&mut self, pool: &[i64]) -> anyhow::Result<Option<Pending>> {
+        let id = match self.start_at.take().filter(|id| pool.contains(id)) {
+            Some(id) => Some(id),
+            None if self.active.as_ref().is_some_and(|p| !p.shuffle) => {
+                next_in_order(pool, self.order_anchor())
+            }
+            None => self.shuffle_draw(pool).await?,
+        };
+        let Some(id) = id else { return Ok(None) };
+        Ok(self.store.track(id).await?.map(|track| Pending {
+            track,
+            source: PlaySource::Pool,
+            request_id: None,
+            requested_by: None,
+        }))
+    }
+
+    /// The latest playlist song on its way or playing, else the last one played.
+    fn order_anchor(&self) -> Option<i64> {
+        self.in_flight
+            .iter()
+            .rev()
+            .find(|p| p.source == PlaySource::Pool)
+            .or(self
+                .playing
+                .as_ref()
+                .map(|p| &p.pending)
+                .filter(|p| p.source == PlaySource::Pool))
+            .map(|p| p.track.id)
+            .or(self.cursor)
+    }
+
+    async fn shuffle_draw(&mut self, pool: &[i64]) -> anyhow::Result<Option<i64>> {
         let window = setting(&self.store, HISTORY_WINDOW, DEFAULT_HISTORY_WINDOW)
             .await?
             .max(0);
@@ -463,15 +593,7 @@ impl Jukebox {
         let upcoming = recent.len();
         recent.extend(self.store.recent_track_ids(window).await?);
         let window = usize::try_from(window).unwrap_or(0) + upcoming;
-        let Some(id) = self.bag.draw(pool, &recent, window, &mut self.rng) else {
-            return Ok(None);
-        };
-        Ok(self.store.track(id).await?.map(|track| Pending {
-            track,
-            source: PlaySource::Pool,
-            request_id: None,
-            requested_by: None,
-        }))
+        Ok(self.bag.draw(pool, &recent, window, &mut self.rng))
     }
 
     fn clear_next(&mut self) -> anyhow::Result<()> {
@@ -497,6 +619,16 @@ impl Jukebox {
     }
 }
 
+/// The song after `anchor` in `ids`, wrapping around; the first song if
+/// there's no anchor (or it left the playlist).
+fn next_in_order(ids: &[i64], anchor: Option<i64>) -> Option<i64> {
+    let first = *ids.first()?;
+    match anchor.and_then(|a| ids.iter().position(|&id| id == a)) {
+        Some(i) => ids.get(i + 1).copied().or(Some(first)),
+        None => Some(first),
+    }
+}
+
 /// Perceptual volume curve: 0 to 100 maps to gain 0.0 to 1.0, squared.
 fn gain(volume: u8) -> f32 {
     let v = f32::from(volume.min(100)) / 100.0;
@@ -514,7 +646,7 @@ pub async fn setting(store: &Store, key: &str, default: i64) -> anyhow::Result<i
 #[cfg(test)]
 mod tests {
     use super::*;
-    use djinn_store::{PoolKind, Role, ScannedTrack};
+    use djinn_store::{EntryKind, Role, ScannedTrack};
     use std::sync::{Arc, Mutex};
 
     fn origin() -> RequestOrigin {
@@ -548,10 +680,20 @@ mod tests {
                 .iter()
                 .map(|k| k.id)
                 .collect();
-            for &id in &tracks[..pool_size] {
-                store.add_pool_entry(PoolKind::Track, id).await.unwrap();
-            }
             let admin = store.create_user("admin", "h", Role::Admin).await.unwrap();
+            if pool_size > 0 {
+                let list = store.create_playlist(admin.id, "Mix").await.unwrap();
+                for &id in &tracks[..pool_size] {
+                    store
+                        .add_playlist_entry(list.id, EntryKind::Track, id)
+                        .await
+                        .unwrap();
+                }
+                store
+                    .set_setting(ACTIVE_PLAYLIST, &list.id.to_string())
+                    .await
+                    .unwrap();
+            }
             let user = store.create_user("guest", "h", Role::User).await.unwrap();
             let sent = Arc::new(Mutex::new(Vec::new()));
             let sink = Arc::clone(&sent);
@@ -816,5 +958,64 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(h.last_next(), Some(h.tracks[0]));
+    }
+
+    #[tokio::test]
+    async fn in_order_playlist_plays_in_order_and_loops() {
+        let mut h = Harness::new(3).await;
+        let list = h.jukebox.active_playlist().unwrap();
+        h.store
+            .update_playlist(list, None, Some(false))
+            .await
+            .unwrap();
+        h.jukebox.auto_mix_changed().await.unwrap();
+        h.event(EngineEvent::NextNeeded { after: None }).await;
+        let mut played = Vec::new();
+        for _ in 0..4 {
+            let id = h.play_next().await;
+            played.push(id);
+            h.finish(id).await;
+        }
+        assert_eq!(played, [h.tracks[0], h.tracks[1], h.tracks[2], h.tracks[0]]);
+    }
+
+    #[tokio::test]
+    async fn play_playlist_from_a_song() {
+        let mut h = Harness::new(4).await;
+        h.event(EngineEvent::NextNeeded { after: None }).await;
+        let first = h.play_next().await;
+        let list = h.jukebox.active_playlist().unwrap();
+        h.store
+            .update_playlist(list, None, Some(false))
+            .await
+            .unwrap();
+
+        h.jukebox
+            .play_playlist(list, Some(h.tracks[2]))
+            .await
+            .unwrap();
+        assert_eq!(h.last_next(), Some(h.tracks[2]), "chosen song is next");
+        let skipped = h
+            .sent
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|c| matches!(c, Command::Skip));
+        assert!(skipped, "the playing playlist song makes way");
+
+        h.finish(first).await;
+        assert_eq!(h.play_next().await, h.tracks[2]);
+        assert_eq!(h.last_next(), Some(h.tracks[3]), "then continues in order");
+
+        h.jukebox.stop_auto_mix().await.unwrap();
+        assert_eq!(h.last_next(), None, "no auto mix after stopping");
+    }
+
+    #[test]
+    fn order_wraps_and_restarts() {
+        assert_eq!(next_in_order(&[1, 2, 3], Some(1)), Some(2));
+        assert_eq!(next_in_order(&[1, 2, 3], Some(3)), Some(1));
+        assert_eq!(next_in_order(&[1, 2, 3], Some(9)), Some(1));
+        assert_eq!(next_in_order(&[], None), None);
     }
 }
