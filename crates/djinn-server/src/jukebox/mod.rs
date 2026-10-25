@@ -12,7 +12,9 @@ use std::collections::VecDeque;
 use std::path::PathBuf;
 
 use djinn_engine::{Command, EndReason, Event as EngineEvent, PlayState as EngineState, TrackId};
-use djinn_store::{AddRequestError, PlaySource, QueueItem, Store, Track, User};
+use djinn_store::{
+    AddRequestError, PlaySource, QueueItem, RequestLimits, RequestOrigin, Store, Track, User,
+};
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 use tokio::sync::broadcast;
@@ -23,8 +25,12 @@ use crate::events::{Entry, NowPlaying, OutputStatus, PlayState, PlayerState, Ser
 pub const HISTORY_WINDOW: &str = "history_window";
 pub const PER_USER_LIMIT: &str = "per_user_limit";
 pub const VOLUME: &str = "volume";
-const DEFAULT_HISTORY_WINDOW: i64 = 25;
-const DEFAULT_PER_USER_LIMIT: i64 = 3;
+/// Most requests the whole queue may hold; 0 means no cap.
+pub const MAX_QUEUE: &str = "max_queue";
+/// 1 when guests may join with just a name.
+pub const GUEST_MODE: &str = "guest_mode";
+pub const DEFAULT_HISTORY_WINDOW: i64 = 25;
+pub const DEFAULT_PER_USER_LIMIT: i64 = 3;
 const DEFAULT_VOLUME: i64 = 80;
 /// Tracks replaced in the engine's slot that it may already have taken.
 const MAX_REPLACED: usize = 8;
@@ -138,17 +144,27 @@ impl Jukebox {
         self.output.clone()
     }
 
+    /// Queues a request. Admins and users marked unlimited skip the
+    /// per-person limit and the queue cap.
     pub async fn add_request(
         &mut self,
         user: &User,
         track_id: i64,
+        origin: &RequestOrigin,
     ) -> Result<QueueItem, QueueError> {
-        let limit = if user.is_admin() {
-            None
+        let limits = if user.is_admin() || user.unlimited {
+            RequestLimits::default()
         } else {
-            Some(setting(&self.store, PER_USER_LIMIT, DEFAULT_PER_USER_LIMIT).await?)
+            let cap = setting(&self.store, MAX_QUEUE, 0).await?;
+            RequestLimits {
+                per_user: Some(setting(&self.store, PER_USER_LIMIT, DEFAULT_PER_USER_LIMIT).await?),
+                queue_cap: (cap > 0).then_some(cap),
+            }
         };
-        let item = self.store.add_request(track_id, user.id, limit).await?;
+        let item = self
+            .store
+            .add_request(track_id, user.id, limits, origin)
+            .await?;
         self.queue_changed().await?;
         Ok(item)
     }
@@ -501,6 +517,10 @@ mod tests {
     use djinn_store::{PoolKind, Role, ScannedTrack};
     use std::sync::{Arc, Mutex};
 
+    fn origin() -> RequestOrigin {
+        RequestOrigin::default()
+    }
+
     struct Harness {
         jukebox: Jukebox,
         sent: Arc<Mutex<Vec<Command>>>,
@@ -614,7 +634,10 @@ mod tests {
 
         let requested = h.tracks[6];
         let user = h.user.clone();
-        h.jukebox.add_request(&user, requested).await.unwrap();
+        h.jukebox
+            .add_request(&user, requested, &origin())
+            .await
+            .unwrap();
         assert_eq!(h.last_next(), Some(requested));
         assert_eq!(h.jukebox.now_playing().up_next.unwrap().track.id, requested);
 
@@ -638,7 +661,10 @@ mod tests {
         // a request replaces it in the slot.
         let requested = h.tracks[6];
         let user = h.user.clone();
-        h.jukebox.add_request(&user, requested).await.unwrap();
+        h.jukebox
+            .add_request(&user, requested, &origin())
+            .await
+            .unwrap();
         h.event(EngineEvent::NextNeeded {
             after: Some(TrackId(pool_track)),
         })
@@ -669,25 +695,68 @@ mod tests {
         let mut h = Harness::new(1).await;
         h.store.set_setting(PER_USER_LIMIT, "1").await.unwrap();
         let (user, admin) = (h.user.clone(), h.admin.clone());
-        h.jukebox.add_request(&user, h.tracks[1]).await.unwrap();
+        h.jukebox
+            .add_request(&user, h.tracks[1], &origin())
+            .await
+            .unwrap();
         assert!(matches!(
-            h.jukebox.add_request(&user, h.tracks[2]).await,
+            h.jukebox.add_request(&user, h.tracks[2], &origin()).await,
             Err(QueueError::Add(AddRequestError::LimitReached(1)))
         ));
-        h.jukebox.add_request(&admin, h.tracks[2]).await.unwrap();
-        h.jukebox.add_request(&admin, h.tracks[3]).await.unwrap();
+        h.jukebox
+            .add_request(&admin, h.tracks[2], &origin())
+            .await
+            .unwrap();
+        h.jukebox
+            .add_request(&admin, h.tracks[3], &origin())
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn queue_cap_spares_unlimited_users() {
+        let mut h = Harness::new(1).await;
+        h.store.set_setting(MAX_QUEUE, "1").await.unwrap();
+        let user = h.user.clone();
+        h.jukebox
+            .add_request(&user, h.tracks[1], &origin())
+            .await
+            .unwrap();
+        let other = h.store.create_user("other", "h", Role::User).await.unwrap();
+        assert!(matches!(
+            h.jukebox.add_request(&other, h.tracks[2], &origin()).await,
+            Err(QueueError::Add(AddRequestError::QueueFull(1)))
+        ));
+        h.store.set_unlimited(other.id, true).await.unwrap();
+        let other = h.store.user(other.id).await.unwrap().unwrap();
+        h.jukebox
+            .add_request(&other, h.tracks[2], &origin())
+            .await
+            .unwrap();
+        h.jukebox
+            .add_request(&other, h.tracks[3], &origin())
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
     async fn only_owner_or_admin_removes_requests() {
         let mut h = Harness::new(1).await;
         let (user, admin) = (h.user.clone(), h.admin.clone());
-        let item = h.jukebox.add_request(&admin, h.tracks[1]).await.unwrap();
+        let item = h
+            .jukebox
+            .add_request(&admin, h.tracks[1], &origin())
+            .await
+            .unwrap();
         assert!(matches!(
             h.jukebox.remove_request(&user, item.id).await,
             Err(QueueError::NotYours)
         ));
-        let mine = h.jukebox.add_request(&user, h.tracks[2]).await.unwrap();
+        let mine = h
+            .jukebox
+            .add_request(&user, h.tracks[2], &origin())
+            .await
+            .unwrap();
         h.jukebox.remove_request(&user, mine.id).await.unwrap();
         h.jukebox.remove_request(&admin, item.id).await.unwrap();
         assert!(h.store.queue().await.unwrap().is_empty());
@@ -721,7 +790,10 @@ mod tests {
         let mut h = Harness::new(2).await;
         let user = h.user.clone();
         let requested = h.tracks[3];
-        h.jukebox.add_request(&user, requested).await.unwrap();
+        h.jukebox
+            .add_request(&user, requested, &origin())
+            .await
+            .unwrap();
         h.event(EngineEvent::TrackError {
             id: TrackId(requested),
             error: "corrupt".into(),
@@ -739,7 +811,10 @@ mod tests {
         assert_eq!(h.last_next(), None);
         // A request starts playback.
         let user = h.user.clone();
-        h.jukebox.add_request(&user, h.tracks[0]).await.unwrap();
+        h.jukebox
+            .add_request(&user, h.tracks[0], &origin())
+            .await
+            .unwrap();
         assert_eq!(h.last_next(), Some(h.tracks[0]));
     }
 }

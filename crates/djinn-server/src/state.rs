@@ -1,7 +1,7 @@
 //! State shared by all request handlers.
 
 use std::path::PathBuf;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use djinn_library::ScanProgress;
@@ -29,6 +29,8 @@ pub struct AppState {
     pub shutdown_request: Arc<Notify>,
     /// The URL guests open, shown on the join page.
     pub join_url: Arc<String>,
+    /// Guests may join with just a name. Mirrors the `guest_mode` setting.
+    pub guest_mode: Arc<AtomicBool>,
 }
 
 #[derive(Default)]
@@ -56,7 +58,12 @@ impl AppState {
             shutdown: Arc::new(watch::Sender::new(false)),
             shutdown_request: Arc::new(Notify::new()),
             join_url: Arc::new(String::new()),
+            guest_mode: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    pub fn guest_mode(&self) -> bool {
+        self.guest_mode.load(Ordering::Relaxed)
     }
 
     pub fn with_join_url(mut self, url: String) -> Self {

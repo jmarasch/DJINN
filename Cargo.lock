@@ -808,6 +808,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "djinn-platform"
+version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.21",
+ "tray-icon",
+ "windows-sys",
+]
+
+[[package]]
 name = "djinn-server"
 version = "0.1.0"
 dependencies = [
@@ -818,8 +827,8 @@ dependencies = [
  "dirs",
  "djinn-engine",
  "djinn-library",
+ "djinn-platform",
  "djinn-store",
- "djinn-tray",
  "figment",
  "futures-util",
  "getrandom",
@@ -848,15 +857,6 @@ dependencies = [
  "sqlx",
  "thiserror 2.0.21",
  "tokio",
-]
-
-[[package]]
-name = "djinn-tray"
-version = "0.1.0"
-dependencies = [
- "thiserror 2.0.21",
- "tray-icon",
- "windows-sys",
 ]
 
 [[package]]

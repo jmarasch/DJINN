@@ -4,7 +4,7 @@
   import Art from '../lib/Art.svelte'
   import { byline, duration } from '../lib/format'
   import Icon from '../lib/Icon.svelte'
-  import { app, currentPosition, isAdmin, toast } from '../lib/state.svelte'
+  import { app, currentPosition, isAdmin, signInAsHost, toast } from '../lib/state.svelte'
 
   const current = $derived(app.nowPlaying.current)
   const next = $derived(app.nowPlaying.up_next)
@@ -98,9 +98,29 @@
       </div>
     </div>
   {/if}
+  {#if !isAdmin()}
+    <p class="host-link">
+      {#if app.me?.role === 'guest'}You're in as <b>{app.me.display_name}</b>. {/if}
+      <button onclick={signInAsHost}>Host sign in</button>
+    </p>
+  {/if}
 </section>
 
 <style>
+  .host-link {
+    margin-top: 32px;
+    color: var(--muted);
+    font-size: 0.875rem;
+  }
+
+  .host-link button {
+    min-height: 32px;
+    padding: 0 4px;
+    background: transparent;
+    color: var(--muted);
+    text-decoration: underline;
+  }
+
   .now {
     display: flex;
     flex-direction: column;

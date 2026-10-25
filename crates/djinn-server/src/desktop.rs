@@ -3,7 +3,7 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use djinn_tray::{Tray, TrayAction};
+use djinn_platform::tray::{Tray, TrayAction};
 
 use crate::state::AppState;
 
@@ -44,6 +44,13 @@ pub fn start_tray(state: &AppState, listen: SocketAddr) -> Option<Tray> {
             tracing::info!(error = %e, "running without a tray icon");
             None
         }
+    }
+}
+
+/// Opens the admin page of a DJINN that is already running on `listen`.
+pub fn open_existing(listen: SocketAddr) {
+    if has_desktop() {
+        open_browser(&format!("{}/#/admin", local_url(listen)));
     }
 }
 

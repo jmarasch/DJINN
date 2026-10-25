@@ -24,8 +24,41 @@ pub enum AddRequestError {
     AlreadyQueued,
     #[error("you already have {0} songs in the queue")]
     LimitReached(i64),
+    #[error("the queue is full ({0} songs). Try again after a few play")]
+    QueueFull(i64),
     #[error(transparent)]
     Store(#[from] StoreError),
+}
+
+/// Request limits for one user. `None` means no limit (admins and users
+/// marked unlimited).
+#[derive(Copy, Clone, Debug, Default)]
+pub struct RequestLimits {
+    /// Unplayed requests this user may have queued.
+    pub per_user: Option<i64>,
+    /// Requests the whole queue may hold.
+    pub queue_cap: Option<i64>,
+}
+
+/// Who made a request and from where, for the request log.
+#[derive(Clone, Debug, Default)]
+pub struct RequestOrigin {
+    pub name: String,
+    pub mac: Option<String>,
+    pub ip: Option<String>,
+}
+
+/// One entry in the request log.
+#[derive(Clone, Debug, PartialEq, Serialize, FromRow)]
+pub struct RequestLogEntry {
+    pub at: i64,
+    pub track_id: i64,
+    pub title: Option<String>,
+    pub artist: Option<String>,
+    pub user_id: Option<i64>,
+    pub name: Option<String>,
+    pub mac: Option<String>,
+    pub ip: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
@@ -68,7 +101,8 @@ pub enum PlaySource {
 
 macro_rules! queue_select {
     () => {
-        "SELECT q.id AS queue_id, q.user_id, u.username, q.added_at, \
+        "SELECT q.id AS queue_id, q.user_id, coalesce(u.display_name, u.username) AS username, \
+                q.added_at, \
                 t.id, t.title, t.artist, t.album, t.album_artist, t.artist_id, t.album_id, \
                 t.track_no, t.disc_no, t.year, t.genre, t.duration_ms, t.art_hash \
          FROM request_queue q \
@@ -78,13 +112,14 @@ macro_rules! queue_select {
 }
 
 impl Store {
-    /// Appends a request. `limit` caps the user's unplayed requests; pass
-    /// `None` for admins.
+    /// Appends a request, enforcing `limits` and recording where it came
+    /// from.
     pub async fn add_request(
         &self,
         track_id: i64,
         user_id: i64,
-        limit: Option<i64>,
+        limits: RequestLimits,
+        origin: &RequestOrigin,
     ) -> Result<QueueItem, AddRequestError> {
         let mut tx = self.pool.begin().await.map_err(StoreError::from)?;
         let available: bool = sqlx::query_scalar(
@@ -97,7 +132,16 @@ impl Store {
         if !available {
             return Err(AddRequestError::NotFound);
         }
-        if let Some(limit) = limit {
+        if let Some(cap) = limits.queue_cap {
+            let queued: i64 = sqlx::query_scalar("SELECT count(*) FROM request_queue")
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(StoreError::from)?;
+            if queued >= cap {
+                return Err(AddRequestError::QueueFull(cap));
+            }
+        }
+        if let Some(limit) = limits.per_user {
             let queued: i64 =
                 sqlx::query_scalar("SELECT count(*) FROM request_queue WHERE user_id = ?")
                     .bind(user_id)
@@ -126,11 +170,16 @@ impl Store {
             }
             Err(e) => return Err(StoreError::from(e).into()),
         };
-        sqlx::query("INSERT INTO request_events (track_id, user_id, at) VALUES (?, ?, ?)")
-            .bind(track_id)
-            .bind(user_id)
-            .bind(now)
-            .execute(&mut *tx)
+        sqlx::query(
+            "INSERT INTO request_events (track_id, user_id, at, name, mac, ip) VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .bind(track_id)
+        .bind(user_id)
+        .bind(now)
+        .bind(&origin.name)
+        .bind(&origin.mac)
+        .bind(&origin.ip)
+        .execute(&mut *tx)
             .await
             .map_err(StoreError::from)?;
         let item = sqlx::query_as(concat!(queue_select!(), " WHERE q.id = ?"))
@@ -140,6 +189,22 @@ impl Store {
             .map_err(StoreError::from)?;
         tx.commit().await.map_err(StoreError::from)?;
         Ok(item)
+    }
+
+    /// Most recent requests first.
+    pub async fn request_log(&self, limit: i64) -> Result<Vec<RequestLogEntry>> {
+        let entries = sqlx::query_as(
+            "SELECT r.at, r.track_id, t.title, t.artist, r.user_id,
+                    coalesce(r.name, u.display_name, u.username) AS name, r.mac, r.ip
+             FROM request_events r
+             LEFT JOIN tracks t ON t.id = r.track_id
+             LEFT JOIN users u ON u.id = r.user_id
+             ORDER BY r.at DESC, r.id DESC LIMIT ?",
+        )
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(entries)
     }
 
     /// The request queue in play order. Requests for files that have since
@@ -337,6 +402,21 @@ mod tests {
     use super::*;
     use crate::{Role, ScannedTrack};
 
+    fn per_user(limit: Option<i64>) -> RequestLimits {
+        RequestLimits {
+            per_user: limit,
+            queue_cap: None,
+        }
+    }
+
+    fn origin() -> RequestOrigin {
+        RequestOrigin {
+            name: "u".into(),
+            mac: Some("aa:bb:cc:00:11:22".into()),
+            ip: Some("192.168.0.7".into()),
+        }
+    }
+
     async fn setup() -> (Store, i64, Vec<i64>) {
         let store = Store::open_in_memory().await.unwrap();
         let user = store.create_user("u", "h", Role::User).await.unwrap().id;
@@ -363,20 +443,35 @@ mod tests {
     #[tokio::test]
     async fn request_rules() {
         let (store, user, ids) = setup().await;
-        store.add_request(ids[0], user, Some(2)).await.unwrap();
+        store
+            .add_request(ids[0], user, per_user(Some(2)), &origin())
+            .await
+            .unwrap();
         assert!(matches!(
-            store.add_request(ids[0], user, Some(2)).await,
+            store
+                .add_request(ids[0], user, per_user(Some(2)), &origin())
+                .await,
             Err(AddRequestError::AlreadyQueued)
         ));
-        store.add_request(ids[1], user, Some(2)).await.unwrap();
+        store
+            .add_request(ids[1], user, per_user(Some(2)), &origin())
+            .await
+            .unwrap();
         assert!(matches!(
-            store.add_request(ids[2], user, Some(2)).await,
+            store
+                .add_request(ids[2], user, per_user(Some(2)), &origin())
+                .await,
             Err(AddRequestError::LimitReached(2))
         ));
         // No limit (admin).
-        store.add_request(ids[2], user, None).await.unwrap();
+        store
+            .add_request(ids[2], user, per_user(None), &origin())
+            .await
+            .unwrap();
         assert!(matches!(
-            store.add_request(9999, user, None).await,
+            store
+                .add_request(9999, user, per_user(None), &origin())
+                .await,
             Err(AddRequestError::NotFound)
         ));
 
@@ -451,5 +546,38 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(store.recent_track_ids(10).await.unwrap(), [ids[1], ids[0]]);
+    }
+
+    #[tokio::test]
+    async fn queue_cap_and_request_log() {
+        let (store, user, ids) = setup().await;
+        let capped = RequestLimits {
+            per_user: None,
+            queue_cap: Some(2),
+        };
+        store
+            .add_request(ids[0], user, capped, &origin())
+            .await
+            .unwrap();
+        store
+            .add_request(ids[1], user, capped, &origin())
+            .await
+            .unwrap();
+        assert!(matches!(
+            store.add_request(ids[2], user, capped, &origin()).await,
+            Err(AddRequestError::QueueFull(2))
+        ));
+        store
+            .add_request(ids[2], user, RequestLimits::default(), &origin())
+            .await
+            .unwrap();
+
+        let log = store.request_log(10).await.unwrap();
+        assert_eq!(log.len(), 3);
+        assert_eq!(log[0].track_id, ids[2]);
+        assert_eq!(log[0].title.as_deref(), Some("Song 3"));
+        assert_eq!(log[0].mac.as_deref(), Some("aa:bb:cc:00:11:22"));
+        assert_eq!(log[0].ip.as_deref(), Some("192.168.0.7"));
+        assert_eq!(log[0].name.as_deref(), Some("u"));
     }
 }

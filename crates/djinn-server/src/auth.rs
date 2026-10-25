@@ -16,15 +16,19 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{AppendHeaders, IntoResponse};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
-use djinn_store::{now_ms, CreateUserError, Role, User};
+use djinn_store::{now_ms, CreateUserError, GuestSummary, Role, User};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use crate::client::{self, ClientIp};
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 
 const COOKIE_NAME: &str = "djinn_session";
 const SESSION_DAYS: i64 = 30;
+/// Guests stay signed in for a year (renewed whenever they open the app),
+/// so they're recognized at the next party.
+const GUEST_SESSION_DAYS: i64 = 365;
 const MIN_PASSWORD: usize = 6;
 const MAX_PASSWORD: usize = 256;
 const MAX_USERNAME: usize = 32;
@@ -34,9 +38,12 @@ pub fn router() -> Router<AppState> {
         .route("/auth/login", post(login))
         .route("/auth/logout", post(logout))
         .route("/auth/bootstrap", get(bootstrap_status).post(bootstrap))
+        .route("/auth/mode", get(mode))
+        .route("/auth/guest", post(join_as_guest))
         .route("/me", get(me))
         .route("/users", get(list_users).post(create_user))
-        .route("/users/{id}", delete(delete_user))
+        .route("/users/{id}", delete(delete_user).patch(update_user))
+        .route("/guests", get(list_guests))
 }
 
 /// The logged-in user. Rejects with 401 when there is no valid session.
@@ -55,6 +62,10 @@ impl FromRequestParts<AppState> for CurrentUser {
             .session_user(&hash_token(&token))
             .await?
             .ok_or_else(ApiError::unauthorized)?;
+        // Turning guest mode off signs guests out.
+        if user.role == Role::Guest && !state.guest_mode() {
+            return Err(ApiError::unauthorized());
+        }
         Ok(Self(user))
     }
 }
@@ -92,7 +103,7 @@ async fn login(
     let user = user
         .filter(|_| valid)
         .ok_or_else(|| ApiError::new(StatusCode::UNAUTHORIZED, "wrong username or password"))?;
-    let cookie = start_session(&state, user.id).await?;
+    let cookie = start_session(&state, user.id, SESSION_DAYS).await?;
     Ok((AppendHeaders([(SET_COOKIE, cookie)]), Json(user)))
 }
 
@@ -105,8 +116,88 @@ async fn logout(State(state): State<AppState>, headers: HeaderMap) -> ApiResult<
     Ok((StatusCode::NO_CONTENT, AppendHeaders([(SET_COOKIE, clear)])))
 }
 
-async fn me(CurrentUser(user): CurrentUser) -> Json<User> {
-    Json(user)
+/// The signed-in user. For guests this also renews the session and its
+/// cookie for another year.
+async fn me(
+    CurrentUser(user): CurrentUser,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> ApiResult<impl IntoResponse> {
+    let mut renewed = None;
+    if user.role == Role::Guest {
+        if let Some(token) = session_token(&headers) {
+            let max_age = GUEST_SESSION_DAYS * 24 * 60 * 60;
+            state
+                .store
+                .extend_session(&hash_token(&token), now_ms() + max_age * 1000)
+                .await?;
+            renewed = Some(session_cookie(&token, max_age)?);
+        }
+    }
+    Ok((AppendHeaders(renewed.map(|c| (SET_COOKIE, c))), Json(user)))
+}
+
+#[derive(Serialize)]
+struct Mode {
+    guest_mode: bool,
+    setup_needed: bool,
+    /// Name this device used last time, so it can rejoin with one tap.
+    welcome_back: Option<String>,
+}
+
+/// How people get in. Public, for the sign-in screen.
+async fn mode(State(state): State<AppState>, ClientIp(ip): ClientIp) -> ApiResult<Json<Mode>> {
+    let guest_mode = state.guest_mode();
+    let welcome_back = match guest_mode {
+        true => match client::mac_for(ip).await {
+            Some(mac) => state
+                .store
+                .guest_by_mac(&mac)
+                .await?
+                .map(|u| u.name().to_owned()),
+            None => None,
+        },
+        false => None,
+    };
+    Ok(Json(Mode {
+        guest_mode,
+        setup_needed: !state.store.admin_exists().await?,
+        welcome_back,
+    }))
+}
+
+#[derive(Deserialize)]
+struct GuestJoin {
+    name: String,
+}
+
+/// Joins with just a name while guest mode is on. A device seen before
+/// (by MAC address) keeps its identity under the new name.
+async fn join_as_guest(
+    State(state): State<AppState>,
+    ClientIp(ip): ClientIp,
+    Json(body): Json<GuestJoin>,
+) -> ApiResult<impl IntoResponse> {
+    if !state.guest_mode() {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "guest access is off, please sign in",
+        ));
+    }
+    let name = validate_display_name(&body.name)?;
+    let mac = client::mac_for(ip).await;
+    let ip = ip.map(|ip| ip.to_string());
+    let user = state
+        .store
+        .join_as_guest(&name, mac.as_deref(), ip.as_deref())
+        .await?;
+    tracing::info!(name = %name, mac = ?mac, ip = ?ip, "guest joined");
+    let cookie = start_session(&state, user.id, GUEST_SESSION_DAYS).await?;
+    Ok((
+        StatusCode::CREATED,
+        AppendHeaders([(SET_COOKIE, cookie)]),
+        Json(user),
+    ))
 }
 
 #[derive(Serialize)]
@@ -151,7 +242,7 @@ async fn bootstrap(
         *token = None;
     }
     tracing::info!(username = %user.username, "admin account created");
-    let cookie = start_session(&state, user.id).await?;
+    let cookie = start_session(&state, user.id, SESSION_DAYS).await?;
     Ok((
         StatusCode::CREATED,
         AppendHeaders([(SET_COOKIE, cookie)]),
@@ -203,6 +294,31 @@ async fn delete_user(
     Ok(StatusCode::NO_CONTENT)
 }
 
+async fn list_guests(
+    _: AdminUser,
+    State(state): State<AppState>,
+) -> ApiResult<Json<Vec<GuestSummary>>> {
+    Ok(Json(state.store.guests().await?))
+}
+
+#[derive(Deserialize)]
+struct UserUpdate {
+    unlimited: bool,
+}
+
+/// Exempts a user or guest from request limits, or not.
+async fn update_user(
+    _: AdminUser,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Json(body): Json<UserUpdate>,
+) -> ApiResult<StatusCode> {
+    if !state.store.set_unlimited(id, body.unlimited).await? {
+        return Err(ApiError::not_found());
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
 async fn new_user(
     state: &AppState,
     username: &str,
@@ -240,14 +356,30 @@ fn validate_username(username: &str) -> ApiResult<String> {
     Ok(username.to_owned())
 }
 
+/// Guest names: anything printable, 1 to 32 characters.
+fn validate_display_name(name: &str) -> ApiResult<String> {
+    let name = name.trim();
+    let length = name.chars().count();
+    if length == 0 || length > MAX_USERNAME || name.chars().any(char::is_control) {
+        return Err(ApiError::bad_request(format!(
+            "pick a name of 1 to {MAX_USERNAME} characters"
+        )));
+    }
+    Ok(name.to_owned())
+}
+
 /// Creates a session and returns its Set-Cookie value.
-async fn start_session(state: &AppState, user_id: i64) -> ApiResult<HeaderValue> {
+async fn start_session(state: &AppState, user_id: i64, days: i64) -> ApiResult<HeaderValue> {
     let token = new_token()?;
-    let max_age = SESSION_DAYS * 24 * 60 * 60;
+    let max_age = days * 24 * 60 * 60;
     state
         .store
         .create_session(user_id, &hash_token(&token), now_ms() + max_age * 1000)
         .await?;
+    session_cookie(&token, max_age)
+}
+
+fn session_cookie(token: &str, max_age: i64) -> ApiResult<HeaderValue> {
     let cookie =
         format!("{COOKIE_NAME}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age}");
     Ok(HeaderValue::from_str(&cookie).map_err(anyhow::Error::from)?)
@@ -378,6 +510,39 @@ mod tests {
         let (status, _) = call(&state, Method::POST, "/api/auth/logout", None, Some(&user)).await;
         assert_eq!(status, StatusCode::NO_CONTENT);
         let (status, _) = call(&state, Method::GET, "/api/me", None, Some(&user)).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn guest_mode_join_and_switch_off() {
+        let state = AppState::for_tests().await;
+        let join = r#"{"name":"  Party Sam 🎉 "}"#;
+        let (status, _) = call(&state, Method::POST, "/api/auth/guest", Some(join), None).await;
+        assert_eq!(
+            status,
+            StatusCode::FORBIDDEN,
+            "guest mode is off by default"
+        );
+
+        state
+            .guest_mode
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        let (status, guest) = call(&state, Method::POST, "/api/auth/guest", Some(join), None).await;
+        assert_eq!(status, StatusCode::CREATED);
+        let guest = guest.unwrap();
+        let (status, renewed) = call(&state, Method::GET, "/api/me", None, Some(&guest)).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(renewed.as_deref(), Some(guest.as_str()), "cookie renewed");
+
+        let bad = r#"{"name":"   "}"#;
+        let (status, _) = call(&state, Method::POST, "/api/auth/guest", Some(bad), None).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+
+        // Switching guest mode off signs guests out.
+        state
+            .guest_mode
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+        let (status, _) = call(&state, Method::GET, "/api/me", None, Some(&guest)).await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
     }
 

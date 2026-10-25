@@ -17,7 +17,7 @@ dirs.workspace = true
 djinn-engine = { path = "../djinn-engine" }
 djinn-library = { path = "../djinn-library" }
 djinn-store = { path = "../djinn-store" }
-djinn-tray = { path = "../djinn-tray" }
+djinn-platform = { path = "../djinn-platform" }
 figment.workspace = true
 futures-util = "0.3.34"
 getrandom = "0.4.3"

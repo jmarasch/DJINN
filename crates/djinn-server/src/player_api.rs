@@ -5,10 +5,13 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
-use djinn_store::{AddPoolError, AddRequestError, PoolEntry, PoolKind, QueueItem};
+use djinn_store::{
+    AddPoolError, AddRequestError, PoolEntry, PoolKind, QueueItem, RequestLogEntry, RequestOrigin,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::auth::{AdminUser, CurrentUser};
+use crate::client::{self, ClientIp};
 use crate::error::{ApiError, ApiResult};
 use crate::events::{NowPlaying, OutputStatus, PlayerState};
 use crate::jukebox::{self, QueueError};
@@ -26,6 +29,7 @@ pub fn router() -> Router<AppState> {
         .route("/pool", get(pool).post(add_pool_entry))
         .route("/pool/{id}", delete(remove_pool_entry))
         .route("/settings", get(settings).put(update_settings))
+        .route("/requests/log", get(request_log))
 }
 
 /// Maps queue rule violations to client errors; anything else is a 500.
@@ -33,7 +37,9 @@ fn queue_error(err: QueueError) -> ApiError {
     match err {
         QueueError::Add(AddRequestError::NotFound) | QueueError::NotFound => ApiError::not_found(),
         QueueError::Add(
-            e @ (AddRequestError::AlreadyQueued | AddRequestError::LimitReached(_)),
+            e @ (AddRequestError::AlreadyQueued
+            | AddRequestError::LimitReached(_)
+            | AddRequestError::QueueFull(_)),
         ) => ApiError::conflict(e.to_string()),
         QueueError::NotYours => ApiError::new(StatusCode::FORBIDDEN, err.to_string()),
         QueueError::Add(AddRequestError::Store(e)) | QueueError::Store(e) => e.into(),
@@ -53,13 +59,19 @@ struct AddRequest {
 async fn add_request(
     CurrentUser(user): CurrentUser,
     State(state): State<AppState>,
+    ClientIp(ip): ClientIp,
     Json(body): Json<AddRequest>,
 ) -> ApiResult<(StatusCode, Json<QueueItem>)> {
+    let origin = RequestOrigin {
+        name: user.name().to_owned(),
+        mac: client::mac_for(ip).await.or_else(|| user.mac.clone()),
+        ip: ip.map(|ip| ip.to_string()),
+    };
     let item = state
         .jukebox
         .lock()
         .await
-        .add_request(&user, body.track_id)
+        .add_request(&user, body.track_id, &origin)
         .await
         .map_err(queue_error)?;
     Ok((StatusCode::CREATED, Json(item)))
@@ -193,12 +205,29 @@ async fn remove_pool_entry(
 struct Settings {
     history_window: i64,
     per_user_limit: i64,
+    /// Most songs the whole queue may hold; 0 means no cap.
+    max_queue: i64,
+    /// Guests join with just a name instead of an account.
+    guest_mode: bool,
 }
 
 async fn settings(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json<Settings>> {
+    let store = &state.store;
     Ok(Json(Settings {
-        history_window: jukebox::setting(&state.store, jukebox::HISTORY_WINDOW, 25).await?,
-        per_user_limit: jukebox::setting(&state.store, jukebox::PER_USER_LIMIT, 3).await?,
+        history_window: jukebox::setting(
+            store,
+            jukebox::HISTORY_WINDOW,
+            jukebox::DEFAULT_HISTORY_WINDOW,
+        )
+        .await?,
+        per_user_limit: jukebox::setting(
+            store,
+            jukebox::PER_USER_LIMIT,
+            jukebox::DEFAULT_PER_USER_LIMIT,
+        )
+        .await?,
+        max_queue: jukebox::setting(store, jukebox::MAX_QUEUE, 0).await?,
+        guest_mode: state.guest_mode(),
     }))
 }
 
@@ -213,6 +242,11 @@ async fn update_settings(
     if !(1..=50).contains(&body.per_user_limit) {
         return Err(ApiError::bad_request("per_user_limit must be 1 to 50"));
     }
+    if !(0..=1000).contains(&body.max_queue) {
+        return Err(ApiError::bad_request(
+            "max_queue must be 0 (no cap) to 1000",
+        ));
+    }
     let store = &state.store;
     store
         .set_setting(jukebox::HISTORY_WINDOW, &body.history_window.to_string())
@@ -220,7 +254,31 @@ async fn update_settings(
     store
         .set_setting(jukebox::PER_USER_LIMIT, &body.per_user_limit.to_string())
         .await?;
+    store
+        .set_setting(jukebox::MAX_QUEUE, &body.max_queue.to_string())
+        .await?;
+    store
+        .set_setting(jukebox::GUEST_MODE, if body.guest_mode { "1" } else { "0" })
+        .await?;
+    state
+        .guest_mode
+        .store(body.guest_mode, std::sync::atomic::Ordering::Relaxed);
     Ok(Json(body))
+}
+
+#[derive(Deserialize)]
+struct LogQuery {
+    limit: Option<i64>,
+}
+
+/// Recent requests with who made them and from which device.
+async fn request_log(
+    _: AdminUser,
+    State(state): State<AppState>,
+    axum::extract::Query(query): axum::extract::Query<LogQuery>,
+) -> ApiResult<Json<Vec<RequestLogEntry>>> {
+    let limit = query.limit.unwrap_or(100).clamp(1, 1000);
+    Ok(Json(state.store.request_log(limit).await?))
 }
 
 #[cfg(test)]
@@ -353,6 +411,22 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
         let (status, _) = call(&state, Method::POST, "/api/player/skip", None, Some(&alice)).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+
+        let rules = r#"{"history_window":25,"per_user_limit":3,"max_queue":4,"guest_mode":true}"#;
+        let (status, _) = call(
+            &state,
+            Method::PUT,
+            "/api/settings",
+            Some(rules),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(state.guest_mode());
+        let (status, _) = call(&state, Method::GET, "/api/requests/log", None, Some(&admin)).await;
+        assert_eq!(status, StatusCode::OK);
+        let (status, _) = call(&state, Method::GET, "/api/requests/log", None, Some(&bob)).await;
         assert_eq!(status, StatusCode::FORBIDDEN);
     }
 }

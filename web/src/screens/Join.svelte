@@ -3,10 +3,12 @@
   import { onMount } from 'svelte'
 
   let url = $state('')
+  let guestMode = $state(false)
 
   onMount(async () => {
-    const res = await fetch('/api/join')
-    if (res.ok) url = (await res.json()).url
+    const [join, mode] = await Promise.all([fetch('/api/join'), fetch('/api/auth/mode')])
+    if (join.ok) url = (await join.json()).url
+    if (mode.ok) guestMode = (await mode.json()).guest_mode
   })
 </script>
 
@@ -19,7 +21,11 @@
 
   <ol>
     <li>Scan the code with your phone camera, or type the address above.</li>
-    <li>Sign in. No account yet? Ask the host for one.</li>
+    {#if guestMode}
+      <li>Type your name. No account needed.</li>
+    {:else}
+      <li>Sign in. No account yet? Ask the host for one.</li>
+    {/if}
     <li>Search for a song or browse the library, then tap <b>+</b> to add it to the party queue.</li>
   </ol>
   <p class="muted">Requests play in order. When the queue is empty, the party mix keeps going.</p>

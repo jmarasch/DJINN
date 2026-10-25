@@ -5,8 +5,43 @@ export type Role = 'admin' | 'user' | 'guest'
 export interface User {
   id: number
   username: string
+  /** Set for guests; shown instead of username. */
+  display_name: string | null
   role: Role
+  /** Exempt from request limits. */
+  unlimited: boolean
+  mac: string | null
   created_at: number
+}
+
+export interface Mode {
+  guest_mode: boolean
+  setup_needed: boolean
+  /** Name this device used last time, if recognized. */
+  welcome_back: string | null
+}
+
+export interface GuestSummary {
+  id: number
+  name: string
+  mac: string | null
+  names: string
+  last_ip: string | null
+  first_seen: number
+  last_seen: number
+  requests: number
+  unlimited: boolean
+}
+
+export interface RequestLogEntry {
+  at: number
+  track_id: number
+  title: string | null
+  artist: string | null
+  user_id: number | null
+  name: string | null
+  mac: string | null
+  ip: string | null
 }
 
 export interface Track {
@@ -110,6 +145,9 @@ export interface PoolEntry {
 export interface Settings {
   history_window: number
   per_user_limit: number
+  /** 0 means no cap. */
+  max_queue: number
+  guest_mode: boolean
 }
 
 export interface Page<T> {

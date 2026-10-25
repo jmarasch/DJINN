@@ -3,6 +3,8 @@ import type {
   AlbumDetail,
   ArtistDetail,
   ArtistSummary,
+  GuestSummary,
+  Mode,
   NowPlaying,
   OutputStatus,
   Page,
@@ -10,6 +12,7 @@ import type {
   PoolEntry,
   PoolKind,
   QueueItem,
+  RequestLogEntry,
   Role,
   ScanProgress,
   SearchResults,
@@ -59,6 +62,8 @@ export const api = {
   login: (username: string, password: string) => post<User>('/auth/login', { username, password }),
   logout: () => post<void>('/auth/logout'),
   bootstrapStatus: () => get<{ needed: boolean }>('/auth/bootstrap'),
+  mode: () => get<Mode>('/auth/mode'),
+  joinAsGuest: (name: string) => post<User>('/auth/guest', { name }),
   bootstrap: (token: string, username: string, password: string) =>
     post<User>('/auth/bootstrap', { token, username, password }),
 
@@ -92,6 +97,9 @@ export const api = {
   createUser: (username: string, password: string, role: Role) =>
     post<User>('/users', { username, password, role }),
   deleteUser: (id: number) => del<void>(`/users/${id}`),
+  setUnlimited: (id: number, unlimited: boolean) => patch<void>(`/users/${id}`, { unlimited }),
+  guests: () => get<GuestSummary[]>('/guests'),
+  requestLog: (limit = 100) => get<RequestLogEntry[]>(`/requests/log?limit=${limit}`),
 
   settings: () => get<Settings>('/settings'),
   saveSettings: (settings: Settings) => put<Settings>('/settings', settings),

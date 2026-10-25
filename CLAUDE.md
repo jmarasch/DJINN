@@ -39,8 +39,8 @@ crates/
   djinn-library/   scanner, tags, cover art, search
   djinn-store/     SQLite access, migrations, models
   djinn-server/    axum app, auth, API, SSE. Builds the `djinn` binary.
-  djinn-tray/      desktop tray icon (tray-icon: ksni on Linux, Win32 on Windows). No C deps,
-                   so `cargo check -p djinn-tray --target x86_64-pc-windows-gnu` works here.
+  djinn-platform/  OS integration: tray icon, MAC lookup, Windows console. No C deps,
+                   so `cargo check -p djinn-platform --target x86_64-pc-windows-gnu` works here.
 web/               Svelte app (built to web/dist, embedded by djinn-server)
 migrations/        sqlx migrations
 ```

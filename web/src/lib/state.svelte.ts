@@ -3,6 +3,7 @@
 import { api, ApiError } from './api'
 import { clearListCache } from './listCache'
 import type {
+  Mode,
   NowPlaying,
   OutputStatus,
   PlayerState,
@@ -13,6 +14,10 @@ import type {
 
 export const app = $state({
   me: null as User | null,
+  /** How people get in (guest mode or accounts). */
+  mode: null as Mode | null,
+  /** Show the account sign-in form even in guest mode (host sign-in). */
+  hostLogin: false,
   /** False until the first /api/me check finishes. */
   ready: false,
   connected: false,
@@ -92,6 +97,21 @@ export async function refreshMe(): Promise<User | null> {
   }
   app.ready = true
   return app.me
+}
+
+export async function refreshMode(): Promise<Mode | null> {
+  try {
+    app.mode = await api.mode()
+  } catch {
+    app.mode = null
+  }
+  return app.mode
+}
+
+/** Leaves the current session and shows the account sign-in form. */
+export async function signInAsHost() {
+  await logout()
+  app.hostLogin = true
 }
 
 export async function logout() {

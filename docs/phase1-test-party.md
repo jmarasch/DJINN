@@ -15,8 +15,8 @@ auto pool when the queue empties (spec section 15).
    `Create one at http://localhost:8066/setup?token=...`. Open it on the
    server machine and create the admin account.
 4. Wait for `library scan finished` in the log (or watch Admin > Library).
-5. Admin > Users: create an account for each guest (password at least 6
-   characters).
+5. Either turn on **guest mode** (Admin > Rules) so guests join with just
+   a name, or create an account for each guest in Admin > Users.
 6. Build the auto pool: search for albums or artists, open them, and tap
    "Add to auto pool". Add enough that the history window (default 25
    songs) does not exhaust it in a night.
@@ -65,5 +65,6 @@ sqlite3 djinn.db "SELECT t.title, p.source, p.played_ms, p.skipped
 - **Cover art is served at full size.** Thumbnails are Phase 2.
 - **Rescans are manual.** Changes to the music folders are picked up at
   startup or by pressing Rescan; the file watcher is Phase 2.
-- **Guests need accounts.** QR-code guest access is the open Phase 4
-  decision.
+- **Guest devices are recognized by MAC address** only on the server's own
+  network segment, and phones use per-network private addresses. The
+  year-long guest cookie is the main way a phone is remembered.

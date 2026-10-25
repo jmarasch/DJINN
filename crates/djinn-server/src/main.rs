@@ -1,8 +1,13 @@
 //! `djinn`: headless party jukebox server.
 
+// Release builds on Windows run without a console window (the tray icon is
+// the interface); see `djinn_platform::console`.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 mod api;
 mod auth;
 mod banner;
+mod client;
 mod config;
 mod desktop;
 mod error;
@@ -41,18 +46,23 @@ struct Cli {
     /// Don't show a system tray icon, even on a desktop.
     #[arg(long)]
     no_tray: bool,
+    /// Write logs to this file instead of the terminal.
+    #[arg(long)]
+    log_file: Option<PathBuf>,
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new("info,symphonia=warn")),
-        )
-        .init();
+    // Without a console (Windows release build started from Explorer or the
+    // Start menu), logs go to a file.
+    let has_console = djinn_platform::console::attach_parent_console();
+    let log_file = cli
+        .log_file
+        .clone()
+        .or_else(|| (!has_console).then(default_log_file).flatten());
+    init_logging(log_file.as_deref())?;
 
     let (config, source) = Config::load(cli.config.as_deref())?;
     match &source {
@@ -116,6 +126,11 @@ async fn main() -> anyhow::Result<()> {
     )
     .with_join_url(base_url.clone());
 
+    let guest_mode = jukebox::setting(&store, jukebox::GUEST_MODE, 0).await? == 1;
+    state
+        .guest_mode
+        .store(guest_mode, std::sync::atomic::Ordering::Relaxed);
+
     let jukebox = std::sync::Arc::clone(&state.jukebox);
     tokio::spawn(async move {
         while let Some(event) = engine_rx.recv().await {
@@ -137,9 +152,19 @@ async fn main() -> anyhow::Result<()> {
         Some(url)
     };
 
-    let listener = tokio::net::TcpListener::bind(config.server.listen)
-        .await
-        .with_context(|| format!("failed to bind {}", config.server.listen))?;
+    let listener = match tokio::net::TcpListener::bind(config.server.listen).await {
+        Ok(listener) => listener,
+        // Probably DJINN is already running (opened twice from the app
+        // menu): show the running one instead of failing silently.
+        Err(e) if e.kind() == std::io::ErrorKind::AddrInUse && !cli.no_tray => {
+            tracing::warn!(addr = %config.server.listen, "already in use, opening the running DJINN");
+            desktop::open_existing(config.server.listen);
+            return Ok(());
+        }
+        Err(e) => {
+            return Err(e).with_context(|| format!("failed to bind {}", config.server.listen));
+        }
+    };
     tracing::info!(
         version = env!("CARGO_PKG_VERSION"),
         addr = %config.server.listen,
@@ -164,13 +189,17 @@ async fn main() -> anyhow::Result<()> {
 
     let shutdown = std::sync::Arc::clone(&state.shutdown);
     let shutdown_request = std::sync::Arc::clone(&state.shutdown_request);
-    axum::serve(listener, app(state))
-        .with_graceful_shutdown(async move {
-            shutdown_signal(shutdown_request).await;
-            shutdown.send_replace(true);
-        })
-        .await
-        .context("server error")?;
+    axum::serve(
+        listener,
+        // Connection info gives handlers the client's IP (for MAC lookup).
+        app(state).into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .with_graceful_shutdown(async move {
+        shutdown_signal(shutdown_request).await;
+        shutdown.send_replace(true);
+    })
+    .await
+    .context("server error")?;
 
     // Remove the tray icon before exiting (Windows leaves a ghost icon
     // otherwise).
@@ -180,6 +209,40 @@ async fn main() -> anyhow::Result<()> {
     store.close().await;
     tracing::info!("shut down");
     Ok(())
+}
+
+fn init_logging(file: Option<&std::path::Path>) -> anyhow::Result<()> {
+    let filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info,symphonia=warn"));
+    let builder = tracing_subscriber::fmt().with_env_filter(filter);
+    match file {
+        Some(path) => {
+            if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
+                std::fs::create_dir_all(dir)?;
+            }
+            let file = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)
+                .with_context(|| format!("cannot open log file {}", path.display()))?;
+            builder
+                .with_ansi(false)
+                .with_writer(std::sync::Mutex::new(file))
+                .init();
+        }
+        None => builder.init(),
+    }
+    Ok(())
+}
+
+/// `djinn.log` next to the binary on Windows (where its config lives too),
+/// in `~/.config/djinn/` elsewhere.
+fn default_log_file() -> Option<PathBuf> {
+    if cfg!(windows) {
+        Some(std::env::current_exe().ok()?.parent()?.join("djinn.log"))
+    } else {
+        Some(dirs::config_dir()?.join("djinn").join("djinn.log"))
+    }
 }
 
 fn app(state: AppState) -> Router {

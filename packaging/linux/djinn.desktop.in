@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=DJINN
+GenericName=Party Jukebox
+Comment=Party jukebox server; lives in the system tray
+Exec="@BIN@" --log-file "@LOG@"
+Icon=djinn
+Terminal=false
+Categories=AudioVideo;Audio;Player;
+StartupNotify=false
