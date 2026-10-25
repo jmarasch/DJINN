@@ -316,37 +316,8 @@ fn dummy_hash() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app;
-    use axum::body::Body;
-    use axum::http::{Method, Request};
-    use tower::ServiceExt;
-
-    async fn call(
-        state: &AppState,
-        method: Method,
-        path: &str,
-        body: Option<&str>,
-        cookie: Option<&str>,
-    ) -> (StatusCode, Option<String>) {
-        let mut req = Request::builder().method(method).uri(path);
-        if body.is_some() {
-            req = req.header("content-type", "application/json");
-        }
-        if let Some(cookie) = cookie {
-            req = req.header(COOKIE, cookie);
-        }
-        let req = req
-            .body(body.map_or_else(Body::empty, |b| Body::from(b.to_owned())))
-            .unwrap();
-        let res = app(state.clone()).oneshot(req).await.unwrap();
-        let cookie = res
-            .headers()
-            .get(SET_COOKIE)
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.split(';').next())
-            .map(str::to_owned);
-        (res.status(), cookie)
-    }
+    use crate::test_util::call;
+    use axum::http::Method;
 
     #[tokio::test]
     async fn bootstrap_login_and_admin_gate() {

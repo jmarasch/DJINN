@@ -1,0 +1,68 @@
+//! Live updates pushed to clients over Server-Sent Events.
+
+use djinn_library::ScanProgress;
+use djinn_store::{PlaySource, QueueItem, Track};
+use serde::Serialize;
+
+/// The SSE event name is the variant name in snake_case; the data is the
+/// variant's JSON.
+#[derive(Clone, Debug, Serialize)]
+#[serde(tag = "type", content = "data", rename_all = "snake_case")]
+pub enum ServerEvent {
+    NowPlaying(Box<NowPlaying>),
+    Position { track_id: i64, position_ms: u64 },
+    QueueChanged(Vec<QueueItem>),
+    PlayerState(PlayerState),
+    OutputStatus(OutputStatus),
+    ScanProgress(ScanProgress),
+}
+
+impl ServerEvent {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::NowPlaying(_) => "now_playing",
+            Self::Position { .. } => "position",
+            Self::QueueChanged(_) => "queue_changed",
+            Self::PlayerState(_) => "player_state",
+            Self::OutputStatus(_) => "output_status",
+            Self::ScanProgress(_) => "scan_progress",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct NowPlaying {
+    pub current: Option<Entry>,
+    pub position_ms: u64,
+    pub up_next: Option<Entry>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct Entry {
+    pub track: Track,
+    pub source: PlaySource,
+    /// Username of whoever requested it.
+    pub requested_by: Option<String>,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PlayState {
+    Idle,
+    Playing,
+    Paused,
+}
+
+#[derive(Copy, Clone, Debug, Serialize)]
+pub struct PlayerState {
+    pub state: PlayState,
+    /// Master volume, 0 to 100.
+    pub volume: u8,
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct OutputStatus {
+    pub device: Option<String>,
+    pub sample_rate: Option<u32>,
+    pub error: Option<String>,
+}

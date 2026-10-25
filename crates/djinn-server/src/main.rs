@@ -4,7 +4,14 @@ mod api;
 mod auth;
 mod config;
 mod error;
+mod events;
+mod jukebox;
+mod library_api;
+mod player_api;
+mod sse;
 mod state;
+#[cfg(test)]
+mod test_util;
 mod web;
 
 use std::path::PathBuf;
@@ -12,11 +19,14 @@ use std::path::PathBuf;
 use anyhow::Context;
 use axum::Router;
 use clap::Parser;
+use djinn_engine::{Engine, EngineConfig};
 use djinn_store::Store;
+use tokio::sync::{broadcast, mpsc};
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
 
 use crate::config::{Config, Source};
+use crate::jukebox::Jukebox;
 use crate::state::AppState;
 
 #[derive(Parser)]
@@ -65,7 +75,48 @@ async fn main() -> anyhow::Result<()> {
         .path
         .parent()
         .map_or_else(|| PathBuf::from("art"), |dir| dir.join("art"));
-    let state = AppState::new(store.clone(), art_dir);
+
+    // Engine events are handed to the async side through a channel; the
+    // callback runs on the engine thread and must not block.
+    let (engine_tx, mut engine_rx) = mpsc::unbounded_channel();
+    let engine = Engine::start(
+        EngineConfig {
+            master_rate: config.audio.master_rate,
+        },
+        move |event| {
+            let _ = engine_tx.send(event);
+        },
+    )?;
+    let engine = std::sync::Arc::new(engine);
+    let engine_sink = std::sync::Arc::clone(&engine);
+    let (events, _) = broadcast::channel(256);
+    let jukebox = Jukebox::new(
+        store.clone(),
+        Box::new(move |command| {
+            if engine_sink.send(command).is_err() {
+                tracing::error!("audio engine stopped");
+            }
+        }),
+        events.clone(),
+    )
+    .await?;
+    let state = AppState::new(
+        store.clone(),
+        art_dir,
+        config.library.roots.clone(),
+        jukebox,
+        events,
+    );
+
+    let jukebox = std::sync::Arc::clone(&state.jukebox);
+    tokio::spawn(async move {
+        while let Some(event) = engine_rx.recv().await {
+            if let Err(e) = jukebox.lock().await.on_engine_event(event).await {
+                tracing::error!(error = %format!("{e:#}"), "handling engine event failed");
+            }
+        }
+    });
+    library_api::start_scan(&state);
 
     if !store.admin_exists().await? {
         let token = auth::new_token()?;
@@ -92,11 +143,17 @@ async fn main() -> anyhow::Result<()> {
         "DJINN listening"
     );
 
+    let shutdown = std::sync::Arc::clone(&state.shutdown);
     axum::serve(listener, app(state))
-        .with_graceful_shutdown(shutdown_signal())
+        .with_graceful_shutdown(async move {
+            shutdown_signal().await;
+            shutdown.send_replace(true);
+        })
         .await
         .context("server error")?;
 
+    // Stop audio before closing the database.
+    drop(engine);
     store.close().await;
     tracing::info!("shut down");
     Ok(())

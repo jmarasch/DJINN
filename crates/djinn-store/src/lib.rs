@@ -1,9 +1,11 @@
 //! DJINN storage: SQLite access, migrations, and models.
 
 mod library;
+mod queue;
 mod users;
 
 pub use library::*;
+pub use queue::*;
 pub use users::*;
 
 use std::path::Path;

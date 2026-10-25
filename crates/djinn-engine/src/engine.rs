@@ -129,7 +129,7 @@ impl EngineThread {
     }
 
     fn run(mut self) {
-        (self.on_event)(Event::NextNeeded);
+        (self.on_event)(Event::NextNeeded { after: None });
         loop {
             match self.rx.recv_timeout(TICK) {
                 Ok(Msg::Command(cmd)) => self.handle(cmd),

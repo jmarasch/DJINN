@@ -14,14 +14,20 @@ argon2 = "0.6.0"
 axum.workspace = true
 clap.workspace = true
 dirs.workspace = true
+djinn-engine = { path = "../djinn-engine" }
 djinn-library = { path = "../djinn-library" }
 djinn-store = { path = "../djinn-store" }
 figment.workspace = true
+futures-util = "0.3.34"
 getrandom = "0.4.3"
+rand = "0.10"
 rust-embed.workspace = true
 serde.workspace = true
+serde_json = "1.0.154"
 sha2 = "0.11.1"
+thiserror.workspace = true
 tokio.workspace = true
+tokio-stream = { version = "0.1.19", features = ["sync"] }
 tower-http.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true

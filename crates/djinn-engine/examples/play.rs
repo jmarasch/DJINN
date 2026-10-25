@@ -60,7 +60,7 @@ fn main() -> ExitCode {
 
     loop {
         match events.recv_timeout(Duration::from_millis(50)) {
-            Ok(Event::NextNeeded) => match queue.next() {
+            Ok(Event::NextNeeded { .. }) => match queue.next() {
                 Some((i, path)) => {
                     let track = Track {
                         id: TrackId(i as i64),

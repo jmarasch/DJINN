@@ -133,7 +133,7 @@ impl Player {
                     id: track.id,
                     error: e.to_string(),
                 });
-                self.events.push(Event::NextNeeded);
+                self.events.push(Event::NextNeeded { after: None });
             }
         }
     }
@@ -232,10 +232,12 @@ impl Player {
             // Decoding had already moved on to a later track whose start was
             // just flushed. Restart it from the top.
             Some(deck) => match TrackDecoder::open(&deck.track.path) {
-                Ok(decoder) => self.start_deck(Deck {
-                    track: deck.track,
-                    decoder,
-                }),
+                Ok(decoder) => {
+                    self.start_deck(Deck {
+                        track: deck.track,
+                        decoder,
+                    });
+                }
                 Err(e) => self.events.push(Event::TrackError {
                     id: deck.track.id,
                     error: e.to_string(),
@@ -250,8 +252,10 @@ impl Player {
     fn produce(&mut self) -> bool {
         let Some(deck) = self.current.as_mut() else {
             if let Some(next) = self.next.take() {
-                self.start_deck(next);
-                self.events.push(Event::NextNeeded);
+                let id = next.track.id;
+                if self.start_deck(next) {
+                    self.events.push(Event::NextNeeded { after: Some(id) });
+                }
                 return true;
             }
             // Nothing left to play: drain the resampler's tail so the last
@@ -315,7 +319,9 @@ impl Player {
         }
     }
 
-    fn start_deck(&mut self, deck: Deck) {
+    /// Makes `deck` current. Returns false (after reporting) if it could not
+    /// be started.
+    fn start_deck(&mut self, deck: Deck) -> bool {
         let rate = deck.decoder.sample_rate();
         if self.stage.as_ref().is_some_and(|s| s.rate != rate) {
             if let Some(stage) = self.stage.take() {
@@ -333,8 +339,8 @@ impl Player {
                             id: deck.track.id,
                             error: e.to_string(),
                         });
-                        self.events.push(Event::NextNeeded);
-                        return;
+                        self.events.push(Event::NextNeeded { after: None });
+                        return false;
                     }
                 }
             };
@@ -351,6 +357,7 @@ impl Player {
             kind: MarkKind::Start(deck.track.id),
         });
         self.current = Some(deck);
+        true
     }
 
     fn finish_stage(&mut self, mut stage: Stage) {
@@ -462,7 +469,7 @@ pub(crate) mod tests {
             let new: Vec<Event> = player.take_events().collect();
             let mut progressed = !new.is_empty();
             for e in new {
-                if e == Event::NextNeeded {
+                if matches!(e, Event::NextNeeded { .. }) {
                     if let Some((i, p)) = queue.next() {
                         player.set_next(Some(track(i as i64, p)));
                         progressed = true;
@@ -493,6 +500,14 @@ pub(crate) mod tests {
 
         let (out, events) = play_all(&[a, b]);
         assert_eq!(out, to_f32(&all), "output differs from the uncut signal");
+        let promoted: Vec<_> = events
+            .iter()
+            .filter_map(|e| match e {
+                Event::NextNeeded { after } => Some(*after),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(promoted, [Some(TrackId(0)), Some(TrackId(1))]);
 
         let ended: Vec<_> = events
             .iter()
@@ -563,7 +578,7 @@ pub(crate) mod tests {
             events[0],
             Event::TrackError { id: TrackId(7), .. }
         ));
-        assert_eq!(events[1], Event::NextNeeded);
+        assert_eq!(events[1], Event::NextNeeded { after: None });
         assert!(!player.is_active());
     }
 

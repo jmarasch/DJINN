@@ -1,0 +1,745 @@
+//! Decides what plays: requests first, then the auto pool. Feeds the engine
+//! and turns its events into history and live updates.
+//!
+//! Tracks move through three stages: `queued` (sent to the engine as the
+//! next track), `in_flight` (the engine is decoding it, but it isn't audible
+//! yet), and `playing`. A request stays in the request queue until it
+//! becomes audible, so "up next" is always visible.
+
+mod bag;
+
+use std::collections::VecDeque;
+use std::path::PathBuf;
+
+use djinn_engine::{Command, EndReason, Event as EngineEvent, PlayState as EngineState, TrackId};
+use djinn_store::{AddRequestError, PlaySource, QueueItem, Store, Track, User};
+use rand::rngs::StdRng;
+use rand::SeedableRng;
+use tokio::sync::broadcast;
+
+use self::bag::ShuffleBag;
+use crate::events::{Entry, NowPlaying, OutputStatus, PlayState, PlayerState, ServerEvent};
+
+pub const HISTORY_WINDOW: &str = "history_window";
+pub const PER_USER_LIMIT: &str = "per_user_limit";
+pub const VOLUME: &str = "volume";
+const DEFAULT_HISTORY_WINDOW: i64 = 25;
+const DEFAULT_PER_USER_LIMIT: i64 = 3;
+const DEFAULT_VOLUME: i64 = 80;
+/// Tracks replaced in the engine's slot that it may already have taken.
+const MAX_REPLACED: usize = 8;
+
+pub type EngineSink = Box<dyn Fn(Command) + Send + Sync>;
+
+#[derive(Clone, Debug)]
+struct Pending {
+    track: Track,
+    source: PlaySource,
+    request_id: Option<i64>,
+    requested_by: Option<(i64, String)>,
+}
+
+impl Pending {
+    fn entry(&self) -> Entry {
+        Entry {
+            track: self.track.clone(),
+            source: self.source,
+            requested_by: self.requested_by.as_ref().map(|(_, name)| name.clone()),
+        }
+    }
+}
+
+struct Playing {
+    pending: Pending,
+    play_event: i64,
+    position_ms: u64,
+}
+
+pub struct Jukebox {
+    store: Store,
+    engine: EngineSink,
+    events: broadcast::Sender<ServerEvent>,
+    bag: ShuffleBag,
+    rng: StdRng,
+    queued: Option<Pending>,
+    replaced: VecDeque<Pending>,
+    in_flight: VecDeque<Pending>,
+    playing: Option<Playing>,
+    state: PlayState,
+    volume: u8,
+    skip_requested_by: Option<i64>,
+    output: OutputStatus,
+    last_position_second: Option<u64>,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum QueueError {
+    #[error(transparent)]
+    Add(#[from] AddRequestError),
+    #[error("not found")]
+    NotFound,
+    #[error("you can only remove your own requests")]
+    NotYours,
+    #[error(transparent)]
+    Store(#[from] djinn_store::StoreError),
+    #[error(transparent)]
+    Other(#[from] anyhow::Error),
+}
+
+impl Jukebox {
+    pub async fn new(
+        store: Store,
+        engine: EngineSink,
+        events: broadcast::Sender<ServerEvent>,
+    ) -> anyhow::Result<Self> {
+        let volume = setting(&store, VOLUME, DEFAULT_VOLUME).await?.clamp(0, 100) as u8;
+        let mut seed = [0u8; 8];
+        getrandom::fill(&mut seed).map_err(|e| anyhow::anyhow!("no system randomness: {e}"))?;
+        let jukebox = Self {
+            store,
+            engine,
+            events,
+            bag: ShuffleBag::default(),
+            rng: StdRng::seed_from_u64(u64::from_le_bytes(seed)),
+            queued: None,
+            replaced: VecDeque::new(),
+            in_flight: VecDeque::new(),
+            playing: None,
+            state: PlayState::Idle,
+            volume,
+            skip_requested_by: None,
+            output: OutputStatus::default(),
+            last_position_second: None,
+        };
+        (jukebox.engine)(Command::SetVolume(gain(volume)));
+        Ok(jukebox)
+    }
+
+    pub fn now_playing(&self) -> NowPlaying {
+        NowPlaying {
+            current: self.playing.as_ref().map(|p| p.pending.entry()),
+            position_ms: self.playing.as_ref().map_or(0, |p| p.position_ms),
+            up_next: self
+                .in_flight
+                .front()
+                .or(self.queued.as_ref())
+                .map(Pending::entry),
+        }
+    }
+
+    pub fn player_state(&self) -> PlayerState {
+        PlayerState {
+            state: self.state,
+            volume: self.volume,
+        }
+    }
+
+    pub fn output_status(&self) -> OutputStatus {
+        self.output.clone()
+    }
+
+    pub async fn add_request(
+        &mut self,
+        user: &User,
+        track_id: i64,
+    ) -> Result<QueueItem, QueueError> {
+        let limit = if user.is_admin() {
+            None
+        } else {
+            Some(setting(&self.store, PER_USER_LIMIT, DEFAULT_PER_USER_LIMIT).await?)
+        };
+        let item = self.store.add_request(track_id, user.id, limit).await?;
+        self.queue_changed().await?;
+        Ok(item)
+    }
+
+    /// Users may remove their own requests; admins may remove any.
+    pub async fn remove_request(&mut self, user: &User, id: i64) -> Result<(), QueueError> {
+        let item = self
+            .store
+            .queue_item(id)
+            .await?
+            .ok_or(QueueError::NotFound)?;
+        if item.user_id != user.id && !user.is_admin() {
+            return Err(QueueError::NotYours);
+        }
+        self.store.remove_request(id).await?;
+        self.queue_changed().await?;
+        Ok(())
+    }
+
+    pub async fn move_request(&mut self, id: i64, index: usize) -> Result<(), QueueError> {
+        if !self.store.move_request(id, index).await? {
+            return Err(QueueError::NotFound);
+        }
+        self.queue_changed().await?;
+        Ok(())
+    }
+
+    /// Call after the auto pool changes.
+    pub async fn pool_changed(&mut self) -> anyhow::Result<()> {
+        self.refresh_next().await?;
+        self.broadcast_now_playing();
+        Ok(())
+    }
+
+    pub fn play(&self) {
+        (self.engine)(Command::Play);
+    }
+
+    pub fn pause(&self) {
+        (self.engine)(Command::Pause);
+    }
+
+    pub fn skip(&mut self, by: &User) {
+        self.skip_requested_by = Some(by.id);
+        (self.engine)(Command::Skip);
+    }
+
+    pub async fn set_volume(&mut self, volume: u8) -> anyhow::Result<()> {
+        self.volume = volume.min(100);
+        (self.engine)(Command::SetVolume(gain(self.volume)));
+        self.store
+            .set_setting(VOLUME, &self.volume.to_string())
+            .await?;
+        self.send(ServerEvent::PlayerState(self.player_state()));
+        Ok(())
+    }
+
+    pub async fn on_engine_event(&mut self, event: EngineEvent) -> anyhow::Result<()> {
+        match event {
+            EngineEvent::NextNeeded { after } => {
+                if let Some(TrackId(id)) = after {
+                    let taken = if self.queued.as_ref().is_some_and(|q| q.track.id == id) {
+                        self.queued.take()
+                    } else {
+                        // Replaced after the engine had already taken it.
+                        self.replaced
+                            .iter()
+                            .position(|p| p.track.id == id)
+                            .and_then(|i| self.replaced.remove(i))
+                    };
+                    if let Some(pending) = taken {
+                        self.in_flight.push_back(pending);
+                    }
+                }
+                self.refresh_next().await?;
+                self.broadcast_now_playing();
+            }
+            EngineEvent::TrackStarted { id: TrackId(id) } => self.track_started(id).await?,
+            EngineEvent::TrackEnded {
+                id: TrackId(id),
+                played_ms,
+                reason,
+            } => self.track_ended(id, played_ms, reason).await?,
+            EngineEvent::TrackError {
+                id: TrackId(id),
+                error,
+            } => {
+                tracing::warn!(track = id, %error, "track failed");
+                if let Some(pending) = self.queued.take_if(|q| q.track.id == id) {
+                    // Failed to open; drop a broken request so it isn't retried.
+                    if let Some(request) = pending.request_id {
+                        self.store.remove_request(request).await?;
+                        self.broadcast_queue().await?;
+                    }
+                }
+            }
+            EngineEvent::Position {
+                id: TrackId(id),
+                ms,
+            } => {
+                if let Some(playing) = self.playing.as_mut().filter(|p| p.pending.track.id == id) {
+                    playing.position_ms = ms;
+                    let second = ms / 1000;
+                    if self.last_position_second != Some(second) {
+                        self.last_position_second = Some(second);
+                        self.send(ServerEvent::Position {
+                            track_id: id,
+                            position_ms: ms,
+                        });
+                    }
+                }
+            }
+            EngineEvent::StateChanged(state) => {
+                self.state = match state {
+                    EngineState::Idle => PlayState::Idle,
+                    EngineState::Playing => PlayState::Playing,
+                    EngineState::Paused => PlayState::Paused,
+                };
+                self.send(ServerEvent::PlayerState(self.player_state()));
+            }
+            EngineEvent::OutputOpened {
+                device,
+                sample_rate,
+                ..
+            } => {
+                self.output = OutputStatus {
+                    device: Some(device),
+                    sample_rate: Some(sample_rate),
+                    error: None,
+                };
+                self.send(ServerEvent::OutputStatus(self.output.clone()));
+            }
+            EngineEvent::OutputError { error } => {
+                self.output = OutputStatus {
+                    device: None,
+                    sample_rate: None,
+                    error: Some(error),
+                };
+                self.send(ServerEvent::OutputStatus(self.output.clone()));
+            }
+        }
+        Ok(())
+    }
+
+    async fn track_started(&mut self, id: i64) -> anyhow::Result<()> {
+        // Anything ahead of it was skipped before it became audible.
+        while self.in_flight.front().is_some_and(|p| p.track.id != id) {
+            self.in_flight.pop_front();
+        }
+        let Some(pending) = self.in_flight.pop_front() else {
+            tracing::warn!(track = id, "unexpected track started");
+            return Ok(());
+        };
+        if let Some(request) = pending.request_id {
+            self.store.remove_request(request).await?;
+            self.broadcast_queue().await?;
+        }
+        let play_event = self
+            .store
+            .start_play_event(
+                id,
+                pending.source,
+                pending.requested_by.as_ref().map(|(id, _)| *id),
+            )
+            .await?;
+        self.playing = Some(Playing {
+            pending,
+            play_event,
+            position_ms: 0,
+        });
+        self.last_position_second = None;
+        self.broadcast_now_playing();
+        Ok(())
+    }
+
+    async fn track_ended(
+        &mut self,
+        id: i64,
+        played_ms: u64,
+        reason: EndReason,
+    ) -> anyhow::Result<()> {
+        let skipped = reason == EndReason::Skipped;
+        let skipped_by = if skipped {
+            self.skip_requested_by.take()
+        } else {
+            None
+        };
+        if let Some(playing) = self.playing.take_if(|p| p.pending.track.id == id) {
+            self.store
+                .finish_play_event(
+                    playing.play_event,
+                    i64::try_from(played_ms).unwrap_or(i64::MAX),
+                    skipped,
+                    skipped_by,
+                )
+                .await?;
+            self.broadcast_now_playing();
+        } else if let Some(i) = self.in_flight.iter().position(|p| p.track.id == id) {
+            // Skipped before it became audible.
+            if let Some(pending) = self.in_flight.remove(i) {
+                if let Some(request) = pending.request_id {
+                    self.store.remove_request(request).await?;
+                    self.broadcast_queue().await?;
+                }
+            }
+            self.broadcast_now_playing();
+        }
+        Ok(())
+    }
+
+    async fn queue_changed(&mut self) -> anyhow::Result<()> {
+        self.refresh_next().await?;
+        self.broadcast_queue().await?;
+        self.broadcast_now_playing();
+        Ok(())
+    }
+
+    /// Makes sure the engine's next slot holds the right track: the first
+    /// request not already on its way, otherwise a draw from the pool.
+    async fn refresh_next(&mut self) -> anyhow::Result<()> {
+        for _ in 0..5 {
+            let in_flight: Vec<i64> = self.in_flight.iter().filter_map(|p| p.request_id).collect();
+            let head = self
+                .store
+                .queue()
+                .await?
+                .into_iter()
+                .find(|q| !in_flight.contains(&q.id));
+
+            let candidate = match (head, &self.queued) {
+                (Some(head), Some(q)) if q.request_id == Some(head.id) => return Ok(()),
+                (Some(head), _) => Pending {
+                    requested_by: Some((head.user_id, head.username.clone())),
+                    request_id: Some(head.id),
+                    source: PlaySource::Request,
+                    track: head.track,
+                },
+                (None, Some(q)) if q.source == PlaySource::Pool => {
+                    let pool = self.store.pool_track_ids().await?;
+                    if pool.contains(&q.track.id) {
+                        return Ok(());
+                    }
+                    match self.draw(&pool).await? {
+                        Some(track) => track,
+                        None => return self.clear_next(),
+                    }
+                }
+                (None, _) => {
+                    let pool = self.store.pool_track_ids().await?;
+                    match self.draw(&pool).await? {
+                        Some(track) => track,
+                        None => return self.clear_next(),
+                    }
+                }
+            };
+
+            let Some(path) = self.store.track_path(candidate.track.id).await? else {
+                // The file vanished since the last scan.
+                if let Some(request) = candidate.request_id {
+                    self.store.remove_request(request).await?;
+                }
+                continue;
+            };
+            if let Some(old) = self.queued.take() {
+                if old.source == PlaySource::Pool && candidate.source == PlaySource::Request {
+                    self.bag.put_back(old.track.id);
+                }
+                self.replaced.push_back(old);
+                if self.replaced.len() > MAX_REPLACED {
+                    self.replaced.pop_front();
+                }
+            }
+            (self.engine)(Command::SetNext(Some(djinn_engine::Track {
+                id: TrackId(candidate.track.id),
+                path: PathBuf::from(path),
+            })));
+            self.queued = Some(candidate);
+            return Ok(());
+        }
+        Ok(())
+    }
+
+    async fn draw(&mut self, pool: &[i64]) -> anyhow::Result<Option<Pending>> {
+        let window = setting(&self.store, HISTORY_WINDOW, DEFAULT_HISTORY_WINDOW)
+            .await?
+            .max(0);
+        // Tracks on their way count as recent too, newest first, on top of
+        // the configured window of history.
+        let mut recent: Vec<i64> = self
+            .in_flight
+            .iter()
+            .rev()
+            .map(|p| p.track.id)
+            .chain(self.playing.iter().map(|p| p.pending.track.id))
+            .collect();
+        let upcoming = recent.len();
+        recent.extend(self.store.recent_track_ids(window).await?);
+        let window = usize::try_from(window).unwrap_or(0) + upcoming;
+        let Some(id) = self.bag.draw(pool, &recent, window, &mut self.rng) else {
+            return Ok(None);
+        };
+        Ok(self.store.track(id).await?.map(|track| Pending {
+            track,
+            source: PlaySource::Pool,
+            request_id: None,
+            requested_by: None,
+        }))
+    }
+
+    fn clear_next(&mut self) -> anyhow::Result<()> {
+        if let Some(old) = self.queued.take() {
+            self.replaced.push_back(old);
+            (self.engine)(Command::SetNext(None));
+        }
+        Ok(())
+    }
+
+    async fn broadcast_queue(&self) -> anyhow::Result<()> {
+        self.send(ServerEvent::QueueChanged(self.store.queue().await?));
+        Ok(())
+    }
+
+    fn broadcast_now_playing(&self) {
+        self.send(ServerEvent::NowPlaying(Box::new(self.now_playing())));
+    }
+
+    fn send(&self, event: ServerEvent) {
+        // No subscribers is fine.
+        let _ = self.events.send(event);
+    }
+}
+
+/// Perceptual volume curve: 0 to 100 maps to gain 0.0 to 1.0, squared.
+fn gain(volume: u8) -> f32 {
+    let v = f32::from(volume.min(100)) / 100.0;
+    v * v
+}
+
+pub async fn setting(store: &Store, key: &str, default: i64) -> anyhow::Result<i64> {
+    Ok(store
+        .get_setting(key)
+        .await?
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(default))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use djinn_store::{PoolKind, Role, ScannedTrack};
+    use std::sync::{Arc, Mutex};
+
+    struct Harness {
+        jukebox: Jukebox,
+        sent: Arc<Mutex<Vec<Command>>>,
+        store: Store,
+        tracks: Vec<i64>,
+        admin: User,
+        user: User,
+    }
+
+    impl Harness {
+        async fn new(pool_size: usize) -> Self {
+            let store = Store::open_in_memory().await.unwrap();
+            let tracks: Vec<ScannedTrack> = (0..pool_size + 3)
+                .map(|i| ScannedTrack {
+                    path: format!("/m/{i}.flac"),
+                    title: format!("Song {i}"),
+                    ..Default::default()
+                })
+                .collect();
+            store.save_scanned(&tracks).await.unwrap();
+            let tracks: Vec<i64> = store
+                .known_files()
+                .await
+                .unwrap()
+                .iter()
+                .map(|k| k.id)
+                .collect();
+            for &id in &tracks[..pool_size] {
+                store.add_pool_entry(PoolKind::Track, id).await.unwrap();
+            }
+            let admin = store.create_user("admin", "h", Role::Admin).await.unwrap();
+            let user = store.create_user("guest", "h", Role::User).await.unwrap();
+            let sent = Arc::new(Mutex::new(Vec::new()));
+            let sink = Arc::clone(&sent);
+            let (events, _) = broadcast::channel(64);
+            let jukebox = Jukebox::new(
+                store.clone(),
+                Box::new(move |c| sink.lock().unwrap().push(c)),
+                events,
+            )
+            .await
+            .unwrap();
+            Self {
+                jukebox,
+                sent,
+                store,
+                tracks,
+                admin,
+                user,
+            }
+        }
+
+        async fn event(&mut self, event: EngineEvent) {
+            self.jukebox.on_engine_event(event).await.unwrap();
+        }
+
+        /// The last track sent to the engine's next slot.
+        fn last_next(&self) -> Option<i64> {
+            self.sent
+                .lock()
+                .unwrap()
+                .iter()
+                .rev()
+                .find_map(|c| match c {
+                    Command::SetNext(t) => Some(t.as_ref().map(|t| t.id.0)),
+                    _ => None,
+                })?
+        }
+
+        /// Simulates the engine taking the queued track and playing it.
+        async fn play_next(&mut self) -> i64 {
+            let id = self.last_next().unwrap();
+            self.event(EngineEvent::NextNeeded {
+                after: Some(TrackId(id)),
+            })
+            .await;
+            self.event(EngineEvent::TrackStarted { id: TrackId(id) })
+                .await;
+            id
+        }
+
+        async fn finish(&mut self, id: i64) {
+            self.event(EngineEvent::TrackEnded {
+                id: TrackId(id),
+                played_ms: 1000,
+                reason: EndReason::Finished,
+            })
+            .await;
+        }
+    }
+
+    #[tokio::test]
+    async fn plays_from_pool_when_queue_empty() {
+        let mut h = Harness::new(5).await;
+        h.event(EngineEvent::NextNeeded { after: None }).await;
+        let first = h.play_next().await;
+        assert!(h.tracks[..5].contains(&first));
+        assert_eq!(h.jukebox.now_playing().current.unwrap().track.id, first);
+        assert_eq!(h.store.recent_track_ids(5).await.unwrap(), [first]);
+
+        // The engine already has the next pool track lined up.
+        let second = h.last_next().unwrap();
+        assert_ne!(first, second);
+    }
+
+    #[tokio::test]
+    async fn request_preempts_queued_pool_track_and_leaves_queue_when_audible() {
+        let mut h = Harness::new(5).await;
+        h.event(EngineEvent::NextNeeded { after: None }).await;
+        let pool_track = h.last_next().unwrap();
+
+        let requested = h.tracks[6];
+        let user = h.user.clone();
+        h.jukebox.add_request(&user, requested).await.unwrap();
+        assert_eq!(h.last_next(), Some(requested));
+        assert_eq!(h.jukebox.now_playing().up_next.unwrap().track.id, requested);
+
+        let started = h.play_next().await;
+        assert_eq!(started, requested);
+        assert!(h.store.queue().await.unwrap().is_empty());
+        let now = h.jukebox.now_playing().current.unwrap();
+        assert_eq!(now.requested_by.as_deref(), Some("guest"));
+
+        // The displaced pool track comes right back.
+        assert_eq!(h.last_next(), Some(pool_track));
+    }
+
+    #[tokio::test]
+    async fn request_replacing_a_track_the_engine_already_took() {
+        let mut h = Harness::new(5).await;
+        h.event(EngineEvent::NextNeeded { after: None }).await;
+        let pool_track = h.last_next().unwrap();
+
+        // The engine takes the pool track, but before its NextNeeded arrives
+        // a request replaces it in the slot.
+        let requested = h.tracks[6];
+        let user = h.user.clone();
+        h.jukebox.add_request(&user, requested).await.unwrap();
+        h.event(EngineEvent::NextNeeded {
+            after: Some(TrackId(pool_track)),
+        })
+        .await;
+        // The request is still the engine's next track; nothing new was sent.
+        assert_eq!(h.last_next(), Some(requested));
+
+        h.event(EngineEvent::TrackStarted {
+            id: TrackId(pool_track),
+        })
+        .await;
+        assert_eq!(
+            h.jukebox.now_playing().current.unwrap().track.id,
+            pool_track
+        );
+        assert_eq!(
+            h.store.queue().await.unwrap().len(),
+            1,
+            "request still waiting"
+        );
+        h.finish(pool_track).await;
+        assert_eq!(h.play_next().await, requested);
+        assert!(h.store.queue().await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn per_user_limit_spares_admins() {
+        let mut h = Harness::new(1).await;
+        h.store.set_setting(PER_USER_LIMIT, "1").await.unwrap();
+        let (user, admin) = (h.user.clone(), h.admin.clone());
+        h.jukebox.add_request(&user, h.tracks[1]).await.unwrap();
+        assert!(matches!(
+            h.jukebox.add_request(&user, h.tracks[2]).await,
+            Err(QueueError::Add(AddRequestError::LimitReached(1)))
+        ));
+        h.jukebox.add_request(&admin, h.tracks[2]).await.unwrap();
+        h.jukebox.add_request(&admin, h.tracks[3]).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn only_owner_or_admin_removes_requests() {
+        let mut h = Harness::new(1).await;
+        let (user, admin) = (h.user.clone(), h.admin.clone());
+        let item = h.jukebox.add_request(&admin, h.tracks[1]).await.unwrap();
+        assert!(matches!(
+            h.jukebox.remove_request(&user, item.id).await,
+            Err(QueueError::NotYours)
+        ));
+        let mine = h.jukebox.add_request(&user, h.tracks[2]).await.unwrap();
+        h.jukebox.remove_request(&user, mine.id).await.unwrap();
+        h.jukebox.remove_request(&admin, item.id).await.unwrap();
+        assert!(h.store.queue().await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn skip_is_recorded_with_who_skipped() {
+        let mut h = Harness::new(3).await;
+        h.event(EngineEvent::NextNeeded { after: None }).await;
+        let id = h.play_next().await;
+        let admin = h.admin.clone();
+        h.jukebox.skip(&admin);
+        h.event(EngineEvent::TrackEnded {
+            id: TrackId(id),
+            played_ms: 4200,
+            reason: EndReason::Skipped,
+        })
+        .await;
+        let row: (i64, i64, Option<i64>) = djinn_store::sqlx::query_as(
+            "SELECT played_ms, skipped, skipped_by FROM play_events WHERE track_id = ?",
+        )
+        .bind(id)
+        .fetch_one(h.store.pool())
+        .await
+        .unwrap();
+        assert_eq!(row, (4200, 1, Some(admin.id)));
+    }
+
+    #[tokio::test]
+    async fn broken_request_is_dropped() {
+        let mut h = Harness::new(2).await;
+        let user = h.user.clone();
+        let requested = h.tracks[3];
+        h.jukebox.add_request(&user, requested).await.unwrap();
+        h.event(EngineEvent::TrackError {
+            id: TrackId(requested),
+            error: "corrupt".into(),
+        })
+        .await;
+        h.event(EngineEvent::NextNeeded { after: None }).await;
+        assert!(h.store.queue().await.unwrap().is_empty());
+        assert!(h.tracks[..2].contains(&h.last_next().unwrap()));
+    }
+
+    #[tokio::test]
+    async fn empty_pool_and_queue_stays_idle() {
+        let mut h = Harness::new(0).await;
+        h.event(EngineEvent::NextNeeded { after: None }).await;
+        assert_eq!(h.last_next(), None);
+        // A request starts playback.
+        let user = h.user.clone();
+        h.jukebox.add_request(&user, h.tracks[0]).await.unwrap();
+        assert_eq!(h.last_next(), Some(h.tracks[0]));
+    }
+}

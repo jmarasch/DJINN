@@ -63,9 +63,13 @@ pub enum PlayState {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Event {
     /// The slot after the track being decoded is empty. Answer with
-    /// [`Command::SetNext`]. Because decoding runs ahead of playback, this
-    /// can arrive shortly before the current track becomes audible.
-    NextNeeded,
+    /// [`Command::SetNext`]. `after` is the track that just left the slot
+    /// and started decoding, or `None` if the slot emptied otherwise (at
+    /// startup, or after a track failed to open). Because decoding runs
+    /// ahead of playback, this arrives shortly before `after` is audible.
+    NextNeeded {
+        after: Option<TrackId>,
+    },
     /// The track's first sample reached the output.
     TrackStarted {
         id: TrackId,
@@ -76,7 +80,7 @@ pub enum Event {
         reason: EndReason,
     },
     /// A track could not be opened or failed mid-stream. A failure to open
-    /// is followed by [`Event::NextNeeded`].
+    /// is followed by [`Event::NextNeeded`] with `after: None`.
     TrackError {
         id: TrackId,
         error: String,
