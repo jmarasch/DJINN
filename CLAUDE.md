@@ -48,6 +48,13 @@ migrations/        sqlx migrations
 - The tokio side talks to the engine over channels: commands in (`Play`, `Pause`, `Skip`, `SetVolume`, `SetCrossfade`, `AddOutput`, ...) and events out (`TrackStarted`, `TrackEnded`, `Position`, `OutputError`, ...).
 - Queue logic lives in the server, not the engine. The engine asks "what's next?" and is told.
 
+## Where things live
+
+- Engine: `player.rs` sequences tracks and shares one resampling stage across same-rate tracks (that is what keeps resampled albums gapless); `output.rs` owns the cpal stream and the realtime callback; `engine.rs` is the thread and command loop. `NextNeeded { after }` names the track the engine just took.
+- Server: `jukebox/` decides what plays (requests first, then the shuffle bag over the pool) and tracks queued, in-flight, and playing tracks; `events.rs` + `sse.rs` push live state; `*_api.rs` are the REST routes.
+- Store: one module per area (`library`, `users`, `queue`); all SQL is static strings (sqlx 0.9 rejects dynamic SQL), with shared column lists as macros used through `concat!`.
+- Golden-sample audio fixtures: `crates/djinn-engine/tests/fixtures/` (README says how to regenerate). Phase 1 acceptance checklist: `docs/phase1-test-party.md`.
+
 ## Coding rules (spec section 16)
 
 - No `unwrap()` or `expect()` outside tests and startup config validation. Enforced by workspace clippy lints (`clippy.toml` allows them in tests). Use `anyhow` in binaries and `thiserror` in library crates.
