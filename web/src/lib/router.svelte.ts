@@ -6,9 +6,15 @@ function current(): string {
 
 export const route = $state({ path: current() })
 
+// Scroll position per route, so Back returns to the same spot in a list.
+const scrollPositions = new Map<string, number>()
+
 window.addEventListener('hashchange', () => {
+  scrollPositions.set(route.path, window.scrollY)
   route.path = current()
-  window.scrollTo(0, 0)
+  const target = scrollPositions.get(route.path) ?? 0
+  // Wait for the new screen (and any cached list) to render.
+  requestAnimationFrame(() => requestAnimationFrame(() => window.scrollTo(0, target)))
 })
 
 export function navigate(path: string) {

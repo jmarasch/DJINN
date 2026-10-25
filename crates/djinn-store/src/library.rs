@@ -61,6 +61,33 @@ pub struct SearchResults {
     pub artists: Vec<Artist>,
 }
 
+/// One page of a browse listing.
+#[derive(Clone, Debug, Serialize)]
+pub struct Page<T> {
+    pub items: Vec<T>,
+    /// Total across all pages.
+    pub total: i64,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, FromRow)]
+pub struct ArtistSummary {
+    pub id: i64,
+    pub name: String,
+    /// Playable tracks by this artist or on their albums.
+    pub track_count: i64,
+}
+
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TrackSort {
+    #[default]
+    Title,
+    /// Artist, then album, then track order.
+    Artist,
+    /// Most recently added first.
+    Added,
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct AlbumDetail {
     #[serde(flatten)]
@@ -115,6 +142,18 @@ pub const UNKNOWN_ARTIST: &str = "Unknown Artist";
 macro_rules! available {
     () => {
         "t.removed_at IS NULL"
+    };
+}
+
+/// Every artist with a count of playable tracks they appear on, as track
+/// artist or album artist.
+macro_rules! artist_counts {
+    () => {
+        "SELECT ar.id, ar.name, \
+                (SELECT count(*) FROM tracks t LEFT JOIN albums al ON al.id = t.album_id \
+                 WHERE t.removed_at IS NULL AND (t.artist_id = ar.id OR al.artist_id = ar.id)) \
+                 AS track_count \
+         FROM artists ar"
     };
 }
 
@@ -250,6 +289,96 @@ impl Store {
             albums,
             other_tracks,
         }))
+    }
+
+    /// Artists with playable tracks, A to Z.
+    pub async fn artists_page(&self, offset: i64, limit: i64) -> Result<Page<ArtistSummary>> {
+        let items = sqlx::query_as(concat!(
+            "SELECT id, name, track_count FROM (",
+            artist_counts!(),
+            ") WHERE track_count > 0 ORDER BY name COLLATE NOCASE LIMIT ? OFFSET ?"
+        ))
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&self.pool)
+        .await?;
+        let total = sqlx::query_scalar(concat!(
+            "SELECT count(*) FROM (",
+            artist_counts!(),
+            ") WHERE track_count > 0"
+        ))
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(Page { items, total })
+    }
+
+    /// Albums with playable tracks, A to Z.
+    pub async fn albums_page(&self, offset: i64, limit: i64) -> Result<Page<Album>> {
+        let items = sqlx::query_as(concat!(
+            "SELECT ",
+            album_columns!(),
+            " FROM albums al JOIN artists ar ON ar.id = al.artist_id
+             WHERE EXISTS (SELECT 1 FROM tracks t WHERE t.album_id = al.id AND ",
+            available!(),
+            ") ORDER BY al.title COLLATE NOCASE, ar.name COLLATE NOCASE LIMIT ? OFFSET ?"
+        ))
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&self.pool)
+        .await?;
+        let total = sqlx::query_scalar(concat!(
+            "SELECT count(*) FROM albums al
+             WHERE EXISTS (SELECT 1 FROM tracks t WHERE t.album_id = al.id AND ",
+            available!(),
+            ")"
+        ))
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(Page { items, total })
+    }
+
+    /// All playable tracks in the given order.
+    pub async fn tracks_page(
+        &self,
+        sort: TrackSort,
+        offset: i64,
+        limit: i64,
+    ) -> Result<Page<Track>> {
+        let sql = match sort {
+            TrackSort::Title => concat!(
+                "SELECT ",
+                track_columns!(),
+                " FROM tracks t WHERE ",
+                available!(),
+                " ORDER BY t.title COLLATE NOCASE, t.artist COLLATE NOCASE LIMIT ? OFFSET ?"
+            ),
+            TrackSort::Artist => concat!(
+                "SELECT ",
+                track_columns!(),
+                " FROM tracks t WHERE ",
+                available!(),
+                " ORDER BY coalesce(t.album_artist, t.artist) IS NULL,
+                           coalesce(t.album_artist, t.artist) COLLATE NOCASE,
+                           t.album COLLATE NOCASE, t.disc_no, t.track_no, t.title COLLATE NOCASE
+                  LIMIT ? OFFSET ?"
+            ),
+            TrackSort::Added => concat!(
+                "SELECT ",
+                track_columns!(),
+                " FROM tracks t WHERE ",
+                available!(),
+                " ORDER BY t.added_at DESC, t.id DESC LIMIT ? OFFSET ?"
+            ),
+        };
+        let items = sqlx::query_as(sql)
+            .bind(limit)
+            .bind(offset)
+            .fetch_all(&self.pool)
+            .await?;
+        Ok(Page {
+            items,
+            total: self.track_count().await?,
+        })
     }
 
     /// Search-as-you-type over tracks, albums, and artists. Every word must
@@ -493,5 +622,65 @@ mod tests {
             .unwrap();
         assert_eq!(store.known_files().await.unwrap()[0].id, known[0].id);
         assert_eq!(store.track_count().await.unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn browse_pages() {
+        let store = Store::open_in_memory().await.unwrap();
+        store
+            .save_scanned(&[
+                scanned("/m/1.flac", "beta", "Zed", "Second"),
+                scanned("/m/2.flac", "Alpha", "zed", "Second"),
+                scanned("/m/3.flac", "gamma", "Abba", "First"),
+            ])
+            .await
+            .unwrap();
+
+        let artists = store.artists_page(0, 10).await.unwrap();
+        let names: Vec<_> = artists
+            .items
+            .iter()
+            .map(|a| (a.name.as_str(), a.track_count))
+            .collect();
+        assert_eq!(names, [("Abba", 1), ("Zed", 2)]);
+        assert_eq!(artists.total, 2);
+
+        let albums = store.albums_page(0, 1).await.unwrap();
+        assert_eq!((albums.items[0].title.as_str(), albums.total), ("First", 2));
+
+        let titles =
+            |page: Page<Track>| page.items.into_iter().map(|t| t.title).collect::<Vec<_>>();
+        assert_eq!(
+            titles(store.tracks_page(TrackSort::Title, 0, 10).await.unwrap()),
+            ["Alpha", "beta", "gamma"]
+        );
+        assert_eq!(
+            titles(store.tracks_page(TrackSort::Title, 1, 1).await.unwrap()),
+            ["beta"]
+        );
+        assert_eq!(
+            titles(store.tracks_page(TrackSort::Artist, 0, 10).await.unwrap()),
+            ["gamma", "Alpha", "beta"]
+        );
+
+        // Removed files drop out, and so do artists left with nothing.
+        let abba = store
+            .known_files()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|k| k.path == "/m/3.flac")
+            .unwrap();
+        store.mark_removed(&[abba.id]).await.unwrap();
+        assert_eq!(store.artists_page(0, 10).await.unwrap().total, 1);
+        assert_eq!(store.albums_page(0, 10).await.unwrap().total, 1);
+        assert_eq!(
+            store
+                .tracks_page(TrackSort::Added, 0, 10)
+                .await
+                .unwrap()
+                .total,
+            2
+        );
     }
 }

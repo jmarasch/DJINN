@@ -1,6 +1,7 @@
 <script lang="ts">
   import { api } from '../lib/api'
   import Art from '../lib/Art.svelte'
+  import Browse from './Browse.svelte'
   import Icon from '../lib/Icon.svelte'
   import TrackRow from '../lib/TrackRow.svelte'
   import type { SearchResults } from '../lib/types'
@@ -41,7 +42,7 @@
   <!-- svelte-ignore a11y_autofocus -->
   <input
     type="search"
-    placeholder="Songs, artists, albums"
+    placeholder="Search songs, artists, albums"
     bind:value={query}
     autofocus
     autocomplete="off"
@@ -84,7 +85,7 @@
     {/each}
   {/if}
 {:else if !query.trim()}
-  <p class="muted center">Search the library, then tap + to queue a song.</p>
+  <Browse />
 {/if}
 
 <style>

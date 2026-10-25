@@ -60,7 +60,7 @@
 
   <nav>
     <a href="#/" class:active={tab === 'now'}><Icon name="disc" /><span>Playing</span></a>
-    <a href="#/search" class:active={tab === 'search'}><Icon name="search" /><span>Search</span></a>
+    <a href="#/search" class:active={tab === 'search'}><Icon name="search" /><span>Library</span></a>
     <a href="#/queue" class:active={tab === 'queue'}>
       <Icon name="queue" />
       <span>Queue{app.queue.length ? ` (${app.queue.length})` : ''}</span>

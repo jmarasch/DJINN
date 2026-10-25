@@ -1,6 +1,7 @@
 // App-wide state, kept current by Server-Sent Events.
 
 import { api, ApiError } from './api'
+import { clearListCache } from './listCache'
 import type {
   NowPlaying,
   OutputStatus,
@@ -62,7 +63,10 @@ export function connect() {
     app.player = data
   })
   on<OutputStatus>('output_status', (data) => (app.output = data))
-  on<ScanProgress>('scan_progress', (data) => (app.scan = data))
+  on<ScanProgress>('scan_progress', (data) => {
+    app.scan = data
+    if (data.done) clearListCache()
+  })
 
   events.onerror = async () => {
     app.connected = false

@@ -111,3 +111,16 @@ export interface Settings {
   history_window: number
   per_user_limit: number
 }
+
+export interface Page<T> {
+  items: T[]
+  total: number
+}
+
+export interface ArtistSummary {
+  id: number
+  name: string
+  track_count: number
+}
+
+export type TrackSort = 'title' | 'artist' | 'added'

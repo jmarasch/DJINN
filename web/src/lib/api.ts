@@ -1,8 +1,11 @@
 import type {
+  Album,
   AlbumDetail,
   ArtistDetail,
+  ArtistSummary,
   NowPlaying,
   OutputStatus,
+  Page,
   PlayerState,
   PoolEntry,
   PoolKind,
@@ -12,6 +15,7 @@ import type {
   SearchResults,
   Settings,
   Track,
+  TrackSort,
   User,
 } from './types'
 
@@ -59,6 +63,10 @@ export const api = {
     post<User>('/auth/bootstrap', { token, username, password }),
 
   search: (q: string) => get<SearchResults>(`/search?q=${encodeURIComponent(q)}`),
+  artists: (offset: number) => get<Page<ArtistSummary>>(`/artists?offset=${offset}`),
+  albums: (offset: number) => get<Page<Album>>(`/albums?offset=${offset}`),
+  tracks: (sort: TrackSort, offset: number) =>
+    get<Page<Track>>(`/tracks?sort=${sort}&offset=${offset}`),
   track: (id: number) => get<Track>(`/tracks/${id}`),
   album: (id: number) => get<AlbumDetail>(`/albums/${id}`),
   artist: (id: number) => get<ArtistDetail>(`/artists/${id}`),

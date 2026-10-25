@@ -8,7 +8,9 @@ use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use djinn_library::{art, ScanProgress};
-use djinn_store::{AlbumDetail, ArtistDetail, SearchResults, Track};
+use djinn_store::{
+    Album, AlbumDetail, ArtistDetail, ArtistSummary, Page, SearchResults, Track, TrackSort,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::auth::{AdminUser, CurrentUser};
@@ -18,12 +20,17 @@ use crate::state::AppState;
 
 const DEFAULT_SEARCH_LIMIT: i64 = 20;
 const MAX_SEARCH_LIMIT: i64 = 100;
+const DEFAULT_PAGE: i64 = 50;
+const MAX_PAGE: i64 = 200;
 
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/search", get(search))
+        .route("/tracks", get(tracks))
         .route("/tracks/{id}", get(track))
+        .route("/albums", get(albums))
         .route("/albums/{id}", get(album))
+        .route("/artists", get(artists))
         .route("/artists/{id}", get(artist))
         .route("/art/{hash}", get(cover_art))
         .route("/library/rescan", post(rescan))
@@ -47,6 +54,53 @@ async fn search(
         .unwrap_or(DEFAULT_SEARCH_LIMIT)
         .clamp(1, MAX_SEARCH_LIMIT);
     Ok(Json(state.store.search(&query.q, limit).await?))
+}
+
+#[derive(Deserialize)]
+struct PageQuery {
+    #[serde(default)]
+    offset: i64,
+    limit: Option<i64>,
+    #[serde(default)]
+    sort: TrackSort,
+}
+
+impl PageQuery {
+    fn bounds(&self) -> (i64, i64) {
+        (
+            self.offset.max(0),
+            self.limit.unwrap_or(DEFAULT_PAGE).clamp(1, MAX_PAGE),
+        )
+    }
+}
+
+async fn artists(
+    _: CurrentUser,
+    State(state): State<AppState>,
+    Query(page): Query<PageQuery>,
+) -> ApiResult<Json<Page<ArtistSummary>>> {
+    let (offset, limit) = page.bounds();
+    Ok(Json(state.store.artists_page(offset, limit).await?))
+}
+
+async fn albums(
+    _: CurrentUser,
+    State(state): State<AppState>,
+    Query(page): Query<PageQuery>,
+) -> ApiResult<Json<Page<Album>>> {
+    let (offset, limit) = page.bounds();
+    Ok(Json(state.store.albums_page(offset, limit).await?))
+}
+
+async fn tracks(
+    _: CurrentUser,
+    State(state): State<AppState>,
+    Query(page): Query<PageQuery>,
+) -> ApiResult<Json<Page<Track>>> {
+    let (offset, limit) = page.bounds();
+    Ok(Json(
+        state.store.tracks_page(page.sort, offset, limit).await?,
+    ))
 }
 
 async fn track(
