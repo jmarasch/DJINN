@@ -20,6 +20,8 @@ djinn-store = { path = "../djinn-store" }
 figment.workspace = true
 futures-util = "0.3.34"
 getrandom = "0.4.3"
+if-addrs = "0.15.0"
+qrcode = { version = "0.14", default-features = false }
 rand = "0.10"
 rust-embed.workspace = true
 serde.workspace = true

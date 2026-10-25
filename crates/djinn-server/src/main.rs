@@ -2,6 +2,7 @@
 
 mod api;
 mod auth;
+mod banner;
 mod config;
 mod error;
 mod events;
@@ -118,21 +119,19 @@ async fn main() -> anyhow::Result<()> {
     });
     library_api::start_scan(&state);
 
-    if !store.admin_exists().await? {
+    let urls = banner::urls(config.server.listen);
+    let base_url = urls.first().cloned().unwrap_or_default();
+    let setup_url = if store.admin_exists().await? {
+        None
+    } else {
         let token = auth::new_token()?;
-        let port = config.server.listen.port();
-        let host = if config.server.listen.ip().is_unspecified() {
-            "localhost".to_owned()
-        } else {
-            config.server.listen.ip().to_string()
-        };
-        tracing::warn!(
-            "no admin account yet. Create one at http://{host}:{port}/setup?token={token}"
-        );
+        let url = format!("{base_url}/setup?token={token}");
+        tracing::warn!("no admin account yet. Create one at {url}");
         if let Ok(mut slot) = state.bootstrap_token.lock() {
             *slot = Some(token);
         }
-    }
+        Some(url)
+    };
 
     let listener = tokio::net::TcpListener::bind(config.server.listen)
         .await
@@ -142,6 +141,13 @@ async fn main() -> anyhow::Result<()> {
         addr = %config.server.listen,
         "DJINN listening"
     );
+    match &setup_url {
+        Some(url) => banner::print_qr(url, "Scan to create the admin account:"),
+        None => banner::print_qr(&base_url, "Scan to join the jukebox:"),
+    }
+    if urls.len() > 1 {
+        tracing::info!(urls = ?&urls[1..], "also reachable at");
+    }
 
     let shutdown = std::sync::Arc::clone(&state.shutdown);
     axum::serve(listener, app(state))
