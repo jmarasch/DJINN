@@ -4,6 +4,7 @@ mod api;
 mod auth;
 mod banner;
 mod config;
+mod desktop;
 mod error;
 mod events;
 mod jukebox;
@@ -22,7 +23,7 @@ use axum::Router;
 use clap::Parser;
 use djinn_engine::{Engine, EngineConfig};
 use djinn_store::Store;
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::{broadcast, mpsc, Notify};
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
 
@@ -37,6 +38,9 @@ struct Cli {
     /// ~/.config/djinn/config.toml elsewhere.
     #[arg(long)]
     config: Option<PathBuf>,
+    /// Don't show a system tray icon, even on a desktop.
+    #[arg(long)]
+    no_tray: bool,
 }
 
 #[tokio::main]
@@ -101,13 +105,16 @@ async fn main() -> anyhow::Result<()> {
         events.clone(),
     )
     .await?;
+    let urls = banner::urls(config.server.listen);
+    let base_url = urls.first().cloned().unwrap_or_default();
     let state = AppState::new(
         store.clone(),
         art_dir,
         config.library.roots.clone(),
         jukebox,
         events,
-    );
+    )
+    .with_join_url(base_url.clone());
 
     let jukebox = std::sync::Arc::clone(&state.jukebox);
     tokio::spawn(async move {
@@ -117,10 +124,7 @@ async fn main() -> anyhow::Result<()> {
             }
         }
     });
-    library_api::start_scan(&state);
 
-    let urls = banner::urls(config.server.listen);
-    let base_url = urls.first().cloned().unwrap_or_default();
     let setup_url = if store.admin_exists().await? {
         None
     } else {
@@ -148,16 +152,29 @@ async fn main() -> anyhow::Result<()> {
     if urls.len() > 1 {
         tracing::info!(urls = ?&urls[1..], "also reachable at");
     }
+    let tray = if config.server.tray && !cli.no_tray {
+        desktop::start_tray(&state, config.server.listen)
+    } else {
+        None
+    };
+
+    // Ready to serve from what the database already knows; look for
+    // changes on disk in the background.
+    library_api::start_scan(&state);
 
     let shutdown = std::sync::Arc::clone(&state.shutdown);
+    let shutdown_request = std::sync::Arc::clone(&state.shutdown_request);
     axum::serve(listener, app(state))
         .with_graceful_shutdown(async move {
-            shutdown_signal().await;
+            shutdown_signal(shutdown_request).await;
             shutdown.send_replace(true);
         })
         .await
         .context("server error")?;
 
+    // Remove the tray icon before exiting (Windows leaves a ghost icon
+    // otherwise).
+    drop(tray);
     // Stop audio before closing the database.
     drop(engine);
     store.close().await;
@@ -173,8 +190,9 @@ fn app(state: AppState) -> Router {
         .with_state(state)
 }
 
-/// Resolves on Ctrl+C, or SIGTERM on Unix (systemd stop).
-async fn shutdown_signal() {
+/// Resolves on Ctrl+C, SIGTERM on Unix (systemd stop), or a request from
+/// the tray menu.
+async fn shutdown_signal(request: std::sync::Arc<Notify>) {
     let ctrl_c = async {
         if let Err(err) = tokio::signal::ctrl_c().await {
             tracing::error!(%err, "failed to listen for Ctrl+C");
@@ -200,6 +218,7 @@ async fn shutdown_signal() {
     tokio::select! {
         () = ctrl_c => {},
         () = terminate => {},
+        () = request.notified() => {},
     }
     tracing::info!("shutdown signal received");
 }
@@ -227,6 +246,12 @@ mod tests {
     #[tokio::test]
     async fn unknown_api_path_is_404_not_spa() {
         assert_eq!(status("/api/nope").await, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn join_page_data_is_public() {
+        assert_eq!(status("/api/join").await, StatusCode::OK);
+        assert_eq!(status("/api/join/qr.svg").await, StatusCode::OK);
     }
 
     #[tokio::test]

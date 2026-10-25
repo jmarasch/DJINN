@@ -27,12 +27,15 @@ pub struct Config {
 #[serde(default)]
 pub struct ServerConfig {
     pub listen: SocketAddr,
+    /// Show a system tray icon when a desktop session is available.
+    pub tray: bool,
 }
 
 impl Default for ServerConfig {
     fn default() -> Self {
         Self {
             listen: SocketAddr::from(([0, 0, 0, 0], 8066)),
+            tray: true,
         }
     }
 }

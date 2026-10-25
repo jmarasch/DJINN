@@ -80,6 +80,8 @@
 
 <h1>Admin</h1>
 
+<a class="button join-link" href="/join" target="_blank" rel="noopener">Show join QR code</a>
+
 <section class="card">
   <h2>Player</h2>
   <div class="row">
@@ -252,6 +254,11 @@
 
   progress {
     width: 100%;
+  }
+
+  .join-link {
+    width: 100%;
+    margin-bottom: 16px;
   }
 
   .signout {

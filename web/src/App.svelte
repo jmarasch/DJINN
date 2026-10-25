@@ -7,6 +7,7 @@
   import Admin from './screens/Admin.svelte'
   import AlbumView from './screens/AlbumView.svelte'
   import ArtistView from './screens/ArtistView.svelte'
+  import Join from './screens/Join.svelte'
   import Login from './screens/Login.svelte'
   import NowPlaying from './screens/NowPlaying.svelte'
   import Queue from './screens/Queue.svelte'
@@ -14,8 +15,11 @@
   import Setup from './screens/Setup.svelte'
 
   const onSetupPage = $state(location.pathname === '/setup')
+  // The join page is for guests who haven't signed in yet.
+  const onJoinPage = location.pathname === '/join'
 
   onMount(async () => {
+    if (onJoinPage) return
     if (await refreshMe()) connect()
   })
 
@@ -32,7 +36,9 @@
   )
 </script>
 
-{#if !app.ready}
+{#if onJoinPage}
+  <Join />
+{:else if !app.ready}
   <div class="center-screen muted">Loading...</div>
 {:else if !app.me}
   <main class="narrow">

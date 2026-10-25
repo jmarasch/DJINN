@@ -39,6 +39,8 @@ crates/
   djinn-library/   scanner, tags, cover art, search
   djinn-store/     SQLite access, migrations, models
   djinn-server/    axum app, auth, API, SSE. Builds the `djinn` binary.
+  djinn-tray/      desktop tray icon (tray-icon: ksni on Linux, Win32 on Windows). No C deps,
+                   so `cargo check -p djinn-tray --target x86_64-pc-windows-gnu` works here.
 web/               Svelte app (built to web/dist, embedded by djinn-server)
 migrations/        sqlx migrations
 ```
@@ -51,7 +53,7 @@ migrations/        sqlx migrations
 ## Where things live
 
 - Engine: `player.rs` sequences tracks and shares one resampling stage across same-rate tracks (that is what keeps resampled albums gapless); `output.rs` owns the cpal stream and the realtime callback; `engine.rs` is the thread and command loop. `NextNeeded { after }` names the track the engine just took.
-- Server: `jukebox/` decides what plays (requests first, then the shuffle bag over the pool) and tracks queued, in-flight, and playing tracks; `events.rs` + `sse.rs` push live state; `*_api.rs` are the REST routes.
+- Server: `desktop.rs` runs the tray (skipped without a display or with `--no-tray` / `server.tray = false`); `banner.rs` picks the LAN URL and prints the terminal QR; the library check runs in the background after the server is listening. `jukebox/` decides what plays (requests first, then the shuffle bag over the pool) and tracks queued, in-flight, and playing tracks; `events.rs` + `sse.rs` push live state; `*_api.rs` are the REST routes.
 - Store: one module per area (`library`, `users`, `queue`); all SQL is static strings (sqlx 0.9 rejects dynamic SQL), with shared column lists as macros used through `concat!`.
 - Golden-sample audio fixtures: `crates/djinn-engine/tests/fixtures/` (README says how to regenerate). Phase 1 acceptance checklist: `docs/phase1-test-party.md`.
 

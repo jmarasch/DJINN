@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 
 use djinn_library::ScanProgress;
 use djinn_store::Store;
-use tokio::sync::{broadcast, watch};
+use tokio::sync::{broadcast, watch, Notify};
 
 use crate::events::ServerEvent;
 use crate::jukebox::Jukebox;
@@ -25,6 +25,10 @@ pub struct AppState {
     /// Set to true on shutdown so long-lived responses (SSE) end and the
     /// graceful shutdown can finish.
     pub shutdown: Arc<watch::Sender<bool>>,
+    /// Notified to request a shutdown (from the tray menu).
+    pub shutdown_request: Arc<Notify>,
+    /// The URL guests open, shown on the join page.
+    pub join_url: Arc<String>,
 }
 
 #[derive(Default)]
@@ -50,7 +54,14 @@ impl AppState {
             events,
             scan: Arc::default(),
             shutdown: Arc::new(watch::Sender::new(false)),
+            shutdown_request: Arc::new(Notify::new()),
+            join_url: Arc::new(String::new()),
         }
+    }
+
+    pub fn with_join_url(mut self, url: String) -> Self {
+        self.join_url = Arc::new(url);
+        self
     }
 
     /// In-memory state with no audio engine, for tests.

@@ -195,6 +195,7 @@ pub fn start_scan(state: &AppState) -> bool {
     }
     let state = state.clone();
     tokio::spawn(async move {
+        tracing::info!("checking the library for changes");
         let started = std::time::Instant::now();
         let progress_state = state.clone();
         let result = djinn_library::scan(
@@ -219,7 +220,7 @@ pub fn start_scan(state: &AppState) -> bool {
                     read = summary.read,
                     removed = summary.removed,
                     secs = started.elapsed().as_secs_f32(),
-                    "library scan finished"
+                    "library check finished"
                 );
                 // New tracks may have joined pooled albums and artists.
                 if let Err(e) = state.jukebox.lock().await.pool_changed().await {

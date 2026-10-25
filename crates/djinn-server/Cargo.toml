@@ -17,11 +17,13 @@ dirs.workspace = true
 djinn-engine = { path = "../djinn-engine" }
 djinn-library = { path = "../djinn-library" }
 djinn-store = { path = "../djinn-store" }
+djinn-tray = { path = "../djinn-tray" }
 figment.workspace = true
 futures-util = "0.3.34"
 getrandom = "0.4.3"
+open = "5.4.5"
 if-addrs = "0.15.0"
-qrcode = { version = "0.14", default-features = false }
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 rand = "0.10"
 rust-embed.workspace = true
 serde.workspace = true
