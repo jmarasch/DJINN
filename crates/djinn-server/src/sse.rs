@@ -33,7 +33,8 @@ impl Audience {
             Self::Member => true,
             Self::Tv => matches!(
                 event,
-                ServerEvent::NowPlaying(_)
+                ServerEvent::Hello { .. }
+                    | ServerEvent::NowPlaying(_)
                     | ServerEvent::Position { .. }
                     | ServerEvent::QueueChanged(_)
                     | ServerEvent::PlayerState(_)
@@ -95,6 +96,9 @@ async fn snapshot(state: &AppState) -> anyhow::Result<Vec<ServerEvent>> {
     let mut events = {
         let jukebox = state.jukebox.lock().await;
         vec![
+            ServerEvent::Hello {
+                web_build: crate::web::build_id(),
+            },
             ServerEvent::NowPlaying(Box::new(jukebox.now_playing())),
             ServerEvent::PlayerState(jukebox.player_state()),
             ServerEvent::OutputStatus(jukebox.output_status()),

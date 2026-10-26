@@ -2,6 +2,7 @@
   // Full-screen now playing for a TV or spare tablet: no sign-in, read only.
   import { onMount } from 'svelte'
   import { duration } from '../lib/format'
+  import { reloadIfUpdated } from '../lib/state.svelte'
   import type { NowPlaying, PlayerState, QueueItem, Track } from '../lib/types'
 
   const UP_NEXT = 6
@@ -73,6 +74,7 @@
     events = new EventSource('/api/tv/events')
     const on = <T,>(name: string, handle: (data: T) => void) =>
       events?.addEventListener(name, (e) => handle(JSON.parse((e as MessageEvent).data)))
+    on<{ web_build: string | null }>('hello', (data) => reloadIfUpdated(data.web_build))
     on<NowPlaying>('now_playing', (data) => {
       nowPlaying = data
       setPosition(data.position_ms)

@@ -64,6 +64,13 @@ export function currentPosition(): number {
 
 let events: EventSource | null = null
 
+/** DJINN was updated while this page was open: load the new app. */
+export function reloadIfUpdated(serverBuild: string | null) {
+  // Only built pages have a hashed script; `npm run dev` doesn't.
+  const mine = document.querySelector('script[type="module"][src*="/assets/index-"]')?.getAttribute('src')
+  if (serverBuild && mine && !mine.endsWith(serverBuild)) location.reload()
+}
+
 export function connect() {
   events?.close()
   events = new EventSource('/api/events')
@@ -74,6 +81,7 @@ export function connect() {
       handle(data ? JSON.parse(data) : (null as T))
     })
 
+  on<{ web_build: string | null }>('hello', (data) => reloadIfUpdated(data.web_build))
   on<NowPlaying>('now_playing', (data) => {
     app.nowPlaying = data
     setPosition(data.position_ms)

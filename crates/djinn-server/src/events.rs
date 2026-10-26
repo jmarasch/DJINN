@@ -9,6 +9,11 @@ use serde::Serialize;
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum ServerEvent {
+    /// First on every connection: the web app build the server has, so an
+    /// out-of-date page reloads.
+    Hello {
+        web_build: Option<String>,
+    },
     NowPlaying(Box<NowPlaying>),
     Position {
         track_id: i64,
@@ -30,6 +35,7 @@ pub enum ServerEvent {
 impl ServerEvent {
     pub fn name(&self) -> &'static str {
         match self {
+            Self::Hello { .. } => "hello",
             Self::NowPlaying(_) => "now_playing",
             Self::Position { .. } => "position",
             Self::QueueChanged(_) => "queue_changed",

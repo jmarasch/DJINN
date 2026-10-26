@@ -37,6 +37,16 @@ pub async fn static_handler(uri: Uri) -> Response {
     })
 }
 
+/// Which web app build is embedded: its main script's hashed file name.
+/// Clients compare it with their own and reload when DJINN was updated.
+pub fn build_id() -> Option<String> {
+    let index = Assets::get("index.html")?;
+    let html = std::str::from_utf8(&index.data).ok()?;
+    let start = html.find("/assets/index-")? + 1;
+    let end = start + html[start..].find(".js")? + 3;
+    Some(html[start..end].to_owned())
+}
+
 fn asset(path: &str) -> Option<Response> {
     let file = Assets::get(path)?;
     // Vite puts content-hashed files under assets/, so they never change.

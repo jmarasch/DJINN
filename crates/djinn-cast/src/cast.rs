@@ -34,6 +34,9 @@ const HEARTBEAT: Duration = Duration::from_secs(5);
 /// No reply to pings for this long means the device is gone.
 const SILENCE_LIMIT: Duration = Duration::from_secs(20);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+/// Our app missing this long (after it had loaded) means it was closed,
+/// not restarted.
+const APP_GONE: Duration = Duration::from_secs(6);
 
 type Tls = tokio_rustls::client::TlsStream<TcpStream>;
 
@@ -61,8 +64,12 @@ pub(crate) async fn play(
     .await?;
 
     let mut session: Option<String> = None;
-    let mut transport: Option<String> = None;
-    let mut loaded = false;
+    // The app instance (transport) the media or page went to. A device may
+    // restart the app on launch, so a new instance gets it again.
+    let mut loaded_into: Option<String> = None;
+    let mut ever_loaded = false;
+    // Since when our app has been missing, after it had loaded.
+    let mut missing_since: Option<tokio::time::Instant> = None;
     let mut heartbeat = tokio::time::interval(HEARTBEAT);
     let mut last_heard = tokio::time::Instant::now();
     loop {
@@ -72,6 +79,9 @@ pub(crate) async fn play(
                 last_heard = tokio::time::Instant::now();
                 let payload: Value = serde_json::from_str(&message.payload).unwrap_or(Value::Null);
                 let kind = payload["type"].as_str().unwrap_or_default();
+                if kind != "PING" && kind != "PONG" {
+                    tracing::debug!(from = %message.source, namespace = %message.namespace, payload = %message.payload, "cast message");
+                }
                 match (message.namespace.as_str(), kind) {
                     (NS_HEARTBEAT, "PING") => {
                         conn.send(&message.source, NS_HEARTBEAT, json!({"type": "PONG"})).await?;
@@ -104,7 +114,8 @@ pub(crate) async fn play(
                                     CastMedia::Stream { .. } => true,
                                     CastMedia::Page { .. } => page_channel.is_some(),
                                 };
-                                if !loaded && ready {
+                                missing_since = None;
+                                if loaded_into != id && ready {
                                     if let Some(id) = id.clone() {
                                         conn.send(&id, NS_CONNECTION, json!({"type": "CONNECT"})).await?;
                                         match media {
@@ -124,18 +135,35 @@ pub(crate) async fn play(
                                                 });
                                             }
                                         }
-                                        loaded = true;
+                                        loaded_into = Some(id);
+                                        ever_loaded = true;
                                     }
                                 }
-                                transport = id;
                             }
-                            // Our receiver closed: someone cast something
-                            // else, or it was stopped on the device.
-                            None if loaded => {
-                                state.send_modify(|s| s.error = Some("Stopped on the device".into()));
-                                return Ok(());
+                            // Our app is gone: someone cast something else, or
+                            // it was stopped on the device. Or it's restarting,
+                            // which takes a moment, so only give up after a
+                            // while (the heartbeat keeps asking meanwhile).
+                            None if ever_loaded => {
+                                loaded_into = None;
+                                let since = *missing_since.get_or_insert_with(tokio::time::Instant::now);
+                                if since.elapsed() >= APP_GONE {
+                                    state.send_modify(|s| s.error = Some("Stopped on the device".into()));
+                                    return Ok(());
+                                }
                             }
                             None => {}
+                        }
+                    }
+                    (NS_RECEIVER, "LAUNCH_STATUS") => {
+                        // Some devices (Nest Hubs) ask on screen before a new
+                        // app may cast.
+                        let status = payload["status"].as_str().unwrap_or_default();
+                        if status.contains("PENDING") {
+                            state.send_modify(|s| s.error = Some("Waiting for someone to allow it on the device".into()));
+                        } else if status.contains("DENIED") || status.contains("REJECT") {
+                            state.send_modify(|s| s.error = Some("Not allowed on the device".into()));
+                            return Ok(());
                         }
                     }
                     (NS_RECEIVER, "LAUNCH_ERROR") => {
@@ -157,9 +185,11 @@ pub(crate) async fn play(
                     (NS_MEDIA, "LOAD_FAILED" | "LOAD_CANCELLED" | "INVALID_REQUEST") => {
                         return Err(format!("the device rejected the stream ({kind})"));
                     }
-                    (NS_CONNECTION, "CLOSE") if Some(&message.source) == transport.as_ref() => {
-                        state.send_modify(|s| s.error = Some("Stopped on the device".into()));
-                        return Ok(());
+                    // The app instance we loaded into closed. It may be
+                    // restarting; the next status says whether it's gone.
+                    (NS_CONNECTION, "CLOSE") if Some(&message.source) == loaded_into.as_ref() => {
+                        loaded_into = None;
+                        conn.request(RECEIVER, NS_RECEIVER, json!({"type": "GET_STATUS"})).await?;
                     }
                     _ => {}
                 }
@@ -170,7 +200,7 @@ pub(crate) async fn play(
                 }
                 conn.send(RECEIVER, NS_HEARTBEAT, json!({"type": "PING"})).await?;
                 // Still waiting for the app to be ready: ask again.
-                if !loaded {
+                if loaded_into.is_none() {
                     conn.request(RECEIVER, NS_RECEIVER, json!({"type": "GET_STATUS"})).await?;
                 }
             }
