@@ -17,7 +17,7 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use djinn_store::{now_ms, ArtistInfo, Store};
+use djinn_store::{ArtistInfo, Store};
 use serde::Deserialize;
 use tokio::time::Instant;
 
@@ -28,8 +28,6 @@ const USER_AGENT: &str = concat!(
     env!("CARGO_PKG_VERSION"),
     " (self-hosted party jukebox)"
 );
-/// Look things up again after this long, in case the services gained info.
-const RECHECK_AFTER_MS: i64 = 30 * 24 * 60 * 60 * 1000;
 /// Pause between artists, to be polite to Deezer and Wikipedia.
 const PAUSE: Duration = Duration::from_millis(600);
 /// MusicBrainz allows one request per second.
@@ -83,19 +81,18 @@ pub struct LookupSummary {
     pub genres: usize,
 }
 
-/// Looks up artists (and, with MusicBrainz, albums) not checked recently,
-/// then refreshes which pictures are shown.
+/// Looks up artists (and, with MusicBrainz, albums) that haven't been
+/// looked up yet (new ones, or ones whose lookup failed), or every one with
+/// `force`. Then refreshes which pictures are shown.
 pub async fn lookup_artists(
     store: &Store,
     art_dir: &std::path::Path,
     options: &LookupOptions,
 ) -> Result<LookupSummary, LibraryError> {
     let mut services = Services::new(options.musicbrainz_contact.as_deref())?;
-    let older_than = if options.force {
-        i64::MAX
-    } else {
-        now_ms() - RECHECK_AFTER_MS
-    };
+    // Without `force`, only never-checked ones (no check time is older
+    // than the oldest possible time).
+    let older_than = if options.force { i64::MAX } else { i64::MIN };
     let mut summary = LookupSummary::default();
 
     for artist in store.artists_for_info_lookup(older_than).await? {

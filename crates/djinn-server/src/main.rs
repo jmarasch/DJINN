@@ -129,13 +129,18 @@ async fn main() -> anyhow::Result<()> {
     let urls = banner::urls(config.server.listen);
     let base_url = urls.first().cloned().unwrap_or_default();
     // Older cache files had no extension; give them one so the folder is
-    // easy to browse.
-    let renamed = {
-        let art_dir = art_dir.clone();
-        tokio::task::spawn_blocking(move || djinn_library::art::add_extensions(&art_dir)).await?
-    };
-    if renamed > 0 {
-        tracing::info!(renamed, "named cached images with file extensions");
+    // easy to browse. Once is enough.
+    const ART_NAMED: &str = "art_extensions_named";
+    if store.get_setting(ART_NAMED).await?.is_none() {
+        let renamed = {
+            let art_dir = art_dir.clone();
+            tokio::task::spawn_blocking(move || djinn_library::art::add_extensions(&art_dir))
+                .await?
+        };
+        if renamed > 0 {
+            tracing::info!(renamed, "named cached images with file extensions");
+        }
+        store.set_setting(ART_NAMED, "1").await?;
     }
     let state = AppState::new(
         store.clone(),

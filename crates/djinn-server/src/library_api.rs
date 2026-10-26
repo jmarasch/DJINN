@@ -387,6 +387,11 @@ pub fn start_scan(state: &AppState) -> bool {
                     secs = started.elapsed().as_secs_f32(),
                     "library check finished"
                 );
+                // Nothing new or gone: no artists to look up, no songs to
+                // measure, and the playlist is the same.
+                if summary.read == 0 && summary.removed == 0 {
+                    return;
+                }
                 let _ = state.events.send(ServerEvent::LibraryChanged);
                 if crate::jukebox::setting(&state.store, crate::jukebox::ONLINE_INFO, 0)
                     .await

@@ -496,6 +496,7 @@
   }
 
   .switch input {
+    flex: none;
     width: 20px;
     min-height: 20px;
     accent-color: var(--accent);

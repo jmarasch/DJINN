@@ -147,7 +147,10 @@ pub async fn scan(
         .map(|k| k.id)
         .collect();
     store.mark_removed(&vanished).await?;
-    store.refresh_artwork().await?;
+    // Which pictures show only changes when files do.
+    if status.read > 0 || !vanished.is_empty() {
+        store.refresh_artwork().await?;
+    }
     store
         .set_setting(SCAN_VERSION_KEY, &SCAN_VERSION.to_string())
         .await?;
