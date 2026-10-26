@@ -149,6 +149,42 @@ pub struct ArtistSummary {
     pub track_count: i64,
 }
 
+/// A name as sorted: a leading "The", "A", or "An" doesn't count, so The
+/// Weeknd files under W.
+macro_rules! sort_key {
+    ($col:literal) => {
+        concat!(
+            "(CASE WHEN ",
+            $col,
+            " LIKE 'the %' THEN substr(",
+            $col,
+            ", 5) ",
+            "WHEN ",
+            $col,
+            " LIKE 'an %' THEN substr(",
+            $col,
+            ", 4) ",
+            "WHEN ",
+            $col,
+            " LIKE 'a %' THEN substr(",
+            $col,
+            ", 3) ",
+            "ELSE ",
+            $col,
+            " END) COLLATE NOCASE"
+        )
+    };
+}
+
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AlbumSort {
+    #[default]
+    Name,
+    /// Newest first.
+    Year,
+}
+
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum TrackSort {
@@ -388,6 +424,18 @@ impl Store {
         .fetch_optional(&self.pool)
         .await?;
         Ok(track)
+    }
+
+    /// Every playable track (for wild play).
+    pub async fn library_track_ids(&self) -> Result<Vec<i64>> {
+        let ids = sqlx::query_scalar(concat!(
+            "SELECT t.id FROM tracks t WHERE ",
+            available!(),
+            " ORDER BY t.id"
+        ))
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(ids)
     }
 
     /// Filesystem path of a playable track, for the engine.
@@ -642,7 +690,9 @@ impl Store {
         let items = sqlx::query_as(concat!(
             "SELECT id, name, art_hash, track_count FROM (",
             artist_counts!(),
-            ") WHERE track_count > 0 ORDER BY name COLLATE NOCASE LIMIT ? OFFSET ?"
+            ") WHERE track_count > 0 ORDER BY ",
+            sort_key!("name"),
+            " LIMIT ? OFFSET ?"
         ))
         .bind(limit)
         .bind(offset)
@@ -658,20 +708,42 @@ impl Store {
         Ok(Page { items, total })
     }
 
-    /// Albums with playable tracks, A to Z.
-    pub async fn albums_page(&self, offset: i64, limit: i64) -> Result<Page<Album>> {
-        let items = sqlx::query_as(concat!(
-            "SELECT ",
-            album_columns!(),
-            " FROM albums al JOIN artists ar ON ar.id = al.artist_id
-             WHERE EXISTS (SELECT 1 FROM tracks t WHERE t.album_id = al.id AND ",
-            available!(),
-            ") ORDER BY al.title COLLATE NOCASE, ar.name COLLATE NOCASE LIMIT ? OFFSET ?"
-        ))
-        .bind(limit)
-        .bind(offset)
-        .fetch_all(&self.pool)
-        .await?;
+    /// Albums with playable tracks, A to Z or newest first.
+    pub async fn albums_page(
+        &self,
+        sort: AlbumSort,
+        offset: i64,
+        limit: i64,
+    ) -> Result<Page<Album>> {
+        let sql = match sort {
+            AlbumSort::Name => concat!(
+                "SELECT ",
+                album_columns!(),
+                " FROM albums al JOIN artists ar ON ar.id = al.artist_id
+                 WHERE EXISTS (SELECT 1 FROM tracks t WHERE t.album_id = al.id AND ",
+                available!(),
+                ") ORDER BY ",
+                sort_key!("al.title"),
+                ", ",
+                sort_key!("ar.name"),
+                " LIMIT ? OFFSET ?"
+            ),
+            AlbumSort::Year => concat!(
+                "SELECT ",
+                album_columns!(),
+                " FROM albums al JOIN artists ar ON ar.id = al.artist_id
+                 WHERE EXISTS (SELECT 1 FROM tracks t WHERE t.album_id = al.id AND ",
+                available!(),
+                ") ORDER BY al.year IS NULL, al.year DESC, ",
+                sort_key!("al.title"),
+                " LIMIT ? OFFSET ?"
+            ),
+        };
+        let items = sqlx::query_as(sql)
+            .bind(limit)
+            .bind(offset)
+            .fetch_all(&self.pool)
+            .await?;
         let total = sqlx::query_scalar(concat!(
             "SELECT count(*) FROM albums al
              WHERE EXISTS (SELECT 1 FROM tracks t WHERE t.album_id = al.id AND ",
@@ -703,10 +775,11 @@ impl Store {
                 track_columns!(),
                 " FROM tracks t WHERE ",
                 available!(),
-                " ORDER BY coalesce(t.album_artist, t.artist) IS NULL,
-                           coalesce(t.album_artist, t.artist) COLLATE NOCASE,
-                           t.album COLLATE NOCASE, t.disc_no, t.track_no, t.title COLLATE NOCASE
-                  LIMIT ? OFFSET ?"
+                " ORDER BY coalesce(t.album_artist, t.artist) IS NULL, ",
+                sort_key!("coalesce(t.album_artist, t.artist)"),
+                ", ",
+                sort_key!("t.album"),
+                ", t.disc_no, t.track_no, t.title COLLATE NOCASE LIMIT ? OFFSET ?"
             ),
             TrackSort::Added => concat!(
                 "SELECT ",
@@ -1035,7 +1108,7 @@ mod tests {
         assert_eq!(names, [("Abba", 1), ("Zed", 2)]);
         assert_eq!(artists.total, 2);
 
-        let albums = store.albums_page(0, 1).await.unwrap();
+        let albums = store.albums_page(AlbumSort::Name, 0, 1).await.unwrap();
         assert_eq!((albums.items[0].title.as_str(), albums.total), ("First", 2));
 
         let titles =
@@ -1063,7 +1136,14 @@ mod tests {
             .unwrap();
         store.mark_removed(&[abba.id]).await.unwrap();
         assert_eq!(store.artists_page(0, 10).await.unwrap().total, 1);
-        assert_eq!(store.albums_page(0, 10).await.unwrap().total, 1);
+        assert_eq!(
+            store
+                .albums_page(AlbumSort::Name, 0, 10)
+                .await
+                .unwrap()
+                .total,
+            1
+        );
         assert_eq!(
             store
                 .tracks_page(TrackSort::Added, 0, 10)
@@ -1098,7 +1178,11 @@ mod tests {
             .await
             .unwrap();
         store.refresh_artwork().await.unwrap();
-        let album = &store.albums_page(0, 5).await.unwrap().items[0];
+        let album = &store
+            .albums_page(AlbumSort::Name, 0, 5)
+            .await
+            .unwrap()
+            .items[0];
         assert_eq!(album.art_hash.as_deref(), Some("first"));
         let artist = &store.artists_page(0, 5).await.unwrap().items[0];
         assert_eq!(artist.art_hash.as_deref(), Some("artistpic"));
@@ -1109,7 +1193,11 @@ mod tests {
             .await
             .unwrap();
         store.refresh_artwork().await.unwrap();
-        let album = &store.albums_page(0, 5).await.unwrap().items[0];
+        let album = &store
+            .albums_page(AlbumSort::Name, 0, 5)
+            .await
+            .unwrap()
+            .items[0];
         assert_eq!(album.art_hash.as_deref(), Some("folder"));
 
         // Renamed artist: the old one disappears once nothing uses it.
@@ -1133,7 +1221,12 @@ mod tests {
             .save_scanned(&[scanned("/m/1.flac", "One", "A", "Record")])
             .await
             .unwrap();
-        let album = store.albums_page(0, 1).await.unwrap().items[0].id;
+        let album = store
+            .albums_page(AlbumSort::Name, 0, 1)
+            .await
+            .unwrap()
+            .items[0]
+            .id;
         store
             .save_album_info(album, Some("onlinecover"), None, None, true)
             .await
@@ -1141,6 +1234,52 @@ mod tests {
         store.refresh_artwork().await.unwrap();
         let track = &store.search("one", 5).await.unwrap().tracks[0];
         assert_eq!(track.art_hash.as_deref(), Some("onlinecover"));
+    }
+
+    #[tokio::test]
+    async fn sorting_skips_leading_articles_and_albums_sort_by_year() {
+        let store = Store::open_in_memory().await.unwrap();
+        let mut tracks = vec![
+            scanned("/m/1.flac", "Blinding Lights", "The Weeknd", "After Hours"),
+            scanned(
+                "/m/2.flac",
+                "Can I Kick It?",
+                "A Tribe Called Quest",
+                "Low End Theory",
+            ),
+            scanned("/m/3.flac", "Uptown Funk", "Bruno Mars", "Uptown Special"),
+            scanned("/m/4.flac", "Theme", "Theory of a Deadman", "Gasoline"),
+        ];
+        tracks[0].year = Some(2020);
+        tracks[1].year = Some(1991);
+        tracks[2].year = Some(2015);
+        store.save_scanned(&tracks).await.unwrap();
+
+        let artists = store.artists_page(0, 10).await.unwrap();
+        let names: Vec<&str> = artists.items.iter().map(|a| a.name.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "Bruno Mars",
+                "Theory of a Deadman",
+                "A Tribe Called Quest",
+                "The Weeknd"
+            ],
+            "\"Theory\" is a word, not \"The\""
+        );
+        let by_year = store.albums_page(AlbumSort::Year, 0, 10).await.unwrap();
+        let titles: Vec<&str> = by_year.items.iter().map(|a| a.title.as_str()).collect();
+        assert_eq!(
+            titles,
+            [
+                "After Hours",
+                "Uptown Special",
+                "Low End Theory",
+                "Gasoline"
+            ],
+            "newest first, unknown years last"
+        );
+        assert_eq!(store.library_track_ids().await.unwrap().len(), 4);
     }
 
     #[tokio::test]

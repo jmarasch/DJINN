@@ -9,7 +9,8 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use djinn_library::{art, ScanProgress};
 use djinn_store::{
-    Album, AlbumDetail, ArtistDetail, ArtistSummary, Page, SearchResults, Track, TrackSort,
+    Album, AlbumDetail, AlbumSort, ArtistDetail, ArtistSummary, Page, SearchResults, Track,
+    TrackSort,
 };
 use serde::{Deserialize, Serialize};
 
@@ -85,13 +86,29 @@ async fn artists(
     Ok(Json(state.store.artists_page(offset, limit).await?))
 }
 
+#[derive(Deserialize)]
+struct AlbumQuery {
+    #[serde(default)]
+    offset: i64,
+    limit: Option<i64>,
+    #[serde(default)]
+    sort: AlbumSort,
+}
+
 async fn albums(
     _: CurrentUser,
     State(state): State<AppState>,
-    Query(page): Query<PageQuery>,
+    Query(query): Query<AlbumQuery>,
 ) -> ApiResult<Json<Page<Album>>> {
+    let page = PageQuery {
+        offset: query.offset,
+        limit: query.limit,
+        sort: TrackSort::default(),
+    };
     let (offset, limit) = page.bounds();
-    Ok(Json(state.store.albums_page(offset, limit).await?))
+    Ok(Json(
+        state.store.albums_page(query.sort, offset, limit).await?,
+    ))
 }
 
 async fn tracks(

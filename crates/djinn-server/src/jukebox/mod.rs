@@ -45,6 +45,9 @@ pub const MUSICBRAINZ_CONTACT: &str = "musicbrainz_contact";
 /// Playlist that plays when nobody has requested anything; 0 or missing
 /// means none.
 pub const ACTIVE_PLAYLIST: &str = "active_playlist";
+/// The active "playlist" id for wild play: random songs from the whole
+/// library.
+pub const WILD_PLAY: i64 = -1;
 /// Votes that skip a song; 0 turns skip voting off.
 pub const SKIP_VOTES: &str = "skip_votes";
 /// Last song the active playlist played, so in-order playback resumes.
@@ -369,6 +372,11 @@ impl Jukebox {
         let id = setting(&self.store, ACTIVE_PLAYLIST, 0).await?;
         self.active = match id {
             0 => None,
+            WILD_PLAY => Some(PlaylistRef {
+                id: WILD_PLAY,
+                name: "Wild play".to_owned(),
+                shuffle: true,
+            }),
             id => self
                 .store
                 .playlists()
@@ -387,6 +395,7 @@ impl Jukebox {
     /// Songs the active playlist covers, in order.
     async fn auto_mix_ids(&self) -> anyhow::Result<Vec<i64>> {
         Ok(match &self.active {
+            Some(playlist) if playlist.id == WILD_PLAY => self.store.library_track_ids().await?,
             Some(playlist) => self.store.playlist_track_ids(playlist.id).await?,
             None => Vec::new(),
         })
@@ -1020,6 +1029,20 @@ mod tests {
         // -18 LUFS target from -8 LUFS: -10 dB.
         let gain = gain_sent(&h).unwrap();
         assert!((gain - 10f32.powf(-0.5)).abs() < 1e-4, "gain {gain}");
+    }
+
+    #[tokio::test]
+    async fn wild_play_draws_from_the_whole_library() {
+        let mut h = Harness::new(0).await;
+        h.event(EngineEvent::NextNeeded { after: None }).await;
+        assert_eq!(h.last_next(), None, "nothing to play yet");
+        h.jukebox.play_playlist(WILD_PLAY, None).await.unwrap();
+        assert_eq!(h.jukebox.player_state().playlist.unwrap().name, "Wild play");
+        let mut seen = std::collections::HashSet::new();
+        for _ in 0..h.tracks.len() {
+            seen.insert(h.play_next().await);
+        }
+        assert_eq!(seen.len(), h.tracks.len(), "every song, none repeated");
     }
 
     #[tokio::test]

@@ -18,6 +18,7 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/playlists", get(list).post(create))
         .route("/playlists/stop", post(stop))
+        .route("/playlists/wild/play", post(play_wild))
         .route("/playlists/{id}", get(detail).patch(update).delete(remove))
         .route("/playlists/{id}/play", post(play))
         .route("/playlists/{id}/entries", post(add_entry))
@@ -137,6 +138,18 @@ async fn play(
         .lock()
         .await
         .play_playlist(id, body.from_track_id)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Wild play: random songs from the whole library when the requests run
+/// out.
+async fn play_wild(_: AdminUser, State(state): State<AppState>) -> ApiResult<StatusCode> {
+    state
+        .jukebox
+        .lock()
+        .await
+        .play_playlist(crate::jukebox::WILD_PLAY, None)
         .await?;
     Ok(StatusCode::NO_CONTENT)
 }

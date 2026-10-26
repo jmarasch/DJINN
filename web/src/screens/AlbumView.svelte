@@ -4,8 +4,10 @@
   import Icon from '../lib/Icon.svelte'
   import AddToPlaylist from '../lib/AddToPlaylist.svelte'
   import QueueAll from '../lib/QueueAll.svelte'
+  import SortChoice from '../lib/SortChoice.svelte'
   import TrackRow from '../lib/TrackRow.svelte'
-  import type { AlbumDetail } from '../lib/types'
+  import { byName } from '../lib/format'
+  import type { AlbumDetail, Track } from '../lib/types'
 
   let { id }: { id: number } = $props()
   let album = $state<AlbumDetail | null>(null)
@@ -18,6 +20,15 @@
       .then((a) => (album = a))
       .catch((e) => (error = e.message))
   })
+
+  let trackSort = $state<'number' | 'name'>('number')
+  const tracks = $derived(
+    album ? (trackSort === 'name' ? [...album.tracks].sort(byName<Track>((t) => t.title)) : album.tracks) : [],
+  )
+  const trackOrders: { value: 'number' | 'name'; label: string }[] = [
+    { value: 'number', label: 'Track order' },
+    { value: 'name', label: 'A to Z' },
+  ]
 </script>
 
 <button class="back" onclick={() => history.back()}><Icon name="back" /> Back</button>
@@ -38,7 +49,12 @@
       </div>
     </div>
   </header>
-  {#each album.tracks as track (track.id)}
+  {#if album.tracks.length > 1}
+    <div class="sort">
+      <SortChoice options={trackOrders} bind:value={trackSort} storageKey="djinn-album-track-sort" label="Sort songs" />
+    </div>
+  {/if}
+  {#each tracks as track (track.id)}
     <TrackRow {track} showArt={false} showAlbum={false} number={track.track_no} />
   {/each}
 {/if}
@@ -64,5 +80,11 @@
 
   header a {
     color: var(--text);
+  }
+
+  .sort {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 4px;
   }
 </style>

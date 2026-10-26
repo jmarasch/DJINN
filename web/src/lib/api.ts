@@ -1,5 +1,6 @@
 import type {
   Album,
+  AlbumSort,
   AudioDevice,
   CastList,
   AlbumDetail,
@@ -82,7 +83,8 @@ export const api = {
 
   search: (q: string) => get<SearchResults>(`/search?q=${encodeURIComponent(q)}`),
   artists: (offset: number) => get<Page<ArtistSummary>>(`/artists?offset=${offset}`),
-  albums: (offset: number) => get<Page<Album>>(`/albums?offset=${offset}`),
+  albums: (sort: AlbumSort, offset: number) => get<Page<Album>>(`/albums?sort=${sort}&offset=${offset}`),
+  playWild: () => post<void>('/playlists/wild/play'),
   tracks: (sort: TrackSort, offset: number) =>
     get<Page<Track>>(`/tracks?sort=${sort}&offset=${offset}`),
   track: (id: number) => get<Track>(`/tracks/${id}`),

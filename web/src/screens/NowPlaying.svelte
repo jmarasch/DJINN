@@ -97,7 +97,11 @@
 
 <div class="top">
   {#if app.player.playlist}
-    <a class="source" href="#/playlist/{app.player.playlist.id}" class:plain={!isAdmin()}>
+    <a
+      class="source"
+      href={app.player.playlist.id < 0 ? '#/playlists' : `#/playlist/${app.player.playlist.id}`}
+      class:plain={!isAdmin()}
+    >
       <Icon name={app.player.playlist.shuffle ? 'shuffle' : 'ordered'} size={16} />
       {app.player.playlist.name}
     </a>

@@ -36,6 +36,18 @@
   async function stop() {
     await api.stopPlaylist().catch((e) => toast(e.message, true))
   }
+
+  async function playWild() {
+    try {
+      await api.playWild()
+      toast('Wild play: random songs from the whole library')
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not start wild play', true)
+    }
+  }
+
+  /** Wild play has no playlist of its own: its id is negative. */
+  const wild = $derived((app.player.playlist?.id ?? 0) < 0)
 </script>
 
 <h1>Playlists</h1>
@@ -51,6 +63,19 @@
     <button onclick={stop}>Stop</button>
   </div>
 {/if}
+
+<div class="row wild" class:active={wild}>
+  <span class="icon"><Icon name="shuffle" /></span>
+  <span class="text">
+    <span class="ellipsis block">Wild play</span>
+    <span class="muted small">Random songs from your whole library, no repeats until it runs out</span>
+  </span>
+  {#if wild}
+    <span class="badge">Playing</span>
+  {:else}
+    <button class="primary" onclick={playWild}>Play</button>
+  {/if}
+</div>
 
 <form class="new" onsubmit={create}>
   <input placeholder="New playlist, e.g. Chill or Dance" bind:value={name} maxlength="60" />
@@ -74,6 +99,16 @@
 {/each}
 
 <style>
+  .wild {
+    margin-bottom: 12px;
+  }
+
+  .wild button {
+    flex: none;
+    min-height: 36px;
+    padding: 0 16px;
+  }
+
   .playing {
     flex-direction: row;
     align-items: center;

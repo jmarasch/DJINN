@@ -4,8 +4,10 @@
   import { api } from '../lib/api'
   import Art from '../lib/Art.svelte'
   import Icon from '../lib/Icon.svelte'
+  import SortChoice from '../lib/SortChoice.svelte'
   import TrackRow from '../lib/TrackRow.svelte'
-  import type { ArtistDetail } from '../lib/types'
+  import { byName } from '../lib/format'
+  import type { Album, ArtistDetail } from '../lib/types'
 
   let { id }: { id: number } = $props()
   let artist = $state<ArtistDetail | null>(null)
@@ -26,6 +28,18 @@
   const topIds = $derived(new Set(artist?.top_tracks.map((t) => t.id)))
   const moreSongs = $derived(artist?.other_tracks.filter((t) => !topIds.has(t.id)) ?? [])
   const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
+
+  let albumSort = $state<'year' | 'name'>('year')
+  /** Newest first (unknown years last), or A to Z. */
+  function sorted(albums: Album[]): Album[] {
+    const list = [...albums]
+    if (albumSort === 'name') return list.sort(byName((a) => a.title))
+    return list.sort((a, b) => (b.year ?? -Infinity) - (a.year ?? -Infinity) || byName<Album>((x) => x.title)(a, b))
+  }
+  const albumOrders: { value: 'year' | 'name'; label: string }[] = [
+    { value: 'year', label: 'Newest' },
+    { value: 'name', label: 'A to Z' },
+  ]
 </script>
 
 <button class="back" onclick={() => history.back()}><Icon name="back" /> Back</button>
@@ -76,9 +90,14 @@
   {/if}
 
   {#if artist.albums.length}
-    <h2>Albums</h2>
+    <div class="section-head">
+      <h2>Albums</h2>
+      {#if artist.albums.length > 1}
+        <SortChoice options={albumOrders} bind:value={albumSort} storageKey="djinn-artist-album-sort" label="Sort albums" />
+      {/if}
+    </div>
     <div class="albums">
-      {#each artist.albums as album (album.id)}
+      {#each sorted(artist.albums) as album (album.id)}
         <a class="album" href="#/album/{album.id}">
           <div class="cover"><Art hash={album.art_hash} size={160} round={10} /></div>
           <span class="ellipsis">{album.title}</span>
@@ -91,7 +110,7 @@
   {#if artist.appears_on.length}
     <h2>Appears on</h2>
     <div class="albums">
-      {#each artist.appears_on as album (album.id)}
+      {#each sorted(artist.appears_on) as album (album.id)}
         <a class="album" href="#/album/{album.id}">
           <div class="cover"><Art hash={album.art_hash} size={160} round={10} /></div>
           <span class="ellipsis">{album.title}</span>
@@ -182,6 +201,13 @@
     padding: 0;
     background: transparent;
     color: var(--accent);
+  }
+
+  .section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
   }
 
   .albums {

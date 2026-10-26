@@ -5,7 +5,7 @@
   import InfiniteList from '../lib/InfiniteList.svelte'
   import TrackRow from '../lib/TrackRow.svelte'
   import TrackTile from '../lib/TrackTile.svelte'
-  import type { TrackSort } from '../lib/types'
+  import type { AlbumSort, TrackSort } from '../lib/types'
 
   type Tab = 'artists' | 'albums' | 'songs'
   type View = 'list' | 'grid'
@@ -19,9 +19,11 @@
   // this device.
   let tab = $state((sessionStorage.getItem('djinn-browse-tab') as Tab) || 'artists')
   let sort = $state((sessionStorage.getItem('djinn-browse-sort') as TrackSort) || 'title')
+  let albumSort = $state((sessionStorage.getItem('djinn-browse-album-sort') as AlbumSort) || 'name')
   let view = $state<View>(readView())
   $effect(() => sessionStorage.setItem('djinn-browse-tab', tab))
   $effect(() => sessionStorage.setItem('djinn-browse-sort', sort))
+  $effect(() => sessionStorage.setItem('djinn-browse-album-sort', albumSort))
   $effect(() => {
     try {
       localStorage.setItem('djinn-browse-view', view)
@@ -87,9 +89,16 @@
     {/snippet}
   </InfiniteList>
 {:else if tab === 'albums'}
+  <label class="sort">
+    <span class="muted small">Sort by</span>
+    <select bind:value={albumSort}>
+      <option value="name">Name</option>
+      <option value="year">Year (newest first)</option>
+    </select>
+  </label>
   <InfiniteList
-    cacheKey="albums"
-    load={api.albums}
+    cacheKey="albums-{albumSort}"
+    load={(offset) => api.albums(albumSort, offset)}
     key={(a) => a.id}
     count={(n) => plural(n, 'album', 'albums')}
     {grid}
@@ -100,7 +109,7 @@
         <a class="tile" href="#/album/{album.id}">
           <div class="cover"><Art hash={album.art_hash} size={160} round={10} /></div>
           <span class="ellipsis">{album.title}</span>
-          <span class="muted small ellipsis">{album.artist}</span>
+          <span class="muted small ellipsis">{album.artist}{albumSort === 'year' && album.year ? ` · ${album.year}` : ''}</span>
         </a>
       {:else}
         <a class="row" href="#/album/{album.id}">

@@ -301,6 +301,9 @@ export interface ArtistSummary {
 
 export type TrackSort = 'title' | 'artist' | 'added'
 
+/** Year is newest first. */
+export type AlbumSort = 'name' | 'year'
+
 export interface LookupSummary {
   checked: number
   photos: number
