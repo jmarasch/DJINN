@@ -25,8 +25,9 @@ use crate::{CastCommand, CastMedia, CastState, Metadata};
 const MEDIA_RECEIVER: &str = "CC1AD845";
 /// DashCast, a public receiver that shows any web page full screen (the
 /// one Home Assistant uses for dashboards on Chromecasts and Nest Hubs).
+/// Its message channel has been renamed over the years, so it's read from
+/// the app's status; it only shows up once the app is ready.
 const PAGE_RECEIVER: &str = "84912283";
-const NS_DASHCAST: &str = "urn:x-cast:es.offd.dashcast";
 const SENDER: &str = "sender-djinn";
 const RECEIVER: &str = "receiver-0";
 const HEARTBEAT: Duration = Duration::from_secs(5);
@@ -91,7 +92,19 @@ pub(crate) async fn play(
                             Some(app) => {
                                 session = app["sessionId"].as_str().map(str::to_owned);
                                 let id = app["transportId"].as_str().map(str::to_owned);
-                                if !loaded {
+                                // DashCast takes the page address on its own
+                                // channel, listed once it's ready.
+                                let page_channel = app["namespaces"].as_array().and_then(|list| {
+                                    list.iter()
+                                        .filter_map(|n| n["name"].as_str())
+                                        .find(|n| n.contains("dashcast"))
+                                        .map(str::to_owned)
+                                });
+                                let ready = match media {
+                                    CastMedia::Stream { .. } => true,
+                                    CastMedia::Page { .. } => page_channel.is_some(),
+                                };
+                                if !loaded && ready {
                                     if let Some(id) = id.clone() {
                                         conn.send(&id, NS_CONNECTION, json!({"type": "CONNECT"})).await?;
                                         match media {
@@ -99,9 +112,10 @@ pub(crate) async fn play(
                                                 conn.request(&id, NS_MEDIA, load_request(url, meta)).await?;
                                             }
                                             CastMedia::Page { url } => {
+                                                let channel = page_channel.as_deref().unwrap_or_default();
                                                 // "force" opens the page itself rather than in a
                                                 // frame, so a plain-HTTP LAN page loads.
-                                                conn.send(&id, NS_DASHCAST, json!({
+                                                conn.send(&id, channel, json!({
                                                     "url": url, "force": true, "reload": false, "reload_time": 0,
                                                 })).await?;
                                                 state.send_modify(|s| {
@@ -155,6 +169,10 @@ pub(crate) async fn play(
                     return Err("the device stopped answering".into());
                 }
                 conn.send(RECEIVER, NS_HEARTBEAT, json!({"type": "PING"})).await?;
+                // Still waiting for the app to be ready: ask again.
+                if !loaded {
+                    conn.request(RECEIVER, NS_RECEIVER, json!({"type": "GET_STATUS"})).await?;
+                }
             }
             command = commands.recv() => {
                 match command {
