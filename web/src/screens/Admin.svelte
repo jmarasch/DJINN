@@ -2,6 +2,7 @@
   import { api } from '../lib/api'
   import FolderPicker from '../lib/FolderPicker.svelte'
   import Icon from '../lib/Icon.svelte'
+  import CastPanel from '../lib/CastPanel.svelte'
   import OutputsPanel from '../lib/OutputsPanel.svelte'
   import ReplayGainPanel from '../lib/ReplayGainPanel.svelte'
   import Sheet from '../lib/Sheet.svelte'
@@ -239,6 +240,7 @@
   {/if}
 {:else if tab === 'audio'}
   <OutputsPanel />
+  <CastPanel />
   <ReplayGainPanel />
 {:else if tab === 'users'}
   <section class="card">

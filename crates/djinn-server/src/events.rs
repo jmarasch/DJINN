@@ -23,6 +23,8 @@ pub enum ServerEvent {
     ArtistLookup(LookupStatus),
     /// Progress measuring song loudness for ReplayGain.
     Loudness(LoudnessStatus),
+    /// Cast devices and how their casts are going.
+    CastStatus(Vec<djinn_cast::CastStatus>),
 }
 
 impl ServerEvent {
@@ -37,6 +39,7 @@ impl ServerEvent {
             Self::LibraryChanged => "library_changed",
             Self::ArtistLookup(_) => "artist_lookup",
             Self::Loudness(_) => "loudness",
+            Self::CastStatus(_) => "cast_status",
         }
     }
 }

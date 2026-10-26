@@ -3,6 +3,7 @@
 import { api, ApiError } from './api'
 import { clearListCache } from './listCache'
 import type {
+  CastDevice,
   LoudnessStatus,
   LookupStatus,
   Mode,
@@ -41,6 +42,8 @@ export const app = $state({
   lookup: { running: false, last: null, finished_at: null } as LookupStatus,
   /** ReplayGain loudness measuring; filled in on the Audio tab. */
   loudness: null as LoudnessStatus | null,
+  /** Cast devices; filled in on the Audio tab, kept current by SSE. */
+  casts: null as CastDevice[] | null,
   /** Track ids with a request on its way to the server. */
   pending: new Set<number>(),
 })
@@ -93,6 +96,7 @@ export function connect() {
   on('library_changed', () => clearListCache())
   on<LookupStatus>('artist_lookup', (data) => (app.lookup = data))
   on<LoudnessStatus>('loudness', (data) => (app.loudness = data))
+  on<CastDevice[]>('cast_status', (data) => (app.casts = data))
 
   events.onerror = async () => {
     app.connected = false

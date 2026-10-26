@@ -37,6 +37,10 @@ impl ApiError {
         Self::new(StatusCode::NOT_FOUND, "not found")
     }
 
+    pub fn not_found_with(message: impl Into<String>) -> Self {
+        Self::new(StatusCode::NOT_FOUND, message)
+    }
+
     pub fn conflict(message: impl Into<String>) -> Self {
         Self::new(StatusCode::CONFLICT, message)
     }

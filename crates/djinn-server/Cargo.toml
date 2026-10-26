@@ -25,7 +25,8 @@ getrandom = "0.4.3"
 notify = { version = "8.2.1", default-features = false }
 open = "5.4.5"
 if-addrs = "0.15.0"
-qrcode = { version = "0.14", default-features = false, features = ["svg"] }
+qrcode = { version = "0.14", default-features = false, features = ["svg", "image"] }
+image = { version = "0.25.10", default-features = false, features = ["png"] }
 rand = "0.10"
 rust-embed.workspace = true
 serde.workspace = true

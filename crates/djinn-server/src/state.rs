@@ -40,6 +40,7 @@ pub struct AppState {
     pub stream: Option<djinn_cast::stream::LiveStream>,
     /// Secret in the stream URL.
     pub cast_token: Arc<String>,
+    pub caster: djinn_cast::Caster,
 }
 
 #[derive(Default)]
@@ -79,6 +80,7 @@ impl AppState {
             guest_mode: Arc::new(AtomicBool::new(false)),
             stream: None,
             cast_token: Arc::new(String::new()),
+            caster: djinn_cast::Caster::new(),
         }
     }
 

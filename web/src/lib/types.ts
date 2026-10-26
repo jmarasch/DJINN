@@ -336,3 +336,25 @@ export interface ReplayGainSettings {
   max_preamp_db: number
   loudness: LoudnessStatus
 }
+
+export interface CastDevice {
+  id: string
+  name: string
+  kind: 'cast' | 'dlna' | 'sonos'
+  model: string | null
+  /** A Google Cast speaker group (plays in sync on every speaker in it). */
+  group: boolean
+  /** DJINN is casting to it, or trying to. */
+  active: boolean
+  playing: boolean
+  buffering: boolean
+  volume: number | null
+  /** The device sets its own volume (a TV remote). */
+  volume_fixed: boolean
+  error: string | null
+}
+
+export interface CastList {
+  devices: CastDevice[]
+  listeners: number
+}

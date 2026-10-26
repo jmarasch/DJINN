@@ -1,6 +1,7 @@
 import type {
   Album,
   AudioDevice,
+  CastList,
   AlbumDetail,
   ArtistDetail,
   ArtistSummary,
@@ -148,6 +149,12 @@ export const api = {
     put<OutputConfig>(`/outputs/${o.id}`, { enabled: o.enabled, volume_trim: o.volume_trim, delay_ms: o.delay_ms }),
   removeOutput: (id: number) => del<void>(`/outputs/${id}`),
   replayGain: () => get<ReplayGainSettings>('/audio/replaygain'),
+  casts: () => get<CastList>('/cast'),
+  discoverCasts: () => post<CastList>('/cast/discover'),
+  startCast: (id: string) => post<CastList>(`/cast/${encodeURIComponent(id)}/start`),
+  stopCast: (id: string) => post<CastList>(`/cast/${encodeURIComponent(id)}/stop`),
+  stopAllCasts: () => post<void>('/cast/stop-all'),
+  setCastVolume: (id: string, level: number) => put<void>(`/cast/${encodeURIComponent(id)}/volume`, { level }),
   saveReplayGain: (mode: ReplayGainMode, preamp_db: number) =>
     put<ReplayGainSettings>('/audio/replaygain', { mode, preamp_db }),
 

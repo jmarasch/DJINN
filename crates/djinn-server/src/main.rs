@@ -217,6 +217,7 @@ async fn main() -> anyhow::Result<()> {
     // Ready to serve from what the database already knows; look for
     // changes on disk in the background.
     library_api::start_scan(&state);
+    cast_api::spawn_background(&state);
     watcher::start(state.clone());
 
     let shutdown = std::sync::Arc::clone(&state.shutdown);
