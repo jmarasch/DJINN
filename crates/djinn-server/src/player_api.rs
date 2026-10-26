@@ -24,6 +24,7 @@ pub fn router() -> Router<AppState> {
         .route("/player/pause", post(pause))
         .route("/player/skip", post(skip))
         .route("/player/volume", put(set_volume))
+        .route("/player/crossfade", put(set_crossfade))
         .route("/settings", get(settings).put(update_settings))
         .route("/requests/log", get(request_log).delete(clear_request_log))
 }
@@ -157,6 +158,24 @@ async fn set_volume(
         return Err(ApiError::bad_request("volume must be 0 to 100"));
     }
     state.jukebox.lock().await.set_volume(body.volume).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+struct Crossfade {
+    /// 0 (gapless) to 12.
+    secs: u8,
+}
+
+async fn set_crossfade(
+    _: AdminUser,
+    State(state): State<AppState>,
+    Json(body): Json<Crossfade>,
+) -> ApiResult<StatusCode> {
+    if u32::from(body.secs) > djinn_engine::MAX_CROSSFADE_SECS {
+        return Err(ApiError::bad_request("crossfade must be 0 to 12 seconds"));
+    }
+    state.jukebox.lock().await.set_crossfade(body.secs).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

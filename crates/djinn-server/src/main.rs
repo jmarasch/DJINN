@@ -91,6 +91,13 @@ async fn main() -> anyhow::Result<()> {
         .parent()
         .map_or_else(|| PathBuf::from("art"), |dir| dir.join("art"));
 
+    // The crossfade is a runtime setting; config.toml gives its first value.
+    if store.get_setting(jukebox::CROSSFADE).await?.is_none() {
+        store
+            .set_setting(jukebox::CROSSFADE, &config.audio.crossfade_secs.to_string())
+            .await?;
+    }
+
     // Engine events are handed to the async side through a channel; the
     // callback runs on the engine thread and must not block.
     let (engine_tx, mut engine_rx) = mpsc::unbounded_channel();

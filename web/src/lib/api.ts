@@ -96,6 +96,7 @@ export const api = {
   pause: () => post<void>('/player/pause'),
   skip: () => post<void>('/player/skip'),
   setVolume: (volume: number) => put<void>('/player/volume', { volume }),
+  setCrossfade: (secs: number) => put<void>('/player/crossfade', { secs }),
 
   playlists: () => get<PlaylistListItem[]>('/playlists'),
   playlist: (id: number) => get<PlaylistDetail>(`/playlists/${id}`),

@@ -65,6 +65,7 @@ fn main() -> ExitCode {
                     let track = Track {
                         id: TrackId(i as i64),
                         path,
+                        gapless: false,
                     };
                     let _ = engine.send(Command::SetNext(Some(track)));
                 }

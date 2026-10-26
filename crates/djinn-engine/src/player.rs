@@ -1,12 +1,21 @@
 //! Track sequencing: decodes the current track, rolls over to the next one
-//! without a gap, and turns boundaries into events when they become audible.
+//! without a gap or with a crossfade, and turns boundaries into events when
+//! they become audible.
 //!
-//! Pipeline: decoder (source rate) -> stage (resample to master) -> sink.
-//! Consecutive tracks at the same source rate share one resampling stage, so
-//! a gapless album is resampled as one continuous signal with no edge
-//! artifacts at track boundaries.
+//! Pipeline: decoder (source rate) -> stage (resample to master) -> held
+//! tail -> sink. Consecutive tracks at the same source rate share one
+//! resampling stage, so a gapless album is resampled as one continuous
+//! signal with no edge artifacts at track boundaries.
+//!
+//! With a crossfade of N seconds, the last N seconds of the current track
+//! are held back. When the track ends, that tail is mixed with the start of
+//! the next track using equal-power curves. The next track starts (and its
+//! position counts from) the start of the blend; the previous one ends when
+//! its tail runs out. With N = 0, or for tracks marked gapless, nothing is
+//! held and tracks join sample-exactly.
 
 use std::collections::VecDeque;
+use std::f32::consts::FRAC_PI_2;
 
 use crate::decoder::TrackDecoder;
 use crate::resample::StreamResampler;
@@ -25,6 +34,9 @@ pub(crate) trait Sink {
     /// `consumed_frames` equals the total written.
     fn flush(&mut self);
 }
+
+/// Longest crossfade, in seconds.
+pub const MAX_CROSSFADE_SECS: u32 = 12;
 
 struct Deck {
     track: Track,
@@ -51,6 +63,26 @@ impl Stage {
     }
 }
 
+/// The end of the previous track, being blended into the start of the next.
+struct Mix {
+    /// Interleaved stereo tail of the previous track.
+    tail: Vec<f32>,
+    /// Frames of `tail` blended so far.
+    done: usize,
+}
+
+impl Mix {
+    fn frames(&self) -> usize {
+        self.tail.len() / 2
+    }
+
+    /// Equal-power gains (outgoing, incoming) at blend frame `i`.
+    fn gains(&self, i: usize) -> (f32, f32) {
+        let t = (i as f32 + 0.5) / self.frames() as f32 * FRAC_PI_2;
+        (t.cos(), t.sin())
+    }
+}
+
 #[derive(Debug)]
 enum MarkKind {
     Start(TrackId),
@@ -63,25 +95,29 @@ struct Mark {
     kind: MarkKind,
 }
 
-#[derive(Copy, Clone, Debug)]
-struct Audible {
-    id: TrackId,
-    start: u64,
-}
-
 pub(crate) struct Player {
     master_rate: u32,
+    /// Crossfade length; 0 joins tracks gaplessly.
+    fade_frames: usize,
     current: Option<Deck>,
     next: Option<Deck>,
     stage: Option<Stage>,
     /// Scratch for decoded source-rate audio.
     decoded: Vec<f32>,
-    /// Master-rate audio not yet written to the sink.
+    /// Scratch for resampled audio on its way to `held`.
+    staged: Vec<f32>,
+    /// The newest master-rate audio, held back for a crossfade.
+    held: VecDeque<f32>,
+    mix: Option<Mix>,
+    /// Master-rate audio ready to write to the sink.
     buf: Vec<f32>,
     /// Master frames written to the sink so far.
     written: u64,
+    /// Boundaries not yet audible, in frame order.
     marks: VecDeque<Mark>,
-    audible: Option<Audible>,
+    /// Audible tracks and where each started; during a crossfade there are
+    /// two. The last is the one reported as playing.
+    audible: Vec<(TrackId, u64)>,
     events: Vec<Event>,
 }
 
@@ -89,14 +125,18 @@ impl Player {
     pub fn new(master_rate: u32) -> Self {
         Self {
             master_rate,
+            fade_frames: 0,
             current: None,
             next: None,
             stage: None,
             decoded: Vec::new(),
+            staged: Vec::new(),
+            held: VecDeque::new(),
+            mix: None,
             buf: Vec::new(),
             written: 0,
             marks: VecDeque::new(),
-            audible: None,
+            audible: Vec::new(),
             events: Vec::new(),
         }
     }
@@ -109,18 +149,26 @@ impl Player {
         self.events.drain(..)
     }
 
+    /// Sets the crossfade for upcoming transitions (0 for gapless).
+    pub fn set_crossfade(&mut self, secs: u32) {
+        let secs = secs.min(MAX_CROSSFADE_SECS);
+        self.fade_frames = (secs * self.master_rate) as usize;
+    }
+
     /// True while anything is playing or queued up to play.
     pub fn is_active(&self) -> bool {
-        self.audible.is_some()
+        !self.audible.is_empty()
             || self.current.is_some()
             || self.next.is_some()
             || !self.marks.is_empty()
+            || !self.held.is_empty()
     }
 
     /// Position of the audible track in milliseconds.
     pub fn position(&self, consumed: u64) -> Option<(TrackId, u64)> {
         self.audible
-            .map(|a| (a.id, self.frames_to_ms(consumed.saturating_sub(a.start))))
+            .last()
+            .map(|&(id, start)| (id, self.frames_to_ms(consumed.saturating_sub(start))))
     }
 
     pub fn set_next(&mut self, track: Option<Track>) {
@@ -141,6 +189,7 @@ impl Player {
     /// Decodes and writes until the sink is full or there is nothing to play.
     pub fn fill(&mut self, sink: &mut dyn Sink) {
         loop {
+            self.release_held(false);
             if !self.buf.is_empty() {
                 let free = sink.free_frames();
                 if free == 0 {
@@ -166,19 +215,13 @@ impl Player {
             };
             match mark.kind {
                 MarkKind::Start(id) => {
-                    self.audible = Some(Audible {
-                        id,
-                        start: mark.frame,
-                    });
+                    self.audible.push((id, mark.frame));
                     self.events.push(Event::TrackStarted { id });
                 }
                 MarkKind::End(id, reason) => {
-                    let played = match self.audible {
-                        Some(a) if a.id == id => {
-                            self.audible = None;
-                            mark.frame.saturating_sub(a.start)
-                        }
-                        _ => 0,
+                    let played = match self.audible.iter().position(|&(a, _)| a == id) {
+                        Some(i) => mark.frame.saturating_sub(self.audible.remove(i).1),
+                        None => 0,
                     };
                     self.events.push(Event::TrackEnded {
                         id,
@@ -191,19 +234,20 @@ impl Player {
     }
 
     /// Ends the audible track (or, if none is audible yet, the first one
-    /// waiting to start) and continues with what follows it.
+    /// waiting to start) and continues with what follows it. A track fading
+    /// out under it ends too.
     pub fn skip(&mut self, sink: &mut dyn Sink) {
         let consumed = sink.consumed_frames();
         self.update(consumed);
 
-        let target = match self.audible.take() {
-            Some(a) => {
+        let target = match self.audible.pop() {
+            Some((id, start)) => {
                 self.events.push(Event::TrackEnded {
-                    id: a.id,
-                    played_ms: self.frames_to_ms(consumed.saturating_sub(a.start)),
+                    id,
+                    played_ms: self.frames_to_ms(consumed.saturating_sub(start)),
                     reason: EndReason::Skipped,
                 });
-                a.id
+                id
             }
             None => {
                 let pending = self.marks.iter().find_map(|m| match m.kind {
@@ -219,10 +263,20 @@ impl Player {
                 id
             }
         };
+        // The track it was crossfading from goes with it.
+        for (id, start) in self.audible.drain(..) {
+            self.events.push(Event::TrackEnded {
+                id,
+                played_ms: (consumed.saturating_sub(start)) * 1000 / u64::from(self.master_rate),
+                reason: EndReason::Finished,
+            });
+        }
 
         // Throw away everything decoded ahead of the output.
         self.marks.clear();
         self.buf.clear();
+        self.held.clear();
+        self.mix = None;
         self.stage = None;
         sink.flush();
 
@@ -233,10 +287,13 @@ impl Player {
             // just flushed. Restart it from the top.
             Some(deck) => match TrackDecoder::open(&deck.track.path) {
                 Ok(decoder) => {
-                    self.start_deck(Deck {
-                        track: deck.track,
-                        decoder,
-                    });
+                    self.start_deck(
+                        Deck {
+                            track: deck.track,
+                            decoder,
+                        },
+                        0,
+                    );
                 }
                 Err(e) => self.events.push(Event::TrackError {
                     id: deck.track.id,
@@ -247,21 +304,25 @@ impl Player {
         }
     }
 
-    /// Produces more master-rate audio into `buf`. Returns false when there
-    /// is nothing more to do until something changes.
+    /// Produces more master-rate audio. Returns false when there is
+    /// nothing more to do until something changes.
     fn produce(&mut self) -> bool {
         let Some(deck) = self.current.as_mut() else {
             if let Some(next) = self.next.take() {
                 let id = next.track.id;
-                if self.start_deck(next) {
+                if self.start_deck(next, 0) {
                     self.events.push(Event::NextNeeded { after: Some(id) });
                 }
                 return true;
             }
-            // Nothing left to play: drain the resampler's tail so the last
-            // track's end becomes audible.
+            // Nothing left to play: drain the resampler and the held tail so
+            // the last track's end becomes audible.
             if let Some(stage) = self.stage.take() {
                 self.finish_stage(stage);
+                return true;
+            }
+            if !self.held.is_empty() {
+                self.release_held(true);
                 return true;
             }
             return false;
@@ -270,16 +331,24 @@ impl Player {
         self.decoded.clear();
         match deck.decoder.decode_next(&mut self.decoded) {
             Ok(true) => {
+                let id = deck.track.id;
                 if let Some(stage) = self.stage.as_mut() {
                     stage.frames_in += (self.decoded.len() / 2) as u64;
-                    match stage.resampler.as_mut() {
-                        Some(r) => {
-                            if let Err(e) = r.process(&self.decoded, &mut self.buf) {
-                                let id = deck.track.id;
-                                self.fail_current(id, e.to_string());
-                            }
+                    self.staged.clear();
+                    let result = match stage.resampler.as_mut() {
+                        Some(r) => r.process(&self.decoded, &mut self.staged),
+                        None => {
+                            self.staged.extend_from_slice(&self.decoded);
+                            Ok(())
                         }
-                        None => self.buf.extend_from_slice(&self.decoded),
+                    };
+                    match result {
+                        Ok(()) => {
+                            let staged = std::mem::take(&mut self.staged);
+                            self.emit(&staged);
+                            self.staged = staged;
+                        }
+                        Err(e) => self.fail_current(id, e.to_string()),
                     }
                 }
             }
@@ -292,6 +361,54 @@ impl Player {
         true
     }
 
+    /// Sends new audio of the current track on: blended into the outgoing
+    /// track's tail during a crossfade, then held back.
+    fn emit(&mut self, samples: &[f32]) {
+        let mut rest = samples;
+        if let Some(mix) = self.mix.as_mut() {
+            let n = (mix.frames() - mix.done).min(rest.len() / 2);
+            for i in 0..n {
+                let (out, inc) = mix.gains(mix.done + i);
+                for c in 0..2 {
+                    let tail = mix.tail[(mix.done + i) * 2 + c];
+                    self.held.push_back(tail * out + rest[i * 2 + c] * inc);
+                }
+            }
+            mix.done += n;
+            rest = &rest[n * 2..];
+            if mix.done == mix.frames() {
+                self.mix = None;
+            }
+        }
+        self.held.extend(rest.iter().copied());
+    }
+
+    /// Finishes a blend early (the incoming track was shorter than it):
+    /// the rest of the outgoing tail fades out alone.
+    fn finish_mix(&mut self) {
+        if let Some(mix) = self.mix.take() {
+            for i in mix.done..mix.frames() {
+                let (out, _) = mix.gains(i);
+                self.held.push_back(mix.tail[i * 2] * out);
+                self.held.push_back(mix.tail[i * 2 + 1] * out);
+            }
+        }
+    }
+
+    /// Moves held audio on to the sink buffer, keeping back a crossfade's
+    /// worth unless `all`.
+    fn release_held(&mut self, all: bool) {
+        let keep = if all || self.current.is_none() && self.next.is_none() {
+            0
+        } else {
+            self.fade_frames * 2
+        };
+        if self.held.len() > keep {
+            let n = (self.held.len() - keep) & !1;
+            self.buf.extend(self.held.drain(..n));
+        }
+    }
+
     fn fail_current(&mut self, id: TrackId, error: String) {
         self.events.push(Event::TrackError { id, error });
         self.end_current(EndReason::Error);
@@ -301,29 +418,56 @@ impl Player {
         let Some(deck) = self.current.take() else {
             return;
         };
-        let frame = self.stage.as_ref().map_or(self.produced(), Stage::position);
-        self.marks.push_back(Mark {
-            frame,
-            kind: MarkKind::End(deck.track.id, reason),
-        });
-        // Keep the stage running only if the next track can continue it.
-        let continues = self.next.as_ref().is_some_and(|next| {
-            self.stage
-                .as_ref()
-                .is_some_and(|s| s.rate == next.decoder.sample_rate())
-        });
+        // The next track decides how this one hands over.
+        let crossfade = self.fade_frames > 0
+            && self.next.as_ref().is_some_and(|next| !next.track.gapless)
+            && reason == EndReason::Finished;
+        let continues = !crossfade
+            && self.next.as_ref().is_some_and(|next| {
+                self.stage
+                    .as_ref()
+                    .is_some_and(|s| s.rate == next.decoder.sample_rate())
+            });
         if !continues {
             if let Some(stage) = self.stage.take() {
                 self.finish_stage(stage);
             }
         }
+        // A blend still running means this track was shorter than it.
+        self.finish_mix();
+        let end = self.stage.as_ref().map_or(self.produced(), Stage::position);
+        self.push_mark(end, MarkKind::End(deck.track.id, reason));
+
+        if !crossfade {
+            self.release_held(true);
+            return;
+        }
+        // Keep the last stretch of this track to blend into the next one.
+        let fade = self.fade_frames.min(self.held.len() / 2);
+        let before = self.held.len() - fade * 2;
+        self.buf.extend(self.held.drain(..before));
+        let tail: Vec<f32> = self.held.drain(..).collect();
+        if let Some(next) = self.next.take() {
+            let id = next.track.id;
+            if self.start_deck(next, fade) {
+                if fade > 0 {
+                    self.mix = Some(Mix { tail, done: 0 });
+                }
+                self.events.push(Event::NextNeeded { after: Some(id) });
+            } else {
+                // The next track couldn't start; let this one end normally.
+                self.held.extend(tail);
+                self.release_held(true);
+            }
+        }
     }
 
-    /// Makes `deck` current. Returns false (after reporting) if it could not
-    /// be started.
-    fn start_deck(&mut self, deck: Deck) -> bool {
+    /// Makes `deck` current, starting `overlap` frames before the end of
+    /// what was produced so far (for a crossfade). Returns false (after
+    /// reporting) if it could not be started.
+    fn start_deck(&mut self, deck: Deck, overlap: usize) -> bool {
         let rate = deck.decoder.sample_rate();
-        if self.stage.as_ref().is_some_and(|s| s.rate != rate) {
+        if self.stage.as_ref().is_some_and(|s| s.rate != rate) || overlap > 0 {
             if let Some(stage) = self.stage.take() {
                 self.finish_stage(stage);
             }
@@ -352,10 +496,7 @@ impl Player {
             });
         }
         let frame = self.stage.as_ref().map_or(self.produced(), Stage::position);
-        self.marks.push_back(Mark {
-            frame,
-            kind: MarkKind::Start(deck.track.id),
-        });
+        self.push_mark(frame, MarkKind::Start(deck.track.id));
         self.current = Some(deck);
         true
     }
@@ -364,13 +505,26 @@ impl Player {
         if let Some(r) = stage.resampler.as_mut() {
             // On failure the tail is lost; boundaries still resolve because
             // `consumed` catches up with `written` once the output drains.
-            let _ = r.finish(&mut self.buf);
+            let mut tail = std::mem::take(&mut self.staged);
+            tail.clear();
+            let _ = r.finish(&mut tail);
+            self.emit(&tail);
+            self.staged = tail;
         }
     }
 
-    /// Total master frames produced: written plus buffered.
+    /// Adds a boundary, keeping marks in frame order (a crossfade's start
+    /// comes before the previous track's end).
+    fn push_mark(&mut self, frame: u64, kind: MarkKind) {
+        let at = self.marks.partition_point(|m| m.frame <= frame);
+        self.marks.insert(at, Mark { frame, kind });
+    }
+
+    /// Total master frames produced: written, buffered, and held. During a
+    /// blend, the outgoing tail's frames are where the incoming track's go,
+    /// so they don't count twice.
     fn produced(&self) -> u64 {
-        self.written + (self.buf.len() / 2) as u64
+        self.written + (self.buf.len() / 2) as u64 + (self.held.len() / 2) as u64
     }
 
     fn frames_to_ms(&self, frames: u64) -> u64 {
@@ -449,18 +603,34 @@ pub(crate) mod tests {
         Track {
             id: TrackId(id),
             path: path.to_path_buf(),
+            gapless: false,
         }
     }
 
     /// Plays tracks back to back the way the engine does, answering every
     /// NextNeeded with the next file. Returns output and events.
     pub fn play_all(paths: &[PathBuf]) -> (Vec<f32>, Vec<Event>) {
+        play_all_with(paths, 0, &[])
+    }
+
+    /// Like [`play_all`] with a crossfade, marking the tracks at the given
+    /// indexes as gapless.
+    pub fn play_all_with(
+        paths: &[PathBuf],
+        crossfade: u32,
+        gapless: &[usize],
+    ) -> (Vec<f32>, Vec<Event>) {
+        let track = |i: usize, p: &Path| Track {
+            gapless: gapless.contains(&i),
+            ..track(i as i64, p)
+        };
         let mut player = Player::new(48_000);
+        player.set_crossfade(crossfade);
         let mut sink = VecSink::default();
         let mut queue = paths.iter().enumerate();
         let mut events = Vec::new();
         if let Some((i, p)) = queue.next() {
-            player.set_next(Some(track(i as i64, p)));
+            player.set_next(Some(track(i, p)));
         }
         for _ in 0..100_000 {
             sink.budget = 4096;
@@ -471,7 +641,7 @@ pub(crate) mod tests {
             for e in new {
                 if matches!(e, Event::NextNeeded { .. }) {
                     if let Some((i, p)) = queue.next() {
-                        player.set_next(Some(track(i as i64, p)));
+                        player.set_next(Some(track(i, p)));
                         progressed = true;
                     }
                 }
@@ -706,5 +876,130 @@ pub(crate) mod tests {
             seam < elsewhere * 3.0,
             "seam {seam} vs elsewhere {elsewhere}"
         );
+    }
+
+    /// A steady level, so a blend's curves are easy to check.
+    fn level_i16(frames: usize, value: i16) -> Vec<i16> {
+        vec![value; frames * 2]
+    }
+
+    #[test]
+    fn crossfade_blends_with_equal_power_and_overlaps_events() {
+        let dir = temp_dir("crossfade");
+        let (a, b) = (dir.join("a.wav"), dir.join("b.wav"));
+        let n = 96_000; // 2 s each
+        let tone = sine_i16(48_000, 0, n);
+        let level = level_i16(n, 8_000);
+        write_wav(&a, 48_000, &tone);
+        write_wav(&b, 48_000, &level);
+
+        let (out, events) = play_all_with(&[a, b], 1, &[]);
+        let fade = 48_000;
+        assert_eq!(out.len() / 2, 2 * n - fade, "the blend overlaps one second");
+        let (tone, level) = (to_f32(&tone), to_f32(&level));
+        // Before the blend: the first track as is.
+        assert_eq!(out[..(n - fade) * 2], tone[..(n - fade) * 2]);
+        // In the blend: cos/sin weighted sum.
+        for i in [0, 1, 12_000, 24_000, 47_999] {
+            let t = (i as f32 + 0.5) / fade as f32 * FRAC_PI_2;
+            let want = tone[(n - fade + i) * 2] * t.cos() + level[i * 2] * t.sin();
+            let got = out[(n - fade + i) * 2];
+            assert!((got - want).abs() < 1e-5, "frame {i}: {got} vs {want}");
+        }
+        // After it: the second track, untouched.
+        assert_eq!(out[n * 2..], level[fade * 2..]);
+
+        let started = events
+            .iter()
+            .position(|e| *e == Event::TrackStarted { id: TrackId(1) });
+        let ended = events
+            .iter()
+            .position(|e| matches!(e, Event::TrackEnded { id: TrackId(0), .. }));
+        assert!(
+            started < ended,
+            "the next track starts before the last one ends"
+        );
+        let played: Vec<_> = events
+            .iter()
+            .filter_map(|e| match e {
+                Event::TrackEnded { id, played_ms, .. } => Some((*id, *played_ms)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(played, [(TrackId(0), 2_000), (TrackId(1), 2_000)]);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn gapless_tracks_skip_the_crossfade() {
+        let dir = temp_dir("crossfade-gapless");
+        let (n1, n2) = (30_001, 50_000);
+        let all = sine_i16(48_000, 0, n1 + n2);
+        let (a, b) = (dir.join("a.wav"), dir.join("b.wav"));
+        write_wav(&a, 48_000, &all[..n1 * 2]);
+        write_wav(&b, 48_000, &all[n1 * 2..]);
+        let (out, _) = play_all_with(&[a, b], 1, &[1]);
+        assert_eq!(out, to_f32(&all), "bit exact despite the crossfade setting");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn incoming_track_shorter_than_the_crossfade() {
+        let dir = temp_dir("crossfade-short");
+        let paths = [dir.join("a.wav"), dir.join("b.wav"), dir.join("c.wav")];
+        write_wav(&paths[0], 48_000, &sine_i16(48_000, 0, 96_000));
+        write_wav(&paths[1], 48_000, &level_i16(12_000, 4_000)); // 0.25 s
+        write_wav(&paths[2], 48_000, &sine_i16(48_000, 0, 96_000));
+        let (out, events) = play_all_with(&paths, 1, &[]);
+        for id in 0..3 {
+            assert!(
+                events.contains(&Event::TrackStarted { id: TrackId(id) }),
+                "{id} started"
+            );
+            assert!(
+                events
+                    .iter()
+                    .any(|e| matches!(e, Event::TrackEnded { id: t, .. } if *t == TrackId(id))),
+                "{id} ended"
+            );
+        }
+        assert!(out.iter().all(|s| s.abs() <= 1.0));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn skipping_during_a_crossfade_ends_both_tracks() {
+        let dir = temp_dir("crossfade-skip");
+        let (a, b, c) = (dir.join("a.wav"), dir.join("b.wav"), dir.join("c.wav"));
+        for p in [&a, &b, &c] {
+            write_wav(p, 48_000, &sine_i16(48_000, 0, 96_000));
+        }
+        let mut player = Player::new(48_000);
+        player.set_crossfade(1);
+        let mut sink = VecSink::default();
+        player.set_next(Some(track(0, &a)));
+        sink.budget = 1_000;
+        player.fill(&mut sink);
+        // The next track is lined up while the first one plays, as the
+        // engine's owner does on NextNeeded.
+        player.set_next(Some(track(1, &b)));
+        sink.budget = 69_000; // into the blend, which starts at 48 000
+        player.fill(&mut sink);
+        player.update(sink.consumed_frames());
+        player.set_next(Some(track(2, &c)));
+        player.take_events().for_each(drop);
+
+        player.skip(&mut sink);
+        let events: Vec<_> = player.take_events().collect();
+        let ended: Vec<_> = events
+            .iter()
+            .filter_map(|e| match e {
+                Event::TrackEnded { id, reason, .. } => Some((*id, *reason)),
+                _ => None,
+            })
+            .collect();
+        assert!(ended.contains(&(TrackId(1), EndReason::Skipped)));
+        assert!(ended.contains(&(TrackId(0), EndReason::Finished)));
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

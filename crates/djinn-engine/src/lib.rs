@@ -20,6 +20,7 @@ use std::path::PathBuf;
 
 pub use engine::{Engine, EngineConfig};
 pub use error::EngineError;
+pub use player::MAX_CROSSFADE_SECS;
 
 /// Opaque track identifier chosen by the engine's owner.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -29,6 +30,9 @@ pub struct TrackId(pub i64);
 pub struct Track {
     pub id: TrackId,
     pub path: PathBuf,
+    /// Join to the track before it without a crossfade, sample-exactly
+    /// (for example, the next song on the same album).
+    pub gapless: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -43,6 +47,9 @@ pub enum Command {
     Skip,
     /// Master volume as linear gain, clamped to 0.0..=1.0.
     SetVolume(f32),
+    /// Crossfade length in seconds for upcoming transitions, 0 to 12; 0
+    /// joins tracks gaplessly.
+    SetCrossfade(u32),
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]

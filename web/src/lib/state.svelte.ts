@@ -25,7 +25,7 @@ export const app = $state({
   ready: false,
   connected: false,
   nowPlaying: { current: null, position_ms: 0, up_next: null } as NowPlaying,
-  player: { state: 'idle', volume: 80, playlist: null } as PlayerState,
+  player: { state: 'idle', volume: 80, crossfade_secs: 0, playlist: null } as PlayerState,
   output: { device: null, sample_rate: null, error: null } as OutputStatus,
   queue: [] as QueueItem[],
   scan: null as ScanProgress | null,

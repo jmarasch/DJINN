@@ -33,6 +33,8 @@ pub const MAX_QUEUE: &str = "max_queue";
 pub const GUEST_MODE: &str = "guest_mode";
 /// 1 to look up artist photos and bios online.
 pub const ONLINE_INFO: &str = "online_artist_info";
+/// Crossfade between songs, in seconds (0 joins them gaplessly).
+pub const CROSSFADE: &str = "crossfade_secs";
 /// Contact (email or website) sent to MusicBrainz; empty turns it off.
 pub const MUSICBRAINZ_CONTACT: &str = "musicbrainz_contact";
 /// Playlist that plays when nobody has requested anything; 0 or missing
@@ -82,8 +84,11 @@ pub struct Jukebox {
     replaced: VecDeque<Pending>,
     in_flight: VecDeque<Pending>,
     playing: Option<Playing>,
+    /// Songs fading out under the playing one during a crossfade.
+    ending: Vec<Playing>,
     state: PlayState,
     volume: u8,
+    crossfade: u8,
     skip_requested_by: Option<i64>,
     output: OutputStatus,
     last_position_second: Option<u64>,
@@ -117,6 +122,9 @@ impl Jukebox {
     ) -> anyhow::Result<Self> {
         let volume = setting(&store, VOLUME, DEFAULT_VOLUME).await?.clamp(0, 100) as u8;
         let cursor = setting(&store, PLAYLIST_CURSOR, 0).await?;
+        let crossfade = setting(&store, CROSSFADE, 0)
+            .await?
+            .clamp(0, i64::from(djinn_engine::MAX_CROSSFADE_SECS)) as u8;
         let mut seed = [0u8; 8];
         getrandom::fill(&mut seed).map_err(|e| anyhow::anyhow!("no system randomness: {e}"))?;
         let mut jukebox = Self {
@@ -129,8 +137,10 @@ impl Jukebox {
             replaced: VecDeque::new(),
             in_flight: VecDeque::new(),
             playing: None,
+            ending: Vec::new(),
             state: PlayState::Idle,
             volume,
+            crossfade,
             skip_requested_by: None,
             output: OutputStatus::default(),
             last_position_second: None,
@@ -139,6 +149,7 @@ impl Jukebox {
             start_at: None,
         };
         (jukebox.engine)(Command::SetVolume(gain(volume)));
+        (jukebox.engine)(Command::SetCrossfade(u32::from(crossfade)));
         jukebox.load_active().await?;
         Ok(jukebox)
     }
@@ -159,6 +170,7 @@ impl Jukebox {
         PlayerState {
             state: self.state,
             volume: self.volume,
+            crossfade_secs: self.crossfade,
             playlist: self.active.clone(),
         }
     }
@@ -305,6 +317,17 @@ impl Jukebox {
         (self.engine)(Command::Skip);
     }
 
+    /// Crossfade for upcoming transitions, in seconds (0 for gapless).
+    pub async fn set_crossfade(&mut self, secs: u8) -> anyhow::Result<()> {
+        self.crossfade = secs.min(djinn_engine::MAX_CROSSFADE_SECS as u8);
+        (self.engine)(Command::SetCrossfade(u32::from(self.crossfade)));
+        self.store
+            .set_setting(CROSSFADE, &self.crossfade.to_string())
+            .await?;
+        self.send(ServerEvent::PlayerState(self.player_state()));
+        Ok(())
+    }
+
     pub async fn set_volume(&mut self, volume: u8) -> anyhow::Result<()> {
         self.volume = volume.min(100);
         (self.engine)(Command::SetVolume(gain(self.volume)));
@@ -429,6 +452,10 @@ impl Jukebox {
                 pending.requested_by.as_ref().map(|(id, _)| *id),
             )
             .await?;
+        // During a crossfade the previous song is still fading out.
+        if let Some(previous) = self.playing.take() {
+            self.ending.push(previous);
+        }
         self.playing = Some(Playing {
             pending,
             play_event,
@@ -451,7 +478,15 @@ impl Jukebox {
         } else {
             None
         };
-        if let Some(playing) = self.playing.take_if(|p| p.pending.track.id == id) {
+        let finished = match self.playing.take_if(|p| p.pending.track.id == id) {
+            Some(playing) => Some(playing),
+            None => self
+                .ending
+                .iter()
+                .position(|p| p.pending.track.id == id)
+                .map(|i| self.ending.remove(i)),
+        };
+        if let Some(playing) = finished {
             self.store
                 .finish_play_event(
                     playing.play_event,
@@ -537,9 +572,16 @@ impl Jukebox {
                     self.replaced.pop_front();
                 }
             }
+            // The song the engine plays before this one.
+            let previous = self
+                .in_flight
+                .back()
+                .or(self.playing.as_ref().map(|p| &p.pending));
+            let gapless = previous.is_some_and(|p| follows_on_album(&p.track, &candidate.track));
             (self.engine)(Command::SetNext(Some(djinn_engine::Track {
                 id: TrackId(candidate.track.id),
                 path: PathBuf::from(path),
+                gapless,
             })));
             self.queued = Some(candidate);
             return Ok(());
@@ -621,6 +663,21 @@ impl Jukebox {
         // No subscribers is fine.
         let _ = self.events.send(event);
     }
+}
+
+/// Whether `next` is the following song on `previous`'s album (including
+/// the first song of the next disc), so it should join without a
+/// crossfade, as live albums and mixes are meant to.
+fn follows_on_album(previous: &Track, next: &Track) -> bool {
+    if previous.album_id.is_none() || previous.album_id != next.album_id {
+        return false;
+    }
+    let (Some(prev_no), Some(next_no)) = (previous.track_no, next.track_no) else {
+        return false;
+    };
+    let (prev_disc, next_disc) = (previous.disc_no.unwrap_or(1), next.disc_no.unwrap_or(1));
+    (next_disc == prev_disc && next_no == prev_no + 1)
+        || (next_disc == prev_disc + 1 && next_no == 1)
 }
 
 /// The song after `anchor` in `ids`, wrapping around; the first song if
@@ -1021,5 +1078,81 @@ mod tests {
         assert_eq!(next_in_order(&[1, 2, 3], Some(3)), Some(1));
         assert_eq!(next_in_order(&[1, 2, 3], Some(9)), Some(1));
         assert_eq!(next_in_order(&[], None), None);
+    }
+
+    #[tokio::test]
+    async fn crossfade_overlap_records_both_songs() {
+        let mut h = Harness::new(3).await;
+        h.event(EngineEvent::NextNeeded { after: None }).await;
+        let first = h.play_next().await;
+        // The next song starts while the first is still fading out.
+        let second = h.play_next().await;
+        assert_eq!(h.jukebox.now_playing().current.unwrap().track.id, second);
+        h.event(EngineEvent::TrackEnded {
+            id: TrackId(first),
+            played_ms: 3000,
+            reason: EndReason::Finished,
+        })
+        .await;
+        assert_eq!(
+            h.jukebox.now_playing().current.unwrap().track.id,
+            second,
+            "still playing"
+        );
+        let played: Option<i64> =
+            djinn_store::sqlx::query_scalar("SELECT played_ms FROM play_events WHERE track_id = ?")
+                .bind(first)
+                .fetch_one(h.store.pool())
+                .await
+                .unwrap();
+        assert_eq!(played, Some(3000), "the faded-out song's play was recorded");
+    }
+
+    #[test]
+    fn next_song_on_the_album_joins_gaplessly() {
+        let track = |album: Option<i64>, disc: Option<i64>, no: Option<i64>| Track {
+            id: 0,
+            title: String::new(),
+            artist: None,
+            album: None,
+            album_artist: None,
+            artist_id: None,
+            album_id: album,
+            track_no: no,
+            disc_no: disc,
+            year: None,
+            genre: None,
+            duration_ms: None,
+            art_hash: None,
+        };
+        assert!(follows_on_album(
+            &track(Some(1), None, Some(3)),
+            &track(Some(1), None, Some(4))
+        ));
+        assert!(follows_on_album(
+            &track(Some(1), Some(1), Some(12)),
+            &track(Some(1), Some(2), Some(1))
+        ));
+        assert!(!follows_on_album(
+            &track(Some(1), None, Some(3)),
+            &track(Some(1), None, Some(5))
+        ));
+        assert!(!follows_on_album(
+            &track(Some(1), None, Some(3)),
+            &track(Some(2), None, Some(4))
+        ));
+        assert!(!follows_on_album(
+            &track(None, None, Some(3)),
+            &track(None, None, Some(4))
+        ));
+    }
+
+    #[tokio::test]
+    async fn crossfade_setting_reaches_the_engine() {
+        let mut h = Harness::new(1).await;
+        h.jukebox.set_crossfade(20).await.unwrap();
+        assert_eq!(h.jukebox.player_state().crossfade_secs, 12, "capped");
+        let sent = h.sent.lock().unwrap();
+        assert!(sent.iter().any(|c| matches!(c, Command::SetCrossfade(12))));
     }
 }

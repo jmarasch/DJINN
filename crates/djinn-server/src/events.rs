@@ -66,6 +66,8 @@ pub struct PlayerState {
     pub state: PlayState,
     /// Master volume, 0 to 100.
     pub volume: u8,
+    /// Crossfade between songs, in seconds; 0 is gapless.
+    pub crossfade_secs: u8,
     /// The playlist playing when nobody has requested anything.
     pub playlist: Option<PlaylistRef>,
 }

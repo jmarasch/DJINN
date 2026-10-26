@@ -137,6 +137,8 @@ export interface PlaylistRef {
 export interface PlayerState {
   state: PlayState
   volume: number
+  /** Seconds; 0 joins songs gaplessly. */
+  crossfade_secs: number
   /** Plays when nobody has requested anything. */
   playlist: PlaylistRef | null
 }

@@ -161,6 +161,7 @@ impl EngineThread {
                     self.player.skip(&mut sink);
                 }
             },
+            Command::SetCrossfade(secs) => self.player.set_crossfade(secs),
             Command::SetVolume(volume) => {
                 self.volume = volume.clamp(0.0, 1.0);
                 if let Some(output) = &self.output {

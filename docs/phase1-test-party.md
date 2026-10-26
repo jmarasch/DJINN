@@ -37,7 +37,11 @@ Tick each one off:
 - [ ] When the queue empties, the playlist takes over with no silence between.
 - [ ] Shuffled playlist songs do not repeat within the history window.
 - [ ] Gapless: play an album with continuous tracks (live album, DJ mix,
-      or a concept album). There is no gap or click between tracks.
+      or a concept album). There is no gap or click between tracks, even
+      with crossfade on (songs that follow each other on an album always
+      join gaplessly).
+- [ ] Crossfade (Now Playing, admin): set a few seconds; songs from
+      different albums blend smoothly with no dip or jump in loudness.
 - [ ] A phone that sleeps or loses Wi-Fi catches up when it comes back.
 - [ ] Restarting the server keeps accounts, queue, pool, and volume.
 
@@ -54,7 +58,6 @@ sqlite3 djinn.db "SELECT t.title, p.source, p.played_ms, p.skipped
 
 ## Known limits in Phase 1
 
-- **No crossfade yet.** Transitions are gapless only. Crossfade is Phase 2.
 - **Only the system default output.** Multiple outputs are Phase 3.
 - **No "Add to Home Screen" app install over plain HTTP.** Browsers only
   allow installing a web app over HTTPS (or on localhost). Over plain
