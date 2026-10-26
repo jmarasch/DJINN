@@ -52,7 +52,7 @@ This file is the source of truth for the project. Read it fully before writing c
 | Frontend | Svelte + Vite (TypeScript) | Built to static files |
 | Embedding UI | rust-embed | UI ships inside the binary |
 | Filesystem watching | notify | Phase 2+ |
-| Similarity (future) | bliss-audio (bliss-rs) | Phase 5 |
+| Similarity (future) | bliss-audio (bliss-rs) | Phase 6 |
 
 Linux build prerequisite: `libasound2-dev` and `pkg-config`.
 
@@ -274,13 +274,22 @@ Runtime-tunable settings live in the `settings` table, not the config file.
 - Resolve the guest access decision (QR + display name vs accounts).
 - Optional: request voting, "skip" votes, now-playing display page for a TV.
 
-### Phase 5: Smart playlists ("tiny AI")
+### Phase 5: Casting
+- DJINN streams the party mix over HTTP as a network output, so the music can play on devices that aren't wired to the server. Several devices at once.
+- Targets: Chromecast / Google TV (Google Cast, Default Media Receiver), DLNA/UPnP media renderers (smart TVs, AV receivers, network speakers), and Sonos. AirPlay is out of scope for now.
+- Discover devices on the LAN (mDNS for Cast, SSDP for UPnP). Start, stop, and watch each cast from Admin > Audio.
+- The TV page can play the stream itself, so a TV or tablet browser gets picture and sound.
+- Works with no local output at all (cast-only), paced by the system clock.
+- Network devices buffer seconds of audio and report no timing, so casts are not sample-synced with local outputs; document this rather than promise it.
+- **Done when:** a Chromecast, a DLNA TV or receiver, and a Sonos speaker play the party at the same time for a full evening, with skips and song changes reaching them.
+
+### Phase 6: Smart playlists ("tiny AI")
 - Run bliss-rs analysis during scan; store feature vectors.
 - Similarity search: "more like this track/artist", seeded radio for the auto pool.
 - Use play/skip history to weight results.
 - Optional: small local language model that turns plain-language prompts ("chill 90s, nothing too slow") into structured queries over tags, features, and history. Must run fully offline.
 
-### Phase 6: Personal streaming
+### Phase 7: Personal streaming
 - Stream tracks to a phone for personal listening (HTTP range requests, optional ffmpeg transcode).
 - Comes last. Likely its own listener on a separate port, sharing the database and library with the jukebox.
 
