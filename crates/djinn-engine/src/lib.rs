@@ -9,17 +9,23 @@
 //! answers with [`Command::SetNext`].
 
 mod decoder;
+mod devices;
+mod drift;
 mod engine;
 mod error;
+mod loudness;
 mod mixdown;
 mod output;
+mod outputs;
 mod player;
 mod resample;
 
 use std::path::PathBuf;
 
+pub use devices::{output_devices, DeviceInfo};
 pub use engine::{Engine, EngineConfig};
 pub use error::EngineError;
+pub use loudness::{measure_loudness, Loudness, REFERENCE_LUFS};
 pub use player::MAX_CROSSFADE_SECS;
 
 /// Opaque track identifier chosen by the engine's owner.
@@ -33,6 +39,73 @@ pub struct Track {
     /// Join to the track before it without a crossfade, sample-exactly
     /// (for example, the next song on the same album).
     pub gapless: bool,
+    /// Linear gain for this track (ReplayGain), 1.0 for none.
+    pub gain: f32,
+}
+
+/// Longest per-output delay, in milliseconds.
+pub const MAX_DELAY_MS: u32 = 1000;
+
+/// Which device an output plays through.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum OutputDevice {
+    /// The OS default device; follows it when it changes.
+    Default,
+    /// A device by id, as listed by [`output_devices`].
+    Id(String),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct OutputConfig {
+    /// Chosen by the owner and reported back in [`OutputStatus`].
+    pub id: i64,
+    pub device: OutputDevice,
+    pub enabled: bool,
+    /// Gain on top of the master volume, 0.0..=1.0.
+    pub trim: f32,
+    /// Holds this output back by up to [`MAX_DELAY_MS`], to line it up
+    /// with slower ones (Bluetooth lags by a few hundred milliseconds).
+    pub delay_ms: u32,
+}
+
+impl OutputConfig {
+    /// The OS default device at full trim: what the engine starts with.
+    pub fn system_default(id: i64) -> Self {
+        Self {
+            id,
+            device: OutputDevice::Default,
+            enabled: true,
+            trim: 1.0,
+            delay_ms: 0,
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum OutputState {
+    Disabled,
+    /// Not open yet, or lost and waiting to retry.
+    Waiting,
+    Playing,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct OutputStatus {
+    pub id: i64,
+    pub state: OutputState,
+    /// Device name while open.
+    pub device: Option<String>,
+    pub sample_rate: Option<u32>,
+    pub channels: Option<u16>,
+    /// Why it isn't playing, if it failed.
+    pub error: Option<String>,
+    /// The output the others are kept in time with.
+    pub clock: bool,
+    /// Speed correction in parts per million (followers only).
+    pub drift_ppm: f64,
+    /// How far it is from where it should be, in milliseconds. Correction
+    /// keeps this near zero.
+    pub offset_ms: f64,
 }
 
 #[derive(Clone, Debug)]
@@ -50,6 +123,9 @@ pub enum Command {
     /// Crossfade length in seconds for upcoming transitions, 0 to 12; 0
     /// joins tracks gaplessly.
     SetCrossfade(u32),
+    /// Replaces the output list. Outputs that keep their id and device keep
+    /// playing; trim and delay changes apply right away.
+    SetOutputs(Vec<OutputConfig>),
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -98,13 +174,7 @@ pub enum Event {
         ms: u64,
     },
     StateChanged(PlayState),
-    OutputOpened {
-        device: String,
-        sample_rate: u32,
-        channels: u16,
-    },
-    /// The output failed. Playback stalls and the engine retries.
-    OutputError {
-        error: String,
-    },
+    /// Output status: sent when an output opens, fails, or changes, and
+    /// every few seconds while more than one plays (for sync figures).
+    Outputs(Vec<OutputStatus>),
 }

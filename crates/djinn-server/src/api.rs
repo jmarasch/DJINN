@@ -12,7 +12,7 @@ use serde::Serialize;
 use crate::error::ApiResult;
 
 use crate::state::AppState;
-use crate::{auth, folders, library_api, player_api, playlist_api, sse};
+use crate::{audio_api, auth, folders, library_api, player_api, playlist_api, sse};
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -24,6 +24,7 @@ pub fn router() -> Router<AppState> {
         .merge(library_api::router())
         .merge(player_api::router())
         .merge(playlist_api::router())
+        .merge(audio_api::router())
         .merge(folders::router())
         // Without this, unknown API paths would fall through to the SPA.
         .fallback(not_found)

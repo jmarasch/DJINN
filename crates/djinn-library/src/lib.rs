@@ -22,8 +22,8 @@ const BATCH: usize = 64;
 const READERS: usize = 4;
 /// Bumped when the scanner starts extracting something new, so the next
 /// scan re-reads every file once. 2: artwork sources, " - Topic" cleanup.
-/// 3: separate artists for collaborations and features.
-const SCAN_VERSION: i64 = 3;
+/// 3: separate artists for collaborations and features. 4: ReplayGain tags.
+const SCAN_VERSION: i64 = 4;
 /// Set to anything else to make the next scan re-read every file.
 pub const SCAN_VERSION_KEY: &str = "scan_version";
 /// Artist names never split (one per line); unset means the defaults.

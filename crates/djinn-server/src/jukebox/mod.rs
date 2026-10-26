@@ -7,6 +7,7 @@
 //! becomes audible, so "up next" is always visible.
 
 mod bag;
+mod gain;
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
@@ -20,6 +21,9 @@ use rand::SeedableRng;
 use tokio::sync::broadcast;
 
 use self::bag::ShuffleBag;
+pub use self::gain::{
+    ReplayGain, ReplayGainMode, MAX_PREAMP_DB, REPLAY_GAIN_MODE, REPLAY_GAIN_PREAMP,
+};
 use crate::events::{
     Entry, NowPlaying, OutputStatus, PlayState, PlayerState, PlaylistRef, ServerEvent,
 };
@@ -98,6 +102,7 @@ pub struct Jukebox {
     cursor: Option<i64>,
     /// Song to play next from the playlist ("play from here").
     start_at: Option<i64>,
+    replay_gain: ReplayGain,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -125,6 +130,20 @@ impl Jukebox {
         let crossfade = setting(&store, CROSSFADE, 0)
             .await?
             .clamp(0, i64::from(djinn_engine::MAX_CROSSFADE_SECS)) as u8;
+        let replay_gain = ReplayGain {
+            mode: ReplayGainMode::parse(
+                store
+                    .get_setting(REPLAY_GAIN_MODE)
+                    .await?
+                    .as_deref()
+                    .unwrap_or_default(),
+            ),
+            preamp_db: store
+                .get_setting(REPLAY_GAIN_PREAMP)
+                .await?
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0.0),
+        };
         let mut seed = [0u8; 8];
         getrandom::fill(&mut seed).map_err(|e| anyhow::anyhow!("no system randomness: {e}"))?;
         let mut jukebox = Self {
@@ -147,6 +166,7 @@ impl Jukebox {
             active: None,
             cursor: (cursor > 0).then_some(cursor),
             start_at: None,
+            replay_gain,
         };
         (jukebox.engine)(Command::SetVolume(gain(volume)));
         (jukebox.engine)(Command::SetCrossfade(u32::from(crossfade)));
@@ -181,6 +201,20 @@ impl Jukebox {
 
     pub fn output_status(&self) -> OutputStatus {
         self.output.clone()
+    }
+
+    pub fn replay_gain(&self) -> ReplayGain {
+        self.replay_gain
+    }
+
+    /// Applies from the next song on.
+    pub fn set_replay_gain(&mut self, replay_gain: ReplayGain) {
+        self.replay_gain = replay_gain;
+    }
+
+    /// Replaces the engine's outputs.
+    pub fn set_outputs(&self, outputs: Vec<djinn_engine::OutputConfig>) {
+        (self.engine)(Command::SetOutputs(outputs));
     }
 
     /// Queues a request. Admins and users marked unlimited skip the
@@ -427,24 +461,8 @@ impl Jukebox {
                 };
                 self.send(ServerEvent::PlayerState(self.player_state()));
             }
-            EngineEvent::OutputOpened {
-                device,
-                sample_rate,
-                ..
-            } => {
-                self.output = OutputStatus {
-                    device: Some(device),
-                    sample_rate: Some(sample_rate),
-                    error: None,
-                };
-                self.send(ServerEvent::OutputStatus(self.output.clone()));
-            }
-            EngineEvent::OutputError { error } => {
-                self.output = OutputStatus {
-                    device: None,
-                    sample_rate: None,
-                    error: Some(error),
-                };
+            EngineEvent::Outputs(list) => {
+                self.output = OutputStatus::from_engine(&list);
                 self.send(ServerEvent::OutputStatus(self.output.clone()));
             }
         }
@@ -604,10 +622,19 @@ impl Jukebox {
                 .back()
                 .or(self.playing.as_ref().map(|p| &p.pending));
             let gapless = previous.is_some_and(|p| follows_on_album(&p.track, &candidate.track));
+            let gain = match self.replay_gain.mode {
+                ReplayGainMode::Off => 1.0,
+                _ => self
+                    .store
+                    .gain_info(candidate.track.id)
+                    .await?
+                    .map_or(1.0, |info| self.replay_gain.linear(&info)),
+            };
             (self.engine)(Command::SetNext(Some(djinn_engine::Track {
                 id: TrackId(candidate.track.id),
                 path: PathBuf::from(path),
                 gapless,
+                gain,
             })));
             self.queued = Some(candidate);
             return Ok(());
@@ -839,6 +866,35 @@ mod tests {
             })
             .await;
         }
+    }
+
+    #[tokio::test]
+    async fn replay_gain_reaches_the_engine() {
+        let mut h = Harness::new(1).await;
+        h.store
+            .save_loudness(h.tracks[0], Some((-8.0, 0.5)))
+            .await
+            .unwrap();
+        let gain_sent = |h: &Harness| {
+            h.sent.lock().unwrap().iter().rev().find_map(|c| match c {
+                Command::SetNext(Some(t)) => Some(t.gain),
+                _ => None,
+            })
+        };
+        h.event(EngineEvent::NextNeeded { after: None }).await;
+        assert_eq!(gain_sent(&h), Some(1.0), "off by default");
+
+        h.jukebox.set_replay_gain(ReplayGain {
+            mode: ReplayGainMode::Track,
+            preamp_db: 0.0,
+        });
+        h.event(EngineEvent::NextNeeded {
+            after: Some(TrackId(h.tracks[0])),
+        })
+        .await;
+        // -18 LUFS target from -8 LUFS: -10 dB.
+        let gain = gain_sent(&h).unwrap();
+        assert!((gain - 10f32.powf(-0.5)).abs() < 1e-4, "gain {gain}");
     }
 
     #[tokio::test]

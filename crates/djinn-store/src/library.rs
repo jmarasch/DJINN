@@ -229,6 +229,18 @@ pub struct ScannedTrack {
     /// The album's owner: its first credited album artist. Falls back to
     /// `album_artist`, then the first credit.
     pub album_owner: Option<String>,
+    pub replay_gain: ReplayGainTags,
+}
+
+/// ReplayGain values from a file's tags.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct ReplayGainTags {
+    /// dB.
+    pub track_gain: Option<f64>,
+    /// Linear, 1.0 is full scale.
+    pub track_peak: Option<f64>,
+    pub album_gain: Option<f64>,
+    pub album_peak: Option<f64>,
 }
 
 impl ScannedTrack {
@@ -808,8 +820,9 @@ async fn save_track(tx: &mut Transaction<'_, Sqlite>, t: &ScannedTrack, now: i64
         "INSERT INTO tracks (path, size, mtime, duration_ms, title, artist, album, album_artist,
                              track_no, disc_no, year, genre, art_hash, sample_rate, channels,
                              codec, artist_id, album_id, added_at, embedded_art, folder_art,
-                             artist_art)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                             artist_art, rg_track_gain, rg_track_peak, rg_album_gain,
+                             rg_album_peak)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (path) DO UPDATE SET
             size = excluded.size, mtime = excluded.mtime, duration_ms = excluded.duration_ms,
             title = excluded.title, artist = excluded.artist, album = excluded.album,
@@ -819,7 +832,16 @@ async fn save_track(tx: &mut Transaction<'_, Sqlite>, t: &ScannedTrack, now: i64
             channels = excluded.channels, codec = excluded.codec,
             artist_id = excluded.artist_id, album_id = excluded.album_id, removed_at = NULL,
             embedded_art = excluded.embedded_art, folder_art = excluded.folder_art,
-            artist_art = excluded.artist_art
+            artist_art = excluded.artist_art, rg_track_gain = excluded.rg_track_gain,
+            rg_track_peak = excluded.rg_track_peak, rg_album_gain = excluded.rg_album_gain,
+            rg_album_peak = excluded.rg_album_peak,
+            -- A changed file gets measured again.
+            loudness_lufs = CASE WHEN size = excluded.size AND mtime = excluded.mtime
+                                 THEN loudness_lufs END,
+            loudness_peak = CASE WHEN size = excluded.size AND mtime = excluded.mtime
+                                 THEN loudness_peak END,
+            loudness_checked_at = CASE WHEN size = excluded.size AND mtime = excluded.mtime
+                                       THEN loudness_checked_at END
          RETURNING id",
     )
     .bind(&t.path)
@@ -844,6 +866,10 @@ async fn save_track(tx: &mut Transaction<'_, Sqlite>, t: &ScannedTrack, now: i64
     .bind(&t.embedded_art)
     .bind(&t.folder_art)
     .bind(&t.artist_art)
+    .bind(t.replay_gain.track_gain)
+    .bind(t.replay_gain.track_peak)
+    .bind(t.replay_gain.album_gain)
+    .bind(t.replay_gain.album_peak)
     .fetch_one(&mut **tx)
     .await?;
     sqlx::query("DELETE FROM track_artists WHERE track_id = ?")

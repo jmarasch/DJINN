@@ -5,26 +5,27 @@ use std::sync::mpsc::{self, RecvTimeoutError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use crate::output::Output;
+use crate::outputs::Outputs;
 use crate::player::{Player, Sink};
-use crate::{Command, EngineError, Event, PlayState};
+use crate::{Command, EngineError, Event, OutputConfig, PlayState};
 
 /// How often the thread wakes when no commands arrive.
 const TICK: Duration = Duration::from_millis(10);
 const POSITION_INTERVAL: Duration = Duration::from_millis(500);
-const DEVICE_CHECK_INTERVAL: Duration = Duration::from_secs(3);
-const OUTPUT_RETRY: Duration = Duration::from_secs(2);
 
 #[derive(Clone, Debug)]
 pub struct EngineConfig {
     /// Internal mix rate. Every track is resampled to this.
     pub master_rate: u32,
+    /// Outputs to start with; replace them with [`Command::SetOutputs`].
+    pub outputs: Vec<OutputConfig>,
 }
 
 impl Default for EngineConfig {
     fn default() -> Self {
         Self {
             master_rate: 48_000,
+            outputs: vec![OutputConfig::system_default(0)],
         }
     }
 }
@@ -74,35 +75,14 @@ impl Drop for Engine {
     }
 }
 
-/// Stand-in sink while no output device is open: nothing plays.
-struct Detached {
-    frames: u64,
-}
-
-impl Sink for Detached {
-    fn free_frames(&mut self) -> usize {
-        0
-    }
-    fn write(&mut self, _: &[f32]) {}
-    fn consumed_frames(&self) -> u64 {
-        self.frames
-    }
-    fn flush(&mut self) {}
-}
-
 struct EngineThread {
-    config: EngineConfig,
     rx: mpsc::Receiver<Msg>,
     on_event: Box<dyn FnMut(Event) + Send>,
     player: Player,
-    output: Option<Output>,
-    retry_at: Instant,
-    last_output_error: Option<String>,
+    outputs: Outputs,
     paused: bool,
-    volume: f32,
     state: Option<PlayState>,
     next_position: Instant,
-    next_device_check: Instant,
 }
 
 impl EngineThread {
@@ -111,20 +91,14 @@ impl EngineThread {
         rx: mpsc::Receiver<Msg>,
         on_event: Box<dyn FnMut(Event) + Send>,
     ) -> Self {
-        let now = Instant::now();
         Self {
             player: Player::new(config.master_rate),
-            config,
+            outputs: Outputs::new(config.master_rate, config.outputs),
             rx,
             on_event,
-            output: None,
-            retry_at: now,
-            last_output_error: None,
             paused: false,
-            volume: 1.0,
             state: None,
-            next_position: now,
-            next_device_check: now + DEVICE_CHECK_INTERVAL,
+            next_position: Instant::now(),
         }
     }
 
@@ -152,46 +126,29 @@ impl EngineThread {
             Command::SetNext(track) => self.player.set_next(track),
             Command::Play => self.set_paused(false),
             Command::Pause => self.set_paused(true),
-            Command::Skip => match self.output.as_mut() {
-                Some(output) => self.player.skip(output),
-                None => {
-                    let mut sink = Detached {
-                        frames: self.player.written(),
-                    };
-                    self.player.skip(&mut sink);
-                }
-            },
+            Command::Skip => self.player.skip(&mut self.outputs),
             Command::SetCrossfade(secs) => self.player.set_crossfade(secs),
-            Command::SetVolume(volume) => {
-                self.volume = volume.clamp(0.0, 1.0);
-                if let Some(output) = &self.output {
-                    output.set_volume(self.volume);
-                }
-            }
+            Command::SetVolume(volume) => self.outputs.set_volume(volume),
+            Command::SetOutputs(configs) => self.outputs.configure(configs),
         }
         self.flush_events();
     }
 
     fn set_paused(&mut self, paused: bool) {
         self.paused = paused;
-        if let Some(output) = &self.output {
-            output.set_paused(paused);
-        }
+        self.outputs.set_paused(paused);
     }
 
     fn tick(&mut self) {
         let now = Instant::now();
-        self.manage_output(now);
-
-        if let Some(output) = self.output.as_mut() {
-            self.player.fill(output);
-            let consumed = output.consumed_frames();
-            self.player.update(consumed);
-            if now >= self.next_position {
-                self.next_position = now + POSITION_INTERVAL;
-                if let Some((id, ms)) = self.player.position(consumed) {
-                    (self.on_event)(Event::Position { id, ms });
-                }
+        self.outputs.tick(now);
+        self.player.fill(&mut self.outputs);
+        let consumed = self.outputs.consumed_frames();
+        self.player.update(consumed);
+        if now >= self.next_position {
+            self.next_position = now + POSITION_INTERVAL;
+            if let Some((id, ms)) = self.player.position(consumed) {
+                (self.on_event)(Event::Position { id, ms });
             }
         }
         self.flush_events();
@@ -209,73 +166,11 @@ impl EngineThread {
         }
     }
 
-    fn manage_output(&mut self, now: Instant) {
-        if let Some(output) = &self.output {
-            let mut lost = None;
-            match output.poll_errors() {
-                Ok(minor) => {
-                    for message in minor {
-                        tracing::debug!(%message, "audio output");
-                    }
-                }
-                Err(message) => lost = Some(message),
-            }
-            if lost.is_none() && now >= self.next_device_check {
-                self.next_device_check = now + DEVICE_CHECK_INTERVAL;
-                if output.default_device_changed() {
-                    tracing::info!("default output device changed, reopening");
-                    self.output = None;
-                    self.retry_at = now;
-                }
-            }
-            if let Some(message) = lost {
-                tracing::warn!(%message, "audio output lost");
-                (self.on_event)(Event::OutputError {
-                    error: message.clone(),
-                });
-                self.last_output_error = Some(message);
-                self.output = None;
-                self.retry_at = now + OUTPUT_RETRY;
-            }
-        }
-
-        if self.output.is_none() && now >= self.retry_at {
-            match Output::open_default(self.config.master_rate, self.player.written()) {
-                Ok(output) => {
-                    output.set_volume(self.volume);
-                    output.set_paused(self.paused);
-                    tracing::info!(
-                        device = output.name(),
-                        rate = output.sample_rate(),
-                        channels = output.channels(),
-                        "audio output opened"
-                    );
-                    (self.on_event)(Event::OutputOpened {
-                        device: output.name().to_owned(),
-                        sample_rate: output.sample_rate(),
-                        channels: output.channels(),
-                    });
-                    self.last_output_error = None;
-                    self.output = Some(output);
-                }
-                Err(e) => {
-                    let message = e.to_string();
-                    // Report each distinct failure once, not every retry.
-                    if self.last_output_error.as_deref() != Some(message.as_str()) {
-                        tracing::warn!(%message, "cannot open audio output, retrying");
-                        (self.on_event)(Event::OutputError {
-                            error: message.clone(),
-                        });
-                        self.last_output_error = Some(message);
-                    }
-                    self.retry_at = now + OUTPUT_RETRY;
-                }
-            }
-        }
-    }
-
     fn flush_events(&mut self) {
         for event in self.player.take_events() {
+            (self.on_event)(event);
+        }
+        for event in self.outputs.take_events() {
             (self.on_event)(event);
         }
     }

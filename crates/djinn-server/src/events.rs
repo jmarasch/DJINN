@@ -21,6 +21,8 @@ pub enum ServerEvent {
     /// Artists, albums, or pictures changed; cached lists are stale.
     LibraryChanged,
     ArtistLookup(LookupStatus),
+    /// Progress measuring song loudness for ReplayGain.
+    Loudness(LoudnessStatus),
 }
 
 impl ServerEvent {
@@ -34,6 +36,7 @@ impl ServerEvent {
             Self::ScanProgress(_) => "scan_progress",
             Self::LibraryChanged => "library_changed",
             Self::ArtistLookup(_) => "artist_lookup",
+            Self::Loudness(_) => "loudness",
         }
     }
 }
@@ -88,9 +91,72 @@ pub struct LookupStatus {
     pub finished_at: Option<i64>,
 }
 
+#[derive(Clone, Copy, Debug, Default, Serialize)]
+pub struct LoudnessStatus {
+    #[serde(flatten)]
+    pub progress: djinn_store::LoudnessProgress,
+    pub running: bool,
+}
+
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct OutputStatus {
+    /// The devices playing, for the status line.
+    pub device: Option<String>,
+    /// The clock output's sample rate.
+    pub sample_rate: Option<u32>,
+    /// Why nothing plays, when no output does.
+    pub error: Option<String>,
+    /// Each output's live state, for the admin page.
+    pub outputs: Vec<LiveOutput>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct LiveOutput {
+    pub id: i64,
+    /// "disabled", "waiting", or "playing".
+    pub state: &'static str,
     pub device: Option<String>,
     pub sample_rate: Option<u32>,
     pub error: Option<String>,
+    /// The output the others are kept in time with.
+    pub clock: bool,
+    pub drift_ppm: f64,
+    pub offset_ms: f64,
+}
+
+impl OutputStatus {
+    pub fn from_engine(list: &[djinn_engine::OutputStatus]) -> Self {
+        let playing: Vec<_> = list
+            .iter()
+            .filter(|o| o.state == djinn_engine::OutputState::Playing)
+            .collect();
+        let names: Vec<&str> = playing.iter().filter_map(|o| o.device.as_deref()).collect();
+        let round = |x: f64| (x * 10.0).round() / 10.0;
+        Self {
+            device: (!names.is_empty()).then(|| names.join(" + ")),
+            sample_rate: playing.iter().find(|o| o.clock).and_then(|o| o.sample_rate),
+            error: if playing.is_empty() {
+                list.iter().find_map(|o| o.error.clone())
+            } else {
+                None
+            },
+            outputs: list
+                .iter()
+                .map(|o| LiveOutput {
+                    id: o.id,
+                    state: match o.state {
+                        djinn_engine::OutputState::Disabled => "disabled",
+                        djinn_engine::OutputState::Waiting => "waiting",
+                        djinn_engine::OutputState::Playing => "playing",
+                    },
+                    device: o.device.clone(),
+                    sample_rate: o.sample_rate,
+                    error: o.error.clone(),
+                    clock: o.clock,
+                    drift_ppm: round(o.drift_ppm),
+                    offset_ms: round(o.offset_ms),
+                })
+                .collect(),
+        }
+    }
 }

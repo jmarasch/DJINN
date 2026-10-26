@@ -155,9 +155,47 @@ export interface PlayerState {
 }
 
 export interface OutputStatus {
+  /** The devices playing, joined. */
+  device: string | null
+  sample_rate: number | null
+  /** Why nothing plays, when no output does. */
+  error: string | null
+  outputs: LiveOutput[]
+}
+
+export interface LiveOutput {
+  id: number
+  state: 'disabled' | 'waiting' | 'playing'
   device: string | null
   sample_rate: number | null
   error: string | null
+  /** The output the others are kept in time with. */
+  clock: boolean
+  drift_ppm: number
+  offset_ms: number
+}
+
+export interface OutputConfig {
+  id: number
+  /** Empty for the system default device. */
+  device_id: string
+  label: string
+  enabled: boolean
+  volume_trim: number
+  delay_ms: number
+}
+
+export interface OutputList {
+  outputs: OutputConfig[]
+  status: OutputStatus
+  max_delay_ms: number
+}
+
+export interface AudioDevice {
+  id: string
+  name: string
+  is_default: boolean
+  added: boolean
 }
 
 export interface ScanProgress {
@@ -260,4 +298,21 @@ export interface LookupStatus {
 /** What asking for background work did. */
 export interface StartResponse {
   status: 'started' | 'running' | 'queued'
+}
+
+export type ReplayGainMode = 'off' | 'track' | 'album'
+
+export interface LoudnessStatus {
+  /** Songs whose loudness is known (tags or measured). */
+  known: number
+  /** Songs still to measure. */
+  waiting: number
+  running: boolean
+}
+
+export interface ReplayGainSettings {
+  mode: ReplayGainMode
+  preamp_db: number
+  max_preamp_db: number
+  loudness: LoudnessStatus
 }

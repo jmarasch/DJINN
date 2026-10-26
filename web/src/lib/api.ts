@@ -1,5 +1,6 @@
 import type {
   Album,
+  AudioDevice,
   AlbumDetail,
   ArtistDetail,
   ArtistSummary,
@@ -10,6 +11,8 @@ import type {
   Mode,
   StartResponse,
   NowPlaying,
+  OutputConfig,
+  OutputList,
   OutputStatus,
   Page,
   PlayerState,
@@ -18,6 +21,8 @@ import type {
   PlaylistListItem,
   PlaylistSummary,
   QueueItem,
+  ReplayGainMode,
+  ReplayGainSettings,
   RequestLogEntry,
   Role,
   ScanProgress,
@@ -134,6 +139,15 @@ export const api = {
 
   settings: () => get<Settings>('/settings'),
   saveSettings: (settings: Settings) => put<Settings>('/settings', settings),
+  outputs: () => get<OutputList>('/outputs'),
+  audioDevices: () => get<AudioDevice[]>('/outputs/devices'),
+  addOutput: (device_id: string, label: string) => post<OutputConfig>('/outputs', { device_id, label }),
+  updateOutput: (o: OutputConfig) =>
+    put<OutputConfig>(`/outputs/${o.id}`, { enabled: o.enabled, volume_trim: o.volume_trim, delay_ms: o.delay_ms }),
+  removeOutput: (id: number) => del<void>(`/outputs/${id}`),
+  replayGain: () => get<ReplayGainSettings>('/audio/replaygain'),
+  saveReplayGain: (mode: ReplayGainMode, preamp_db: number) =>
+    put<ReplayGainSettings>('/audio/replaygain', { mode, preamp_db }),
 
   libraryStatus: () =>
     get<{ scanning: boolean; last_scan: ScanProgress | null; tracks: number; art_dir: string }>(

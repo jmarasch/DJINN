@@ -6,11 +6,18 @@ publish.workspace = true
 
 [dependencies]
 cpal = "0.18.2"
+ebur128 = "0.1.10"
 rtrb = "0.4.1"
 rubato = "5.0.1"
 symphonia = { version = "0.6.1", features = ["mp3", "flac", "aac", "isomp4", "vorbis", "ogg", "wav", "pcm"] }
 thiserror.workspace = true
 tracing.workspace = true
+
+# PulseAudio covers PipeWire too (through pipewire-pulse) and lists every
+# sink, including Bluetooth ones that raw ALSA can't reach. Pure Rust, so no
+# extra system libraries.
+[target.'cfg(target_os = "linux")'.dependencies]
+cpal = { version = "0.18.2", features = ["pulseaudio"] }
 
 [lints]
 workspace = true

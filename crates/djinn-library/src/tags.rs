@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use djinn_store::ScannedTrack;
+use djinn_store::{ReplayGainTags, ScannedTrack};
 use lofty::file::TaggedFile;
 use lofty::picture::PictureType;
 use lofty::prelude::*;
@@ -140,7 +140,29 @@ fn fill_from_tags(track: &mut ScannedTrack, file: &TaggedFile) -> (Vec<String>, 
     track.track_no = tag.track().map(i64::from);
     track.disc_no = tag.disk().map(i64::from);
     track.year = tag.date().map(|d| i64::from(d.year));
+    let number = |key: ItemKey| tag.get_string(key).and_then(parse_replay_gain);
+    track.replay_gain = ReplayGainTags {
+        track_gain: number(ItemKey::ReplayGainTrackGain),
+        track_peak: number(ItemKey::ReplayGainTrackPeak).filter(|p| *p > 0.0),
+        album_gain: number(ItemKey::ReplayGainAlbumGain),
+        album_peak: number(ItemKey::ReplayGainAlbumPeak).filter(|p| *p > 0.0),
+    };
     (artists, album_artists)
+}
+
+/// Reads a ReplayGain value like "-6.54 dB", "+1.2dB", or "0.98765".
+fn parse_replay_gain(value: &str) -> Option<f64> {
+    let value = value.trim();
+    let number = value
+        .strip_suffix("dB")
+        .or_else(|| value.strip_suffix("db"))
+        .or_else(|| value.strip_suffix("DB"))
+        .unwrap_or(value)
+        .trim();
+    number
+        .parse::<f64>()
+        .ok()
+        .filter(|n| n.is_finite() && n.abs() < 100.0)
 }
 
 /// Drops the " - Topic" that YouTube Music adds to auto-generated artist
@@ -190,6 +212,50 @@ fn cached(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_replay_gain_values() {
+        assert_eq!(parse_replay_gain("-6.54 dB"), Some(-6.54));
+        assert_eq!(parse_replay_gain("+1.2dB"), Some(1.2));
+        assert_eq!(parse_replay_gain(" 0.987654 "), Some(0.987654));
+        assert_eq!(parse_replay_gain("loud"), None);
+        assert_eq!(parse_replay_gain("NaN dB"), None);
+    }
+
+    #[test]
+    fn reads_replay_gain_tags() {
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/tagged.flac");
+        let dir = std::env::temp_dir().join(format!("djinn-rg-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // Tag a copy; fixtures stay untouched.
+        let copy = dir.join("rg.flac");
+        std::fs::copy(&fixture, &copy).unwrap();
+        let mut file = lofty::read_from_path(&copy).unwrap();
+        let tag = file.primary_tag_mut().unwrap();
+        tag.insert_text(ItemKey::ReplayGainTrackGain, "-7.25 dB".into());
+        tag.insert_text(ItemKey::ReplayGainTrackPeak, "0.95".into());
+        tag.insert_text(ItemKey::ReplayGainAlbumGain, "-6.5 dB".into());
+        file.save_to_path(&copy, lofty::config::WriteOptions::default())
+            .unwrap();
+
+        let cache = ArtCache::default();
+        let scan = ScanContext {
+            art_dir: &dir,
+            cache: &cache,
+            keep_whole: &[],
+        };
+        let t = read(&copy, "rg.flac", 1, 2, None, &scan);
+        assert_eq!(
+            t.replay_gain,
+            ReplayGainTags {
+                track_gain: Some(-7.25),
+                track_peak: Some(0.95),
+                album_gain: Some(-6.5),
+                album_peak: None,
+            }
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn reads_tags_and_embedded_art() {

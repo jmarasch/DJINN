@@ -3,6 +3,7 @@
 import { api, ApiError } from './api'
 import { clearListCache } from './listCache'
 import type {
+  LoudnessStatus,
   LookupStatus,
   Mode,
   NowPlaying,
@@ -26,10 +27,12 @@ export const app = $state({
   connected: false,
   nowPlaying: { current: null, position_ms: 0, up_next: null } as NowPlaying,
   player: { state: 'idle', volume: 80, crossfade_secs: 0, playlist: null } as PlayerState,
-  output: { device: null, sample_rate: null, error: null } as OutputStatus,
+  output: { device: null, sample_rate: null, error: null, outputs: [] } as OutputStatus,
   queue: [] as QueueItem[],
   scan: null as ScanProgress | null,
   lookup: { running: false, last: null, finished_at: null } as LookupStatus,
+  /** ReplayGain loudness measuring; filled in on the Audio tab. */
+  loudness: null as LoudnessStatus | null,
   /** Track ids with a request on its way to the server. */
   pending: new Set<number>(),
 })
@@ -81,6 +84,7 @@ export function connect() {
   })
   on('library_changed', () => clearListCache())
   on<LookupStatus>('artist_lookup', (data) => (app.lookup = data))
+  on<LoudnessStatus>('loudness', (data) => (app.loudness = data))
 
   events.onerror = async () => {
     app.connected = false

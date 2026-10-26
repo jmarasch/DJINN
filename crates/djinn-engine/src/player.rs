@@ -141,10 +141,6 @@ impl Player {
         }
     }
 
-    pub fn written(&self) -> u64 {
-        self.written
-    }
-
     pub fn take_events(&mut self) -> std::vec::Drain<'_, Event> {
         self.events.drain(..)
     }
@@ -332,6 +328,12 @@ impl Player {
         match deck.decoder.decode_next(&mut self.decoded) {
             Ok(true) => {
                 let id = deck.track.id;
+                let gain = deck.track.gain;
+                if gain != 1.0 {
+                    for sample in &mut self.decoded {
+                        *sample *= gain;
+                    }
+                }
                 if let Some(stage) = self.stage.as_mut() {
                     stage.frames_in += (self.decoded.len() / 2) as u64;
                     self.staged.clear();
@@ -604,6 +606,7 @@ pub(crate) mod tests {
             id: TrackId(id),
             path: path.to_path_buf(),
             gapless: false,
+            gain: 1.0,
         }
     }
 
@@ -622,6 +625,7 @@ pub(crate) mod tests {
     ) -> (Vec<f32>, Vec<Event>) {
         let track = |i: usize, p: &Path| Track {
             gapless: gapless.contains(&i),
+            gain: 1.0,
             ..track(i as i64, p)
         };
         let mut player = Player::new(48_000);
@@ -697,6 +701,28 @@ pub(crate) mod tests {
                 (TrackId(1), (n2 * 1000 / 48_000) as u64, EndReason::Finished),
             ]
         );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn track_gain_scales_the_signal() {
+        let dir = temp_dir("gain");
+        let samples = sine_i16(48_000, 0, 4_800);
+        let path = dir.join("a.wav");
+        write_wav(&path, 48_000, &samples);
+
+        let mut player = Player::new(48_000);
+        player.set_next(Some(Track {
+            gain: 0.5,
+            ..track(0, &path)
+        }));
+        let mut sink = VecSink::default();
+        for _ in 0..100 {
+            sink.budget = 4096;
+            player.fill(&mut sink);
+        }
+        let expected: Vec<f32> = to_f32(&samples).iter().map(|s| s * 0.5).collect();
+        assert_eq!(sink.out, expected);
         std::fs::remove_dir_all(dir).unwrap();
     }
 

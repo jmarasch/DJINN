@@ -386,6 +386,7 @@ pub fn start_scan(state: &AppState) -> bool {
                 {
                     start_artist_lookup(&state, false);
                 }
+                crate::audio_api::start_measuring(&state).await;
                 // New tracks may have joined albums and artists in the
                 // active playlist.
                 if let Err(e) = state.jukebox.lock().await.auto_mix_changed().await {

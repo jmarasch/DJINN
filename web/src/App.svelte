@@ -41,8 +41,9 @@
   const artistId = $derived(param('/artist'))
   const playlistId = $derived(param('/playlist'))
   const adminTab = $derived(
-    (route.path.match(/^\/admin\/(library|users|log|rules)$/)?.[1] ?? 'library') as
+    (route.path.match(/^\/admin\/(library|audio|users|log|rules)$/)?.[1] ?? 'library') as
       | 'library'
+      | 'audio'
       | 'users'
       | 'log'
       | 'rules',

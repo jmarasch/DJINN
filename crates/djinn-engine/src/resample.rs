@@ -6,8 +6,8 @@
 
 use rubato::audioadapter_buffers::direct::InterleavedSlice;
 use rubato::{
-    Async, Fft, FixedAsync, FixedSync, Indexing, Resampler, SincInterpolationParameters,
-    WindowFunction,
+    Adjustable, Async, Fft, FixedAsync, FixedSync, Indexing, Resampler,
+    SincInterpolationParameters, WindowFunction,
 };
 
 use crate::EngineError;
@@ -15,8 +15,29 @@ use crate::EngineError;
 const CHANNELS: usize = 2;
 const CHUNK: usize = 1024;
 
+enum Inner {
+    Fixed(Box<dyn Resampler<f32>>),
+    Adjustable(Box<dyn Adjustable<f32>>),
+}
+
+impl Inner {
+    fn get(&self) -> &dyn Resampler<f32> {
+        match self {
+            Self::Fixed(r) => r.as_ref(),
+            Self::Adjustable(r) => r.as_ref(),
+        }
+    }
+
+    fn get_mut(&mut self) -> &mut dyn Resampler<f32> {
+        match self {
+            Self::Fixed(r) => r.as_mut(),
+            Self::Adjustable(r) => r.as_mut(),
+        }
+    }
+}
+
 pub struct StreamResampler {
-    inner: Box<dyn Resampler<f32>>,
+    inner: Inner,
     from: u32,
     to: u32,
     /// Interleaved input not yet consumed by the resampler.
@@ -40,12 +61,11 @@ impl StreamResampler {
             FixedSync::Input,
         )
         .map_err(|e| EngineError::Resample(e.to_string()))?;
-        Ok(Self::with(Box::new(inner), from, to))
+        Ok(Self::with(Inner::Fixed(Box::new(inner)), from, to))
     }
 
     /// Ratio adjustable at runtime by up to `max_relative`. For outputs,
     /// where drift correction nudges the ratio.
-    #[allow(dead_code)] // Used by multi-output drift correction (Phase 3).
     pub fn adjustable(from: u32, to: u32, max_relative: f64) -> Result<Self, EngineError> {
         let params = SincInterpolationParameters::new(128, WindowFunction::BlackmanHarris2);
         let inner = Async::<f32>::new_sinc(
@@ -57,12 +77,12 @@ impl StreamResampler {
             FixedAsync::Input,
         )
         .map_err(|e| EngineError::Resample(e.to_string()))?;
-        Ok(Self::with(Box::new(inner), from, to))
+        Ok(Self::with(Inner::Adjustable(Box::new(inner)), from, to))
     }
 
-    fn with(inner: Box<dyn Resampler<f32>>, from: u32, to: u32) -> Self {
-        let skip = inner.output_delay();
-        let scratch = vec![0.0; inner.output_frames_max() * CHANNELS];
+    fn with(inner: Inner, from: u32, to: u32) -> Self {
+        let skip = inner.get().output_delay();
+        let scratch = vec![0.0; inner.get().output_frames_max() * CHANNELS];
         Self {
             inner,
             from,
@@ -86,7 +106,7 @@ impl StreamResampler {
     pub fn process(&mut self, input: &[f32], out: &mut Vec<f32>) -> Result<(), EngineError> {
         self.frames_in += (input.len() / CHANNELS) as u64;
         self.pending.extend_from_slice(input);
-        while self.pending.len() / CHANNELS >= self.inner.input_frames_next() {
+        while self.pending.len() / CHANNELS >= self.inner.get().input_frames_next() {
             self.run_chunk(None, out)?;
         }
         Ok(())
@@ -106,12 +126,27 @@ impl StreamResampler {
         Ok(())
     }
 
+    /// Sets the ratio relative to the nominal one (above 1.0 makes more
+    /// output), ramping smoothly over the next chunk.
+    pub fn set_ratio_relative(&mut self, relative: f64) -> Result<(), EngineError> {
+        match &mut self.inner {
+            Inner::Adjustable(r) => r
+                .set_resample_ratio_relative(relative, true)
+                .map_err(|e| EngineError::Resample(e.to_string())),
+            Inner::Fixed(_) => Err(EngineError::Resample("fixed-ratio resampler".to_owned())),
+        }
+    }
+
+    /// Input frames waiting for a full chunk.
+    pub fn pending_frames(&self) -> usize {
+        self.pending.len() / CHANNELS
+    }
+
     /// Drops all buffered audio and starts over.
-    #[allow(dead_code)] // Used when an output is flushed (resampled outputs).
     pub fn reset(&mut self) {
-        self.inner.reset();
+        self.inner.get_mut().reset();
         self.pending.clear();
-        self.skip = self.inner.output_delay();
+        self.skip = self.inner.get().output_delay();
         self.frames_in = 0;
         self.frames_out = 0;
     }
@@ -119,7 +154,7 @@ impl StreamResampler {
     /// Runs one chunk. With `partial`, only that many pending frames are
     /// valid and the rest of the chunk is silence.
     fn run_chunk(&mut self, partial: Option<usize>, out: &mut Vec<f32>) -> Result<(), EngineError> {
-        let need = self.inner.input_frames_next();
+        let need = self.inner.get().input_frames_next();
         if self.pending.len() < need * CHANNELS {
             self.pending.resize(need * CHANNELS, 0.0);
         }
@@ -131,6 +166,7 @@ impl StreamResampler {
         let indexing = partial.map(|n| Indexing::new().partial_len(n));
         let (_, written) = self
             .inner
+            .get_mut()
             .process_into_buffer(&input, &mut output, indexing.as_ref())
             .map_err(|e| EngineError::Resample(e.to_string()))?;
 

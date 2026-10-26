@@ -5,6 +5,7 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod api;
+mod audio_api;
 mod auth;
 mod banner;
 mod client;
@@ -101,9 +102,11 @@ async fn main() -> anyhow::Result<()> {
     // Engine events are handed to the async side through a channel; the
     // callback runs on the engine thread and must not block.
     let (engine_tx, mut engine_rx) = mpsc::unbounded_channel();
+    let outputs = audio_api::engine_configs(&store.outputs().await?);
     let engine = Engine::start(
         EngineConfig {
             master_rate: config.audio.master_rate,
+            outputs,
         },
         move |event| {
             let _ = engine_tx.send(event);
