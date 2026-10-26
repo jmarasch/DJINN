@@ -9,7 +9,16 @@ use lofty::file::TaggedFile;
 use lofty::picture::PictureType;
 use lofty::prelude::*;
 
-use crate::art;
+use crate::{art, credits};
+
+/// What every file in a scan shares.
+#[derive(Clone, Copy)]
+pub struct ScanContext<'a> {
+    pub art_dir: &'a Path,
+    pub cache: &'a ArtCache,
+    /// Artist names never split.
+    pub keep_whole: &'a [String],
+}
 
 /// Images already resolved during this scan, so each folder is read once.
 #[derive(Default)]
@@ -26,9 +35,13 @@ pub fn read(
     size: i64,
     mtime: i64,
     artist_dir: Option<&Path>,
-    art_dir: &Path,
-    cache: &ArtCache,
+    scan: &ScanContext<'_>,
 ) -> ScannedTrack {
+    let ScanContext {
+        art_dir,
+        cache,
+        keep_whole,
+    } = *scan;
     let mut track = ScannedTrack {
         path: path_str.to_owned(),
         size,
@@ -37,9 +50,11 @@ pub fn read(
     };
 
     let mut embedded_art = None;
+    let mut artists = Vec::new();
+    let mut album_artists = Vec::new();
     match lofty::read_from_path(path) {
         Ok(file) => {
-            fill_from_tags(&mut track, &file);
+            (artists, album_artists) = fill_from_tags(&mut track, &file);
             embedded_art = cover_picture(&file);
         }
         // Still list the file: symphonia may play what lofty can't parse.
@@ -52,6 +67,18 @@ pub fn read(
             .unwrap_or_else(|| path_str.to_owned());
     }
 
+    // Split "A & B feat. C" into separate artists.
+    if !artists.is_empty() {
+        track.credits = credits::track_credits(&artists, &track.title, keep_whole)
+            .into_iter()
+            .map(|c| (c.name, c.featured))
+            .collect();
+    }
+    track.album_owner = album_artists
+        .first()
+        .and_then(|a| credits::split_credit(a, keep_whole).into_iter().next())
+        .map(|c| c.name);
+
     track.embedded_art = embedded_art.and_then(|bytes| {
         art::store(art_dir, &bytes)
             .map_err(|e| tracing::warn!(path = path_str, error = %e, "cannot cache cover art"))
@@ -60,7 +87,11 @@ pub fn read(
     track.folder_art = path
         .parent()
         .and_then(|dir| cached(&cache.folders, dir, || art::find_folder_art(dir), art_dir));
-    let artist = track.album_artist.clone().or_else(|| track.artist.clone());
+    let artist = track
+        .album_owner
+        .clone()
+        .or_else(|| track.credits.first().map(|(name, _)| name.clone()))
+        .or_else(|| track.artist.clone());
     track.artist_art = match (artist_dir, artist) {
         (Some(dir), Some(artist)) => cached(
             &cache.artists,
@@ -73,7 +104,9 @@ pub fn read(
     track
 }
 
-fn fill_from_tags(track: &mut ScannedTrack, file: &TaggedFile) {
+/// Fills in tags and audio properties. Returns the artist and album artist
+/// values (several when the file has proper multi-artist tags).
+fn fill_from_tags(track: &mut ScannedTrack, file: &TaggedFile) -> (Vec<String>, Vec<String>) {
     let props = file.properties();
     track.duration_ms = i64::try_from(props.duration().as_millis()).ok();
     track.sample_rate = props.sample_rate().map(i64::from);
@@ -81,20 +114,33 @@ fn fill_from_tags(track: &mut ScannedTrack, file: &TaggedFile) {
     track.codec = Some(format!("{:?}", file.file_type()).to_lowercase());
 
     let Some(tag) = file.primary_tag().or_else(|| file.first_tag()) else {
-        return;
+        return (Vec::new(), Vec::new());
     };
     let text = |value: Option<std::borrow::Cow<'_, str>>| {
         value.map(|v| v.trim().to_owned()).filter(|v| !v.is_empty())
     };
+    // Proper multi-artist tags (Picard's ARTISTS) first, then every value of
+    // the plain artist tag.
+    let values = |many: ItemKey, one: ItemKey| -> Vec<String> {
+        let clean = |v: &str| Some(clean_artist(v.trim().to_owned())).filter(|v| !v.is_empty());
+        let multi: Vec<String> = tag.get_strings(many).filter_map(clean).collect();
+        if multi.is_empty() {
+            tag.get_strings(one).filter_map(clean).collect()
+        } else {
+            multi
+        }
+    };
+    let artists = values(ItemKey::TrackArtists, ItemKey::TrackArtist);
+    let album_artists = values(ItemKey::AlbumArtists, ItemKey::AlbumArtist);
     track.title = text(tag.title()).unwrap_or_default();
-    track.artist = text(tag.artist()).map(clean_artist);
+    track.artist = (!artists.is_empty()).then(|| artists.join(" & "));
     track.album = text(tag.album());
-    track.album_artist =
-        text(tag.get_string(ItemKey::AlbumArtist).map(Into::into)).map(clean_artist);
+    track.album_artist = (!album_artists.is_empty()).then(|| album_artists.join(" & "));
     track.genre = text(tag.genre());
     track.track_no = tag.track().map(i64::from);
     track.disc_no = tag.disk().map(i64::from);
     track.year = tag.date().map(|d| i64::from(d.year));
+    (artists, album_artists)
 }
 
 /// Drops the " - Topic" that YouTube Music adds to auto-generated artist
@@ -150,7 +196,12 @@ mod tests {
         let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/tagged.flac");
         let art_dir = std::env::temp_dir().join(format!("djinn-tags-{}", std::process::id()));
         let cache = ArtCache::default();
-        let t = read(&fixture, "tagged.flac", 1, 2, None, &art_dir, &cache);
+        let scan = ScanContext {
+            art_dir: &art_dir,
+            cache: &cache,
+            keep_whole: &[],
+        };
+        let t = read(&fixture, "tagged.flac", 1, 2, None, &scan);
 
         assert_eq!(t.title, "Jóga");
         assert_eq!(t.artist.as_deref(), Some("Björk"));

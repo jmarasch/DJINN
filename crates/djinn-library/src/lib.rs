@@ -1,6 +1,7 @@
 //! DJINN music library: scanner, tags, cover art, and search.
 
 pub mod art;
+pub mod credits;
 pub mod online;
 mod tags;
 
@@ -21,8 +22,28 @@ const BATCH: usize = 64;
 const READERS: usize = 4;
 /// Bumped when the scanner starts extracting something new, so the next
 /// scan re-reads every file once. 2: artwork sources, " - Topic" cleanup.
-const SCAN_VERSION: i64 = 2;
-const SCAN_VERSION_KEY: &str = "scan_version";
+/// 3: separate artists for collaborations and features.
+const SCAN_VERSION: i64 = 3;
+/// Set to anything else to make the next scan re-read every file.
+pub const SCAN_VERSION_KEY: &str = "scan_version";
+/// Artist names never split (one per line); unset means the defaults.
+pub const KEEP_WHOLE_KEY: &str = "artist_keep_whole";
+
+/// The never-split artist names in effect.
+pub async fn keep_whole(store: &Store) -> Result<Vec<String>, LibraryError> {
+    Ok(match store.get_setting(KEEP_WHOLE_KEY).await? {
+        Some(list) => list
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .map(str::to_owned)
+            .collect(),
+        None => credits::DEFAULT_KEEP_WHOLE
+            .iter()
+            .map(|s| (*s).to_owned())
+            .collect(),
+    })
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum LibraryError {
@@ -97,13 +118,16 @@ pub async fn scan(
     progress(&status);
 
     let art_cache = Arc::new(tags::ArtCache::default());
+    let keep_whole = Arc::new(keep_whole(store).await?);
     for batch in to_read.chunks(BATCH) {
         let batch = batch.to_vec();
         let art_dir = art_dir.to_path_buf();
         let cache = Arc::clone(&art_cache);
-        let scanned = tokio::task::spawn_blocking(move || read_batch(&batch, &art_dir, &cache))
-            .await
-            .map_err(|e| LibraryError::Task(e.to_string()))?;
+        let keep = Arc::clone(&keep_whole);
+        let scanned =
+            tokio::task::spawn_blocking(move || read_batch(&batch, &art_dir, &cache, &keep))
+                .await
+                .map_err(|e| LibraryError::Task(e.to_string()))?;
         store.save_scanned(&scanned).await?;
         status.read += scanned.len();
         progress(&status);
@@ -190,7 +214,17 @@ fn is_audio(path: &Path) -> bool {
         .is_some_and(|e| AUDIO_EXTENSIONS.iter().any(|a| a.eq_ignore_ascii_case(e)))
 }
 
-fn read_batch(batch: &[FoundFile], art_dir: &Path, cache: &tags::ArtCache) -> Vec<ScannedTrack> {
+fn read_batch(
+    batch: &[FoundFile],
+    art_dir: &Path,
+    cache: &tags::ArtCache,
+    keep_whole: &[String],
+) -> Vec<ScannedTrack> {
+    let scan = tags::ScanContext {
+        art_dir,
+        cache,
+        keep_whole,
+    };
     let per_thread = batch.len().div_ceil(READERS).max(1);
     std::thread::scope(|s| {
         let handles: Vec<_> = batch
@@ -206,8 +240,7 @@ fn read_batch(batch: &[FoundFile], art_dir: &Path, cache: &tags::ArtCache) -> Ve
                                 f.size,
                                 f.mtime,
                                 f.artist_dir.as_deref(),
-                                art_dir,
-                                cache,
+                                &scan,
                             )
                         })
                         .collect::<Vec<_>>()

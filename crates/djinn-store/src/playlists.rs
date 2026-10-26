@@ -5,6 +5,7 @@
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
+use crate::library::track_columns;
 use crate::{now_ms, Result, Store, StoreError, Track};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
@@ -97,7 +98,7 @@ macro_rules! entry_covers {
         "t.removed_at IS NULL AND (
               (e.kind = 'track' AND t.id = e.ref_id)
            OR (e.kind = 'album' AND t.album_id = e.ref_id)
-           OR (e.kind = 'artist' AND (t.artist_id = e.ref_id
+           OR (e.kind = 'artist' AND (EXISTS (SELECT 1 FROM track_artists ta WHERE ta.track_id = t.id AND ta.artist_id = e.ref_id)
                OR t.album_id IN (SELECT id FROM albums WHERE artist_id = e.ref_id))))"
     };
 }
@@ -203,14 +204,10 @@ impl Store {
         .bind(id)
         .fetch_all(&self.pool)
         .await?;
-        let tracks: Vec<Track> = sqlx::query_as(expanded_tracks!(
-            "t.id, t.title, t.artist, t.album, t.album_artist, t.artist_id, t.album_id, \
-             t.track_no, t.disc_no, t.year, t.genre, t.duration_ms, \
-             coalesce(t.art_hash, (SELECT fa.art_hash FROM albums fa WHERE fa.id = t.album_id)) AS art_hash"
-        ))
-        .bind(id)
-        .fetch_all(&self.pool)
-        .await?;
+        let tracks: Vec<Track> = sqlx::query_as(expanded_tracks!(track_columns!()))
+            .bind(id)
+            .fetch_all(&self.pool)
+            .await?;
         Ok(Some(PlaylistDetail {
             playlist,
             entries,

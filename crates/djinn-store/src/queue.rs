@@ -3,6 +3,7 @@
 use serde::Serialize;
 use sqlx::FromRow;
 
+use crate::library::track_columns;
 use crate::{now_ms, Result, Store, StoreError, Track};
 
 #[derive(Clone, Debug, PartialEq, Serialize, FromRow)]
@@ -71,14 +72,14 @@ pub enum PlaySource {
 
 macro_rules! queue_select {
     () => {
-        "SELECT q.id AS queue_id, q.user_id, coalesce(u.display_name, u.username) AS username, \
-                q.added_at, \
-                t.id, t.title, t.artist, t.album, t.album_artist, t.artist_id, t.album_id, \
-                t.track_no, t.disc_no, t.year, t.genre, t.duration_ms, \
-                coalesce(t.art_hash, (SELECT fa.art_hash FROM albums fa WHERE fa.id = t.album_id)) AS art_hash \
-         FROM request_queue q \
-         JOIN users u ON u.id = q.user_id \
-         JOIN tracks t ON t.id = q.track_id"
+        concat!(
+            "SELECT q.id AS queue_id, q.user_id, \
+                    coalesce(u.display_name, u.username) AS username, q.added_at, ",
+            track_columns!(),
+            " FROM request_queue q \
+             JOIN users u ON u.id = q.user_id \
+             JOIN tracks t ON t.id = q.track_id"
+        )
     };
 }
 

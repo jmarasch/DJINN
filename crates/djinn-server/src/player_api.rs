@@ -232,6 +232,9 @@ struct Settings {
     /// MusicBrainz lookups off.
     #[serde(default)]
     musicbrainz_contact: String,
+    /// Artist names never split into separate artists, one per line.
+    #[serde(default)]
+    artist_keep_whole: String,
 }
 
 async fn settings(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json<Settings>> {
@@ -256,6 +259,10 @@ async fn settings(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json
             .get_setting(jukebox::MUSICBRAINZ_CONTACT)
             .await?
             .unwrap_or_default(),
+        artist_keep_whole: djinn_library::keep_whole(store)
+            .await
+            .map_err(anyhow::Error::from)?
+            .join("\n"),
     }))
 }
 
@@ -311,6 +318,25 @@ async fn update_settings(
             if body.online_artist_info { "1" } else { "0" },
         )
         .await?;
+    // A changed never-split list means re-reading every file's artists.
+    let keep_whole: Vec<&str> = body
+        .artist_keep_whole
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+    let old_keep_whole = djinn_library::keep_whole(store)
+        .await
+        .map_err(anyhow::Error::from)?;
+    if keep_whole != old_keep_whole {
+        store
+            .set_setting(djinn_library::KEEP_WHOLE_KEY, &keep_whole.join("\n"))
+            .await?;
+        store
+            .set_setting(djinn_library::SCAN_VERSION_KEY, "0")
+            .await?;
+        crate::library_api::start_scan(&state);
+    }
     // Turning lookups on, or adding MusicBrainz, looks everything up now
     // (MusicBrainz adds covers and genres to artists already checked).
     let added_musicbrainz = old_contact.trim().is_empty() && !contact.is_empty();

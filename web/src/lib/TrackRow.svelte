@@ -3,6 +3,7 @@
   // names go to their pages.
   import AddToPlaylist from './AddToPlaylist.svelte'
   import Art from './Art.svelte'
+  import Credits from './Credits.svelte'
   import { duration } from './format'
   import Icon from './Icon.svelte'
   import { tapTrack, toggleRequest, trackStatus } from './state.svelte'
@@ -37,11 +38,7 @@
   <div class="text">
     <button class="title ellipsis" onclick={() => tapTrack(track)}>{track.title}</button>
     <div class="sub ellipsis">
-      {#if track.artist_id}
-        <a href="#/artist/{track.artist_id}">{track.artist}</a>
-      {:else if track.artist}
-        {track.artist}
-      {/if}
+      <Credits {track} />
       {#if showAlbum && track.album}
         ·
         {#if track.album_id}<a href="#/album/{track.album_id}">{track.album}</a>{:else}{track.album}{/if}

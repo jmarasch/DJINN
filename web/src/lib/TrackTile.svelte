@@ -1,6 +1,7 @@
 <script lang="ts">
   // A song as a grid tile: tap the cover or title to queue it.
   import Art from './Art.svelte'
+  import Credits from './Credits.svelte'
   import Icon from './Icon.svelte'
   import { tapTrack, toggleRequest, trackStatus } from './state.svelte'
   import type { Track } from './types'
@@ -28,11 +29,7 @@
     </button>
   </div>
   <button class="title ellipsis" onclick={() => tapTrack(track)}>{track.title}</button>
-  {#if track.artist_id}
-    <a class="muted small ellipsis artist" href="#/artist/{track.artist_id}">{track.artist}</a>
-  {:else}
-    <span class="muted small ellipsis">{track.artist ?? ''}</span>
-  {/if}
+  <span class="muted small ellipsis"><Credits {track} /></span>
 </div>
 
 <style>
@@ -69,10 +66,6 @@
     color: var(--text);
     text-align: left;
     font: inherit;
-  }
-
-  .artist {
-    text-decoration: none;
   }
 
   .queue {

@@ -88,6 +88,19 @@
     </div>
   {/if}
 
+  {#if artist.appears_on.length}
+    <h2>Appears on</h2>
+    <div class="albums">
+      {#each artist.appears_on as album (album.id)}
+        <a class="album" href="#/album/{album.id}">
+          <div class="cover"><Art hash={album.art_hash} size={160} round={10} /></div>
+          <span class="ellipsis">{album.title}</span>
+          <span class="muted small ellipsis">{album.artist}</span>
+        </a>
+      {/each}
+    </div>
+  {/if}
+
   {#if moreSongs.length}
     <h2>More songs</h2>
     {#each moreSongs as track (track.id)}

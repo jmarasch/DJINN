@@ -5,16 +5,29 @@ use sqlx::{FromRow, Sqlite, Transaction};
 
 use crate::{now_ms, Result, Store};
 
+/// An artist credited on a track.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
+pub struct Credit {
+    pub id: i64,
+    pub name: String,
+    /// "feat." rather than a main artist.
+    pub featured: bool,
+}
+
 /// A track as returned by the API.
 #[derive(Clone, Debug, PartialEq, Serialize, FromRow)]
 pub struct Track {
     pub id: i64,
     pub title: String,
+    /// The artist credit as tagged, like "Zara Larsson & David Guetta".
     pub artist: Option<String>,
     pub album: Option<String>,
     pub album_artist: Option<String>,
     pub artist_id: Option<i64>,
     pub album_id: Option<i64>,
+    /// Each credited artist, in order.
+    #[sqlx(json)]
+    pub credits: Vec<Credit>,
     pub track_no: Option<i64>,
     pub disc_no: Option<i64>,
     pub year: Option<i64>,
@@ -29,10 +42,16 @@ pub struct Track {
 macro_rules! track_columns {
     () => {
         "t.id, t.title, t.artist, t.album, t.album_artist, t.artist_id, t.album_id, \
+         (SELECT json_group_array(json_object('id', c.id, 'name', c.name, \
+                 'featured', json(CASE WHEN c.featured THEN 'true' ELSE 'false' END))) \
+          FROM (SELECT a.id, a.name, ta.featured FROM track_artists ta \
+                JOIN artists a ON a.id = ta.artist_id \
+                WHERE ta.track_id = t.id ORDER BY ta.position) c) AS credits, \
          t.track_no, t.disc_no, t.year, t.genre, t.duration_ms, \
          coalesce(t.art_hash, (SELECT fa.art_hash FROM albums fa WHERE fa.id = t.album_id)) AS art_hash"
     };
 }
+pub(crate) use track_columns;
 
 #[derive(Clone, Debug, PartialEq, Serialize, FromRow)]
 pub struct Album {
@@ -164,7 +183,9 @@ pub struct ArtistDetail {
     /// Most requested (then most played) songs, best first.
     pub top_tracks: Vec<TopTrack>,
     pub albums: Vec<Album>,
-    /// Tracks by this artist that are not on one of `albums`.
+    /// Other artists' albums this artist is credited on.
+    pub appears_on: Vec<Album>,
+    /// Tracks crediting this artist that are not on one of `albums`.
     pub other_tracks: Vec<Track>,
 }
 
@@ -202,6 +223,12 @@ pub struct ScannedTrack {
     pub folder_art: Option<String>,
     /// Image in the artist's folder.
     pub artist_art: Option<String>,
+    /// Each credited artist (name, featured), in order. Empty means the
+    /// whole `artist` text is one artist.
+    pub credits: Vec<(String, bool)>,
+    /// The album's owner: its first credited album artist. Falls back to
+    /// `album_artist`, then the first credit.
+    pub album_owner: Option<String>,
 }
 
 impl ScannedTrack {
@@ -227,7 +254,7 @@ macro_rules! artist_counts {
     () => {
         "SELECT ar.id, ar.name, ar.art_hash, \
                 (SELECT count(*) FROM tracks t LEFT JOIN albums al ON al.id = t.album_id \
-                 WHERE t.removed_at IS NULL AND (t.artist_id = ar.id OR al.artist_id = ar.id)) \
+                 WHERE t.removed_at IS NULL AND (EXISTS (SELECT 1 FROM track_artists ta WHERE ta.track_id = t.id AND ta.artist_id = ar.id) OR al.artist_id = ar.id)) \
                  AS track_count \
          FROM artists ar"
     };
@@ -283,14 +310,14 @@ impl Store {
             "UPDATE artists SET art_hash = coalesce(
                (SELECT t.artist_art FROM tracks t LEFT JOIN albums al ON al.id = t.album_id
                 WHERE t.removed_at IS NULL AND t.artist_art IS NOT NULL
-                  AND (al.artist_id = artists.id OR t.artist_id = artists.id)
+                  AND (al.artist_id = artists.id OR EXISTS (SELECT 1 FROM track_artists ta WHERE ta.track_id = t.id AND ta.artist_id = artists.id))
                 ORDER BY t.path LIMIT 1),
                artists.online_art_hash,
                (SELECT al.art_hash FROM albums al
                 WHERE al.artist_id = artists.id AND al.art_hash IS NOT NULL
                 ORDER BY al.year IS NULL, al.year, al.title LIMIT 1),
                (SELECT t.art_hash FROM tracks t
-                WHERE t.artist_id = artists.id AND t.removed_at IS NULL AND t.art_hash IS NOT NULL
+                WHERE EXISTS (SELECT 1 FROM track_artists ta WHERE ta.track_id = t.id AND ta.artist_id = artists.id) AND t.removed_at IS NULL AND t.art_hash IS NOT NULL
                 ORDER BY t.path LIMIT 1))",
         )
         .execute(&mut *tx)
@@ -306,6 +333,7 @@ impl Store {
         sqlx::query(
             "DELETE FROM artists
              WHERE NOT EXISTS (SELECT 1 FROM tracks t WHERE t.artist_id = artists.id)
+               AND NOT EXISTS (SELECT 1 FROM track_artists ta WHERE ta.artist_id = artists.id)
                AND NOT EXISTS (SELECT 1 FROM albums al WHERE al.artist_id = artists.id)
                AND NOT EXISTS (SELECT 1 FROM playlist_entries p
                                WHERE p.kind = 'artist' AND p.ref_id = artists.id)",
@@ -435,12 +463,28 @@ impl Store {
             track_columns!(),
             " FROM tracks t
              LEFT JOIN albums al ON al.id = t.album_id
-             WHERE t.artist_id = ? AND ",
+             WHERE EXISTS (SELECT 1 FROM track_artists ta WHERE ta.track_id = t.id AND ta.artist_id = ?) AND ",
             available!(),
             "
-               AND (al.id IS NULL OR al.artist_id != t.artist_id)
+               AND (al.id IS NULL OR al.artist_id != ?)
              ORDER BY t.album, t.disc_no, t.track_no, t.title"
         ))
+        .bind(id)
+        .bind(id)
+        .fetch_all(&self.pool)
+        .await?;
+        let appears_on = sqlx::query_as(concat!(
+            "SELECT ",
+            album_columns!(),
+            " FROM albums al JOIN artists ar ON ar.id = al.artist_id
+             WHERE al.artist_id != ?
+               AND EXISTS (SELECT 1 FROM tracks t JOIN track_artists ta ON ta.track_id = t.id
+                           WHERE t.album_id = al.id AND ta.artist_id = ? AND ",
+            available!(),
+            ")
+             ORDER BY al.year, al.title"
+        ))
+        .bind(id)
         .bind(id)
         .fetch_all(&self.pool)
         .await?;
@@ -453,6 +497,7 @@ impl Store {
             photo_credit_url,
             top_tracks,
             albums,
+            appears_on,
             other_tracks,
         }))
     }
@@ -464,17 +509,17 @@ impl Store {
             "SELECT ar.id, ar.name,
                     EXISTS (SELECT 1 FROM tracks t LEFT JOIN albums al ON al.id = t.album_id
                             WHERE t.artist_art IS NOT NULL AND t.removed_at IS NULL
-                              AND (t.artist_id = ar.id OR al.artist_id = ar.id))
+                              AND (EXISTS (SELECT 1 FROM track_artists ta WHERE ta.track_id = t.id AND ta.artist_id = ar.id) OR al.artist_id = ar.id))
                         AS has_folder_art,
                     coalesce((SELECT group_concat(title, char(10)) FROM (
                         SELECT t.title FROM tracks t
-                        WHERE t.artist_id = ar.id AND t.removed_at IS NULL
+                        WHERE EXISTS (SELECT 1 FROM track_artists ta WHERE ta.track_id = t.id AND ta.artist_id = ar.id) AND t.removed_at IS NULL
                         ORDER BY t.id LIMIT 5)), '') AS sample_titles
              FROM artists ar
              WHERE (ar.info_checked_at IS NULL OR ar.info_checked_at < ?)
                AND EXISTS (SELECT 1 FROM tracks t LEFT JOIN albums al ON al.id = t.album_id
                            WHERE t.removed_at IS NULL
-                             AND (t.artist_id = ar.id OR al.artist_id = ar.id))
+                             AND (EXISTS (SELECT 1 FROM track_artists ta WHERE ta.track_id = t.id AND ta.artist_id = ar.id) OR al.artist_id = ar.id))
              ORDER BY ar.name",
         )
         .bind(older_than)
@@ -568,7 +613,7 @@ impl Store {
              FROM tracks t LEFT JOIN albums al ON al.id = t.album_id
              WHERE ",
             available!(),
-            " AND (t.artist_id = ? OR al.artist_id = ?)
+            " AND (EXISTS (SELECT 1 FROM track_artists ta WHERE ta.track_id = t.id AND ta.artist_id = ?) OR al.artist_id = ?)
              ORDER BY requests DESC, plays DESC, t.title COLLATE NOCASE
              LIMIT ?"
         ))
@@ -715,7 +760,7 @@ impl Store {
                  SELECT 1 FROM tracks t LEFT JOIN albums al ON al.id = t.album_id
                  WHERE ",
             available!(),
-            " AND (t.artist_id = ar.id OR al.artist_id = ar.id))
+            " AND (EXISTS (SELECT 1 FROM track_artists ta WHERE ta.track_id = t.id AND ta.artist_id = ar.id) OR al.artist_id = ar.id))
              ORDER BY bm25(artists_fts)
              LIMIT ?"
         ))
@@ -732,23 +777,34 @@ impl Store {
 }
 
 async fn save_track(tx: &mut Transaction<'_, Sqlite>, t: &ScannedTrack, now: i64) -> Result<()> {
-    let artist_id = match &t.artist {
-        Some(name) => Some(upsert_artist(tx, name).await?),
-        None => None,
+    let credits: Vec<(&str, bool)> = if t.credits.is_empty() {
+        t.artist
+            .as_deref()
+            .map(|a| (a, false))
+            .into_iter()
+            .collect()
+    } else {
+        t.credits.iter().map(|(n, f)| (n.as_str(), *f)).collect()
     };
+    let mut credit_ids = Vec::with_capacity(credits.len());
+    for (name, featured) in &credits {
+        credit_ids.push((upsert_artist(tx, name).await?, *featured));
+    }
+    let artist_id = credit_ids.first().map(|&(id, _)| id);
     let album_id = match &t.album {
         Some(title) => {
             let album_artist = t
-                .album_artist
+                .album_owner
                 .as_deref()
-                .or(t.artist.as_deref())
+                .or(t.album_artist.as_deref())
+                .or(credits.first().map(|&(name, _)| name))
                 .unwrap_or(UNKNOWN_ARTIST);
             let album_artist_id = upsert_artist(tx, album_artist).await?;
             Some(upsert_album(tx, title, album_artist_id, t.year).await?)
         }
         None => None,
     };
-    sqlx::query(
+    let track_id: i64 = sqlx::query_scalar(
         "INSERT INTO tracks (path, size, mtime, duration_ms, title, artist, album, album_artist,
                              track_no, disc_no, year, genre, art_hash, sample_rate, channels,
                              codec, artist_id, album_id, added_at, embedded_art, folder_art,
@@ -763,7 +819,8 @@ async fn save_track(tx: &mut Transaction<'_, Sqlite>, t: &ScannedTrack, now: i64
             channels = excluded.channels, codec = excluded.codec,
             artist_id = excluded.artist_id, album_id = excluded.album_id, removed_at = NULL,
             embedded_art = excluded.embedded_art, folder_art = excluded.folder_art,
-            artist_art = excluded.artist_art",
+            artist_art = excluded.artist_art
+         RETURNING id",
     )
     .bind(&t.path)
     .bind(t.size)
@@ -787,8 +844,24 @@ async fn save_track(tx: &mut Transaction<'_, Sqlite>, t: &ScannedTrack, now: i64
     .bind(&t.embedded_art)
     .bind(&t.folder_art)
     .bind(&t.artist_art)
-    .execute(&mut **tx)
+    .fetch_one(&mut **tx)
     .await?;
+    sqlx::query("DELETE FROM track_artists WHERE track_id = ?")
+        .bind(track_id)
+        .execute(&mut **tx)
+        .await?;
+    for (position, (artist, featured)) in credit_ids.iter().enumerate() {
+        sqlx::query(
+            "INSERT OR IGNORE INTO track_artists (track_id, artist_id, position, featured)
+             VALUES (?, ?, ?, ?)",
+        )
+        .bind(track_id)
+        .bind(artist)
+        .bind(i64::try_from(position).unwrap_or(i64::MAX))
+        .bind(featured)
+        .execute(&mut **tx)
+        .await?;
+    }
     Ok(())
 }
 
@@ -1042,5 +1115,73 @@ mod tests {
         store.refresh_artwork().await.unwrap();
         let track = &store.search("one", 5).await.unwrap().tracks[0];
         assert_eq!(track.art_hash.as_deref(), Some("onlinecover"));
+    }
+
+    #[tokio::test]
+    async fn collaborations_count_for_every_artist() {
+        let store = Store::open_in_memory().await.unwrap();
+        let mut collab = scanned(
+            "/m/v.flac",
+            "Volcano",
+            "Zara Larsson & David Guetta",
+            "Volcano",
+        );
+        collab.credits = vec![
+            ("Zara Larsson".into(), false),
+            ("David Guetta".into(), false),
+            ("KREAM".into(), true),
+        ];
+        collab.album_owner = Some("Zara Larsson".into());
+        let solo = scanned(
+            "/m/t.flac",
+            "Titanium",
+            "David Guetta",
+            "Nothing but the Beat",
+        );
+        store.save_scanned(&[collab, solo]).await.unwrap();
+
+        let artists = store.artists_page(0, 10).await.unwrap();
+        let names: Vec<_> = artists
+            .items
+            .iter()
+            .map(|a| (a.name.as_str(), a.track_count))
+            .collect();
+        assert_eq!(
+            names,
+            [("David Guetta", 2), ("KREAM", 1), ("Zara Larsson", 1)],
+            "no combined artist"
+        );
+
+        let track = &store.search("volcano", 5).await.unwrap().tracks[0];
+        let credits: Vec<_> = track
+            .credits
+            .iter()
+            .map(|c| (c.name.as_str(), c.featured))
+            .collect();
+        assert_eq!(
+            credits,
+            [
+                ("Zara Larsson", false),
+                ("David Guetta", false),
+                ("KREAM", true)
+            ]
+        );
+        assert_eq!(
+            track.artist.as_deref(),
+            Some("Zara Larsson & David Guetta"),
+            "display text kept"
+        );
+
+        // The single belongs to Zara and appears on David's page.
+        let guetta = artists
+            .items
+            .iter()
+            .find(|a| a.name == "David Guetta")
+            .unwrap()
+            .id;
+        let detail = store.artist(guetta).await.unwrap().unwrap();
+        assert_eq!(detail.albums.len(), 1, "his own album");
+        assert_eq!(detail.appears_on.len(), 1, "Zara's single");
+        assert_eq!(detail.top_tracks.len(), 2);
     }
 }

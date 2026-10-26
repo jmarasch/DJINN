@@ -44,10 +44,19 @@ export interface RequestLogEntry {
   ip: string | null
 }
 
+export interface Credit {
+  id: number
+  name: string
+  featured: boolean
+}
+
 export interface Track {
   id: number
   title: string
+  /** The credit as tagged, like "Zara Larsson & David Guetta". */
   artist: string | null
+  /** Each credited artist, in order. */
+  credits: Credit[]
   album: string | null
   album_artist: string | null
   artist_id: number | null
@@ -101,6 +110,8 @@ export interface ArtistDetail extends Artist {
   photo_credit_url: string | null
   top_tracks: TopTrack[]
   albums: Album[]
+  /** Other artists' albums this artist is credited on. */
+  appears_on: Album[]
   other_tracks: Track[]
 }
 
@@ -214,6 +225,8 @@ export interface Settings {
   online_artist_info: boolean
   /** Empty turns MusicBrainz lookups off. */
   musicbrainz_contact: string
+  /** Artist names never split, one per line. */
+  artist_keep_whole: string
 }
 
 export interface Page<T> {

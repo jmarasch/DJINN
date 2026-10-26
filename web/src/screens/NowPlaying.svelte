@@ -2,6 +2,7 @@
   import { onMount } from 'svelte'
   import { api } from '../lib/api'
   import Art from '../lib/Art.svelte'
+  import Credits from '../lib/Credits.svelte'
   import { byline, duration } from '../lib/format'
   import Icon from '../lib/Icon.svelte'
   import {
@@ -87,10 +88,10 @@
     </div>
     <h1 class="title">{current.track.title}</h1>
     <p class="artist">
-      {#if current.track.artist_id}
-        <a href="#/artist/{current.track.artist_id}">{current.track.artist}</a>
+      {#if current.track.credits.length || current.track.artist}
+        <Credits track={current.track} />
       {:else}
-        {current.track.artist ?? 'Unknown artist'}
+        Unknown artist
       {/if}
       {#if current.track.album_id}
         · <a href="#/album/{current.track.album_id}">{current.track.album}</a>

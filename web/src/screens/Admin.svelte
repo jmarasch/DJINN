@@ -342,6 +342,14 @@
         </span>
       </label>
       <label>
+        Artist names that are never split (one per line)
+        <textarea rows="6" bind:value={settings.artist_keep_whole} spellcheck="false"></textarea>
+        <span class="small muted">
+          Songs credited to "A &amp; B" or "A feat. B" count for each artist. Band names that contain
+          &amp;, commas, or "x" go here so they stay one artist. Saving re-reads the library.
+        </span>
+      </label>
+      <label>
         Most songs in the queue at once (0 for no limit)
         <input type="number" min="0" max="1000" bind:value={settings.max_queue} />
       </label>
@@ -497,6 +505,17 @@
     display: flex;
     flex-direction: column;
     gap: 14px;
+  }
+
+  textarea {
+    padding: 8px 12px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--surface-2);
+    color: var(--text);
+    font: inherit;
+    font-size: 0.875rem;
+    resize: vertical;
   }
 
   .settings input[type='number'] {

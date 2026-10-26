@@ -1144,6 +1144,7 @@ mod tests {
             album_artist: None,
             artist_id: None,
             album_id: album,
+            credits: Vec::new(),
             track_no: no,
             disc_no: disc,
             year: None,
