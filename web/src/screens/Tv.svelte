@@ -5,6 +5,9 @@
   import type { NowPlaying, PlayerState, QueueItem, Track } from '../lib/types'
 
   const UP_NEXT = 6
+  /** Opened by a cast (Chromecast, Google TV): play sound at once, no
+   * on-screen buttons, since nobody can tap them. */
+  const casting = new URLSearchParams(location.search).has('cast')
 
   let nowPlaying = $state<NowPlaying>({ current: null, position_ms: 0, up_next: null })
   let player = $state<PlayerState | null>(null)
@@ -58,6 +61,7 @@
       streamUrl = data.stream_url
       error = null
       listen()
+      if (casting && !soundOn) setTimeout(toggleSound, 0)
     } catch {
       error = 'Cannot reach the jukebox. Retrying...'
       setTimeout(load, 5_000)
@@ -125,6 +129,9 @@
       soundOn = true
     } catch {
       soundOn = false
+      // A cast can't be tapped; keep trying in case the device allows
+      // sound a moment later.
+      if (casting) setTimeout(toggleSound, 5_000)
     }
   }
 
@@ -266,14 +273,22 @@
     </aside>
   {/if}
 
-  <div class="corner">
+  <div class="corner" class:hidden={casting}>
     {#if streamUrl}
       <button class:on={soundOn} onclick={toggleSound}>{soundOn ? 'Sound on' : 'Play sound here'}</button>
     {/if}
     <button onclick={toggleFullscreen}>Full screen</button>
   </div>
   <!-- svelte-ignore a11y_media_has_caption -->
-  <audio bind:this={audio} preload="none" onerror={() => (soundOn = false)}></audio>
+  <audio
+    bind:this={audio}
+    preload="none"
+    onerror={() => {
+      soundOn = false
+      // Server restarted or the network blipped: on a cast, reconnect.
+      if (casting) setTimeout(toggleSound, 3_000)
+    }}
+  ></audio>
 </div>
 
 <style>
@@ -566,8 +581,13 @@
     color: #1a1030;
   }
 
-  .idle-cursor .corner {
+  .idle-cursor .corner,
+  .corner.hidden {
     opacity: 0;
+  }
+
+  .corner.hidden {
+    pointer-events: none;
   }
 
   /* Portrait screens (tablets on a stand): stack. */

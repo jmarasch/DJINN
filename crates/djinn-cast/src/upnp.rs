@@ -66,6 +66,7 @@ pub(crate) async fn describe(
             kind,
             model,
             group: false,
+            screen: false,
             addr,
             upnp: Some(control),
         }),

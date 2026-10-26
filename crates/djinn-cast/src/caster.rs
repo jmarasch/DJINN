@@ -9,7 +9,7 @@ use serde::Serialize;
 use tokio::sync::{mpsc, watch};
 
 use crate::discover::{self, Device, DeviceKind};
-use crate::{cast, upnp, CastCommand, CastError, CastState, Metadata};
+use crate::{cast, upnp, CastCommand, CastError, CastMedia, CastState};
 
 const RETRY: Duration = Duration::from_secs(10);
 
@@ -20,6 +20,8 @@ pub struct CastStatus {
     pub device: Device,
     /// DJINN is casting to it (or trying to).
     pub active: bool,
+    /// Showing the TV page rather than just playing audio.
+    pub page: bool,
     pub playing: bool,
     pub buffering: bool,
     pub volume: Option<f32>,
@@ -30,6 +32,7 @@ pub struct CastStatus {
 struct Session {
     commands: mpsc::Sender<CastCommand>,
     state: watch::Receiver<CastState>,
+    page: bool,
 }
 
 #[derive(Default)]
@@ -96,16 +99,15 @@ impl Caster {
         let mut list: Vec<CastStatus> = devices
             .into_iter()
             .map(|device| {
-                let state = sessions
-                    .as_ref()
-                    .ok()
-                    .and_then(|s| s.get(&device.id))
-                    .map(|s| s.state.borrow().clone());
+                let session = sessions.as_ref().ok().and_then(|s| s.get(&device.id));
+                let page = session.is_some_and(|s| s.page);
+                let state = session.map(|s| s.state.borrow().clone());
                 let active = state.is_some();
                 let state = state.unwrap_or_default();
                 CastStatus {
                     device,
                     active,
+                    page,
                     playing: state.playing,
                     buffering: state.buffering,
                     volume: state.volume,
@@ -123,15 +125,39 @@ impl Caster {
         list
     }
 
-    /// Starts casting `url` to a known device. Already casting is fine.
-    pub fn start(&self, device_id: &str, url: String, meta: Metadata) -> Result<(), CastError> {
-        if !self
+    /// Starts casting to a known device. Already casting the same kind of
+    /// thing is fine; switching between audio and the page restarts it.
+    pub async fn start(&self, device_id: &str, media: CastMedia) -> Result<(), CastError> {
+        let device = self
             .inner
             .devices
             .lock()
-            .is_ok_and(|d| d.contains_key(device_id))
-        {
-            return Err(CastError::UnknownDevice);
+            .ok()
+            .and_then(|d| d.get(device_id).cloned())
+            .ok_or(CastError::UnknownDevice)?;
+        let page = matches!(media, CastMedia::Page { .. });
+        if page && !device.screen {
+            return Err(CastError::NoScreen);
+        }
+        let running = self
+            .inner
+            .sessions
+            .lock()
+            .ok()
+            .and_then(|s| s.get(device_id).map(|s| s.page));
+        match running {
+            Some(same) if same == page => return Ok(()),
+            Some(_) => {
+                self.stop(device_id).await;
+                // Let the old cast finish before the new one starts.
+                for _ in 0..50 {
+                    if !self.active().iter().any(|a| a == device_id) {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+            }
+            None => {}
         }
         let Ok(mut sessions) = self.inner.sessions.lock() else {
             return Ok(());
@@ -146,13 +172,14 @@ impl Caster {
             Session {
                 commands,
                 state: watcher,
+                page,
             },
         );
         drop(sessions);
         let caster = self.clone();
         let id = device_id.to_owned();
         tokio::spawn(async move {
-            caster.run(&id, &url, &meta, receiver, state).await;
+            caster.run(&id, &media, receiver, state).await;
             if let Ok(mut sessions) = caster.inner.sessions.lock() {
                 sessions.remove(&id);
             }
@@ -212,8 +239,7 @@ impl Caster {
     async fn run(
         &self,
         id: &str,
-        url: &str,
-        meta: &Metadata,
+        media: &CastMedia,
         mut commands: mpsc::Receiver<CastCommand>,
         state: watch::Sender<CastState>,
     ) {
@@ -239,10 +265,13 @@ impl Caster {
             });
             tracing::info!(device = %device.name, "casting");
             let result = match device.kind {
-                DeviceKind::Cast => cast::play(device.addr, url, meta, &mut commands, &state).await,
-                DeviceKind::Dlna | DeviceKind::Sonos => {
-                    upnp::play(&device, url, meta, &mut commands, &state).await
-                }
+                DeviceKind::Cast => cast::play(device.addr, media, &mut commands, &state).await,
+                DeviceKind::Dlna | DeviceKind::Sonos => match media {
+                    CastMedia::Stream { url, meta } => {
+                        upnp::play(&device, url, meta, &mut commands, &state).await
+                    }
+                    CastMedia::Page { .. } => Err("this device can't show pages".to_owned()),
+                },
             };
             match result {
                 Ok(()) => {

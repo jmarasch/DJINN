@@ -19,10 +19,14 @@ use tokio::sync::{mpsc, watch};
 use tokio_rustls::TlsConnector;
 
 use crate::castv2::{CastMessage, MAX_FRAME, NS_CONNECTION, NS_HEARTBEAT, NS_MEDIA, NS_RECEIVER};
-use crate::{CastCommand, CastState, Metadata};
+use crate::{CastCommand, CastMedia, CastState, Metadata};
 
 /// Google's Default Media Receiver.
 const MEDIA_RECEIVER: &str = "CC1AD845";
+/// DashCast, a public receiver that shows any web page full screen (the
+/// one Home Assistant uses for dashboards on Chromecasts and Nest Hubs).
+const PAGE_RECEIVER: &str = "84912283";
+const NS_DASHCAST: &str = "urn:x-cast:es.offd.dashcast";
 const SENDER: &str = "sender-djinn";
 const RECEIVER: &str = "receiver-0";
 const HEARTBEAT: Duration = Duration::from_secs(5);
@@ -32,23 +36,26 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
 type Tls = tokio_rustls::client::TlsStream<TcpStream>;
 
-/// Plays `url` on the device at `addr` until told to stop. Returns when
+/// Casts `media` to the device at `addr` until told to stop. Returns when
 /// stopped (`Ok`) or when the connection or receiver fails (`Err`, so the
 /// caller can retry).
 pub(crate) async fn play(
     addr: SocketAddr,
-    url: &str,
-    meta: &Metadata,
+    media: &CastMedia,
     commands: &mut mpsc::Receiver<CastCommand>,
     state: &watch::Sender<CastState>,
 ) -> Result<(), String> {
+    let app_id = match media {
+        CastMedia::Stream { .. } => MEDIA_RECEIVER,
+        CastMedia::Page { .. } => PAGE_RECEIVER,
+    };
     let mut conn = Connection::open(addr).await?;
     conn.send(RECEIVER, NS_CONNECTION, json!({"type": "CONNECT"}))
         .await?;
     conn.request(
         RECEIVER,
         NS_RECEIVER,
-        json!({"type": "LAUNCH", "appId": MEDIA_RECEIVER}),
+        json!({"type": "LAUNCH", "appId": app_id}),
     )
     .await?;
 
@@ -78,7 +85,7 @@ pub(crate) async fn play(
                             });
                         }
                         let app = status["applications"].as_array().and_then(|apps| {
-                            apps.iter().find(|a| a["appId"] == MEDIA_RECEIVER)
+                            apps.iter().find(|a| a["appId"] == app_id)
                         });
                         match app {
                             Some(app) => {
@@ -87,7 +94,22 @@ pub(crate) async fn play(
                                 if !loaded {
                                     if let Some(id) = id.clone() {
                                         conn.send(&id, NS_CONNECTION, json!({"type": "CONNECT"})).await?;
-                                        conn.request(&id, NS_MEDIA, load_request(url, meta)).await?;
+                                        match media {
+                                            CastMedia::Stream { url, meta } => {
+                                                conn.request(&id, NS_MEDIA, load_request(url, meta)).await?;
+                                            }
+                                            CastMedia::Page { url } => {
+                                                // "force" opens the page itself rather than in a
+                                                // frame, so a plain-HTTP LAN page loads.
+                                                conn.send(&id, NS_DASHCAST, json!({
+                                                    "url": url, "force": true, "reload": false, "reload_time": 0,
+                                                })).await?;
+                                                state.send_modify(|s| {
+                                                    s.playing = true;
+                                                    s.buffering = false;
+                                                });
+                                            }
+                                        }
                                         loaded = true;
                                     }
                                 }

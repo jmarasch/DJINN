@@ -17,6 +17,18 @@ pub enum CastError {
     Encoder(String),
     #[error("that device wasn't found on the network")]
     UnknownDevice,
+    #[error("that device can't show pages; cast audio to it instead")]
+    NoScreen,
+}
+
+/// What to cast.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CastMedia {
+    /// The live audio stream, with something to show on screens.
+    Stream { url: String, meta: Metadata },
+    /// A web page shown full screen (the TV page, which plays the stream
+    /// itself). Google Cast devices with a screen only.
+    Page { url: String },
 }
 
 /// What a device shows while it plays the party.

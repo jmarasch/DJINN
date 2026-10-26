@@ -32,6 +32,8 @@ pub struct Device {
     pub model: Option<String>,
     /// A Google Cast speaker group: plays in sync on every speaker in it.
     pub group: bool,
+    /// Has a screen, so it can show the TV page (Google Cast only).
+    pub screen: bool,
     #[serde(skip)]
     pub addr: SocketAddr,
     #[serde(skip)]
@@ -75,13 +77,16 @@ fn discover_cast(wait: Duration) -> Vec<Device> {
         let Some(id) = txt("id") else { continue };
         let model = txt("md");
         let name = txt("fn").unwrap_or_else(|| service.fullname.clone());
+        // Capability bits: 1 is video out, 32 a multi-room group.
+        let caps = txt("ca").and_then(|c| c.parse::<u64>().ok()).unwrap_or(0);
         found.insert(
             id.clone(),
             Device {
                 id: format!("cast:{id}"),
                 name,
                 kind: DeviceKind::Cast,
-                group: model.as_deref() == Some("Google Cast Group"),
+                group: caps & 32 != 0 || model.as_deref() == Some("Google Cast Group"),
+                screen: caps & 1 != 0,
                 model,
                 addr: SocketAddr::new(IpAddr::V4(ip), service.port),
                 upnp: None,

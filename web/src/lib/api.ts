@@ -151,7 +151,8 @@ export const api = {
   replayGain: () => get<ReplayGainSettings>('/audio/replaygain'),
   casts: () => get<CastList>('/cast'),
   discoverCasts: () => post<CastList>('/cast/discover'),
-  startCast: (id: string) => post<CastList>(`/cast/${encodeURIComponent(id)}/start`),
+  startCast: (id: string, mode: 'audio' | 'page') =>
+    post<CastList>(`/cast/${encodeURIComponent(id)}/start`, { mode }),
   stopCast: (id: string) => post<CastList>(`/cast/${encodeURIComponent(id)}/stop`),
   stopAllCasts: () => post<void>('/cast/stop-all'),
   setCastVolume: (id: string, level: number) => put<void>(`/cast/${encodeURIComponent(id)}/volume`, { level }),

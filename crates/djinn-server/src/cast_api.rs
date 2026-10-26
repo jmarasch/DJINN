@@ -5,7 +5,7 @@
 //! because Chromecasts, TVs, and Sonos speakers fetch it themselves and
 //! can't sign in. Only DJINN hands the URL out.
 
-use axum::body::Body;
+use axum::body::{Body, Bytes};
 use std::time::Duration;
 
 use axum::extract::{Path, State};
@@ -14,11 +14,9 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use djinn_cast::stream::{self, LiveStream};
-use djinn_cast::{CastStatus, Metadata};
+use djinn_cast::{CastError, CastMedia, CastStatus, Metadata};
 use djinn_store::Store;
-use futures_util::stream::StreamExt;
 use serde::{Deserialize, Serialize};
-use tokio_stream::wrappers::BroadcastStream;
 
 use crate::auth::AdminUser;
 use crate::error::{ApiError, ApiResult};
@@ -73,12 +71,39 @@ async fn discover(_: AdminUser, State(state): State<AppState>) -> Json<CastList>
     Json(cast_list(&state))
 }
 
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum Mode {
+    /// Just the music (any device).
+    #[default]
+    Audio,
+    /// The TV page with sound (Google Cast devices with a screen).
+    Page,
+}
+
+impl Mode {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Audio => "audio",
+            Self::Page => "page",
+        }
+    }
+}
+
+#[derive(Default, Deserialize)]
+struct StartCast {
+    #[serde(default)]
+    mode: Mode,
+}
+
 async fn start(
     _: AdminUser,
     State(state): State<AppState>,
     Path(id): Path<String>,
+    body: Option<Json<StartCast>>,
 ) -> ApiResult<Json<CastList>> {
-    start_cast(&state, &id)?;
+    let mode = body.map(|b| b.0.mode).unwrap_or_default();
+    start_cast(&state, &id, mode).await?;
     save_targets(&state).await?;
     Ok(Json(cast_list(&state)))
 }
@@ -128,7 +153,7 @@ async fn volume(
     Ok(StatusCode::NO_CONTENT)
 }
 
-fn start_cast(state: &AppState, id: &str) -> ApiResult<()> {
+async fn start_cast(state: &AppState, id: &str, mode: Mode) -> ApiResult<()> {
     if state.stream.is_none() {
         return Err(ApiError::new(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -137,21 +162,50 @@ fn start_cast(state: &AppState, id: &str) -> ApiResult<()> {
     }
     let base = state.join_url.trim_end_matches('/');
     let token = state.cast_token.as_str();
-    let meta = Metadata {
-        title: "DJINN".to_owned(),
-        subtitle: "Scan the code to add songs".to_owned(),
-        image_url: Some(format!("{base}/cast/{token}/join.png")),
+    let media = match mode {
+        Mode::Audio => CastMedia::Stream {
+            url: format!("{base}{}", stream_path(token)),
+            meta: Metadata {
+                title: "DJINN".to_owned(),
+                subtitle: "Scan the code to add songs".to_owned(),
+                image_url: Some(format!("{base}/cast/{token}/join.png")),
+            },
+        },
+        Mode::Page => {
+            if !crate::tv_api::enabled(state).await? {
+                return Err(ApiError::bad_request(
+                    "turn on the TV page under Rules first",
+                ));
+            }
+            CastMedia::Page {
+                url: format!("{base}/tv?cast=1"),
+            }
+        }
     };
+    state.caster.start(id, media).await.map_err(|e| match e {
+        CastError::NoScreen => ApiError::bad_request(e.to_string()),
+        _ => ApiError::not_found_with(e.to_string()),
+    })
+}
+
+/// Saved casts as "id<TAB>mode" lines.
+fn cast_targets(state: &AppState) -> Vec<String> {
     state
         .caster
-        .start(id, format!("{base}{}", stream_path(token)), meta)
-        .map_err(|e| ApiError::not_found_with(e.to_string()))
+        .status()
+        .into_iter()
+        .filter(|s| s.active)
+        .map(|s| {
+            let mode = if s.page { Mode::Page } else { Mode::Audio };
+            format!("{}\t{}", s.device.id, mode.as_str())
+        })
+        .collect()
 }
 
 async fn save_targets(state: &AppState) -> ApiResult<()> {
     state
         .store
-        .set_setting(CAST_TARGETS, &state.caster.active().join("\n"))
+        .set_setting(CAST_TARGETS, &cast_targets(state).join("\n"))
         .await?;
     Ok(())
 }
@@ -177,8 +231,13 @@ pub fn spawn_background(state: &AppState) {
             _ => return,
         };
         resume.caster.discover(DISCOVERY).await;
-        for id in targets.lines().map(str::trim).filter(|t| !t.is_empty()) {
-            match start_cast(&resume, id) {
+        for line in targets.lines().map(str::trim).filter(|t| !t.is_empty()) {
+            let (id, mode) = match line.split_once('\t') {
+                Some((id, "page")) => (id, Mode::Page),
+                Some((id, _)) => (id, Mode::Audio),
+                None => (line, Mode::Audio),
+            };
+            match start_cast(&resume, id, mode).await {
                 Ok(()) => tracing::info!(device = id, "resuming cast"),
                 Err(_) => tracing::info!(device = id, "cast device not found; not resuming"),
             }
@@ -222,30 +281,142 @@ pub fn stream_path(token: &str) -> String {
     format!("/cast/{token}/live.mp3")
 }
 
-async fn live(State(state): State<AppState>, Path(token): Path<String>) -> Response {
+async fn live(
+    State(state): State<AppState>,
+    Path(token): Path<String>,
+    headers: axum::http::HeaderMap,
+) -> Response {
     let Some(stream) = state.stream.as_ref().filter(|_| *state.cast_token == token) else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    live_response(stream)
+    // Internet radio players (Sonos, many receivers, VLC) ask for song
+    // titles inside the stream.
+    let wants_titles = headers
+        .get("icy-metadata")
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.trim() == "1");
+    let title = if wants_titles {
+        Some(song_title(&state.jukebox.lock().await.now_playing()))
+    } else {
+        None
+    };
+    live_response(stream, title.map(|t| (t, state.events.subscribe())))
 }
 
-fn live_response(stream: &LiveStream) -> Response {
+/// How many audio bytes go between title blocks.
+const ICY_METAINT: usize = 16_000;
+
+/// "Artist - Title" for the song playing.
+fn song_title(now: &crate::events::NowPlaying) -> String {
+    match &now.current {
+        Some(entry) => match &entry.track.artist {
+            Some(artist) => format!("{artist} - {}", entry.track.title),
+            None => entry.track.title.clone(),
+        },
+        None => "DJINN".to_owned(),
+    }
+}
+
+/// One ICY metadata block: a length byte (in 16-byte units), then the
+/// text padded to it. An unchanged title is a lone zero byte.
+fn icy_block(title: Option<&str>) -> Vec<u8> {
+    let Some(title) = title else {
+        return vec![0];
+    };
+    // Quotes end the field; keep it simple and drop them.
+    let clean: String = title.chars().filter(|c| *c != '\'').collect();
+    let mut text = format!("StreamTitle='{clean}';").into_bytes();
+    text.truncate(255 * 16);
+    let blocks = text.len().div_ceil(16);
+    text.resize(blocks * 16, 0);
+    let mut out = Vec::with_capacity(text.len() + 1);
+    out.push(u8::try_from(blocks).unwrap_or(u8::MAX));
+    out.extend_from_slice(&text);
+    out
+}
+
+struct LiveBody {
+    backlog: std::collections::VecDeque<Bytes>,
+    live: tokio::sync::broadcast::Receiver<Bytes>,
+    _guard: stream::ListenerGuard,
+    /// Titles for players that asked: (current title, sent yet, events).
+    titles: Option<(String, bool, tokio::sync::broadcast::Receiver<ServerEvent>)>,
+    until_title: usize,
+    pending: Bytes,
+}
+
+impl LiveBody {
+    async fn next_chunk(&mut self) -> Option<Bytes> {
+        loop {
+            if !self.pending.is_empty() {
+                return Some(std::mem::take(&mut self.pending));
+            }
+            if let Some(frame) = self.backlog.pop_front() {
+                return Some(frame);
+            }
+            match self.live.recv().await {
+                Ok(frame) => return Some(frame),
+                // A slow client skipped frames; MP3 picks up at the next.
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => return None,
+            }
+        }
+    }
+
+    /// The next piece of the response, with title blocks spliced in every
+    /// `ICY_METAINT` audio bytes when asked for.
+    async fn next(&mut self) -> Option<Bytes> {
+        let chunk = self.next_chunk().await?;
+        let Some((title, sent, events)) = self.titles.as_mut() else {
+            return Some(chunk);
+        };
+        while let Ok(event) = events.try_recv() {
+            if let ServerEvent::NowPlaying(now) = event {
+                let latest = song_title(&now);
+                if latest != *title {
+                    *title = latest;
+                    *sent = false;
+                }
+            }
+        }
+        if chunk.len() < self.until_title {
+            self.until_title -= chunk.len();
+            return Some(chunk);
+        }
+        let (audio, rest) = chunk.split_at(self.until_title);
+        let mut out = Vec::with_capacity(audio.len() + 64);
+        out.extend_from_slice(audio);
+        out.extend_from_slice(&icy_block((!*sent).then_some(title.as_str())));
+        *sent = true;
+        self.pending = Bytes::copy_from_slice(rest);
+        self.until_title = ICY_METAINT;
+        Some(Bytes::from(out))
+    }
+}
+
+fn live_response(
+    stream: &LiveStream,
+    titles: Option<(String, tokio::sync::broadcast::Receiver<ServerEvent>)>,
+) -> Response {
     let stream::Listener {
         backlog,
         live,
         guard,
     } = stream.subscribe();
-    let live = BroadcastStream::new(live).filter_map(move |frame| {
-        // The guard counts this listener for as long as the response
-        // streams.
-        let _ = &guard;
-        // A slow client that skipped frames (lagged) picks up again at the
-        // next one; MP3 resyncs on its own.
-        std::future::ready(frame.ok())
+    let icy = titles.is_some();
+    let state = LiveBody {
+        backlog: backlog.into(),
+        live,
+        _guard: guard,
+        titles: titles.map(|(title, events)| (title, false, events)),
+        until_title: ICY_METAINT,
+        pending: Bytes::new(),
+    };
+    let body = futures_util::stream::unfold(state, |mut state| async move {
+        let chunk = state.next().await?;
+        Some((Ok::<_, std::convert::Infallible>(chunk), state))
     });
-    let backlog = futures_util::stream::iter(backlog);
-    let body = backlog.chain(live).map(Ok::<_, std::convert::Infallible>);
-    (
+    let mut response = (
         [
             (header::CONTENT_TYPE, stream::CONTENT_TYPE),
             (header::CACHE_CONTROL, "no-cache, no-store"),
@@ -262,5 +433,30 @@ fn live_response(stream: &LiveStream) -> Response {
         ],
         Body::from_stream(body),
     )
-        .into_response()
+        .into_response();
+    if icy {
+        response.headers_mut().insert(
+            header::HeaderName::from_static("icy-metaint"),
+            header::HeaderValue::from(ICY_METAINT),
+        );
+    }
+    response
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn title_blocks_follow_the_icy_format() {
+        assert_eq!(icy_block(None), [0]);
+        let block = icy_block(Some("Zara Larsson - Lush Life"));
+        assert_eq!(block.len(), 1 + usize::from(block[0]) * 16);
+        let text = String::from_utf8_lossy(&block[1..]);
+        assert!(text.starts_with("StreamTitle='Zara Larsson - Lush Life';"));
+        assert!(text.trim_end_matches('\0').ends_with(';'));
+        // Quotes would end the field early.
+        let quoted = icy_block(Some("Don't Stop"));
+        assert!(String::from_utf8_lossy(&quoted).contains("'Dont Stop';"));
+    }
 }

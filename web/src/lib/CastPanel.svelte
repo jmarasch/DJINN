@@ -27,10 +27,17 @@
     }
   }
 
-  async function toggle(device: CastDevice) {
+  async function cast(device: CastDevice, mode: 'audio' | 'page') {
     try {
-      const list = device.active ? await api.stopCast(device.id) : await api.startCast(device.id)
-      app.casts = list.devices
+      app.casts = (await api.startCast(device.id, mode)).devices
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'That did not work', true)
+    }
+  }
+
+  async function stop(device: CastDevice) {
+    try {
+      app.casts = (await api.stopCast(device.id)).devices
     } catch (e) {
       toast(e instanceof Error ? e.message : 'That did not work', true)
     }
@@ -60,7 +67,7 @@
   function status(d: CastDevice): string {
     if (!d.active) return d.model && !d.group ? `${kindLabel(d)} · ${d.model}` : kindLabel(d)
     if (d.error) return `${d.error}. Trying again...`
-    if (d.playing) return 'Playing the party'
+    if (d.playing) return d.page ? 'Showing the TV page with sound' : 'Playing the party'
     return 'Connecting...'
   }
 
@@ -70,10 +77,10 @@
 <section class="card">
   <h2>Cast to TVs and speakers</h2>
   <p class="small muted">
-    Play the party on Chromecasts, Google TVs, Nest speakers, smart TVs (DLNA), and Sonos, several at once. TVs show
-    the join code while they play. Network devices run a few seconds behind this computer's speakers and can't be
-    synced to them, so use either casts or local speakers in a room, not both. Speaker groups from the Google Home app
-    stay in sync with each other.
+    Play the party on Chromecasts, Google TVs, Nest speakers, smart TVs (DLNA), and Sonos, several at once. "Show on
+    TV" puts the TV page on the screen, with what's playing, what's next, and the join code, and plays the music too.
+    Network devices run a few seconds behind this computer's speakers and can't be synced to them, so use either casts
+    or local speakers in a room, not both. Speaker groups from the Google Home app stay in sync with each other.
   </p>
 
   {#if app.casts?.length}
@@ -104,9 +111,21 @@
             <div class="small muted">Volume is set on the TV.</div>
           {/if}
         </div>
-        <button class:primary={!device.active} onclick={() => toggle(device)}>
-          {device.active ? 'Stop' : 'Cast'}
-        </button>
+        <div class="actions">
+          {#if device.active}
+            {#if device.screen}
+              <button class="small-button" onclick={() => cast(device, device.page ? 'audio' : 'page')}>
+                {device.page ? 'Audio only' : 'Show TV page'}
+              </button>
+            {/if}
+            <button onclick={() => stop(device)}>Stop</button>
+          {:else if device.screen}
+            <button class="primary" onclick={() => cast(device, 'page')}>Show on TV</button>
+            <button class="small-button" onclick={() => cast(device, 'audio')}>Audio only</button>
+          {:else}
+            <button class="primary" onclick={() => cast(device, 'audio')}>Cast</button>
+          {/if}
+        </div>
       </div>
     {/each}
   {:else if !searching}
@@ -167,9 +186,22 @@
     margin-top: 4px;
   }
 
-  .device button {
+  .actions {
     flex: none;
-    min-width: 76px;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+  }
+
+  .actions button {
+    min-width: 96px;
+  }
+
+  .small-button {
+    min-height: 32px;
+    padding: 0 10px;
+    font-size: 0.8125rem;
   }
 
   .row-buttons {

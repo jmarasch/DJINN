@@ -344,8 +344,12 @@ export interface CastDevice {
   model: string | null
   /** A Google Cast speaker group (plays in sync on every speaker in it). */
   group: boolean
+  /** Has a screen, so it can show the TV page. */
+  screen: boolean
   /** DJINN is casting to it, or trying to. */
   active: boolean
+  /** Showing the TV page (with sound), not just audio. */
+  page: boolean
   playing: boolean
   buffering: boolean
   volume: number | null

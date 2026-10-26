@@ -8,8 +8,9 @@ song changes reaching them.
 
 1. Admin > Audio > Cast to TVs and speakers. DJINN looks for devices on
    the Wi-Fi when the page opens; "Look for devices" looks again.
-2. Press Cast on a TV. Within a few seconds it shows DJINN with the join QR
-   code and plays the party. The playing screen on phones is unchanged.
+2. Press "Show on TV" on a TV or the Nest Hub. Within a few seconds it shows
+   the TV page (what's playing, what's next, the join code) and plays the
+   music. "Audio only" plays just the music, with the join code on screen.
 3. Cast to a second device, and a speaker group (Google Home groups stay in
    sync with each other).
 4. Skip a song: the casts follow a few seconds later (each device keeps a
@@ -28,4 +29,9 @@ song changes reaching them.
   casts alone.
 - TVs set their own volume ("Volume is set on the TV"); Nest speakers and
   Sonos get a slider.
+- "Show on TV" uses DashCast, a free public Cast receiver (the one Home
+  Assistant uses for dashboards). If it ever goes away, New Terra Studios
+  can register its own receiver with Google.
+- Audio-only players that show radio titles (Sonos, many receivers, VLC)
+  get "Artist - Title" for each song.
 - The TV page has "Play sound here" for TVs and tablets with a browser.
