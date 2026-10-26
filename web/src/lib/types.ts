@@ -120,7 +120,14 @@ export interface QueueItem {
   user_id: number
   username: string
   added_at: number
+  /** Others who asked for it too, in order. */
+  backers: Backer[]
   track: Track
+}
+
+export interface Backer {
+  user_id: number
+  name: string
 }
 
 export type PlaySource = 'request' | 'pool'
@@ -129,6 +136,9 @@ export interface Entry {
   track: Track
   source: PlaySource
   requested_by: string | null
+  requested_by_id: number | null
+  /** Others who asked for it too. */
+  backers: string[]
 }
 
 export interface NowPlaying {
@@ -152,6 +162,12 @@ export interface PlayerState {
   crossfade_secs: number
   /** Plays when nobody has requested anything. */
   playlist: PlaylistRef | null
+  /** Votes to skip the song playing. */
+  skip_votes: number
+  /** Who voted. */
+  skip_voters: number[]
+  /** Votes that skip it; 0 when skip voting is off. */
+  skip_votes_needed: number
 }
 
 export interface OutputStatus {
@@ -267,6 +283,8 @@ export interface Settings {
   artist_keep_whole: string
   /** The TV page (/tv) works without signing in. */
   tv_page: boolean
+  /** Votes that skip a song; 0 turns skip voting off. */
+  skip_votes: number
 }
 
 export interface Page<T> {

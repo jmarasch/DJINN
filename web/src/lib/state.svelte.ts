@@ -26,7 +26,15 @@ export const app = $state({
   ready: false,
   connected: false,
   nowPlaying: { current: null, position_ms: 0, up_next: null } as NowPlaying,
-  player: { state: 'idle', volume: 80, crossfade_secs: 0, playlist: null } as PlayerState,
+  player: {
+    state: 'idle',
+    volume: 80,
+    crossfade_secs: 0,
+    playlist: null,
+    skip_votes: 0,
+    skip_voters: [],
+    skip_votes_needed: 0,
+  } as PlayerState,
   output: { device: null, sample_rate: null, error: null, outputs: [] } as OutputStatus,
   queue: [] as QueueItem[],
   scan: null as ScanProgress | null,
@@ -159,12 +167,17 @@ export function dismissToast(id: number) {
   toasts.items = toasts.items.filter((t) => t.id !== id)
 }
 
-/** Queues a track with an optimistic "pending" state until SSE confirms. */
+/** Queues a track with an optimistic "pending" state until SSE confirms.
+ * Asking for a song someone else queued backs it, moving it up a place. */
 export async function requestTrack(trackId: number) {
   app.pending = new Set(app.pending).add(trackId)
   try {
     const item = await api.addRequest(trackId)
-    toast('Added to the queue', false, { label: 'Undo', run: () => cancelRequest(item.id) })
+    toast(
+      item.outcome === 'backed' ? 'You asked for it too, so it moved up a place' : 'Added to the queue',
+      false,
+      { label: 'Undo', run: () => cancelRequest(item.id) },
+    )
   } catch (e) {
     const next = new Set(app.pending)
     next.delete(trackId)
@@ -173,51 +186,80 @@ export async function requestTrack(trackId: number) {
   }
 }
 
-/** Removes one of your own requests (admins can remove any). */
+/** How you're part of a queued song: you asked first, or asked too. */
+export function involvement(item: QueueItem): 'owner' | 'backer' | null {
+  if (item.user_id === app.me?.id) return 'owner'
+  if (item.backers.some((b) => b.user_id === app.me?.id)) return 'backer'
+  return null
+}
+
+/** Everyone who asked for a song: "you, Sam & Jo". */
+export function askedBy(item: QueueItem): string {
+  const me = app.me?.id
+  const names = [
+    item.user_id === me ? 'you' : item.username,
+    ...item.backers.map((b) => (b.user_id === me ? 'you' : b.name)),
+  ]
+  return names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} & ${names[names.length - 1]}`
+}
+
+/** Takes you off a request: as a backer you step back; as the requester
+ * it passes to whoever asked next (or goes). Admins remove anyone's. */
 export async function cancelRequest(queueId: number) {
+  const item = app.queue.find((q) => q.id === queueId)
+  const role = item ? involvement(item) : null
+  const message =
+    role === 'backer'
+      ? 'You stepped back from that song'
+      : role === 'owner' && item?.backers.length
+        ? `It's ${item.backers[0].name}'s request now`
+        : 'Removed from the queue'
   const before = app.queue
-  app.queue = app.queue.filter((q) => q.id !== queueId)
+  // Only drop it right away when it really leaves the queue.
+  if (!item?.backers.length && role !== 'backer') app.queue = app.queue.filter((q) => q.id !== queueId)
   try {
     await api.removeRequest(queueId)
-    toast('Removed from the queue')
+    toast(message)
   } catch (e) {
     app.queue = before
     toast(e instanceof Error ? e.message : 'Could not remove that song', true)
   }
 }
 
-/** Your own queued request for a track, if any. */
+/** A queued song you asked for (first or too), if any. */
 export function myRequest(trackId: number) {
-  return app.queue.find((q) => q.track.id === trackId && q.user_id === app.me?.id) ?? null
+  return app.queue.find((q) => q.track.id === trackId && involvement(q) !== null) ?? null
 }
 
-/** `mine`: queued by you, so you can cancel it. */
+/** `mine`: you asked for it, so you can step back. `queued`: someone else
+ * did, so you can ask for it too. */
 export function trackStatus(trackId: number): 'playing' | 'mine' | 'queued' | 'pending' | null {
   if (app.nowPlaying.current?.track.id === trackId) return 'playing'
   if (myRequest(trackId)) return 'mine'
-  if (app.queue.some((q) => q.track.id === trackId)) return 'queued'
   if (app.pending.has(trackId)) return 'pending'
+  if (app.queue.some((q) => q.track.id === trackId)) return 'queued'
   return null
 }
 
-/** Tapping a song's picture or title: queue it if it isn't already. */
+/** Tapping a song's picture or title: queue it, or ask for it too. */
 export function tapTrack(track: { id: number; title: string }) {
   switch (trackStatus(track.id)) {
     case null:
+    case 'queued':
       requestTrack(track.id)
       break
     case 'playing':
       toast('Playing now')
       break
     case 'mine':
-      toast('Already in the queue. Tap the check to cancel.')
+      toast('You asked for this one. Tap the check to step back.')
       break
     default:
-      toast('Already in the queue')
+      toast('Adding it...')
   }
 }
 
-/** Queues the track, or cancels your request if it's already queued. */
+/** Queues the track (or asks for it too), or takes back your request. */
 export function toggleRequest(trackId: number) {
   const mine = myRequest(trackId)
   if (mine) cancelRequest(mine.id)

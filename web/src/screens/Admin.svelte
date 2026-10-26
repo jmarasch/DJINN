@@ -371,6 +371,15 @@
       <label>
         Songs each person can have queued
         <input type="number" min="1" max="50" bind:value={settings.per_user_limit} />
+        <span class="small muted">Asking for a song someone else queued counts too (it moves that song up a place).</span>
+      </label>
+      <label>
+        Votes needed to skip a song (0 turns skip voting off)
+        <input type="number" min="0" max="100" bind:value={settings.skip_votes} />
+        <span class="small muted">
+          Guests get a "Vote to skip" button on the playing screen. Whoever requested a song can always skip it
+          alone, and admins skip right away.
+        </span>
       </label>
       <label>
         Songs before a shuffled playlist song can repeat

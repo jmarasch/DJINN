@@ -170,7 +170,8 @@
           {/if}
           <p class="by">
             {#if current.requested_by}
-              Requested by <strong>{current.requested_by}</strong>
+              Requested by <strong>{current.requested_by}</strong>{#if current.backers.length}
+                and {current.backers.length === 1 ? current.backers[0] : `${current.backers.length} others`}{/if}
             {:else if player?.playlist}
               From the playlist <strong>{player.playlist.name}</strong>
             {:else}
@@ -200,7 +201,9 @@
               <div class="text">
                 <div class="title">{item.track.title}</div>
                 <div class="sub">{artist(item.track)}</div>
-                <div class="sub who">{item.username}</div>
+                <div class="sub who">
+                  {item.username}{item.backers.length ? ` +${item.backers.length}` : ''}
+                </div>
               </div>
             </li>
           {/each}

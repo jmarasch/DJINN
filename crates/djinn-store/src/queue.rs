@@ -1,6 +1,6 @@
 //! Request queue, auto pool, and listening history.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
 use crate::library::track_columns;
@@ -13,8 +13,40 @@ pub struct QueueItem {
     pub user_id: i64,
     pub username: String,
     pub added_at: i64,
+    /// Others who asked for it too, in the order they did.
+    #[sqlx(json)]
+    pub backers: Vec<Backer>,
     #[sqlx(flatten)]
     pub track: Track,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Backer {
+    pub user_id: i64,
+    pub name: String,
+}
+
+/// What a request did.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RequestOutcome {
+    /// A new song in the queue.
+    Added,
+    /// The song was queued already; this person backs it now.
+    Backed,
+}
+
+/// What withdrawing from a request did.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Withdrawal {
+    /// A backer stepped back; the song stays.
+    Unbacked,
+    /// The requester stepped back and the first backer took it over.
+    HandedOver,
+    /// The requester stepped back and nobody else wanted it.
+    Removed,
+    /// Neither the requester nor a backer.
+    NotInvolved,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -23,6 +55,8 @@ pub enum AddRequestError {
     NotFound,
     #[error("that song is already in the queue")]
     AlreadyQueued,
+    #[error("you already asked for that song")]
+    AlreadyYours,
     #[error("you already have {0} songs in the queue")]
     LimitReached(i64),
     #[error("the queue is full ({0} songs). Try again after a few play")]
@@ -74,7 +108,11 @@ macro_rules! queue_select {
     () => {
         concat!(
             "SELECT q.id AS queue_id, q.user_id, \
-                    coalesce(u.display_name, u.username) AS username, q.added_at, ",
+                    coalesce(u.display_name, u.username) AS username, q.added_at, \
+                    (SELECT json_group_array(json_object('user_id', b.user_id, 'name', b.name)) \
+                     FROM (SELECT rb.user_id, coalesce(bu.display_name, bu.username) AS name \
+                           FROM request_backers rb JOIN users bu ON bu.id = rb.user_id \
+                           WHERE rb.queue_id = q.id ORDER BY rb.added_at, rb.user_id) b) AS backers, ",
             track_columns!(),
             " FROM request_queue q \
              JOIN users u ON u.id = q.user_id \
@@ -85,14 +123,15 @@ macro_rules! queue_select {
 
 impl Store {
     /// Appends a request, enforcing `limits` and recording where it came
-    /// from.
+    /// from. A song already in the queue gets this person as a backer
+    /// instead (using one of their slots) and moves up one place.
     pub async fn add_request(
         &self,
         track_id: i64,
         user_id: i64,
         limits: RequestLimits,
         origin: &RequestOrigin,
-    ) -> Result<QueueItem, AddRequestError> {
+    ) -> Result<(QueueItem, RequestOutcome), AddRequestError> {
         let mut tx = self.pool.begin().await.map_err(StoreError::from)?;
         let available: bool = sqlx::query_scalar(
             "SELECT EXISTS (SELECT 1 FROM tracks WHERE id = ? AND removed_at IS NULL)",
@@ -104,7 +143,25 @@ impl Store {
         if !available {
             return Err(AddRequestError::NotFound);
         }
-        if let Some(cap) = limits.queue_cap {
+        let existing: Option<(i64, i64, i64)> =
+            sqlx::query_as("SELECT id, user_id, position FROM request_queue WHERE track_id = ?")
+                .bind(track_id)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(StoreError::from)?;
+        if let Some((queue_id, owner, _)) = existing {
+            let backing: bool = sqlx::query_scalar(
+                "SELECT EXISTS (SELECT 1 FROM request_backers WHERE queue_id = ? AND user_id = ?)",
+            )
+            .bind(queue_id)
+            .bind(user_id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(StoreError::from)?;
+            if owner == user_id || backing {
+                return Err(AddRequestError::AlreadyYours);
+            }
+        } else if let Some(cap) = limits.queue_cap {
             let queued: i64 = sqlx::query_scalar("SELECT count(*) FROM request_queue")
                 .fetch_one(&mut *tx)
                 .await
@@ -114,33 +171,70 @@ impl Store {
             }
         }
         if let Some(limit) = limits.per_user {
-            let queued: i64 =
-                sqlx::query_scalar("SELECT count(*) FROM request_queue WHERE user_id = ?")
-                    .bind(user_id)
-                    .fetch_one(&mut *tx)
-                    .await
-                    .map_err(StoreError::from)?;
+            let queued: i64 = sqlx::query_scalar(
+                "SELECT (SELECT count(*) FROM request_queue WHERE user_id = ?1) \
+                      + (SELECT count(*) FROM request_backers WHERE user_id = ?1)",
+            )
+            .bind(user_id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(StoreError::from)?;
             if queued >= limit {
                 return Err(AddRequestError::LimitReached(limit));
             }
         }
         let now = now_ms();
-        let inserted = sqlx::query_scalar(
-            "INSERT INTO request_queue (track_id, user_id, added_at, position)
-             VALUES (?, ?, ?, (SELECT coalesce(max(position), 0) + 1 FROM request_queue))
-             RETURNING id",
-        )
-        .bind(track_id)
-        .bind(user_id)
-        .bind(now)
-        .fetch_one(&mut *tx)
-        .await;
-        let id: i64 = match inserted {
-            Ok(id) => id,
-            Err(sqlx::Error::Database(e)) if e.is_unique_violation() => {
-                return Err(AddRequestError::AlreadyQueued)
+        let (id, outcome) = match existing {
+            Some((queue_id, _, position)) => {
+                sqlx::query(
+                    "INSERT INTO request_backers (queue_id, user_id, added_at) VALUES (?, ?, ?)",
+                )
+                .bind(queue_id)
+                .bind(user_id)
+                .bind(now)
+                .execute(&mut *tx)
+                .await
+                .map_err(StoreError::from)?;
+                // Trade places with the song just ahead.
+                let ahead: Option<(i64, i64)> = sqlx::query_as(
+                    "SELECT id, position FROM request_queue WHERE position < ? \
+                     ORDER BY position DESC LIMIT 1",
+                )
+                .bind(position)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(StoreError::from)?;
+                if let Some((ahead_id, ahead_position)) = ahead {
+                    for (id, position) in [(queue_id, ahead_position), (ahead_id, position)] {
+                        sqlx::query("UPDATE request_queue SET position = ? WHERE id = ?")
+                            .bind(position)
+                            .bind(id)
+                            .execute(&mut *tx)
+                            .await
+                            .map_err(StoreError::from)?;
+                    }
+                }
+                (queue_id, RequestOutcome::Backed)
             }
-            Err(e) => return Err(StoreError::from(e).into()),
+            None => {
+                let inserted = sqlx::query_scalar(
+                    "INSERT INTO request_queue (track_id, user_id, added_at, position)
+                     VALUES (?, ?, ?, (SELECT coalesce(max(position), 0) + 1 FROM request_queue))
+                     RETURNING id",
+                )
+                .bind(track_id)
+                .bind(user_id)
+                .bind(now)
+                .fetch_one(&mut *tx)
+                .await;
+                match inserted {
+                    Ok(id) => (id, RequestOutcome::Added),
+                    Err(sqlx::Error::Database(e)) if e.is_unique_violation() => {
+                        return Err(AddRequestError::AlreadyQueued)
+                    }
+                    Err(e) => return Err(StoreError::from(e).into()),
+                }
+            }
         };
         sqlx::query(
             "INSERT INTO request_events (track_id, user_id, at, name, mac, ip) VALUES (?, ?, ?, ?, ?, ?)",
@@ -152,15 +246,71 @@ impl Store {
         .bind(&origin.mac)
         .bind(&origin.ip)
         .execute(&mut *tx)
-            .await
-            .map_err(StoreError::from)?;
+        .await
+        .map_err(StoreError::from)?;
         let item = sqlx::query_as(concat!(queue_select!(), " WHERE q.id = ?"))
             .bind(id)
             .fetch_one(&mut *tx)
             .await
             .map_err(StoreError::from)?;
         tx.commit().await.map_err(StoreError::from)?;
-        Ok(item)
+        Ok((item, outcome))
+    }
+
+    /// Takes `user_id` off a request: a backer just steps back; the
+    /// requester hands it to the first backer, or removes it if there's
+    /// none.
+    pub async fn withdraw_request(&self, id: i64, user_id: i64) -> Result<Withdrawal> {
+        let mut tx = self.pool.begin().await?;
+        let unbacked =
+            sqlx::query("DELETE FROM request_backers WHERE queue_id = ? AND user_id = ?")
+                .bind(id)
+                .bind(user_id)
+                .execute(&mut *tx)
+                .await?;
+        if unbacked.rows_affected() > 0 {
+            tx.commit().await?;
+            return Ok(Withdrawal::Unbacked);
+        }
+        let owner: Option<i64> =
+            sqlx::query_scalar("SELECT user_id FROM request_queue WHERE id = ?")
+                .bind(id)
+                .fetch_optional(&mut *tx)
+                .await?;
+        if owner != Some(user_id) {
+            return Ok(Withdrawal::NotInvolved);
+        }
+        let next: Option<i64> = sqlx::query_scalar(
+            "SELECT user_id FROM request_backers WHERE queue_id = ? \
+             ORDER BY added_at, user_id LIMIT 1",
+        )
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let outcome = match next {
+            Some(heir) => {
+                sqlx::query("DELETE FROM request_backers WHERE queue_id = ? AND user_id = ?")
+                    .bind(id)
+                    .bind(heir)
+                    .execute(&mut *tx)
+                    .await?;
+                sqlx::query("UPDATE request_queue SET user_id = ? WHERE id = ?")
+                    .bind(heir)
+                    .bind(id)
+                    .execute(&mut *tx)
+                    .await?;
+                Withdrawal::HandedOver
+            }
+            None => {
+                sqlx::query("DELETE FROM request_queue WHERE id = ?")
+                    .bind(id)
+                    .execute(&mut *tx)
+                    .await?;
+                Withdrawal::Removed
+            }
+        };
+        tx.commit().await?;
+        Ok(outcome)
     }
 
     /// Most recent requests first, from `since` (Unix ms) on.
@@ -328,6 +478,82 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn asking_for_a_queued_song_backs_it() {
+        let (store, ana, ids) = setup().await;
+        let sam = store.create_user("sam", "h", Role::User).await.unwrap().id;
+        let jo = store.create_user("jo", "h", Role::User).await.unwrap().id;
+        let limit = per_user(Some(2));
+        for &id in &ids[..3] {
+            store
+                .add_request(id, ana, per_user(None), &origin())
+                .await
+                .unwrap();
+        }
+        let order = |store: Store| async move {
+            store
+                .queue()
+                .await
+                .unwrap()
+                .iter()
+                .map(|q| (q.track.id, q.backers.len()))
+                .collect::<Vec<_>>()
+        };
+
+        // Sam backs the last song: it moves up one place, not to the top.
+        let (item, outcome) = store
+            .add_request(ids[2], sam, limit, &origin())
+            .await
+            .unwrap();
+        assert_eq!(outcome, RequestOutcome::Backed);
+        assert_eq!(item.backers[0].name, "sam");
+        assert_eq!(
+            order(store.clone()).await,
+            [(ids[0], 0), (ids[2], 1), (ids[1], 0)]
+        );
+        // Jo backs it too: now it's first.
+        store
+            .add_request(ids[2], jo, limit, &origin())
+            .await
+            .unwrap();
+        assert_eq!(order(store.clone()).await[0], (ids[2], 2));
+        // Asking again is refused, and a backing uses up a slot.
+        assert!(matches!(
+            store.add_request(ids[2], sam, limit, &origin()).await,
+            Err(AddRequestError::AlreadyYours)
+        ));
+        store
+            .add_request(ids[3], sam, limit, &origin())
+            .await
+            .unwrap();
+        assert!(matches!(
+            store.add_request(ids[4], sam, limit, &origin()).await,
+            Err(AddRequestError::LimitReached(2))
+        ));
+
+        // Ana steps back: Sam asked first, so the request is his now.
+        let queue_id = item.id;
+        assert_eq!(
+            store.withdraw_request(queue_id, ana).await.unwrap(),
+            Withdrawal::HandedOver
+        );
+        let item = store.queue_item(queue_id).await.unwrap().unwrap();
+        assert_eq!((item.user_id, item.backers.len()), (sam, 1));
+        assert_eq!(
+            store.withdraw_request(queue_id, jo).await.unwrap(),
+            Withdrawal::Unbacked
+        );
+        assert_eq!(
+            store.withdraw_request(queue_id, jo).await.unwrap(),
+            Withdrawal::NotInvolved
+        );
+        assert_eq!(
+            store.withdraw_request(queue_id, sam).await.unwrap(),
+            Withdrawal::Removed
+        );
+        assert!(store.queue_item(queue_id).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
     async fn request_rules() {
         let (store, user, ids) = setup().await;
         store
@@ -338,7 +564,7 @@ mod tests {
             store
                 .add_request(ids[0], user, per_user(Some(2)), &origin())
                 .await,
-            Err(AddRequestError::AlreadyQueued)
+            Err(AddRequestError::AlreadyYours)
         ));
         store
             .add_request(ids[1], user, per_user(Some(2)), &origin())

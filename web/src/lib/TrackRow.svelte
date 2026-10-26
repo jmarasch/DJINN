@@ -50,20 +50,28 @@
   <AddToPlaylist kind="track" refId={track.id} label={track.title} compact />
   <button
     class="queue"
-    class:done={status !== null}
+    class:done={status !== null && status !== 'queued'}
     class:mine={status === 'mine'}
-    disabled={status !== null && status !== 'mine'}
+    disabled={status === 'playing' || status === 'pending'}
     onclick={() => toggleRequest(track.id)}
     aria-label={status === 'mine'
-      ? `Cancel your request for ${track.title}`
-      : status
-        ? `Already ${status}`
-        : `Queue ${track.title}`}
-    title={status === 'mine' ? 'Queued by you. Tap to cancel.' : undefined}
+      ? `Take back your request for ${track.title}`
+      : status === 'queued'
+        ? `Ask for ${track.title} too (moves it up)`
+        : status
+          ? `Already ${status}`
+          : `Queue ${track.title}`}
+    title={status === 'mine'
+      ? 'You asked for this. Tap to take it back.'
+      : status === 'queued'
+        ? 'Someone queued this. Ask for it too to move it up.'
+        : undefined}
   >
     {#if status === 'playing'}
       <Icon name="play" />
-    {:else if status === 'queued' || status === 'mine'}
+    {:else if status === 'queued'}
+      <Icon name="up" />
+    {:else if status === 'mine'}
       <Icon name="check" />
     {:else if status === 'pending'}
       <Icon name="clock" />

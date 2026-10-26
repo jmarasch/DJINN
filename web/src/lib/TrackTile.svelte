@@ -17,13 +17,26 @@
     </button>
     <button
       class="queue"
-      class:done={status !== null}
-      disabled={status !== null && status !== 'mine'}
+      class:done={status !== null && status !== 'queued'}
+      disabled={status === 'playing' || status === 'pending'}
       onclick={() => toggleRequest(track.id)}
-      aria-label={status === 'mine' ? `Cancel your request for ${track.title}` : `Queue ${track.title}`}
+      aria-label={status === 'mine'
+        ? `Take back your request for ${track.title}`
+        : status === 'queued'
+          ? `Ask for ${track.title} too (moves it up)`
+          : `Queue ${track.title}`}
+      title={status === 'queued' ? 'Someone queued this. Ask for it too to move it up.' : undefined}
     >
       <Icon
-        name={status === 'playing' ? 'play' : status === 'pending' ? 'clock' : status ? 'check' : 'plus'}
+        name={status === 'playing'
+          ? 'play'
+          : status === 'pending'
+            ? 'clock'
+            : status === 'queued'
+              ? 'up'
+              : status
+                ? 'check'
+                : 'plus'}
         size={20}
       />
     </button>

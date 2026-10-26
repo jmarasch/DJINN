@@ -91,7 +91,9 @@ export const api = {
   artUrl: (hash: string, size?: number) => `/api/art/${hash}${size ? `?size=${size}` : ''}`,
 
   queue: () => get<QueueItem[]>('/queue'),
-  addRequest: (trackId: number) => post<QueueItem>('/queue', { track_id: trackId }),
+  addRequest: (trackId: number) =>
+    post<QueueItem & { outcome: 'added' | 'backed' }>('/queue', { track_id: trackId }),
+  skipVote: () => post<{ skipped: boolean }>('/player/skip-vote'),
   removeRequest: (id: number) => del<void>(`/queue/${id}`),
   queueAll: (kind: EntryKind, refId: number) =>
     post<{ added: number }>('/queue/all', { kind, ref_id: refId }),

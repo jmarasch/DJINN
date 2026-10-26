@@ -9,12 +9,13 @@
 mod bag;
 mod gain;
 
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::path::PathBuf;
 
 use djinn_engine::{Command, EndReason, Event as EngineEvent, PlayState as EngineState, TrackId};
 use djinn_store::{
-    AddRequestError, PlaySource, QueueItem, RequestLimits, RequestOrigin, Store, Track, User,
+    AddRequestError, Backer, PlaySource, QueueItem, RequestLimits, RequestOrigin, RequestOutcome,
+    Store, Track, User, Withdrawal,
 };
 use rand::rngs::StdRng;
 use rand::SeedableRng;
@@ -44,6 +45,8 @@ pub const MUSICBRAINZ_CONTACT: &str = "musicbrainz_contact";
 /// Playlist that plays when nobody has requested anything; 0 or missing
 /// means none.
 pub const ACTIVE_PLAYLIST: &str = "active_playlist";
+/// Votes that skip a song; 0 turns skip voting off.
+pub const SKIP_VOTES: &str = "skip_votes";
 /// Last song the active playlist played, so in-order playback resumes.
 const PLAYLIST_CURSOR: &str = "playlist_cursor";
 pub const DEFAULT_HISTORY_WINDOW: i64 = 25;
@@ -60,6 +63,8 @@ struct Pending {
     source: PlaySource,
     request_id: Option<i64>,
     requested_by: Option<(i64, String)>,
+    /// Others who asked for it too.
+    backers: Vec<Backer>,
 }
 
 impl Pending {
@@ -68,6 +73,8 @@ impl Pending {
             track: self.track.clone(),
             source: self.source,
             requested_by: self.requested_by.as_ref().map(|(_, name)| name.clone()),
+            requested_by_id: self.requested_by.as_ref().map(|(id, _)| *id),
+            backers: self.backers.iter().map(|b| b.name.clone()).collect(),
         }
     }
 }
@@ -94,6 +101,10 @@ pub struct Jukebox {
     volume: u8,
     crossfade: u8,
     skip_requested_by: Option<i64>,
+    /// People who voted to skip the song playing.
+    skip_votes: HashSet<i64>,
+    /// Votes that skip a song; 0 when skip voting is off.
+    skip_votes_needed: u32,
     output: OutputStatus,
     last_position_second: Option<u64>,
     /// The playlist feeding the music, if any.
@@ -113,6 +124,10 @@ pub enum QueueError {
     NotFound,
     #[error("you can only remove your own requests")]
     NotYours,
+    #[error("nothing is playing")]
+    NothingPlaying,
+    #[error("skip voting is off")]
+    SkipVotesOff,
     #[error(transparent)]
     Store(#[from] djinn_store::StoreError),
     #[error(transparent)]
@@ -130,6 +145,7 @@ impl Jukebox {
         let crossfade = setting(&store, CROSSFADE, 0)
             .await?
             .clamp(0, i64::from(djinn_engine::MAX_CROSSFADE_SECS)) as u8;
+        let skip_votes_needed = setting(&store, SKIP_VOTES, 0).await?.clamp(0, 100) as u32;
         let replay_gain = ReplayGain {
             mode: ReplayGainMode::parse(
                 store
@@ -161,6 +177,8 @@ impl Jukebox {
             volume,
             crossfade,
             skip_requested_by: None,
+            skip_votes: HashSet::new(),
+            skip_votes_needed,
             output: OutputStatus::default(),
             last_position_second: None,
             active: None,
@@ -192,6 +210,9 @@ impl Jukebox {
             volume: self.volume,
             crossfade_secs: self.crossfade,
             playlist: self.active.clone(),
+            skip_votes: u32::try_from(self.skip_votes.len()).unwrap_or(u32::MAX),
+            skip_voters: self.skip_votes.iter().copied().collect(),
+            skip_votes_needed: self.skip_votes_needed,
         }
     }
 
@@ -224,7 +245,7 @@ impl Jukebox {
         user: &User,
         track_id: i64,
         origin: &RequestOrigin,
-    ) -> Result<QueueItem, QueueError> {
+    ) -> Result<(QueueItem, RequestOutcome), QueueError> {
         let limits = if user.is_admin() || user.unlimited {
             RequestLimits::default()
         } else {
@@ -234,12 +255,12 @@ impl Jukebox {
                 queue_cap: (cap > 0).then_some(cap),
             }
         };
-        let item = self
+        let added = self
             .store
             .add_request(track_id, user.id, limits, origin)
             .await?;
         self.queue_changed().await?;
-        Ok(item)
+        Ok(added)
     }
 
     /// Queues several songs in order (admin: no limits). Songs already in
@@ -258,7 +279,11 @@ impl Jukebox {
                 .await
             {
                 Ok(_) => added += 1,
-                Err(AddRequestError::AlreadyQueued | AddRequestError::NotFound) => {}
+                Err(
+                    AddRequestError::AlreadyQueued
+                    | AddRequestError::AlreadyYours
+                    | AddRequestError::NotFound,
+                ) => {}
                 Err(e) => return Err(e.into()),
             }
         }
@@ -268,17 +293,20 @@ impl Jukebox {
         Ok(added)
     }
 
-    /// Users may remove their own requests; admins may remove any.
+    /// People take themselves off a request: a backer steps back, and the
+    /// requester hands it to the first backer (or it goes, if nobody else
+    /// wanted it). Admins remove anyone's request outright.
     pub async fn remove_request(&mut self, user: &User, id: i64) -> Result<(), QueueError> {
-        let item = self
-            .store
-            .queue_item(id)
-            .await?
-            .ok_or(QueueError::NotFound)?;
-        if item.user_id != user.id && !user.is_admin() {
-            return Err(QueueError::NotYours);
+        if self.store.queue_item(id).await?.is_none() {
+            return Err(QueueError::NotFound);
         }
-        self.store.remove_request(id).await?;
+        match self.store.withdraw_request(id, user.id).await? {
+            Withdrawal::NotInvolved if user.is_admin() => {
+                self.store.remove_request(id).await?;
+            }
+            Withdrawal::NotInvolved => return Err(QueueError::NotYours),
+            Withdrawal::Unbacked | Withdrawal::HandedOver | Withdrawal::Removed => {}
+        }
         self.queue_changed().await?;
         Ok(())
     }
@@ -375,6 +403,40 @@ impl Jukebox {
     pub fn skip(&mut self, by: &User) {
         self.skip_requested_by = Some(by.id);
         (self.engine)(Command::Skip);
+    }
+
+    pub fn set_skip_votes_needed(&mut self, needed: u32) {
+        self.skip_votes_needed = needed;
+        self.send(ServerEvent::PlayerState(self.player_state()));
+    }
+
+    /// A vote to skip the song playing. Admins skip at once, and so does
+    /// whoever requested it if nobody else asked for it too. Returns
+    /// whether it skipped.
+    pub fn vote_skip(&mut self, user: &User) -> Result<bool, QueueError> {
+        let Some(playing) = self.playing.as_ref() else {
+            return Err(QueueError::NothingPlaying);
+        };
+        let own = playing
+            .pending
+            .requested_by
+            .as_ref()
+            .is_some_and(|(id, _)| *id == user.id)
+            && playing.pending.backers.is_empty();
+        if user.is_admin() || own {
+            self.skip(user);
+            return Ok(true);
+        }
+        if self.skip_votes_needed == 0 {
+            return Err(QueueError::SkipVotesOff);
+        }
+        self.skip_votes.insert(user.id);
+        let skipped = self.skip_votes.len() >= self.skip_votes_needed as usize;
+        if skipped {
+            self.skip(user);
+        }
+        self.send(ServerEvent::PlayerState(self.player_state()));
+        Ok(skipped)
     }
 
     /// Crossfade for upcoming transitions, in seconds (0 for gapless).
@@ -507,6 +569,10 @@ impl Jukebox {
         });
         self.last_position_second = None;
         self.broadcast_now_playing();
+        if !self.skip_votes.is_empty() {
+            self.skip_votes.clear();
+            self.send(ServerEvent::PlayerState(self.player_state()));
+        }
         Ok(())
     }
 
@@ -577,6 +643,7 @@ impl Jukebox {
                 (Some(head), Some(q)) if q.request_id == Some(head.id) => return Ok(()),
                 (Some(head), _) => Pending {
                     requested_by: Some((head.user_id, head.username.clone())),
+                    backers: head.backers.clone(),
                     request_id: Some(head.id),
                     source: PlaySource::Request,
                     track: head.track,
@@ -658,6 +725,7 @@ impl Jukebox {
             source: PlaySource::Pool,
             request_id: None,
             requested_by: None,
+            backers: Vec::new(),
         }))
     }
 
@@ -869,6 +937,63 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn skip_votes() {
+        let mut h = Harness::new(3).await;
+        let (admin, user) = (h.admin.clone(), h.user.clone());
+        let other = h.store.create_user("other", "h", Role::User).await.unwrap();
+        let skips = |h: &Harness| {
+            h.sent
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|c| matches!(c, Command::Skip))
+                .count()
+        };
+        assert!(matches!(
+            h.jukebox.vote_skip(&user),
+            Err(QueueError::NothingPlaying)
+        ));
+        h.event(EngineEvent::NextNeeded { after: None }).await;
+        h.play_next().await;
+
+        assert!(matches!(
+            h.jukebox.vote_skip(&user),
+            Err(QueueError::SkipVotesOff)
+        ));
+        h.jukebox.set_skip_votes_needed(2);
+        assert!(!h.jukebox.vote_skip(&user).unwrap());
+        assert!(!h.jukebox.vote_skip(&user).unwrap(), "one vote each");
+        assert_eq!(h.jukebox.player_state().skip_votes, 1);
+        assert!(h.jukebox.vote_skip(&other).unwrap());
+        assert_eq!(skips(&h), 1);
+
+        // A new song starts with no votes.
+        h.play_next().await;
+        assert_eq!(h.jukebox.player_state().skip_votes, 0);
+        // Admins skip at once.
+        assert!(h.jukebox.vote_skip(&admin).unwrap());
+        assert_eq!(skips(&h), 2);
+    }
+
+    #[tokio::test]
+    async fn requester_can_skip_their_own_song_alone() {
+        let mut h = Harness::new(0).await;
+        let user = h.user.clone();
+        let other = h.store.create_user("other", "h", Role::User).await.unwrap();
+        h.jukebox
+            .add_request(&user, h.tracks[0], &origin())
+            .await
+            .unwrap();
+        h.event(EngineEvent::NextNeeded { after: None }).await;
+        h.play_next().await;
+        assert!(matches!(
+            h.jukebox.vote_skip(&other),
+            Err(QueueError::SkipVotesOff)
+        ));
+        assert!(h.jukebox.vote_skip(&user).unwrap());
+    }
+
+    #[tokio::test]
     async fn replay_gain_reaches_the_engine() {
         let mut h = Harness::new(1).await;
         h.store
@@ -1028,7 +1153,7 @@ mod tests {
     async fn only_owner_or_admin_removes_requests() {
         let mut h = Harness::new(1).await;
         let (user, admin) = (h.user.clone(), h.admin.clone());
-        let item = h
+        let (item, _) = h
             .jukebox
             .add_request(&admin, h.tracks[1], &origin())
             .await
@@ -1037,7 +1162,7 @@ mod tests {
             h.jukebox.remove_request(&user, item.id).await,
             Err(QueueError::NotYours)
         ));
-        let mine = h
+        let (mine, _) = h
             .jukebox
             .add_request(&user, h.tracks[2], &origin())
             .await

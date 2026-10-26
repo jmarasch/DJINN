@@ -7,7 +7,9 @@
   import Icon from '../lib/Icon.svelte'
   import {
     app,
+    askedBy,
     cancelRequest,
+    involvement,
     currentPosition,
     isAdmin,
     myRequest,
@@ -18,8 +20,9 @@
 
   const current = $derived(app.nowPlaying.current)
   const next = $derived(app.nowPlaying.up_next)
-  /** "Up next" is your own request, so you can cancel it. */
+  /** "Up next" is a request you're part of, so you can take yours back. */
   const nextMine = $derived(next ? myRequest(next.track.id) : null)
+  const nextQueued = $derived(next ? app.queue.find((q) => q.track.id === next.track.id) : undefined)
   const total = $derived(current?.track.duration_ms ?? 0)
   let position = $state(0)
   let volume = $state(app.player.volume)
@@ -63,6 +66,32 @@
     }
   }
 
+  // Skip votes: whoever requested the song alone can skip it; others vote
+  // when the host has skip voting on.
+  const soleRequester = $derived(
+    !!current && current.requested_by_id === app.me?.id && !current.backers.length,
+  )
+  const canVote = $derived(!!current && !isAdmin() && (soleRequester || app.player.skip_votes_needed > 0))
+  const voted = $derived(app.player.skip_voters.includes(app.me?.id ?? -1))
+
+  async function voteSkip() {
+    try {
+      const { skipped } = await api.skipVote()
+      toast(skipped ? 'Skipped' : 'Vote counted')
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not vote', true)
+    }
+  }
+
+  const requesters = $derived(
+    current?.requested_by ? [current.requested_by, ...current.backers] : [],
+  )
+  const requesterText = $derived(
+    requesters.length < 2
+      ? requesters.join('')
+      : `${requesters.slice(0, -1).join(', ')} & ${requesters[requesters.length - 1]}`,
+  )
+
   const themeLabel = $derived({ auto: 'Auto', light: 'Light', dark: 'Dark' }[theme.mode])
 </script>
 
@@ -97,8 +126,8 @@
         · <a href="#/album/{current.track.album_id}">{current.track.album}</a>
       {/if}
     </p>
-    {#if current.requested_by}
-      <p class="badge">Requested by {current.requested_by}</p>
+    {#if requesterText}
+      <p class="badge">Requested by {requesterText}</p>
     {/if}
     <div class="progress" role="progressbar" aria-valuenow={position} aria-valuemax={total}>
       <div class="fill" style:width="{total ? (position / total) * 100 : 0}%"></div>
@@ -107,6 +136,18 @@
       <span>{duration(position)}</span>
       <span>{duration(total)}</span>
     </div>
+    {#if canVote}
+      <button class="skip-vote" disabled={voted} onclick={voteSkip}>
+        <Icon name="skip" size={18} />
+        {#if soleRequester}
+          Skip my song
+        {:else if voted}
+          Voted to skip · {app.player.skip_votes} of {app.player.skip_votes_needed}
+        {:else}
+          Vote to skip{app.player.skip_votes ? ` · ${app.player.skip_votes} of ${app.player.skip_votes_needed}` : ''}
+        {/if}
+      </button>
+    {/if}
   {:else}
     <div class="idle">
       <Icon name="disc" size={72} />
@@ -164,11 +205,17 @@
         <div class="text">
           <div class="ellipsis">{next.track.title}</div>
           <div class="muted small ellipsis">
-            {byline(next.track.artist)}{next.requested_by ? ` · for ${next.requested_by}` : ''}
+            {byline(next.track.artist)}{nextQueued
+              ? ` · for ${askedBy(nextQueued)}`
+              : next.requested_by
+                ? ` · for ${next.requested_by}`
+                : ''}
           </div>
         </div>
         {#if nextMine}
-          <button class="cancel" onclick={() => nextMine && cancelRequest(nextMine.id)}>Cancel</button>
+          <button class="cancel" onclick={() => nextMine && cancelRequest(nextMine.id)}>
+            {involvement(nextMine) === 'backer' ? 'Step back' : 'Cancel'}
+          </button>
         {/if}
       </div>
     </div>
@@ -183,6 +230,17 @@
 </section>
 
 <style>
+  .skip-vote {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin: 12px auto 0;
+    padding: 0 16px;
+    min-height: 40px;
+    border-radius: 999px;
+    font-size: 0.875rem;
+  }
+
   .top {
     display: flex;
     align-items: center;

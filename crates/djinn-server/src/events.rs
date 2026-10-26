@@ -54,6 +54,9 @@ pub struct Entry {
     pub source: PlaySource,
     /// Username of whoever requested it.
     pub requested_by: Option<String>,
+    pub requested_by_id: Option<i64>,
+    /// Others who asked for it too.
+    pub backers: Vec<String>,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize)]
@@ -73,6 +76,12 @@ pub struct PlayerState {
     pub crossfade_secs: u8,
     /// The playlist playing when nobody has requested anything.
     pub playlist: Option<PlaylistRef>,
+    /// Votes to skip the song playing.
+    pub skip_votes: u32,
+    /// Who voted, so each person's screen knows whether they did.
+    pub skip_voters: Vec<i64>,
+    /// Votes that skip it; 0 when skip voting is off.
+    pub skip_votes_needed: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]

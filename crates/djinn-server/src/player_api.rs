@@ -5,7 +5,9 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
-use djinn_store::{AddRequestError, EntryKind, QueueItem, RequestLogEntry, RequestOrigin};
+use djinn_store::{
+    AddRequestError, EntryKind, QueueItem, RequestLogEntry, RequestOrigin, RequestOutcome,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::auth::{AdminUser, CurrentUser};
@@ -24,6 +26,7 @@ pub fn router() -> Router<AppState> {
         .route("/player/play", post(play))
         .route("/player/pause", post(pause))
         .route("/player/skip", post(skip))
+        .route("/player/skip-vote", post(skip_vote))
         .route("/player/volume", put(set_volume))
         .route("/player/crossfade", put(set_crossfade))
         .route("/settings", get(settings).put(update_settings))
@@ -36,10 +39,14 @@ fn queue_error(err: QueueError) -> ApiError {
         QueueError::Add(AddRequestError::NotFound) | QueueError::NotFound => ApiError::not_found(),
         QueueError::Add(
             e @ (AddRequestError::AlreadyQueued
+            | AddRequestError::AlreadyYours
             | AddRequestError::LimitReached(_)
             | AddRequestError::QueueFull(_)),
         ) => ApiError::conflict(e.to_string()),
-        QueueError::NotYours => ApiError::new(StatusCode::FORBIDDEN, err.to_string()),
+        QueueError::NothingPlaying => ApiError::conflict(err.to_string()),
+        QueueError::NotYours | QueueError::SkipVotesOff => {
+            ApiError::new(StatusCode::FORBIDDEN, err.to_string())
+        }
         QueueError::Add(AddRequestError::Store(e)) | QueueError::Store(e) => e.into(),
         QueueError::Other(e) => e.into(),
     }
@@ -54,25 +61,37 @@ struct AddRequest {
     track_id: i64,
 }
 
+#[derive(Serialize)]
+struct AddedRequest {
+    #[serde(flatten)]
+    item: QueueItem,
+    /// "added" for a new song, "backed" when it was queued already.
+    outcome: RequestOutcome,
+}
+
 async fn add_request(
     CurrentUser(user): CurrentUser,
     State(state): State<AppState>,
     ClientIp(ip): ClientIp,
     Json(body): Json<AddRequest>,
-) -> ApiResult<(StatusCode, Json<QueueItem>)> {
+) -> ApiResult<(StatusCode, Json<AddedRequest>)> {
     let origin = RequestOrigin {
         name: user.name().to_owned(),
         mac: client::mac_for(ip).await.or_else(|| user.mac.clone()),
         ip: ip.map(|ip| ip.to_string()),
     };
-    let item = state
+    let (item, outcome) = state
         .jukebox
         .lock()
         .await
         .add_request(&user, body.track_id, &origin)
         .await
         .map_err(queue_error)?;
-    Ok((StatusCode::CREATED, Json(item)))
+    let status = match outcome {
+        RequestOutcome::Added => StatusCode::CREATED,
+        RequestOutcome::Backed => StatusCode::OK,
+    };
+    Ok((status, Json(AddedRequest { item, outcome })))
 }
 
 #[derive(Deserialize)]
@@ -181,6 +200,25 @@ async fn skip(AdminUser(admin): AdminUser, State(state): State<AppState>) -> Sta
     StatusCode::NO_CONTENT
 }
 
+#[derive(Serialize)]
+struct SkipVote {
+    skipped: bool,
+}
+
+/// Anyone's vote to skip the song playing.
+async fn skip_vote(
+    CurrentUser(user): CurrentUser,
+    State(state): State<AppState>,
+) -> ApiResult<Json<SkipVote>> {
+    let skipped = state
+        .jukebox
+        .lock()
+        .await
+        .vote_skip(&user)
+        .map_err(queue_error)?;
+    Ok(Json(SkipVote { skipped }))
+}
+
 #[derive(Deserialize)]
 struct Volume {
     /// 0 to 100.
@@ -238,6 +276,9 @@ struct Settings {
     /// The TV page (/tv) works without signing in.
     #[serde(default = "default_true")]
     tv_page: bool,
+    /// Votes that skip a song; 0 turns skip voting off.
+    #[serde(default)]
+    skip_votes: i64,
 }
 
 fn default_true() -> bool {
@@ -271,6 +312,7 @@ async fn settings(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json
             .map_err(anyhow::Error::from)?
             .join("\n"),
         tv_page: crate::tv_api::enabled(&state).await?,
+        skip_votes: jukebox::setting(store, jukebox::SKIP_VOTES, 0).await?,
     }))
 }
 
@@ -284,6 +326,9 @@ async fn update_settings(
     }
     if !(1..=50).contains(&body.per_user_limit) {
         return Err(ApiError::bad_request("per_user_limit must be 1 to 50"));
+    }
+    if !(0..=100).contains(&body.skip_votes) {
+        return Err(ApiError::bad_request("skip_votes must be 0 (off) to 100"));
     }
     if !(0..=1000).contains(&body.max_queue) {
         return Err(ApiError::bad_request(
@@ -322,6 +367,14 @@ async fn update_settings(
     store
         .set_setting(crate::tv_api::TV_PAGE, if body.tv_page { "1" } else { "0" })
         .await?;
+    store
+        .set_setting(jukebox::SKIP_VOTES, &body.skip_votes.to_string())
+        .await?;
+    state
+        .jukebox
+        .lock()
+        .await
+        .set_skip_votes_needed(u32::try_from(body.skip_votes).unwrap_or(0));
     let was_online = jukebox::setting(store, jukebox::ONLINE_INFO, 0).await? == 1;
     store
         .set_setting(
@@ -443,7 +496,16 @@ mod tests {
             Some(&bob),
         )
         .await;
-        assert_eq!(status, StatusCode::CONFLICT, "duplicate");
+        assert_eq!(status, StatusCode::OK, "someone else asking backs it");
+        let (status, _) = call(
+            &state,
+            Method::POST,
+            "/api/queue",
+            Some(&post(ids[0])),
+            Some(&alice),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT, "asking twice");
         let (status, _) = call(
             &state,
             Method::POST,
@@ -473,8 +535,10 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::CONFLICT, "per-user limit");
 
-        let first = state.store.queue().await.unwrap()[0].id;
-        let path = format!("/api/queue/{first}");
+        // Bob backs the first song, so he may step back from it, but the
+        // second is Alice's alone.
+        let queue = state.store.queue().await.unwrap();
+        let path = format!("/api/queue/{}", queue[1].id);
         let (status, _) = call(&state, Method::DELETE, &path, None, Some(&bob)).await;
         assert_eq!(status, StatusCode::FORBIDDEN, "not bob's request");
         let (status, _) = call(

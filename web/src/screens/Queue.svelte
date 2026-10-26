@@ -3,21 +3,10 @@
   import Art from '../lib/Art.svelte'
   import { byline, duration } from '../lib/format'
   import Icon from '../lib/Icon.svelte'
-  import { app, isAdmin, toast } from '../lib/state.svelte'
+  import { app, askedBy, cancelRequest, involvement, isAdmin, requestTrack, toast } from '../lib/state.svelte'
   import type { QueueItem } from '../lib/types'
 
-  const mine = $derived(app.queue.filter((q) => q.user_id === app.me?.id).length)
-
-  async function remove(item: QueueItem) {
-    const before = app.queue
-    app.queue = app.queue.filter((q) => q.id !== item.id)
-    try {
-      await api.removeRequest(item.id)
-    } catch (e) {
-      app.queue = before
-      toast(e instanceof Error ? e.message : 'Could not remove that song', true)
-    }
-  }
+  const mine = $derived(app.queue.filter((q) => involvement(q) !== null).length)
 
   async function move(item: QueueItem, index: number) {
     const before = app.queue
@@ -42,8 +31,9 @@
 {:else}
   <p class="muted small">
     {app.queue.length} {app.queue.length === 1 ? 'song' : 'songs'}{mine
-      ? `, ${mine} from you (tap × to cancel yours)`
-      : ''}
+      ? `, ${mine} from you (tap × to take yours back)`
+      : ''}. Want a song that's already here? Tap <Icon name="up" size={14} /> to ask for it too: it moves up a
+    place and uses one of your requests.
   </p>
   <ol>
     {#each app.queue as item, i (item.id)}
@@ -55,8 +45,16 @@
             {byline(item.track.artist)}
             {#if item.track.duration_ms}· {duration(item.track.duration_ms)}{/if}
           </div>
-          <div class="who small">for {item.user_id === app.me?.id ? 'you' : item.username}</div>
+          <div class="who small">
+            for {askedBy(item)}
+            {#if item.backers.length}<span class="count">{item.backers.length + 1} asked</span>{/if}
+          </div>
         </div>
+        {#if involvement(item) === null && !app.pending.has(item.track.id)}
+          <button class="metoo" aria-label="Ask for {item.track.title} too" onclick={() => requestTrack(item.track.id)}>
+            <Icon name="up" />
+          </button>
+        {/if}
         {#if isAdmin()}
           <div class="order">
             <button aria-label="Move up" disabled={i === 0} onclick={() => move(item, i - 1)}>
@@ -71,8 +69,8 @@
             </button>
           </div>
         {/if}
-        {#if isAdmin() || item.user_id === app.me?.id}
-          <button class="remove" aria-label="Remove {item.track.title}" onclick={() => remove(item)}>
+        {#if isAdmin() || involvement(item) !== null}
+          <button class="remove" aria-label="Remove {item.track.title}" onclick={() => cancelRequest(item.id)}>
             <Icon name="close" />
           </button>
         {/if}
@@ -103,6 +101,22 @@
   }
 
   .who {
+    color: var(--accent);
+  }
+
+  .count {
+    margin-left: 6px;
+    padding: 0 6px;
+    border-radius: 999px;
+    background: var(--surface-3);
+    color: var(--text);
+  }
+
+  .metoo {
+    flex: none;
+    width: 44px;
+    height: 44px;
+    padding: 0;
     color: var(--accent);
   }
 
