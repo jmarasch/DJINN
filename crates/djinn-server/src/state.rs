@@ -29,6 +29,9 @@ pub struct AppState {
     pub shutdown: Arc<watch::Sender<bool>>,
     /// Notified to request a shutdown (from the tray menu).
     pub shutdown_request: Arc<Notify>,
+    /// Notified when library folders are added or removed, so the folder
+    /// watcher follows.
+    pub roots_changed: Arc<Notify>,
     /// The URL guests open, shown on the join page.
     pub join_url: Arc<String>,
     /// Guests may join with just a name. Mirrors the `guest_mode` setting.
@@ -65,6 +68,7 @@ impl AppState {
             scan: Arc::default(),
             shutdown: Arc::new(watch::Sender::new(false)),
             shutdown_request: Arc::new(Notify::new()),
+            roots_changed: Arc::new(Notify::new()),
             join_url: Arc::new(String::new()),
             guest_mode: Arc::new(AtomicBool::new(false)),
         }

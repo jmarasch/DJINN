@@ -21,6 +21,7 @@ mod sse;
 mod state;
 #[cfg(test)]
 mod test_util;
+mod watcher;
 mod web;
 
 use std::path::PathBuf;
@@ -194,6 +195,7 @@ async fn main() -> anyhow::Result<()> {
     // Ready to serve from what the database already knows; look for
     // changes on disk in the background.
     library_api::start_scan(&state);
+    watcher::start(state.clone());
 
     let shutdown = std::sync::Arc::clone(&state.shutdown);
     let shutdown_request = std::sync::Arc::clone(&state.shutdown_request);

@@ -51,6 +51,14 @@ async fn save_app_roots(store: &Store, roots: &[PathBuf]) -> anyhow::Result<()> 
     Ok(())
 }
 
+/// Adds a library folder directly, for tests.
+#[cfg(test)]
+pub async fn add_root_for_tests(state: &AppState, path: &Path) {
+    let mut roots = app_roots(&state.store).await.unwrap();
+    roots.push(path.to_path_buf());
+    save_app_roots(&state.store, &roots).await.unwrap();
+}
+
 #[derive(Serialize)]
 struct Root {
     path: PathBuf,
@@ -100,6 +108,7 @@ async fn add(
     roots.push(path.clone());
     save_app_roots(&state.store, &roots).await?;
     tracing::info!(path = %path.display(), "library folder added");
+    state.roots_changed.notify_one();
     start_scan(&state);
     Ok((StatusCode::CREATED, Json(roots_view(&state).await?)))
 }
@@ -123,6 +132,7 @@ async fn remove(
     }
     save_app_roots(&state.store, &roots).await?;
     tracing::info!(path = %body.path.display(), "library folder removed");
+    state.roots_changed.notify_one();
     start_scan(&state);
     Ok(Json(roots_view(&state).await?))
 }

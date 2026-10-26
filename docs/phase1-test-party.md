@@ -60,9 +60,9 @@ sqlite3 djinn.db "SELECT t.title, p.source, p.played_ms, p.skipped
   allow installing a web app over HTTPS (or on localhost). Over plain
   HTTP on the LAN, iOS Safari's "Add to Home Screen" still makes a
   shortcut.
-- **Cover art is served at full size.** Thumbnails are Phase 2.
-- **Rescans are manual.** Changes to the music folders are picked up at
-  startup or by pressing Rescan; the file watcher is Phase 2.
+- **Network shares are checked every 30 minutes.** Local folders are
+  watched and new music shows up within seconds; shares don't report
+  changes, so press Check for changes after adding music there.
 - **Guest devices are recognized by MAC address** only on the server's own
   network segment, and phones use per-network private addresses. The
   year-long guest cookie is the main way a phone is remembered.
