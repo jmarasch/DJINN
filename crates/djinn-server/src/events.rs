@@ -20,6 +20,7 @@ pub enum ServerEvent {
     ScanProgress(ScanProgress),
     /// Artists, albums, or pictures changed; cached lists are stale.
     LibraryChanged,
+    ArtistLookup(LookupStatus),
 }
 
 impl ServerEvent {
@@ -32,6 +33,7 @@ impl ServerEvent {
             Self::OutputStatus(_) => "output_status",
             Self::ScanProgress(_) => "scan_progress",
             Self::LibraryChanged => "library_changed",
+            Self::ArtistLookup(_) => "artist_lookup",
         }
     }
 }
@@ -73,6 +75,15 @@ pub struct PlaylistRef {
     pub id: i64,
     pub name: String,
     pub shuffle: bool,
+}
+
+/// Online artist photo and bio lookups.
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct LookupStatus {
+    pub running: bool,
+    pub last: Option<djinn_library::online::LookupSummary>,
+    /// When the last lookup finished (Unix ms).
+    pub finished_at: Option<i64>,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]

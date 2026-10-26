@@ -3,6 +3,7 @@
 import { api, ApiError } from './api'
 import { clearListCache } from './listCache'
 import type {
+  LookupStatus,
   Mode,
   NowPlaying,
   OutputStatus,
@@ -28,6 +29,7 @@ export const app = $state({
   output: { device: null, sample_rate: null, error: null } as OutputStatus,
   queue: [] as QueueItem[],
   scan: null as ScanProgress | null,
+  lookup: { running: false, last: null, finished_at: null } as LookupStatus,
   /** Track ids with a request on its way to the server. */
   pending: new Set<number>(),
 })
@@ -78,6 +80,7 @@ export function connect() {
     if (data.done) clearListCache()
   })
   on('library_changed', () => clearListCache())
+  on<LookupStatus>('artist_lookup', (data) => (app.lookup = data))
 
   events.onerror = async () => {
     app.connected = false

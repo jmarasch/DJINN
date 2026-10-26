@@ -219,3 +219,20 @@ export interface ArtistSummary {
 }
 
 export type TrackSort = 'title' | 'artist' | 'added'
+
+export interface LookupSummary {
+  checked: number
+  photos: number
+  bios: number
+}
+
+export interface LookupStatus {
+  running: boolean
+  last: LookupSummary | null
+  finished_at: number | null
+}
+
+/** What asking for background work did. */
+export interface StartResponse {
+  status: 'started' | 'running' | 'queued'
+}

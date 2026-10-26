@@ -60,6 +60,9 @@ async fn snapshot(state: &AppState) -> anyhow::Result<Vec<ServerEvent>> {
         ]
     };
     events.push(ServerEvent::QueueChanged(state.store.queue().await?));
+    events.push(ServerEvent::ArtistLookup(
+        crate::library_api::lookup_status(state),
+    ));
     let scan = state.scan.last.lock().ok().and_then(|last| last.clone());
     if let Some(progress) = scan {
         events.push(ServerEvent::ScanProgress(progress));

@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::auth::{AdminUser, CurrentUser};
 use crate::error::{ApiError, ApiResult};
-use crate::events::ServerEvent;
+use crate::events::{LookupStatus, ServerEvent};
 use crate::state::AppState;
 
 const DEFAULT_SEARCH_LIMIT: i64 = 20;
@@ -180,12 +180,37 @@ async fn status(_: CurrentUser, State(state): State<AppState>) -> ApiResult<Json
     }))
 }
 
-async fn rescan(_: AdminUser, State(state): State<AppState>) -> StatusCode {
-    if start_scan(&state) {
-        StatusCode::ACCEPTED
+/// What a request to start background work did.
+#[derive(Serialize)]
+#[serde(rename_all = "lowercase")]
+enum StartOutcome {
+    /// It started now.
+    Started,
+    /// One is already running; nothing new was started.
+    Running,
+    /// One is running; this one runs right after it.
+    Queued,
+}
+
+#[derive(Serialize)]
+struct StartResponse {
+    status: StartOutcome,
+}
+
+fn started(status: StartOutcome) -> (StatusCode, Json<StartResponse>) {
+    let code = match status {
+        StartOutcome::Started | StartOutcome::Queued => StatusCode::ACCEPTED,
+        StartOutcome::Running => StatusCode::OK,
+    };
+    (code, Json(StartResponse { status }))
+}
+
+async fn rescan(_: AdminUser, State(state): State<AppState>) -> (StatusCode, Json<StartResponse>) {
+    started(if start_scan(&state) {
+        StartOutcome::Started
     } else {
-        StatusCode::CONFLICT
-    }
+        StartOutcome::Running
+    })
 }
 
 #[derive(Deserialize, Default)]
@@ -195,17 +220,31 @@ struct LookupRequest {
     force: bool,
 }
 
-/// Looks up artist photos and bios online now (admin).
+/// Looks up artist photos and bios online now (admin). If a lookup is
+/// already running, a "recheck all" is queued to run right after it.
 async fn artist_info(
     _: AdminUser,
     State(state): State<AppState>,
     body: Option<Json<LookupRequest>>,
-) -> StatusCode {
+) -> (StatusCode, Json<StartResponse>) {
     let force = body.map(|Json(b)| b.force).unwrap_or_default();
     if start_artist_lookup(&state, force) {
-        StatusCode::ACCEPTED
-    } else {
-        StatusCode::CONFLICT
+        return started(StartOutcome::Started);
+    }
+    if force {
+        state.scan.lookup_force_next.store(true, Ordering::Release);
+        return started(StartOutcome::Queued);
+    }
+    started(StartOutcome::Running)
+}
+
+/// Current lookup state, for clients and the SSE snapshot.
+pub fn lookup_status(state: &AppState) -> LookupStatus {
+    let last = state.scan.lookup_last.lock().ok().and_then(|l| l.clone());
+    LookupStatus {
+        running: state.scan.lookup_running.load(Ordering::Acquire),
+        finished_at: last.as_ref().map(|(_, at)| *at),
+        last: last.map(|(summary, _)| summary),
     }
 }
 
@@ -217,22 +256,39 @@ pub fn start_artist_lookup(state: &AppState, force: bool) -> bool {
     }
     let state = state.clone();
     tokio::spawn(async move {
-        tracing::info!("looking up artist photos and bios online");
-        let result =
-            djinn_library::online::lookup_artists(&state.store, &state.art_dir, force).await;
-        state.scan.lookup_running.store(false, Ordering::Release);
-        match result {
-            Ok(summary) => {
-                tracing::info!(
-                    checked = summary.checked,
-                    photos = summary.photos,
-                    bios = summary.bios,
-                    "artist lookup finished"
-                );
-                let _ = state.events.send(ServerEvent::LibraryChanged);
+        let mut force = force;
+        loop {
+            let _ = state
+                .events
+                .send(ServerEvent::ArtistLookup(lookup_status(&state)));
+            tracing::info!(force, "looking up artist photos and bios online");
+            let result =
+                djinn_library::online::lookup_artists(&state.store, &state.art_dir, force).await;
+            match result {
+                Ok(summary) => {
+                    tracing::info!(
+                        checked = summary.checked,
+                        photos = summary.photos,
+                        bios = summary.bios,
+                        "artist lookup finished"
+                    );
+                    if let Ok(mut last) = state.scan.lookup_last.lock() {
+                        *last = Some((summary, djinn_store::now_ms()));
+                    }
+                    let _ = state.events.send(ServerEvent::LibraryChanged);
+                }
+                Err(e) => tracing::error!(error = %e, "artist lookup failed"),
             }
-            Err(e) => tracing::error!(error = %e, "artist lookup failed"),
+            // A "recheck all" asked for while this ran goes next.
+            if !state.scan.lookup_force_next.swap(false, Ordering::AcqRel) {
+                break;
+            }
+            force = true;
         }
+        state.scan.lookup_running.store(false, Ordering::Release);
+        let _ = state
+            .events
+            .send(ServerEvent::ArtistLookup(lookup_status(&state)));
     });
     true
 }
@@ -292,4 +348,54 @@ pub fn start_scan(state: &AppState) -> bool {
         }
     });
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_util::{call, session};
+    use axum::http::Method;
+    use djinn_store::Role;
+
+    #[tokio::test]
+    async fn starting_work_twice_is_not_an_error() {
+        let state = AppState::for_tests().await;
+        let admin = session(&state, "admin", Role::Admin).await;
+        // Pretend a lookup is already running.
+        state.scan.lookup_running.store(true, Ordering::Release);
+
+        let lookup = "/api/library/artist-info";
+        let (status, _) = call(
+            &state,
+            Method::POST,
+            lookup,
+            Some(r#"{"force":false}"#),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "already running");
+        assert!(!state.scan.lookup_force_next.load(Ordering::Acquire));
+
+        let (status, _) = call(
+            &state,
+            Method::POST,
+            lookup,
+            Some(r#"{"force":true}"#),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(status, StatusCode::ACCEPTED, "recheck all is queued");
+        assert!(state.scan.lookup_force_next.load(Ordering::Acquire));
+
+        state.scan.running.store(true, Ordering::Release);
+        let (status, _) = call(
+            &state,
+            Method::POST,
+            "/api/library/rescan",
+            None,
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "already checking for changes");
+    }
 }

@@ -8,6 +8,7 @@ import type {
   GuestSummary,
   LibraryRoot,
   Mode,
+  StartResponse,
   NowPlaying,
   OutputStatus,
   Page,
@@ -52,7 +53,8 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     }
     throw new ApiError(res.status, message)
   }
-  if (res.status === 204 || res.status === 202) return undefined as T
+  const isJson = res.headers.get('content-type')?.includes('application/json')
+  if (res.status === 204 || !isJson) return undefined as T
   return res.json() as Promise<T>
 }
 
@@ -114,7 +116,7 @@ export const api = {
   removeLibraryRoot: (path: string) => request<LibraryRoot[]>('DELETE', '/library/roots', { path }),
   browseFolders: (path?: string) =>
     get<FolderListing>(path === undefined ? '/fs/dirs' : `/fs/dirs?path=${encodeURIComponent(path)}`),
-  lookUpArtistInfo: (force = false) => post<void>('/library/artist-info', { force }),
+  lookUpArtistInfo: (force = false) => post<StartResponse>('/library/artist-info', { force }),
 
   users: () => get<User[]>('/users'),
   createUser: (username: string, password: string, role: Role) =>
@@ -131,5 +133,5 @@ export const api = {
 
   libraryStatus: () =>
     get<{ scanning: boolean; last_scan: ScanProgress | null; tracks: number }>('/library/status'),
-  rescan: () => post<void>('/library/rescan'),
+  rescan: () => post<StartResponse>('/library/rescan'),
 }

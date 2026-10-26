@@ -40,6 +40,10 @@ pub struct ScanState {
     pub running: AtomicBool,
     /// An online artist info lookup is running.
     pub lookup_running: AtomicBool,
+    /// "Recheck all" was asked for during a lookup; run it next.
+    pub lookup_force_next: AtomicBool,
+    /// How the last lookup went, and when it finished (Unix ms).
+    pub lookup_last: Mutex<Option<(djinn_library::online::LookupSummary, i64)>>,
     pub last: Mutex<Option<ScanProgress>>,
 }
 

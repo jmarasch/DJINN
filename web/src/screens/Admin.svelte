@@ -104,6 +104,32 @@
     if (await attempt(() => api.deleteUser(guest.id))) guests = guests.filter((g) => g.id !== guest.id)
   }
 
+  async function lookUp(force: boolean) {
+    try {
+      const { status } = await api.lookUpArtistInfo(force)
+      toast(
+        status === 'started'
+          ? force
+            ? 'Looking up every artist again'
+            : 'Looking up new artists'
+          : status === 'queued'
+            ? "A lookup is running. Every artist gets rechecked right after it."
+            : 'Already looking up artists. Results show up when it finishes.',
+      )
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not start the lookup', true)
+    }
+  }
+
+  async function checkForChanges() {
+    try {
+      const { status } = await api.rescan()
+      toast(status === 'started' ? 'Checking for changes' : 'Already checking for changes')
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not start the check', true)
+    }
+  }
+
   async function clearLog() {
     if (!confirm('Clear the request log? Top songs on artist pages keep counting.')) return
     if (await attempt(() => api.clearRequestLog(), 'Request log cleared')) log = []
@@ -157,16 +183,24 @@
     {:else if app.scan}
       <p class="small muted">Last check found {app.scan.found} files, read {app.scan.read}, removed {app.scan.removed}.</p>
     {/if}
-    <button disabled={scanning} onclick={() => attempt(api.rescan, 'Checking for changes')}>Check for changes</button>
+    <button disabled={scanning} onclick={checkForChanges}>Check for changes</button>
   </section>
 
   <section class="card">
     <h2>Artist photos and bios</h2>
     {#if settings?.online_artist_info}
       <p class="small muted">Looked up on Deezer and Wikipedia after each library check. Pictures in artist folders always win.</p>
+      {#if app.lookup.running}
+        <p class="small"><span class="spinner" aria-hidden="true"></span> Looking up artists... New pictures show up when it's done.</p>
+      {:else if app.lookup.last && app.lookup.finished_at}
+        <p class="small muted">
+          Last lookup {when(app.lookup.finished_at)}: {app.lookup.last.checked} artists checked,
+          {app.lookup.last.photos} photos, {app.lookup.last.bios} bios found.
+        </p>
+      {/if}
       <div class="row-buttons">
-        <button onclick={() => attempt(() => api.lookUpArtistInfo(), 'Looking up new artists')}>Look up new artists</button>
-        <button onclick={() => attempt(() => api.lookUpArtistInfo(true), 'Looking up every artist again')}>Recheck all</button>
+        <button disabled={app.lookup.running} onclick={() => lookUp(false)}>Look up new artists</button>
+        <button onclick={() => lookUp(true)}>Recheck all</button>
       </div>
     {:else}
       <p class="small muted">Off. Turn on "Look up artist photos and bios" under <a href="#/admin/rules">Rules</a>.</p>
@@ -437,6 +471,24 @@
 
   progress {
     width: 100%;
+  }
+
+  .spinner {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    margin-right: 6px;
+    border: 2px solid var(--line);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    vertical-align: -1px;
+    animation: spin 0.8s linear infinite;
+  }
+
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
   }
 
   .signout {
