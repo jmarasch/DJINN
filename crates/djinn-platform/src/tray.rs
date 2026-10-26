@@ -1,5 +1,5 @@
 //! System tray icon for desktop installs: click to open DJINN, right-click
-//! for the join code and shutdown.
+//! for the join code, the TV page, and shutdown.
 //!
 //! Linux uses the StatusNotifierItem D-Bus protocol (KDE, and GNOME with
 //! the AppIndicator extension); Windows uses the native notification area.
@@ -18,6 +18,8 @@ pub enum TrayAction {
     /// Left click or "Open DJINN".
     Open,
     ShowJoinCode,
+    /// The full-screen now-playing page, for a TV.
+    ShowTv,
     Quit,
 }
 
@@ -29,6 +31,7 @@ pub enum TrayError {
 
 const OPEN: &str = "open";
 const JOIN: &str = "join";
+const TV: &str = "tv";
 const QUIT: &str = "quit";
 
 /// The running tray icon. Dropping it removes the icon.
@@ -89,6 +92,7 @@ fn build(tooltip: &str) -> Result<TrayIcon, TrayError> {
     menu.append_items(&[
         &MenuItem::with_id(OPEN, "Open DJINN", true, None),
         &MenuItem::with_id(JOIN, "Show join QR code", true, None),
+        &MenuItem::with_id(TV, "Open TV page", true, None),
         &PredefinedMenuItem::separator(),
         &MenuItem::with_id(QUIT, "Shut down DJINN", true, None),
     ])
@@ -122,6 +126,7 @@ fn install_handlers(on_action: impl Fn(TrayAction) + Send + Sync + 'static) {
         let action = match event.id().as_ref() {
             OPEN => TrayAction::Open,
             JOIN => TrayAction::ShowJoinCode,
+            TV => TrayAction::ShowTv,
             QUIT => TrayAction::Quit,
             _ => return,
         };

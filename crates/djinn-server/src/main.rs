@@ -22,6 +22,7 @@ mod sse;
 mod state;
 #[cfg(test)]
 mod test_util;
+mod tv_api;
 mod watcher;
 mod web;
 

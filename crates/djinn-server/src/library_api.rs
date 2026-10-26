@@ -145,7 +145,7 @@ async fn artist(
 }
 
 #[derive(Deserialize)]
-struct ArtQuery {
+pub struct ArtQuery {
     /// Thumbnail size in pixels (128 or 512); omit for the original.
     size: Option<u32>,
 }
@@ -157,6 +157,14 @@ async fn cover_art(
     Path(hash): Path<String>,
     Query(query): Query<ArtQuery>,
 ) -> ApiResult<impl IntoResponse> {
+    serve_art(&state, hash, query).await
+}
+
+pub async fn serve_art(
+    state: &AppState,
+    hash: String,
+    query: ArtQuery,
+) -> ApiResult<impl IntoResponse + use<>> {
     let art_dir = state.art_dir.as_ref().clone();
     let file = tokio::task::spawn_blocking(move || match query.size {
         Some(size) => art::thumbnail(&art_dir, &hash, size),

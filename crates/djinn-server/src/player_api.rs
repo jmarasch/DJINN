@@ -235,6 +235,13 @@ struct Settings {
     /// Artist names never split into separate artists, one per line.
     #[serde(default)]
     artist_keep_whole: String,
+    /// The TV page (/tv) works without signing in.
+    #[serde(default = "default_true")]
+    tv_page: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 async fn settings(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json<Settings>> {
@@ -263,6 +270,7 @@ async fn settings(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json
             .await
             .map_err(anyhow::Error::from)?
             .join("\n"),
+        tv_page: crate::tv_api::enabled(&state).await?,
     }))
 }
 
@@ -311,6 +319,9 @@ async fn update_settings(
     state
         .guest_mode
         .store(body.guest_mode, std::sync::atomic::Ordering::Relaxed);
+    store
+        .set_setting(crate::tv_api::TV_PAGE, if body.tv_page { "1" } else { "0" })
+        .await?;
     let was_online = jukebox::setting(store, jukebox::ONLINE_INFO, 0).await? == 1;
     store
         .set_setting(

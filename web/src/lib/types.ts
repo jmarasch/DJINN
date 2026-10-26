@@ -265,6 +265,8 @@ export interface Settings {
   musicbrainz_contact: string
   /** Artist names never split, one per line. */
   artist_keep_whole: string
+  /** The TV page (/tv) works without signing in. */
+  tv_page: boolean
 }
 
 export interface Page<T> {

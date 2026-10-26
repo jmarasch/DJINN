@@ -18,15 +18,18 @@
   import Queue from './screens/Queue.svelte'
   import Search from './screens/Search.svelte'
   import Setup from './screens/Setup.svelte'
+  import Tv from './screens/Tv.svelte'
   import SetupLibrary from './screens/SetupLibrary.svelte'
 
   const onSetupPage = $state(location.pathname === '/setup')
-  // The join page is for guests who haven't signed in yet.
+  // The join page is for guests who haven't signed in yet; the TV page is
+  // public and read only.
   const onJoinPage = location.pathname === '/join'
+  const onTvPage = location.pathname === '/tv'
   let showJoin = $state(false)
 
   onMount(async () => {
-    if (onJoinPage) return
+    if (onJoinPage || onTvPage) return
     const me = await refreshMe()
     if (me) connect()
     else await refreshMode()
@@ -34,7 +37,7 @@
 
   // Signing out (or being signed out) re-checks how to get back in.
   $effect(() => {
-    if (app.ready && !app.me && !onJoinPage) refreshMode()
+    if (app.ready && !app.me && !onJoinPage && !onTvPage) refreshMode()
   })
 
   const albumId = $derived(param('/album'))
@@ -61,7 +64,9 @@
   )
 </script>
 
-{#if onJoinPage}
+{#if onTvPage}
+  <Tv />
+{:else if onJoinPage}
   <Join />
 {:else if !app.ready}
   <div class="center-screen muted">Loading...</div>

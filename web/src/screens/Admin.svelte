@@ -332,6 +332,13 @@
         Guest mode: people join with just a name, no account
       </label>
       <label class="switch big">
+        <input type="checkbox" bind:checked={settings.tv_page} />
+        <span>
+          TV page: what's playing, what's next, and the join code, for a TV or tablet. Open
+          <a href="/tv" target="_blank" rel="noopener">/tv</a> on that screen; no sign-in needed.
+        </span>
+      </label>
+      <label class="switch big">
         <input type="checkbox" bind:checked={settings.online_artist_info} />
         Look up artist photos and bios (sends artist names to Deezer and Wikipedia)
       </label>

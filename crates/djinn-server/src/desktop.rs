@@ -30,6 +30,7 @@ pub fn start_tray(state: &AppState, listen: SocketAddr) -> Option<Tray> {
             open_browser(&url);
         }
         TrayAction::ShowJoinCode => open_browser(&format!("{local}/join")),
+        TrayAction::ShowTv => open_browser(&format!("{local}/tv")),
         TrayAction::Quit => {
             tracing::info!("shutdown requested from the tray");
             shutdown.notify_one();
