@@ -52,7 +52,7 @@ This file is the source of truth for the project. Read it fully before writing c
 | Frontend | Svelte + Vite (TypeScript) | Built to static files |
 | Embedding UI | rust-embed | UI ships inside the binary |
 | Filesystem watching | notify | Phase 2+ |
-| Similarity (future) | bliss-audio (bliss-rs) | Phase 6 |
+| Similarity (future) | bliss-audio (bliss-rs) | Phase 5 |
 
 Linux build prerequisite: `libasound2-dev` and `pkg-config`.
 
@@ -274,14 +274,15 @@ Runtime-tunable settings live in the `settings` table, not the config file.
 - Resolve the guest access decision (QR + display name vs accounts).
 - Optional: request voting, "skip" votes, now-playing display page for a TV.
 
-### Phase 5: Personal streaming
-- Stream tracks to a phone for personal listening (HTTP range requests, optional ffmpeg transcode).
-
-### Phase 6: Smart playlists ("tiny AI")
+### Phase 5: Smart playlists ("tiny AI")
 - Run bliss-rs analysis during scan; store feature vectors.
 - Similarity search: "more like this track/artist", seeded radio for the auto pool.
 - Use play/skip history to weight results.
 - Optional: small local language model that turns plain-language prompts ("chill 90s, nothing too slow") into structured queries over tags, features, and history. Must run fully offline.
+
+### Phase 6: Personal streaming
+- Stream tracks to a phone for personal listening (HTTP range requests, optional ffmpeg transcode).
+- Comes last. Likely its own listener on a separate port, sharing the database and library with the jukebox.
 
 ## 16. Coding rules
 
