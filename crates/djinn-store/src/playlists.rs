@@ -188,7 +188,8 @@ impl Store {
         .await?;
         let tracks: Vec<Track> = sqlx::query_as(expanded_tracks!(
             "t.id, t.title, t.artist, t.album, t.album_artist, t.artist_id, t.album_id, \
-             t.track_no, t.disc_no, t.year, t.genre, t.duration_ms, t.art_hash"
+             t.track_no, t.disc_no, t.year, t.genre, t.duration_ms, \
+             coalesce(t.art_hash, (SELECT fa.art_hash FROM albums fa WHERE fa.id = t.album_id)) AS art_hash"
         ))
         .bind(id)
         .fetch_all(&self.pool)

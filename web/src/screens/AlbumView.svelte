@@ -30,6 +30,7 @@
       <h1>{album.title}</h1>
       <a href="#/artist/{album.artist_id}">{album.artist}</a>
       {#if album.year}<span class="muted"> · {album.year}</span>{/if}
+      {#if album.genres}<div class="muted small genres">{album.genres}</div>{/if}
       <AddToPlaylist kind="album" refId={album.id} label={album.title} />
     </div>
   </header>

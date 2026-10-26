@@ -33,6 +33,8 @@ pub const MAX_QUEUE: &str = "max_queue";
 pub const GUEST_MODE: &str = "guest_mode";
 /// 1 to look up artist photos and bios online.
 pub const ONLINE_INFO: &str = "online_artist_info";
+/// Contact (email or website) sent to MusicBrainz; empty turns it off.
+pub const MUSICBRAINZ_CONTACT: &str = "musicbrainz_contact";
 /// Playlist that plays when nobody has requested anything; 0 or missing
 /// means none.
 pub const ACTIVE_PLAYLIST: &str = "active_playlist";

@@ -132,6 +132,9 @@ export const api = {
   saveSettings: (settings: Settings) => put<Settings>('/settings', settings),
 
   libraryStatus: () =>
-    get<{ scanning: boolean; last_scan: ScanProgress | null; tracks: number }>('/library/status'),
+    get<{ scanning: boolean; last_scan: ScanProgress | null; tracks: number; art_dir: string }>(
+      '/library/status',
+    ),
+  openArtFolder: () => post<void>('/library/open-art-folder'),
   rescan: () => post<StartResponse>('/library/rescan'),
 }

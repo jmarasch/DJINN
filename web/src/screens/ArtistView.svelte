@@ -36,9 +36,21 @@
     <Art hash={artist.art_hash} size={140} round={999} letter={artist.name.charAt(0).toUpperCase()} />
     <div class="heading">
       <h1>{artist.name}</h1>
+      {#if artist.genres}
+        <div class="genres">
+          {#each artist.genres.split(', ') as genre (genre)}<span class="genre">{genre}</span>{/each}
+        </div>
+      {/if}
       <AddToPlaylist kind="artist" refId={artist.id} label={artist.name} />
     </div>
   </header>
+  {#if artist.photo_credit}
+    <p class="credit small muted">
+      Photo: {#if artist.photo_credit_url}<a href={artist.photo_credit_url} target="_blank" rel="noopener"
+          >{artist.photo_credit}</a
+        >{:else}{artist.photo_credit}{/if}, Wikimedia Commons
+    </p>
+  {/if}
 
   {#if artist.bio}
     <section class="bio">
@@ -96,6 +108,29 @@
     margin: 0;
     font-size: 1.75rem;
     overflow-wrap: anywhere;
+  }
+
+  .genres {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 6px;
+  }
+
+  .genre {
+    padding: 2px 10px;
+    border-radius: 999px;
+    background: var(--surface-2);
+    color: var(--muted);
+    font-size: 0.8125rem;
+  }
+
+  .credit {
+    margin: -4px 0 10px;
+  }
+
+  .credit a {
+    color: inherit;
   }
 
   .bio p {

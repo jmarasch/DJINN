@@ -35,6 +35,7 @@ pub fn router() -> Router<AppState> {
         .route("/art/{hash}", get(cover_art))
         .route("/library/rescan", post(rescan))
         .route("/library/artist-info", post(artist_info))
+        .route("/library/open-art-folder", post(open_art_folder))
         .route("/library/status", get(status))
 }
 
@@ -170,6 +171,8 @@ struct LibraryStatus {
     scanning: bool,
     last_scan: Option<ScanProgress>,
     tracks: i64,
+    /// Where cover art and artist photos are cached.
+    art_dir: String,
 }
 
 async fn status(_: CurrentUser, State(state): State<AppState>) -> ApiResult<Json<LibraryStatus>> {
@@ -177,7 +180,21 @@ async fn status(_: CurrentUser, State(state): State<AppState>) -> ApiResult<Json
         scanning: state.scan.running.load(Ordering::Relaxed),
         last_scan: state.scan.last.lock().ok().and_then(|l| l.clone()),
         tracks: state.store.track_count().await?,
+        art_dir: state.art_dir.display().to_string(),
     }))
+}
+
+/// Opens the image cache in the file manager of the computer DJINN runs
+/// on (admin).
+async fn open_art_folder(_: AdminUser, State(state): State<AppState>) -> ApiResult<StatusCode> {
+    std::fs::create_dir_all(state.art_dir.as_ref()).map_err(anyhow::Error::from)?;
+    open::that_detached(state.art_dir.as_ref()).map_err(|e| {
+        ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            format!("couldn't open the folder on this computer: {e}"),
+        )
+    })?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// What a request to start background work did.
@@ -262,18 +279,35 @@ pub fn start_artist_lookup(state: &AppState, force: bool) -> bool {
                 .events
                 .send(ServerEvent::ArtistLookup(lookup_status(&state)));
             tracing::info!(force, "looking up artist photos and bios online");
+            let contact = state
+                .store
+                .get_setting(crate::jukebox::MUSICBRAINZ_CONTACT)
+                .await
+                .ok()
+                .flatten()
+                .filter(|c| !c.trim().is_empty());
+            let options = djinn_library::online::LookupOptions {
+                force,
+                musicbrainz_contact: contact,
+            };
             let result =
-                djinn_library::online::lookup_artists(&state.store, &state.art_dir, force).await;
+                djinn_library::online::lookup_artists(&state.store, &state.art_dir, &options).await;
             match result {
                 Ok(summary) => {
                     tracing::info!(
                         checked = summary.checked,
                         photos = summary.photos,
                         bios = summary.bios,
+                        covers = summary.covers,
+                        genres = summary.genres,
                         "artist lookup finished"
                     );
+                    // A run with nothing due keeps the last useful summary.
+                    let did_work = summary != Default::default();
                     if let Ok(mut last) = state.scan.lookup_last.lock() {
-                        *last = Some((summary, djinn_store::now_ms()));
+                        if did_work || last.is_none() {
+                            *last = Some((summary, djinn_store::now_ms()));
+                        }
                     }
                     let _ = state.events.send(ServerEvent::LibraryChanged);
                 }

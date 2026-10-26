@@ -24,11 +24,13 @@ pub struct Track {
 }
 
 // Column lists are macros so queries stay `&'static str` (built with
-// `concat!`), which sqlx accepts as injection-safe.
+// `concat!`), which sqlx accepts as injection-safe. A song without artwork
+// of its own shows its album's cover.
 macro_rules! track_columns {
     () => {
         "t.id, t.title, t.artist, t.album, t.album_artist, t.artist_id, t.album_id, \
-         t.track_no, t.disc_no, t.year, t.genre, t.duration_ms, t.art_hash"
+         t.track_no, t.disc_no, t.year, t.genre, t.duration_ms, \
+         coalesce(t.art_hash, (SELECT fa.art_hash FROM albums fa WHERE fa.id = t.album_id)) AS art_hash"
     };
 }
 
@@ -40,11 +42,13 @@ pub struct Album {
     pub artist: String,
     pub year: Option<i64>,
     pub art_hash: Option<String>,
+    /// Comma separated, from MusicBrainz.
+    pub genres: Option<String>,
 }
 
 macro_rules! album_columns {
     () => {
-        "al.id, al.title, al.artist_id, ar.name AS artist, al.year, al.art_hash"
+        "al.id, al.title, al.artist_id, ar.name AS artist, al.year, al.art_hash, al.genres"
     };
 }
 
@@ -62,6 +66,34 @@ pub struct InfoLookupArtist {
     pub name: String,
     /// Has a picture in their own folder, so no photo is needed.
     pub has_folder_art: bool,
+    /// A few of their song titles, for checking an online match is really
+    /// them. Separated by newlines.
+    pub sample_titles: String,
+}
+
+/// An album due for an online info lookup.
+#[derive(Clone, Debug, FromRow)]
+pub struct InfoLookupAlbum {
+    pub id: i64,
+    pub title: String,
+    pub artist: String,
+    /// No cover from the files or folder, so one is worth finding online.
+    pub needs_cover: bool,
+}
+
+/// What an online lookup found for an artist. `None` fields keep whatever
+/// was found before.
+#[derive(Clone, Debug, Default)]
+pub struct ArtistInfo {
+    pub photo: Option<String>,
+    pub photo_credit: Option<String>,
+    pub photo_credit_url: Option<String>,
+    pub bio: Option<String>,
+    pub bio_url: Option<String>,
+    pub mbid: Option<String>,
+    pub genres: Option<String>,
+    /// Both services answered; don't look again until the periodic recheck.
+    pub checked: bool,
 }
 
 /// A song with how often it's been requested and played, for "top songs".
@@ -124,6 +156,11 @@ pub struct ArtistDetail {
     pub bio: Option<String>,
     /// Where the bio came from.
     pub bio_url: Option<String>,
+    /// Comma separated, from MusicBrainz.
+    pub genres: Option<String>,
+    /// Credit for a free-licensed photo ("Name (CC BY-SA 4.0)").
+    pub photo_credit: Option<String>,
+    pub photo_credit_url: Option<String>,
     /// Most requested (then most played) songs, best first.
     pub top_tracks: Vec<TopTrack>,
     pub albums: Vec<Album>,
@@ -223,7 +260,7 @@ impl Store {
     pub async fn refresh_artwork(&self) -> Result<()> {
         let mut tx = self.pool.begin().await?;
         // Albums: the first listed song's embedded cover, then the album
-        // folder's image, then any song's artwork.
+        // folder's image, then any song's artwork, then a cover found online.
         sqlx::query(
             "UPDATE albums SET art_hash = coalesce(
                (SELECT t.embedded_art FROM tracks t
@@ -235,7 +272,8 @@ impl Store {
                 ORDER BY t.path LIMIT 1),
                (SELECT t.art_hash FROM tracks t
                 WHERE t.album_id = albums.id AND t.removed_at IS NULL AND t.art_hash IS NOT NULL
-                ORDER BY t.disc_no, t.track_no, t.path LIMIT 1))",
+                ORDER BY t.disc_no, t.track_no, t.path LIMIT 1),
+               albums.online_art_hash)",
         )
         .execute(&mut *tx)
         .await?;
@@ -356,16 +394,24 @@ impl Store {
             artist: Artist,
             bio: Option<String>,
             bio_url: Option<String>,
+            genres: Option<String>,
+            photo_credit: Option<String>,
+            photo_credit_url: Option<String>,
         }
-        let row: Option<Row> =
-            sqlx::query_as("SELECT id, name, art_hash, bio, bio_url FROM artists WHERE id = ?")
-                .bind(id)
-                .fetch_optional(&self.pool)
-                .await?;
+        let row: Option<Row> = sqlx::query_as(
+            "SELECT id, name, art_hash, bio, bio_url, genres, photo_credit, photo_credit_url
+             FROM artists WHERE id = ?",
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?;
         let Some(Row {
             artist,
             bio,
             bio_url,
+            genres,
+            photo_credit,
+            photo_credit_url,
         }) = row
         else {
             return Ok(None);
@@ -402,6 +448,9 @@ impl Store {
             artist,
             bio,
             bio_url,
+            genres,
+            photo_credit,
+            photo_credit_url,
             top_tracks,
             albums,
             other_tracks,
@@ -416,7 +465,11 @@ impl Store {
                     EXISTS (SELECT 1 FROM tracks t LEFT JOIN albums al ON al.id = t.album_id
                             WHERE t.artist_art IS NOT NULL AND t.removed_at IS NULL
                               AND (t.artist_id = ar.id OR al.artist_id = ar.id))
-                        AS has_folder_art
+                        AS has_folder_art,
+                    coalesce((SELECT group_concat(title, char(10)) FROM (
+                        SELECT t.title FROM tracks t
+                        WHERE t.artist_id = ar.id AND t.removed_at IS NULL
+                        ORDER BY t.id LIMIT 5)), '') AS sample_titles
              FROM artists ar
              WHERE (ar.info_checked_at IS NULL OR ar.info_checked_at < ?)
                AND EXISTS (SELECT 1 FROM tracks t LEFT JOIN albums al ON al.id = t.album_id
@@ -430,26 +483,73 @@ impl Store {
         Ok(artists)
     }
 
-    /// Saves what an online lookup found, keeping earlier finds for anything
-    /// it didn't find this time. `checked` marks the artist as done until
-    /// the next periodic recheck; leave it false after a failed request.
-    pub async fn save_artist_info(
-        &self,
-        id: i64,
-        photo: Option<&str>,
-        bio: Option<&str>,
-        bio_url: Option<&str>,
-        checked: bool,
-    ) -> Result<()> {
+    /// Saves what an online lookup found for an artist, keeping earlier
+    /// finds for anything it didn't find this time.
+    pub async fn save_artist_info(&self, id: i64, info: &ArtistInfo) -> Result<()> {
         sqlx::query(
             "UPDATE artists SET online_art_hash = coalesce(?, online_art_hash),
+                                photo_credit = CASE WHEN ? IS NULL THEN photo_credit ELSE ? END,
+                                photo_credit_url = CASE WHEN ? IS NULL THEN photo_credit_url
+                                                        ELSE ? END,
                                 bio = coalesce(?, bio), bio_url = coalesce(?, bio_url),
+                                mbid = coalesce(?, mbid), genres = coalesce(?, genres),
                                 info_checked_at = CASE WHEN ? THEN ? ELSE info_checked_at END
              WHERE id = ?",
         )
-        .bind(photo)
-        .bind(bio)
-        .bind(bio_url)
+        .bind(&info.photo)
+        // A new photo replaces the credit (even with none, e.g. from Deezer).
+        .bind(&info.photo)
+        .bind(&info.photo_credit)
+        .bind(&info.photo)
+        .bind(&info.photo_credit_url)
+        .bind(&info.bio)
+        .bind(&info.bio_url)
+        .bind(&info.mbid)
+        .bind(&info.genres)
+        .bind(info.checked)
+        .bind(now_ms())
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Albums with playable tracks not looked up online since `older_than`.
+    pub async fn albums_for_info_lookup(&self, older_than: i64) -> Result<Vec<InfoLookupAlbum>> {
+        let albums = sqlx::query_as(
+            "SELECT al.id, al.title, ar.name AS artist,
+                    NOT EXISTS (SELECT 1 FROM tracks t
+                                WHERE t.album_id = al.id AND t.art_hash IS NOT NULL)
+                        AS needs_cover
+             FROM albums al JOIN artists ar ON ar.id = al.artist_id
+             WHERE (al.info_checked_at IS NULL OR al.info_checked_at < ?)
+               AND EXISTS (SELECT 1 FROM tracks t
+                           WHERE t.album_id = al.id AND t.removed_at IS NULL)
+             ORDER BY ar.name, al.title",
+        )
+        .bind(older_than)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(albums)
+    }
+
+    pub async fn save_album_info(
+        &self,
+        id: i64,
+        cover: Option<&str>,
+        mbid: Option<&str>,
+        genres: Option<&str>,
+        checked: bool,
+    ) -> Result<()> {
+        sqlx::query(
+            "UPDATE albums SET online_art_hash = coalesce(?, online_art_hash),
+                               mbid = coalesce(?, mbid), genres = coalesce(?, genres),
+                               info_checked_at = CASE WHEN ? THEN ? ELSE info_checked_at END
+             WHERE id = ?",
+        )
+        .bind(cover)
+        .bind(mbid)
+        .bind(genres)
         .bind(checked)
         .bind(now_ms())
         .bind(id)
@@ -925,5 +1025,22 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(names, ["New Band"]);
+    }
+
+    #[tokio::test]
+    async fn songs_without_art_show_the_album_cover() {
+        let store = Store::open_in_memory().await.unwrap();
+        store
+            .save_scanned(&[scanned("/m/1.flac", "One", "A", "Record")])
+            .await
+            .unwrap();
+        let album = store.albums_page(0, 1).await.unwrap().items[0].id;
+        store
+            .save_album_info(album, Some("onlinecover"), None, None, true)
+            .await
+            .unwrap();
+        store.refresh_artwork().await.unwrap();
+        let track = &store.search("one", 5).await.unwrap().tracks[0];
+        assert_eq!(track.art_hash.as_deref(), Some("onlinecover"));
     }
 }

@@ -23,26 +23,30 @@ const FOLDER_ART: &[&str] = &[
 /// Image names for an artist's folder, in order of preference.
 const ARTIST_ART: &[&str] = &["artist.jpg", "artist.jpeg", "artist.png", "artist.webp"];
 
-/// Stores `bytes` in `art_dir` under their content hash and returns the hash.
-/// Identical images (one per album, usually) are stored once.
+/// File extensions the cache uses, from the image's type.
+const EXTENSIONS: &[&str] = &["jpg", "png", "gif", "webp", "bmp", "img"];
+
+/// Stores `bytes` in `art_dir` as `<content hash>.<ext>` and returns the
+/// hash. Identical images (one per album, usually) are stored once.
 pub fn store(art_dir: &Path, bytes: &[u8]) -> io::Result<String> {
     let digest = Sha256::digest(bytes);
     let hash: String = digest[..16].iter().map(|b| format!("{b:02x}")).collect();
-    let path = art_dir.join(&hash);
-    if !path.exists() {
-        fs::create_dir_all(art_dir)?;
-        // Write then rename, so a reader never sees a partial file. Scanner
-        // threads can store the same image at once, so each write gets its
-        // own temporary name.
-        static NEXT: AtomicU64 = AtomicU64::new(0);
-        let n = NEXT.fetch_add(1, Ordering::Relaxed);
-        let tmp = art_dir.join(format!("{hash}.{}.{n}.tmp", std::process::id()));
-        fs::write(&tmp, bytes)?;
-        if let Err(e) = fs::rename(&tmp, &path) {
-            let _ = fs::remove_file(&tmp);
-            if !path.exists() {
-                return Err(e);
-            }
+    if path(art_dir, &hash).is_some() {
+        return Ok(hash);
+    }
+    let path = art_dir.join(format!("{hash}.{}", extension(bytes)));
+    fs::create_dir_all(art_dir)?;
+    // Write then rename, so a reader never sees a partial file. Scanner
+    // threads can store the same image at once, so each write gets its own
+    // temporary name.
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, Ordering::Relaxed);
+    let tmp = art_dir.join(format!("{hash}.{}.{n}.tmp", std::process::id()));
+    fs::write(&tmp, bytes)?;
+    if let Err(e) = fs::rename(&tmp, &path) {
+        let _ = fs::remove_file(&tmp);
+        if !path.exists() {
+            return Err(e);
         }
     }
     Ok(hash)
@@ -51,8 +55,47 @@ pub fn store(art_dir: &Path, bytes: &[u8]) -> io::Result<String> {
 /// Path of cached art for `hash`, if the hash is well formed and present.
 pub fn path(art_dir: &Path, hash: &str) -> Option<PathBuf> {
     let well_formed = hash.len() == 32 && hash.bytes().all(|b| b.is_ascii_hexdigit());
-    let path = art_dir.join(hash);
-    (well_formed && path.is_file()).then_some(path)
+    if !well_formed {
+        return None;
+    }
+    EXTENSIONS
+        .iter()
+        .map(|ext| art_dir.join(format!("{hash}.{ext}")))
+        // Files cached before extensions were added.
+        .chain(std::iter::once(art_dir.join(hash)))
+        .find(|p| p.is_file())
+}
+
+/// Gives cache files from before extensions were added one, so the folder
+/// is easy to browse. Returns how many were renamed.
+pub fn add_extensions(art_dir: &Path) -> usize {
+    let Ok(entries) = fs::read_dir(art_dir) else {
+        return 0;
+    };
+    entries
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .filter(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.len() == 32 && n.bytes().all(|b| b.is_ascii_hexdigit()))
+        })
+        .filter(|p| {
+            let Ok(bytes) = fs::read(p) else { return false };
+            fs::rename(p, p.with_extension(extension(&bytes))).is_ok()
+        })
+        .count()
+}
+
+fn extension(bytes: &[u8]) -> &'static str {
+    match mime_type(bytes) {
+        "image/jpeg" => "jpg",
+        "image/png" => "png",
+        "image/gif" => "gif",
+        "image/webp" => "webp",
+        "image/bmp" => "bmp",
+        _ => "img",
+    }
 }
 
 /// MIME type from the image's magic bytes.
@@ -136,6 +179,22 @@ mod tests {
             1,
             "no leftover temp files"
         );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn files_get_extensions_and_old_ones_are_renamed() {
+        let dir = std::env::temp_dir().join(format!("djinn-art-ext-{}", std::process::id()));
+        let png = [0x89, b'P', b'N', b'G', 1, 2, 3];
+        let hash = store(&dir, &png).unwrap();
+        assert!(dir.join(format!("{hash}.png")).is_file());
+
+        // A file from before extensions existed is still found, then renamed.
+        let old = "0123456789abcdef0123456789abcdef";
+        fs::write(dir.join(old), [0xFF, 0xD8, 1]).unwrap();
+        assert!(path(&dir, old).is_some());
+        assert_eq!(add_extensions(&dir), 1);
+        assert_eq!(path(&dir, old), Some(dir.join(format!("{old}.jpg"))));
         fs::remove_dir_all(dir).unwrap();
     }
 

@@ -17,6 +17,7 @@
 
   let roots = $state<LibraryRoot[]>([])
   let trackCount = $state(0)
+  let artDir = $state('')
   let users = $state<User[]>([])
   let guests = $state<GuestSummary[]>([])
   let log = $state<RequestLogEntry[]>([])
@@ -33,6 +34,7 @@
       const [r, status, s] = await Promise.all([api.libraryRoots(), api.libraryStatus(), api.settings()])
       roots = r
       trackCount = status.tracks
+      artDir = status.art_dir
       settings = s
       if (status.last_scan) app.scan = status.last_scan
     } else if (which === 'users') {
@@ -189,13 +191,22 @@
   <section class="card">
     <h2>Artist photos and bios</h2>
     {#if settings?.online_artist_info}
-      <p class="small muted">Looked up on Deezer and Wikipedia after each library check. Pictures in artist folders always win.</p>
+      <p class="small muted">
+        Looked up on Deezer and Wikipedia after each library check{settings.musicbrainz_contact
+          ? ', plus MusicBrainz for exact matches, album covers, and genres'
+          : ''}. Pictures in your folders always win.
+      </p>
+      {#if !settings.musicbrainz_contact}
+        <p class="small muted">Add a MusicBrainz contact under <a href="#/admin/rules">Rules</a> for album covers, genres, and better bio matches.</p>
+      {/if}
       {#if app.lookup.running}
         <p class="small"><span class="spinner" aria-hidden="true"></span> Looking up artists... New pictures show up when it's done.</p>
       {:else if app.lookup.last && app.lookup.finished_at}
         <p class="small muted">
           Last lookup {when(app.lookup.finished_at)}: {app.lookup.last.checked} artists checked,
-          {app.lookup.last.photos} photos, {app.lookup.last.bios} bios found.
+          {app.lookup.last.photos} photos, {app.lookup.last.bios} bios{settings.musicbrainz_contact
+            ? `, ${app.lookup.last.covers} album covers, ${app.lookup.last.genres} with genres`
+            : ''} found.
         </p>
       {/if}
       <div class="row-buttons">
@@ -205,6 +216,15 @@
     {:else}
       <p class="small muted">Off. Turn on "Look up artist photos and bios" under <a href="#/admin/rules">Rules</a>.</p>
     {/if}
+  </section>
+
+  <section class="card">
+    <h2>Image cache</h2>
+    <p class="small muted">
+      Covers and artist photos DJINN finds are kept here, on this computer. Your music folders are never changed.
+    </p>
+    <p class="path small mono">{artDir}</p>
+    <button onclick={() => attempt(api.openArtFolder)}>Open image folder</button>
   </section>
 
   {#if picking}
@@ -306,6 +326,20 @@
       <label class="switch big">
         <input type="checkbox" bind:checked={settings.online_artist_info} />
         Look up artist photos and bios (sends artist names to Deezer and Wikipedia)
+      </label>
+      <label>
+        MusicBrainz contact (email or website)
+        <input
+          type="text"
+          bind:value={settings.musicbrainz_contact}
+          placeholder="Leave empty to skip MusicBrainz"
+          maxlength="200"
+          autocapitalize="none"
+        />
+        <span class="small muted">
+          MusicBrainz needs no account, but asks apps to say who to contact if something goes wrong. It's sent with
+          each MusicBrainz request and adds album covers, genres, and exact artist matches.
+        </span>
       </label>
       <label>
         Most songs in the queue at once (0 for no limit)

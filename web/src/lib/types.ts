@@ -67,6 +67,8 @@ export interface Album {
   artist: string
   year: number | null
   art_hash: string | null
+  /** Comma separated, from MusicBrainz. */
+  genres: string | null
 }
 
 export interface Artist {
@@ -93,6 +95,10 @@ export interface TopTrack extends Track {
 export interface ArtistDetail extends Artist {
   bio: string | null
   bio_url: string | null
+  genres: string | null
+  /** Credit for a free-licensed photo. */
+  photo_credit: string | null
+  photo_credit_url: string | null
   top_tracks: TopTrack[]
   albums: Album[]
   other_tracks: Track[]
@@ -204,6 +210,8 @@ export interface Settings {
   max_queue: number
   guest_mode: boolean
   online_artist_info: boolean
+  /** Empty turns MusicBrainz lookups off. */
+  musicbrainz_contact: string
 }
 
 export interface Page<T> {
@@ -224,6 +232,8 @@ export interface LookupSummary {
   checked: number
   photos: number
   bios: number
+  covers: number
+  genres: number
 }
 
 export interface LookupStatus {

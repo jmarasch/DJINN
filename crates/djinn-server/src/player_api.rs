@@ -171,6 +171,10 @@ struct Settings {
     /// Look up artist photos and bios online (Deezer, Wikipedia).
     #[serde(default)]
     online_artist_info: bool,
+    /// Contact sent to MusicBrainz (email or website). Empty turns
+    /// MusicBrainz lookups off.
+    #[serde(default)]
+    musicbrainz_contact: String,
 }
 
 async fn settings(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json<Settings>> {
@@ -191,6 +195,10 @@ async fn settings(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json
         max_queue: jukebox::setting(store, jukebox::MAX_QUEUE, 0).await?,
         guest_mode: state.guest_mode(),
         online_artist_info: jukebox::setting(store, jukebox::ONLINE_INFO, 0).await? == 1,
+        musicbrainz_contact: store
+            .get_setting(jukebox::MUSICBRAINZ_CONTACT)
+            .await?
+            .unwrap_or_default(),
     }))
 }
 
@@ -210,7 +218,20 @@ async fn update_settings(
             "max_queue must be 0 (no cap) to 1000",
         ));
     }
+    let contact = body.musicbrainz_contact.trim();
+    if contact.chars().count() > 200 || contact.chars().any(char::is_control) {
+        return Err(ApiError::bad_request(
+            "the MusicBrainz contact should be an email address or website",
+        ));
+    }
     let store = &state.store;
+    let old_contact = store
+        .get_setting(jukebox::MUSICBRAINZ_CONTACT)
+        .await?
+        .unwrap_or_default();
+    store
+        .set_setting(jukebox::MUSICBRAINZ_CONTACT, contact)
+        .await?;
     store
         .set_setting(jukebox::HISTORY_WINDOW, &body.history_window.to_string())
         .await?;
@@ -233,8 +254,11 @@ async fn update_settings(
             if body.online_artist_info { "1" } else { "0" },
         )
         .await?;
-    if body.online_artist_info && !was_online {
-        crate::library_api::start_artist_lookup(&state, false);
+    // Turning lookups on, or adding MusicBrainz, looks everything up now
+    // (MusicBrainz adds covers and genres to artists already checked).
+    let added_musicbrainz = old_contact.trim().is_empty() && !contact.is_empty();
+    if body.online_artist_info && (!was_online || added_musicbrainz) {
+        crate::library_api::start_artist_lookup(&state, added_musicbrainz);
     }
     Ok(Json(body))
 }
