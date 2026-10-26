@@ -208,6 +208,32 @@ impl Jukebox {
         Ok(item)
     }
 
+    /// Queues several songs in order (admin: no limits). Songs already in
+    /// the queue are skipped. Returns how many were added.
+    pub async fn add_requests(
+        &mut self,
+        admin: &User,
+        track_ids: &[i64],
+        origin: &RequestOrigin,
+    ) -> Result<usize, QueueError> {
+        let mut added = 0;
+        for &id in track_ids {
+            match self
+                .store
+                .add_request(id, admin.id, RequestLimits::default(), origin)
+                .await
+            {
+                Ok(_) => added += 1,
+                Err(AddRequestError::AlreadyQueued | AddRequestError::NotFound) => {}
+                Err(e) => return Err(e.into()),
+            }
+        }
+        if added > 0 {
+            self.queue_changed().await?;
+        }
+        Ok(added)
+    }
+
     /// Users may remove their own requests; admins may remove any.
     pub async fn remove_request(&mut self, user: &User, id: i64) -> Result<(), QueueError> {
         let item = self

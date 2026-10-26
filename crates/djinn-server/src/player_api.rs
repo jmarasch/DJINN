@@ -5,7 +5,7 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
-use djinn_store::{AddRequestError, QueueItem, RequestLogEntry, RequestOrigin};
+use djinn_store::{AddRequestError, EntryKind, QueueItem, RequestLogEntry, RequestOrigin};
 use serde::{Deserialize, Serialize};
 
 use crate::auth::{AdminUser, CurrentUser};
@@ -19,6 +19,7 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/queue", get(queue).post(add_request))
         .route("/queue/{id}", delete(remove_request).patch(move_request))
+        .route("/queue/all", post(add_all))
         .route("/now-playing", get(now_playing))
         .route("/player/play", post(play))
         .route("/player/pause", post(pause))
@@ -72,6 +73,43 @@ async fn add_request(
         .await
         .map_err(queue_error)?;
     Ok((StatusCode::CREATED, Json(item)))
+}
+
+#[derive(Deserialize)]
+struct AddAll {
+    kind: EntryKind,
+    ref_id: i64,
+}
+
+#[derive(Serialize)]
+struct Added {
+    added: usize,
+}
+
+/// Queues a whole album or artist (admin), in play order.
+async fn add_all(
+    AdminUser(admin): AdminUser,
+    State(state): State<AppState>,
+    ClientIp(ip): ClientIp,
+    Json(body): Json<AddAll>,
+) -> ApiResult<Json<Added>> {
+    let ids = state.store.tracks_for(body.kind, body.ref_id).await?;
+    if ids.is_empty() {
+        return Err(ApiError::not_found());
+    }
+    let origin = RequestOrigin {
+        name: admin.name().to_owned(),
+        mac: client::mac_for(ip).await.or_else(|| admin.mac.clone()),
+        ip: ip.map(|ip| ip.to_string()),
+    };
+    let added = state
+        .jukebox
+        .lock()
+        .await
+        .add_requests(&admin, &ids, &origin)
+        .await
+        .map_err(queue_error)?;
+    Ok(Json(Added { added }))
 }
 
 async fn remove_request(

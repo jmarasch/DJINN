@@ -1,5 +1,6 @@
 <script lang="ts">
   import AddToPlaylist from '../lib/AddToPlaylist.svelte'
+  import QueueAll from '../lib/QueueAll.svelte'
   import { api } from '../lib/api'
   import Art from '../lib/Art.svelte'
   import Icon from '../lib/Icon.svelte'
@@ -41,7 +42,10 @@
           {#each artist.genres.split(', ') as genre (genre)}<span class="genre">{genre}</span>{/each}
         </div>
       {/if}
-      <AddToPlaylist kind="artist" refId={artist.id} label={artist.name} />
+      <div class="admin-actions">
+        <QueueAll kind="artist" refId={artist.id} />
+        <AddToPlaylist kind="artist" refId={artist.id} label={artist.name} />
+      </div>
     </div>
   </header>
   {#if artist.photo_credit}
@@ -93,6 +97,12 @@
 {/if}
 
 <style>
+  .admin-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
   header {
     display: flex;
     align-items: center;

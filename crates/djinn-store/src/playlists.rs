@@ -90,6 +90,26 @@ macro_rules! entry_select {
     };
 }
 
+/// Which tracks an entry covers (`e.kind`, `e.ref_id`): a track, an
+/// album's tracks, or an artist's tracks and albums.
+macro_rules! entry_covers {
+    () => {
+        "t.removed_at IS NULL AND (
+              (e.kind = 'track' AND t.id = e.ref_id)
+           OR (e.kind = 'album' AND t.album_id = e.ref_id)
+           OR (e.kind = 'artist' AND (t.artist_id = e.ref_id
+               OR t.album_id IN (SELECT id FROM albums WHERE artist_id = e.ref_id))))"
+    };
+}
+
+/// Play order within an entry: albums by year, then disc and track.
+macro_rules! entry_order {
+    () => {
+        "al.year IS NULL, al.year, t.album COLLATE NOCASE, t.disc_no, t.track_no,
+         t.title COLLATE NOCASE"
+    };
+}
+
 /// Playable tracks covered by a playlist's entries, in play order: entries
 /// in their order, albums by disc and track, artists by album year.
 macro_rules! expanded_tracks {
@@ -98,15 +118,12 @@ macro_rules! expanded_tracks {
             "SELECT ",
             $columns,
             " FROM playlist_entries e
-             JOIN tracks t ON t.removed_at IS NULL AND (
-                  (e.kind = 'track' AND t.id = e.ref_id)
-               OR (e.kind = 'album' AND t.album_id = e.ref_id)
-               OR (e.kind = 'artist' AND (t.artist_id = e.ref_id
-                   OR t.album_id IN (SELECT id FROM albums WHERE artist_id = e.ref_id))))
-             LEFT JOIN albums al ON al.id = t.album_id
+             JOIN tracks t ON ",
+            entry_covers!(),
+            " LEFT JOIN albums al ON al.id = t.album_id
              WHERE e.playlist_id = ?
-             ORDER BY e.position, al.year IS NULL, al.year, t.album COLLATE NOCASE,
-                      t.disc_no, t.track_no, t.title COLLATE NOCASE"
+             ORDER BY e.position, ",
+            entry_order!()
         )
     };
 }
@@ -207,6 +224,21 @@ impl Store {
             .bind(id)
             .fetch_all(&self.pool)
             .await?;
+        Ok(dedup_by(ids, |&id| id))
+    }
+
+    /// Song ids a song, album, or artist covers, in play order, each once.
+    pub async fn tracks_for(&self, kind: EntryKind, ref_id: i64) -> Result<Vec<i64>> {
+        let ids: Vec<i64> = sqlx::query_scalar(concat!(
+            "SELECT t.id FROM (SELECT ? AS kind, ? AS ref_id) e JOIN tracks t ON ",
+            entry_covers!(),
+            " LEFT JOIN albums al ON al.id = t.album_id ORDER BY ",
+            entry_order!()
+        ))
+        .bind(kind)
+        .bind(ref_id)
+        .fetch_all(&self.pool)
+        .await?;
         Ok(dedup_by(ids, |&id| id))
     }
 

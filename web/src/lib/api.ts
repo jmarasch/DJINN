@@ -88,6 +88,8 @@ export const api = {
   queue: () => get<QueueItem[]>('/queue'),
   addRequest: (trackId: number) => post<QueueItem>('/queue', { track_id: trackId }),
   removeRequest: (id: number) => del<void>(`/queue/${id}`),
+  queueAll: (kind: EntryKind, refId: number) =>
+    post<{ added: number }>('/queue/all', { kind, ref_id: refId }),
   moveRequest: (id: number, position: number) => patch<void>(`/queue/${id}`, { position }),
 
   nowPlaying: () =>

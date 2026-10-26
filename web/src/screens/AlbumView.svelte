@@ -3,6 +3,7 @@
   import Art from '../lib/Art.svelte'
   import Icon from '../lib/Icon.svelte'
   import AddToPlaylist from '../lib/AddToPlaylist.svelte'
+  import QueueAll from '../lib/QueueAll.svelte'
   import TrackRow from '../lib/TrackRow.svelte'
   import type { AlbumDetail } from '../lib/types'
 
@@ -31,7 +32,10 @@
       <a href="#/artist/{album.artist_id}">{album.artist}</a>
       {#if album.year}<span class="muted"> · {album.year}</span>{/if}
       {#if album.genres}<div class="muted small genres">{album.genres}</div>{/if}
-      <AddToPlaylist kind="album" refId={album.id} label={album.title} />
+      <div class="admin-actions">
+        <QueueAll kind="album" refId={album.id} />
+        <AddToPlaylist kind="album" refId={album.id} label={album.title} />
+      </div>
     </div>
   </header>
   {#each album.tracks as track (track.id)}
@@ -40,6 +44,12 @@
 {/if}
 
 <style>
+  .admin-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
   header {
     display: flex;
     align-items: flex-end;
