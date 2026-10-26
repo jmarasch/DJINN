@@ -48,6 +48,8 @@ struct TvSnapshot {
     queue: Vec<QueueItem>,
     join_url: String,
     guest_mode: bool,
+    /// The live stream, so the TV can play the music itself.
+    stream_url: Option<String>,
 }
 
 async fn snapshot(State(state): State<AppState>) -> ApiResult<Json<TvSnapshot>> {
@@ -62,6 +64,10 @@ async fn snapshot(State(state): State<AppState>) -> ApiResult<Json<TvSnapshot>> 
         queue: state.store.queue().await?,
         join_url: state.join_url.to_string(),
         guest_mode: state.guest_mode(),
+        stream_url: state
+            .stream
+            .as_ref()
+            .map(|_| crate::cast_api::stream_path(&state.cast_token)),
     }))
 }
 

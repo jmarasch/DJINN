@@ -36,6 +36,10 @@ pub struct AppState {
     pub join_url: Arc<String>,
     /// Guests may join with just a name. Mirrors the `guest_mode` setting.
     pub guest_mode: Arc<AtomicBool>,
+    /// The live stream for casting, when the engine runs.
+    pub stream: Option<djinn_cast::stream::LiveStream>,
+    /// Secret in the stream URL.
+    pub cast_token: Arc<String>,
 }
 
 #[derive(Default)]
@@ -73,7 +77,15 @@ impl AppState {
             roots_changed: Arc::new(Notify::new()),
             join_url: Arc::new(String::new()),
             guest_mode: Arc::new(AtomicBool::new(false)),
+            stream: None,
+            cast_token: Arc::new(String::new()),
         }
+    }
+
+    pub fn with_stream(mut self, stream: djinn_cast::stream::LiveStream, token: String) -> Self {
+        self.stream = Some(stream);
+        self.cast_token = Arc::new(token);
+        self
     }
 
     pub fn guest_mode(&self) -> bool {

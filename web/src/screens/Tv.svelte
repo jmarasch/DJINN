@@ -14,6 +14,9 @@
   let error = $state<string | null>(null)
   let position = $state(0)
   let idleCursor = $state(false)
+  let streamUrl = $state<string | null>(null)
+  let soundOn = $state(false)
+  let audio = $state<HTMLAudioElement | null>(null)
 
   // Position from the server, extrapolated while playing.
   let basePosition = 0
@@ -52,6 +55,7 @@
       queue = data.queue
       joinUrl = data.join_url
       guestMode = data.guest_mode
+      streamUrl = data.stream_url
       error = null
       listen()
     } catch {
@@ -101,6 +105,27 @@
     idleCursor = false
     clearTimeout(cursorTimer)
     cursorTimer = setTimeout(() => (idleCursor = true), 3000)
+  }
+
+  /** Plays the party on this screen too. Browsers only start sound after a
+   * tap or key press, so it's a button. */
+  async function toggleSound() {
+    if (!audio || !streamUrl) return
+    if (soundOn) {
+      audio.pause()
+      audio.removeAttribute('src')
+      audio.load()
+      soundOn = false
+      return
+    }
+    // A fresh connection each time, so it starts at the live point.
+    audio.src = `${streamUrl}?t=${Date.now()}`
+    try {
+      await audio.play()
+      soundOn = true
+    } catch {
+      soundOn = false
+    }
   }
 
   function toggleFullscreen() {
@@ -241,7 +266,14 @@
     </aside>
   {/if}
 
-  <button class="fullscreen" onclick={toggleFullscreen}>Full screen</button>
+  <div class="corner">
+    {#if streamUrl}
+      <button class:on={soundOn} onclick={toggleSound}>{soundOn ? 'Sound on' : 'Play sound here'}</button>
+    {/if}
+    <button onclick={toggleFullscreen}>Full screen</button>
+  </div>
+  <!-- svelte-ignore a11y_media_has_caption -->
+  <audio bind:this={audio} preload="none" onerror={() => (soundOn = false)}></audio>
 </div>
 
 <style>
@@ -511,21 +543,30 @@
     color: rgb(255 255 255 / 0.8);
   }
 
-  .fullscreen {
+  .corner {
     position: absolute;
     right: 1.5vw;
     top: 1.5vh;
+    display: flex;
+    gap: 0.5em;
+    transition: opacity 0.3s;
+  }
+
+  .corner button {
     padding: 0.4em 0.9em;
     border: 0;
     border-radius: 2em;
     background: rgb(255 255 255 / 0.15);
     color: #fff;
     font-size: 0.7em;
-    opacity: 1;
-    transition: opacity 0.3s;
   }
 
-  .idle-cursor .fullscreen {
+  .corner button.on {
+    background: #c9b3ff;
+    color: #1a1030;
+  }
+
+  .idle-cursor .corner {
     opacity: 0;
   }
 

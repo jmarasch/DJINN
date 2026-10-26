@@ -1,0 +1,16 @@
+[package]
+name = "djinn-cast"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+bytes = "1"
+djinn-engine = { path = "../djinn-engine" }
+rusty_mp3 = "1.0.5"
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

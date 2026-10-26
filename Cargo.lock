@@ -833,6 +833,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "djinn-cast"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "djinn-engine",
+ "rusty_mp3",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "djinn-engine"
 version = "0.1.0"
 dependencies = [
@@ -882,6 +894,7 @@ dependencies = [
  "axum",
  "clap",
  "dirs",
+ "djinn-cast",
  "djinn-engine",
  "djinn-library",
  "djinn-platform",
@@ -2838,6 +2851,12 @@ name = "rustversion"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
+
+[[package]]
+name = "rusty_mp3"
+version = "1.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eda7c6c82285d2bc3f1e6aded40ca6f7572fe9eec77f18fb10efc1d03aed3877"
 
 [[package]]
 name = "ryu"

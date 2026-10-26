@@ -7,7 +7,8 @@
 //! [`DriftControl`], adjusts its speed so its buffered time (less its own
 //! delay) matches the clock's. A device that fails is closed and retried on
 //! its own; the rest keep playing. If the clock fails, the next open output
-//! takes over.
+//! takes over. With no output open but a stream tap listening (casting),
+//! the system clock paces playback instead.
 
 use std::cell::Cell;
 use std::time::{Duration, Instant};
@@ -17,6 +18,7 @@ use cpal::traits::{DeviceTrait, HostTrait};
 use crate::drift::DriftControl;
 use crate::output::{Output, BUFFER_SECS};
 use crate::player::Sink;
+use crate::tap::StreamTap;
 use crate::{Event, OutputConfig, OutputDevice, OutputState, OutputStatus, MAX_DELAY_MS};
 
 const RETRY: Duration = Duration::from_secs(2);
@@ -26,6 +28,49 @@ const RETRY_NAMED: Duration = Duration::from_secs(5);
 const DEVICE_CHECK_INTERVAL: Duration = Duration::from_secs(3);
 /// How often sync figures are reported while several outputs play.
 const SYNC_REPORT_INTERVAL: Duration = Duration::from_secs(5);
+/// How far ahead of the system clock to decode when only casting. Cast
+/// devices buffer seconds of their own, so this only needs to cover hiccups.
+const VIRTUAL_AHEAD_SECS: f64 = 0.5;
+
+/// Paces playback by the system clock when no output device is open.
+struct VirtualClock {
+    started: Instant,
+    /// Master frames written when it started.
+    base: u64,
+    paused_at: Option<Instant>,
+    paused_for: Duration,
+}
+
+impl VirtualClock {
+    fn new(base: u64) -> Self {
+        Self {
+            started: Instant::now(),
+            base,
+            paused_at: None,
+            paused_for: Duration::ZERO,
+        }
+    }
+
+    /// Master frames "played" by now.
+    fn played(&self, rate: u32) -> u64 {
+        let now = self.paused_at.unwrap_or_else(Instant::now);
+        let running = now
+            .duration_since(self.started)
+            .saturating_sub(self.paused_for);
+        self.base + (running.as_secs_f64() * f64::from(rate)) as u64
+    }
+
+    fn set_paused(&mut self, paused: bool) {
+        match (paused, self.paused_at) {
+            (true, None) => self.paused_at = Some(Instant::now()),
+            (false, Some(at)) => {
+                self.paused_for += at.elapsed();
+                self.paused_at = None;
+            }
+            _ => {}
+        }
+    }
+}
 
 struct Slot {
     config: OutputConfig,
@@ -65,10 +110,12 @@ pub(crate) struct Outputs {
     next_report: Instant,
     reported: Vec<OutputStatus>,
     events: Vec<Event>,
+    tap: Option<StreamTap>,
+    virtual_clock: Option<VirtualClock>,
 }
 
 impl Outputs {
-    pub fn new(master_rate: u32, configs: Vec<OutputConfig>) -> Self {
+    pub fn new(master_rate: u32, configs: Vec<OutputConfig>, tap: Option<StreamTap>) -> Self {
         let now = Instant::now();
         let mut outputs = Self {
             master_rate,
@@ -84,6 +131,8 @@ impl Outputs {
             next_report: now,
             reported: Vec::new(),
             events: Vec::new(),
+            tap,
+            virtual_clock: None,
         };
         outputs.configure(configs);
         outputs
@@ -149,6 +198,9 @@ impl Outputs {
 
     pub fn set_paused(&mut self, paused: bool) {
         self.paused = paused;
+        if let Some(clock) = self.virtual_clock.as_mut() {
+            clock.set_paused(paused);
+        }
         for output in self.slots.iter().filter_map(|s| s.output.as_ref()) {
             output.set_paused(paused);
         }
@@ -437,17 +489,45 @@ impl Outputs {
 impl Sink for Outputs {
     fn free_frames(&mut self) -> usize {
         let master_rate = f64::from(self.master_rate);
-        let Some((clock, delay)) = self.clock_output() else {
+        let has_clock = self
+            .clock
+            .and_then(|i| self.slots.get(i))
+            .is_some_and(|s| s.output.is_some());
+        if has_clock {
+            self.virtual_clock = None;
+            let Some((clock, delay)) = self.clock_output() else {
+                return 0;
+            };
+            let room = clock.free_frames();
+            let wanted = ((BUFFER_SECS + delay - clock.latency()) * master_rate).max(0.0) as usize;
+            return room.min(wanted);
+        }
+        if !self.tap.as_ref().is_some_and(StreamTap::is_active) {
             // Nothing to play to: hold still until an output opens.
+            self.virtual_clock = None;
             return 0;
+        }
+        let (frames_in, paused, rate) = (self.frames_in, self.paused, self.master_rate);
+        let fresh = || {
+            let mut clock = VirtualClock::new(frames_in);
+            clock.set_paused(paused);
+            clock
         };
-        let room = clock.free_frames();
-        let wanted = ((BUFFER_SECS + delay - clock.latency()) * master_rate).max(0.0) as usize;
-        room.min(wanted)
+        let clock = self.virtual_clock.get_or_insert_with(fresh);
+        // Fell behind (nothing to play for a while): start over from here
+        // instead of rushing to catch up.
+        if clock.played(rate) > frames_in {
+            *clock = fresh();
+        }
+        let ahead = (VIRTUAL_AHEAD_SECS * master_rate) as u64;
+        usize::try_from((clock.played(rate) + ahead).saturating_sub(frames_in)).unwrap_or(0)
     }
 
     fn write(&mut self, samples: &[f32]) {
         self.frames_in += (samples.len() / 2) as u64;
+        if let Some(tap) = self.tap.as_mut() {
+            tap.write(samples);
+        }
         for output in self.slots.iter_mut().filter_map(|s| s.output.as_mut()) {
             output.write(samples);
         }
@@ -458,9 +538,10 @@ impl Sink for Outputs {
             .clock
             .and_then(|i| self.slots.get(i))
             .and_then(|s| s.output.as_ref());
-        let consumed = match clock {
-            Some(output) => output.consumed_frames(),
-            None => self.frames_in,
+        let consumed = match (clock, &self.virtual_clock) {
+            (Some(output), _) => output.consumed_frames(),
+            (None, Some(virtual_clock)) => virtual_clock.played(self.master_rate),
+            (None, None) => self.frames_in,
         };
         let consumed = consumed.max(self.consumed_floor.get()).min(self.frames_in);
         self.consumed_floor.set(consumed);
@@ -478,5 +559,47 @@ impl Sink for Outputs {
         }
         // Silence padding aside, everything written counts as consumed.
         self.consumed_floor.set(self.frames_in);
+        if let Some(clock) = self.virtual_clock.as_mut() {
+            let paused = clock.paused_at.is_some();
+            *clock = VirtualClock::new(self.frames_in);
+            clock.set_paused(paused);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tap::stream_tap;
+
+    #[test]
+    fn casting_alone_is_paced_by_the_system_clock() {
+        let rate = 48_000;
+        let (tap, reader) = stream_tap(5.0, rate);
+        let mut outputs = Outputs::new(rate, Vec::new(), Some(tap));
+        assert_eq!(outputs.free_frames(), 0, "nobody listening: hold still");
+
+        reader.set_active(true);
+        let ahead = outputs.free_frames();
+        assert!(
+            (23_000..=26_000).contains(&ahead),
+            "starts half a second ahead: {ahead}"
+        );
+        outputs.write(&vec![0.0; ahead * 2]);
+        assert!(outputs.free_frames() < 500, "then waits for the clock");
+
+        std::thread::sleep(Duration::from_millis(100));
+        let more = outputs.free_frames();
+        assert!((4_000..=7_000).contains(&more), "about 100 ms more: {more}");
+        outputs.write(&vec![0.0; more * 2]);
+        let consumed = outputs.consumed_frames();
+        assert!(
+            consumed < outputs.frames_in,
+            "consumed trails what was written"
+        );
+
+        outputs.set_paused(true);
+        std::thread::sleep(Duration::from_millis(100));
+        assert!(outputs.free_frames() < 500, "paused: no time passes");
     }
 }

@@ -8,6 +8,7 @@ mod api;
 mod audio_api;
 mod auth;
 mod banner;
+mod cast_api;
 mod client;
 mod config;
 mod desktop;
@@ -104,11 +105,15 @@ async fn main() -> anyhow::Result<()> {
     // callback runs on the engine thread and must not block.
     let (engine_tx, mut engine_rx) = mpsc::unbounded_channel();
     let outputs = audio_api::engine_configs(&store.outputs().await?);
-    let engine = Engine::start(
+    // A copy of the mix for casting, encoded to MP3 while anyone listens.
+    let (tap, tap_reader) = djinn_engine::stream_tap(4.0, config.audio.master_rate);
+    let stream = djinn_cast::stream::LiveStream::start(tap_reader, config.audio.master_rate)?;
+    let engine = Engine::start_with_tap(
         EngineConfig {
             master_rate: config.audio.master_rate,
             outputs,
         },
+        Some(tap),
         move |event| {
             let _ = engine_tx.send(event);
         },
@@ -149,7 +154,8 @@ async fn main() -> anyhow::Result<()> {
         jukebox,
         events,
     )
-    .with_join_url(base_url.clone());
+    .with_join_url(base_url.clone())
+    .with_stream(stream, cast_api::token(&store).await?);
 
     let guest_mode = jukebox::setting(&store, jukebox::GUEST_MODE, 0).await? == 1;
     state
@@ -274,6 +280,7 @@ fn default_log_file() -> Option<PathBuf> {
 fn app(state: AppState) -> Router {
     Router::new()
         .nest("/api", api::router())
+        .merge(cast_api::stream_router())
         .fallback(web::static_handler)
         .layer(TraceLayer::new_for_http())
         .with_state(state)

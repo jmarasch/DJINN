@@ -19,6 +19,7 @@ mod output;
 mod outputs;
 mod player;
 mod resample;
+mod tap;
 
 use std::path::PathBuf;
 
@@ -27,6 +28,7 @@ pub use engine::{Engine, EngineConfig};
 pub use error::EngineError;
 pub use loudness::{measure_loudness, Loudness, REFERENCE_LUFS};
 pub use player::MAX_CROSSFADE_SECS;
+pub use tap::{stream_tap, StreamTap, TapReader};
 
 /// Opaque track identifier chosen by the engine's owner.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]

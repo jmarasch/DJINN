@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 
 use crate::outputs::Outputs;
 use crate::player::{Player, Sink};
+use crate::tap::StreamTap;
 use crate::{Command, EngineError, Event, OutputConfig, PlayState};
 
 /// How often the thread wakes when no commands arrive.
@@ -48,10 +49,20 @@ impl Engine {
         config: EngineConfig,
         on_event: impl FnMut(Event) + Send + 'static,
     ) -> Result<Self, EngineError> {
+        Self::start_with_tap(config, None, on_event)
+    }
+
+    /// Like [`Engine::start`], also copying the master stream into `tap`
+    /// for network outputs.
+    pub fn start_with_tap(
+        config: EngineConfig,
+        tap: Option<StreamTap>,
+        on_event: impl FnMut(Event) + Send + 'static,
+    ) -> Result<Self, EngineError> {
         let (tx, rx) = mpsc::channel();
         let thread = std::thread::Builder::new()
             .name("djinn-engine".to_owned())
-            .spawn(move || EngineThread::new(config, rx, Box::new(on_event)).run())
+            .spawn(move || EngineThread::new(config, tap, rx, Box::new(on_event)).run())
             .map_err(|e| EngineError::Output(format!("failed to start engine thread: {e}")))?;
         Ok(Self {
             tx,
@@ -88,12 +99,13 @@ struct EngineThread {
 impl EngineThread {
     fn new(
         config: EngineConfig,
+        tap: Option<StreamTap>,
         rx: mpsc::Receiver<Msg>,
         on_event: Box<dyn FnMut(Event) + Send>,
     ) -> Self {
         Self {
             player: Player::new(config.master_rate),
-            outputs: Outputs::new(config.master_rate, config.outputs),
+            outputs: Outputs::new(config.master_rate, config.outputs, tap),
             rx,
             on_event,
             paused: false,
