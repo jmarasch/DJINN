@@ -66,6 +66,57 @@ pub fn path(art_dir: &Path, hash: &str) -> Option<PathBuf> {
         .find(|p| p.is_file())
 }
 
+/// Thumbnail sizes served, in pixels (the longest side).
+pub const THUMBNAIL_SIZES: &[u32] = &[128, 512];
+
+/// A thumbnail of the cached image `hash` that fits in `size` pixels,
+/// made on first use and kept in `thumbs/`. Images already that small are
+/// served as they are. Returns `None` if there's no such image.
+pub fn thumbnail(art_dir: &Path, hash: &str, size: u32) -> io::Result<Option<PathBuf>> {
+    let Some(original) = path(art_dir, hash) else {
+        return Ok(None);
+    };
+    // Snap to a supported size so each image has at most two thumbnails.
+    let size = THUMBNAIL_SIZES
+        .iter()
+        .copied()
+        .find(|&s| s >= size)
+        .unwrap_or(THUMBNAIL_SIZES[THUMBNAIL_SIZES.len() - 1]);
+    let thumbs = art_dir.join("thumbs");
+    let thumb = thumbs.join(format!("{hash}-{size}.jpg"));
+    if thumb.is_file() {
+        return Ok(Some(thumb));
+    }
+    let bytes = fs::read(&original)?;
+    let Ok(image) = image::load_from_memory(&bytes) else {
+        // Can't decode it; the original still works in the browser.
+        return Ok(Some(original));
+    };
+    if image.width() <= size && image.height() <= size {
+        return Ok(Some(original));
+    }
+    let mut jpeg = Vec::new();
+    image
+        .thumbnail(size, size)
+        .to_rgb8()
+        .write_with_encoder(image::codecs::jpeg::JpegEncoder::new_with_quality(
+            &mut jpeg, 85,
+        ))
+        .map_err(io::Error::other)?;
+    fs::create_dir_all(&thumbs)?;
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, Ordering::Relaxed);
+    let tmp = thumbs.join(format!("{hash}-{size}.{}.{n}.tmp", std::process::id()));
+    fs::write(&tmp, &jpeg)?;
+    if let Err(e) = fs::rename(&tmp, &thumb) {
+        let _ = fs::remove_file(&tmp);
+        if !thumb.is_file() {
+            return Err(e);
+        }
+    }
+    Ok(Some(thumb))
+}
+
 /// Gives cache files from before extensions were added one, so the folder
 /// is easy to browse. Returns how many were renamed.
 pub fn add_extensions(art_dir: &Path) -> usize {
@@ -195,6 +246,37 @@ mod tests {
         assert!(path(&dir, old).is_some());
         assert_eq!(add_extensions(&dir), 1);
         assert_eq!(path(&dir, old), Some(dir.join(format!("{old}.jpg"))));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn thumbnails_shrink_but_never_enlarge() {
+        let dir = std::env::temp_dir().join(format!("djinn-thumbs-{}", std::process::id()));
+        let encode = |w: u32, h: u32| {
+            let mut png = Vec::new();
+            image::RgbImage::from_pixel(w, h, image::Rgb([200, 30, 90]))
+                .write_to(&mut io::Cursor::new(&mut png), image::ImageFormat::Png)
+                .unwrap();
+            png
+        };
+        let big = store(&dir, &encode(1000, 800)).unwrap();
+        let small = store(&dir, &encode(100, 100)).unwrap();
+
+        let thumb = thumbnail(&dir, &big, 128).unwrap().unwrap();
+        assert!(thumb.ends_with(format!("thumbs/{big}-128.jpg")));
+        let (w, h) = image::image_dimensions(&thumb).unwrap();
+        assert_eq!((w, h), (128, 102), "fits in 128, keeps the shape");
+        // Odd sizes snap up to a supported one.
+        assert!(thumbnail(&dir, &big, 300)
+            .unwrap()
+            .unwrap()
+            .ends_with(format!("{big}-512.jpg")));
+        // Small images are served as they are.
+        assert_eq!(thumbnail(&dir, &small, 128).unwrap(), path(&dir, &small));
+        assert_eq!(
+            thumbnail(&dir, "0123456789abcdef0123456789abcdef", 128).unwrap(),
+            None
+        );
         fs::remove_dir_all(dir).unwrap();
     }
 

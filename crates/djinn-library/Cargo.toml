@@ -6,6 +6,7 @@ publish.workspace = true
 
 [dependencies]
 djinn-store = { path = "../djinn-store" }
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "webp", "gif", "bmp"] }
 lofty = "0.25.5"
 reqwest = { version = "0.13.5", default-features = false, features = ["rustls-no-provider", "json", "query", "http2"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }

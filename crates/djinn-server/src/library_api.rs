@@ -144,15 +144,29 @@ async fn artist(
         .ok_or_else(ApiError::not_found)
 }
 
-/// Cover art by content hash. Originals for now; `?size=` thumbnails come
-/// with the thumbnail cache (Phase 2).
+#[derive(Deserialize)]
+struct ArtQuery {
+    /// Thumbnail size in pixels (128 or 512); omit for the original.
+    size: Option<u32>,
+}
+
+/// Cover art by content hash, optionally as a thumbnail.
 async fn cover_art(
     _: CurrentUser,
     State(state): State<AppState>,
     Path(hash): Path<String>,
+    Query(query): Query<ArtQuery>,
 ) -> ApiResult<impl IntoResponse> {
-    let path = art::path(&state.art_dir, &hash).ok_or_else(ApiError::not_found)?;
-    let bytes = tokio::fs::read(path).await?;
+    let art_dir = state.art_dir.as_ref().clone();
+    let file = tokio::task::spawn_blocking(move || match query.size {
+        Some(size) => art::thumbnail(&art_dir, &hash, size),
+        None => Ok(art::path(&art_dir, &hash)),
+    })
+    .await
+    .map_err(anyhow::Error::from)?
+    .map_err(anyhow::Error::from)?
+    .ok_or_else(ApiError::not_found)?;
+    let bytes = tokio::fs::read(file).await?;
     Ok((
         [
             (header::CONTENT_TYPE, art::mime_type(&bytes)),

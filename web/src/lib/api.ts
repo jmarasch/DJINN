@@ -82,7 +82,8 @@ export const api = {
   track: (id: number) => get<Track>(`/tracks/${id}`),
   album: (id: number) => get<AlbumDetail>(`/albums/${id}`),
   artist: (id: number) => get<ArtistDetail>(`/artists/${id}`),
-  artUrl: (hash: string) => `/api/art/${hash}`,
+  /** Cover art; `size` (pixels) asks for a thumbnail. */
+  artUrl: (hash: string, size?: number) => `/api/art/${hash}${size ? `?size=${size}` : ''}`,
 
   queue: () => get<QueueItem[]>('/queue'),
   addRequest: (trackId: number) => post<QueueItem>('/queue', { track_id: trackId }),

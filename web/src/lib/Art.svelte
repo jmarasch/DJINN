@@ -16,11 +16,14 @@
     letter?: string | null
   } = $props()
   let failed = $state(false)
+  // Small pictures get the 128 px thumbnail, medium ones 512 px; big ones
+  // (Now Playing) the original, to stay sharp on high-density screens.
+  const thumb = $derived(size <= 64 ? 128 : size < 300 ? 512 : undefined)
 </script>
 
 <div class="art" style:width="{size}px" style:height="{size}px" style:border-radius="{round}px">
   {#if hash && !failed}
-    <img src={api.artUrl(hash)} alt="" loading="lazy" onerror={() => (failed = true)} />
+    <img src={api.artUrl(hash, thumb)} alt="" loading="lazy" onerror={() => (failed = true)} />
   {:else if letter}
     <span class="letter" style:font-size="{Math.round(size * 0.42)}px">{letter}</span>
   {:else}
