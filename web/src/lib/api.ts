@@ -9,6 +9,7 @@ import type {
   AlbumDetail,
   ArtistDetail,
   ArtistSummary,
+  Described,
   EntryKind,
   FolderListing,
   GuestSummary,
@@ -85,6 +86,8 @@ export const api = {
     post<User>('/auth/bootstrap', { token, username, password }),
 
   search: (q: string) => get<SearchResults>(`/search?q=${encodeURIComponent(q)}`),
+  /** The query read by the AI reader; takes a few seconds. */
+  ask: (q: string) => get<Described | null>(`/search/ask?q=${encodeURIComponent(q)}`),
   artists: (offset: number) => get<Page<ArtistSummary>>(`/artists?offset=${offset}`),
   albums: (sort: AlbumSort, offset: number) => get<Page<Album>>(`/albums?sort=${sort}&offset=${offset}`),
   playWild: () => post<void>('/playlists/wild/play'),
@@ -166,6 +169,9 @@ export const api = {
   setAi: (enabled: boolean) => put<AiStatus>('/ai', { enabled }),
   downloadAi: () => post<void>('/ai/download'),
   removeAi: () => del<void>('/ai/model'),
+  setReader: (enabled: boolean) => put<void>('/ai/reader', { enabled }),
+  downloadReader: () => post<void>('/ai/reader/download'),
+  removeReader: () => del<void>('/ai/reader/model'),
   casts: () => get<CastList>('/cast'),
   discoverCasts: () => post<CastList>('/cast/discover'),
   startCast: (id: string, mode: 'audio' | 'page') =>

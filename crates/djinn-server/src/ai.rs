@@ -73,29 +73,54 @@ const GENRES: &[&str] = &[
     "metalcore",
 ];
 
+/// A model's download progress and last error.
+#[derive(Default)]
+pub struct Fetch {
+    /// (done, total) bytes while downloading.
+    progress: Mutex<Option<(u64, u64)>>,
+    error: Mutex<Option<String>>,
+}
+
+impl Fetch {
+    pub fn progress(&self) -> Option<(u64, u64)> {
+        self.progress.lock().ok().and_then(|p| *p)
+    }
+
+    pub fn error(&self) -> Option<String> {
+        self.error.lock().ok().and_then(|e| e.clone())
+    }
+
+    pub fn set_error(&self, error: Option<String>) {
+        if let Ok(mut e) = self.error.lock() {
+            *e = error;
+        }
+    }
+}
+
 /// Model, progress, and switches, shared by everything.
 pub struct AiState {
     dir: PathBuf,
     model: RwLock<Option<Arc<Clap>>>,
     /// Each genre's text embedding, made once the model loads.
     genres: RwLock<Vec<(String, Vec<f32>)>>,
-    download: Mutex<Option<(u64, u64)>>,
-    error: Mutex<Option<String>>,
+    fetch: Fetch,
     loading: AtomicBool,
     listening: AtomicBool,
+    /// The AI reader for free-form requests.
+    pub reader: crate::reader::ReaderState,
 }
 
 impl AiState {
     /// `models_dir` is DJINN's models folder (next to the database).
     pub fn new(models_dir: &Path) -> Self {
         Self {
-            dir: models_dir.join(models::folder_name()),
+            dir: models_dir.join(models::CLAP.folder),
             model: RwLock::new(None),
             genres: RwLock::new(Vec::new()),
-            download: Mutex::new(None),
-            error: Mutex::new(None),
+            fetch: Fetch::default(),
             loading: AtomicBool::new(false),
             listening: AtomicBool::new(false),
+            reader: crate::reader::ReaderState::new(&models_dir.join(models::READER.folder)),
         }
     }
 
@@ -107,12 +132,6 @@ impl AiState {
     pub fn genre_embeddings(&self) -> Vec<(String, Vec<f32>)> {
         self.genres.read().map(|g| g.clone()).unwrap_or_default()
     }
-
-    fn set_error(&self, error: Option<String>) {
-        if let Ok(mut e) = self.error.lock() {
-            *e = error;
-        }
-    }
 }
 
 pub fn router() -> Router<AppState> {
@@ -120,6 +139,7 @@ pub fn router() -> Router<AppState> {
         .route("/ai", get(status).put(set_enabled))
         .route("/ai/download", post(download))
         .route("/ai/model", delete(remove_model))
+        .merge(crate::reader::router())
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -135,21 +155,23 @@ pub struct AiStatus {
     heard: i64,
     waiting: i64,
     listening: bool,
+    reader: crate::reader::ReaderStatus,
 }
 
 pub async fn ai_status(state: &AppState) -> ApiResult<AiStatus> {
     let ai = &state.ai;
     let (heard, waiting) = state.store.heard_progress(models::VERSION).await?;
     Ok(AiStatus {
-        installed: models::installed(&ai.dir),
+        installed: models::CLAP.installed(&ai.dir),
         enabled: enabled(state).await?,
         ready: ai.model().is_some(),
-        download_size: models::download_size(),
-        downloading: ai.download.lock().ok().and_then(|d| *d),
-        error: ai.error.lock().ok().and_then(|e| e.clone()),
+        download_size: models::CLAP.download_size(),
+        downloading: ai.fetch.progress(),
+        error: ai.fetch.error(),
         heard,
         waiting,
         listening: ai.listening.load(Ordering::Acquire),
+        reader: crate::reader::status(state).await?,
     })
 }
 
@@ -157,7 +179,7 @@ async fn enabled(state: &AppState) -> ApiResult<bool> {
     Ok(crate::jukebox::setting(&state.store, AI_LISTENING, 0).await? == 1)
 }
 
-async fn broadcast(state: &AppState) {
+pub async fn broadcast(state: &AppState) {
     if let Ok(status) = ai_status(state).await {
         let _ = state.events.send(ServerEvent::AiStatus(status));
     }
@@ -177,7 +199,7 @@ async fn set_enabled(
     State(state): State<AppState>,
     Json(body): Json<Enabled>,
 ) -> ApiResult<Json<AiStatus>> {
-    if body.enabled && !models::installed(&state.ai.dir) {
+    if body.enabled && !models::CLAP.installed(&state.ai.dir) {
         return Err(ApiError::bad_request("download the model first"));
     }
     state
@@ -199,7 +221,7 @@ async fn set_enabled(
 pub fn start(state: &AppState) {
     let state = state.clone();
     tokio::spawn(async move {
-        if !enabled(&state).await.unwrap_or(false) || !models::installed(&state.ai.dir) {
+        if !enabled(&state).await.unwrap_or(false) || !models::CLAP.installed(&state.ai.dir) {
             return;
         }
         if state.ai.model().is_none() {
@@ -230,13 +252,13 @@ pub fn start(state: &AppState) {
                     if let Ok(mut m) = state.ai.model.write() {
                         *m = Some(Arc::new(clap));
                     }
-                    state.ai.set_error(None);
+                    state.ai.fetch.set_error(None);
                     // Heard genres and the description search use it.
                     crate::smart::refresh(&state).await;
                 }
                 Ok(Err(e)) => {
                     tracing::error!(error = %e, "loading the AI model failed");
-                    state.ai.set_error(Some(e.to_string()));
+                    state.ai.fetch.set_error(Some(e.to_string()));
                 }
                 Err(e) => tracing::error!(error = %e, "loading the AI model failed"),
             }
@@ -322,41 +344,59 @@ async fn listen(state: &AppState) {
 }
 
 async fn download(_: AdminUser, State(state): State<AppState>) -> ApiResult<StatusCode> {
-    if models::installed(&state.ai.dir) {
+    let dir = state.ai.dir.clone();
+    start_download(&state, &models::CLAP, dir, |ai| &ai.fetch)
+}
+
+/// Downloads `model` into `dir` in the background, unless it's there or
+/// already coming down. `fetch` picks where its progress goes.
+pub fn start_download(
+    state: &AppState,
+    model: &'static models::Model,
+    dir: PathBuf,
+    fetch: fn(&AiState) -> &Fetch,
+) -> ApiResult<StatusCode> {
+    if model.installed(&dir) {
         return Ok(StatusCode::NO_CONTENT);
     }
     {
-        let Ok(mut progress) = state.ai.download.lock() else {
+        let Ok(mut progress) = fetch(&state.ai).progress.lock() else {
             return Err(anyhow::anyhow!("download state poisoned").into());
         };
         if progress.is_some() {
             return Ok(StatusCode::ACCEPTED);
         }
-        *progress = Some((0, models::download_size()));
+        *progress = Some((0, model.download_size()));
     }
-    state.ai.set_error(None);
+    fetch(&state.ai).set_error(None);
     let task_state = state.clone();
     tokio::spawn(async move {
-        let result = fetch_all(&task_state).await;
-        if let Ok(mut progress) = task_state.ai.download.lock() {
-            *progress = None;
+        let result = fetch_all(&task_state, model, &dir, fetch).await;
+        let progress = fetch(&task_state.ai);
+        if let Ok(mut p) = progress.progress.lock() {
+            *p = None;
         }
         match result {
-            Ok(()) => tracing::info!("AI model downloaded"),
+            Ok(()) => tracing::info!(model = model.folder, "AI model downloaded"),
             Err(e) => {
-                tracing::error!(error = %e, "downloading the AI model failed");
-                task_state.ai.set_error(Some(e));
+                tracing::error!(model = model.folder, error = %e, "downloading an AI model failed");
+                progress.set_error(Some(e));
             }
         }
         broadcast(&task_state).await;
     });
-    broadcast(&state).await;
+    let state = state.clone();
+    tokio::spawn(async move { broadcast(&state).await });
     Ok(StatusCode::ACCEPTED)
 }
 
-/// Downloads every file, checking sizes and sums, into the model folder.
-async fn fetch_all(state: &AppState) -> Result<(), String> {
-    let dir = &state.ai.dir;
+/// Downloads every file, checking sizes and sums, into `dir`.
+async fn fetch_all(
+    state: &AppState,
+    model: &models::Model,
+    dir: &Path,
+    fetch: fn(&AiState) -> &Fetch,
+) -> Result<(), String> {
     tokio::fs::create_dir_all(dir)
         .await
         .map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
@@ -365,8 +405,9 @@ async fn fetch_all(state: &AppState) -> Result<(), String> {
         .user_agent(concat!("DJINN/", env!("CARGO_PKG_VERSION")))
         .build()
         .map_err(|e| e.to_string())?;
+    let total = model.download_size();
     let mut done = 0u64;
-    for file in models::FILES {
+    for file in model.files {
         let target = dir.join(file.local);
         if tokio::fs::metadata(&target)
             .await
@@ -377,7 +418,7 @@ async fn fetch_all(state: &AppState) -> Result<(), String> {
         }
         let partial = dir.join(format!("{}.part", file.local));
         let response = client
-            .get(models::url(file))
+            .get(file.url)
             .send()
             .await
             .and_then(|r| r.error_for_status())
@@ -393,8 +434,8 @@ async fn fetch_all(state: &AppState) -> Result<(), String> {
             hasher.update(&chunk);
             out.write_all(&chunk).await.map_err(|e| e.to_string())?;
             written += chunk.len() as u64;
-            if let Ok(mut progress) = state.ai.download.lock() {
-                *progress = Some((done + written, models::download_size()));
+            if let Ok(mut progress) = fetch(&state.ai).progress.lock() {
+                *progress = Some((done + written, total));
             }
             // About one progress event per megabyte.
             if written % (1 << 20) < chunk.len() as u64 {

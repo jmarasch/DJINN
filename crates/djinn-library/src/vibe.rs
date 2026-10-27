@@ -17,6 +17,9 @@ pub struct Intent {
     /// Each group is one genre asked for, as the genre names that count
     /// for it; a song must fit every group.
     pub genres: Vec<Vec<String>>,
+    /// Genres ruled out ("no rap"), grouped the same way; a song fitting
+    /// any group is left out.
+    pub not_genres: Vec<Vec<String>>,
     /// Inclusive year range.
     pub years: Option<(i64, i64)>,
     /// BPM range.
@@ -34,6 +37,7 @@ pub struct Intent {
 impl Intent {
     pub fn is_empty(&self) -> bool {
         self.genres.is_empty()
+            && self.not_genres.is_empty()
             && self.years.is_none()
             && self.tempo.is_none()
             && self.energy.is_none()
@@ -296,6 +300,7 @@ const FILLER: &[&str] = &[
     "our",
     "us",
     "by",
+    "but",
 ];
 
 const FAST: &[&str] = &[
@@ -363,6 +368,11 @@ pub fn parse(query: &str, vocab: &Vocabulary) -> Option<Intent> {
 
         // "nothing too slow", "not too fast"
         if let Some(n) = match_negated_tempo(rest, &mut intent) {
+            i += n;
+            continue;
+        }
+        // "no rap", "nothing country", "without metal"
+        if let Some(n) = match_negated_genre(rest, vocab, &mut intent) {
             i += n;
             continue;
         }
@@ -473,6 +483,28 @@ fn match_negated_tempo(rest: &[String], intent: &mut Intent) -> Option<usize> {
     Some(n + 1)
 }
 
+fn match_negated_genre(rest: &[String], vocab: &Vocabulary, intent: &mut Intent) -> Option<usize> {
+    if !matches!(
+        rest.first().map(String::as_str),
+        Some("no" | "not" | "nothing" | "without")
+    ) {
+        return None;
+    }
+    let lead = if rest.get(1).map(String::as_str) == Some("too") {
+        2
+    } else {
+        1
+    };
+    (1..=3).rev().find_map(|n| {
+        let words = rest.get(lead..lead + n)?;
+        let phrase = words.join(" ");
+        let group = genre_group(&phrase, vocab)?;
+        intent.summary.push(format!("no {phrase}"));
+        intent.not_genres.push(group);
+        Some(lead + n)
+    })
+}
+
 fn match_years(rest: &[String], intent: &mut Intent) -> Option<usize> {
     let mut n = 0;
     let part = match rest.first().map(String::as_str) {
@@ -562,6 +594,148 @@ fn decade(word: &str) -> Option<i64> {
     }
 }
 
+/// What a language model read in a request (DJINN's AI reader).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Asked {
+    pub genres: Vec<String>,
+    pub not_genres: Vec<String>,
+    pub years: Option<(i64, i64)>,
+    /// "slow", "medium", or "fast".
+    pub tempo: Option<String>,
+    pub mood: Option<String>,
+    pub like_artists: Vec<String>,
+}
+
+/// Fills in what the phrase reader missed in `request` (its `phrase`
+/// reading) with what a language model read. Years, tempo, and mood the
+/// phrase reader found stay. Genres come from the model, which read the
+/// whole sentence ("first dance" isn't dance music), as long as DJINN
+/// knows them (or the last words of one, "80s rock" as rock). Artists and
+/// exclusions count only if the request names them (small models make
+/// artists up), and the model's tempo guess only when nothing else
+/// narrows the songs down.
+pub fn merge(
+    request: &str,
+    phrase: Option<Intent>,
+    asked: &Asked,
+    vocab: &Vocabulary,
+) -> Option<Intent> {
+    let words = format!(
+        " {} ",
+        normalize(&request.replace([',', '.', '!', '?'], " "))
+    );
+    let named = |name: &str| !name.is_empty() && words.contains(&format!(" {name} "));
+    let mut intent = phrase.unwrap_or_default();
+    // The model read those.
+    intent.unknown.clear();
+    let mut energy: Option<(Level, String)> = None;
+    let mut mood: Option<(Mood, String)> = None;
+    let mut feel = |word: &str| -> bool {
+        let w = word.to_owned();
+        if FAST.contains(&word) || word == "energetic" {
+            energy.get_or_insert((Level::High, w));
+        } else if SLOW.contains(&word) {
+            energy.get_or_insert((Level::Low, w));
+        } else if SAD.contains(&word) {
+            mood.get_or_insert((Mood::Sad, w));
+        } else if HAPPY.contains(&word) {
+            mood.get_or_insert((Mood::Happy, w));
+        } else {
+            return false;
+        }
+        true
+    };
+    if let Some(tempo) = &asked.tempo {
+        feel(tempo);
+    }
+    if let Some(m) = &asked.mood {
+        feel(&normalize(m));
+    }
+    // A genre the library doesn't know, by its last words.
+    let known = |genre: &str| -> Option<(String, Vec<String>)> {
+        let words: Vec<&str> = genre.split(' ').collect();
+        (0..words.len()).find_map(|skip| {
+            let p = words[skip..].join(" ");
+            genre_group(&p, vocab).map(|g| (p, g))
+        })
+    };
+
+    let mut group: Vec<String> = Vec::new();
+    let mut labels: Vec<String> = Vec::new();
+    for genre in asked.genres.iter().map(|g| normalize(g)) {
+        // Small models file "chill" or "sad" as a genre.
+        if feel(&genre) {
+            continue;
+        }
+        if let Some((label, names)) = known(&genre) {
+            for name in names {
+                if !group.contains(&name) {
+                    group.push(name);
+                }
+            }
+            if !labels.contains(&label) {
+                labels.push(label);
+            }
+        }
+    }
+    if !group.is_empty() || asked.genres.is_empty() {
+        // The phrase reader's genres were words out of context.
+        let dropped: Vec<String> = intent.genres.drain(..).flatten().collect();
+        intent.summary.retain(|label| {
+            genre_group(label, vocab).is_none_or(|g| g.iter().all(|n| !dropped.contains(n)))
+        });
+    }
+    if !group.is_empty() {
+        intent.genres.push(group);
+        intent.summary.push(labels.join(" or "));
+    }
+    for genre in asked.not_genres.iter().map(|g| normalize(g)) {
+        if !named(&genre) {
+            continue;
+        }
+        if let Some(group) = genre_group(&genre, vocab) {
+            if !intent.not_genres.contains(&group) {
+                intent.not_genres.push(group);
+                intent.summary.push(format!("no {genre}"));
+            }
+        }
+    }
+    if let (None, Some((from, to))) = (intent.years, asked.years) {
+        intent.years = Some((from, to));
+        intent.summary.push(if from % 10 == 0 && to == from + 9 {
+            format!("{from}s")
+        } else if from == to {
+            from.to_string()
+        } else {
+            format!("{from} to {to}")
+        });
+    }
+    for name in asked.like_artists.iter().map(|a| normalize(a)) {
+        if !named(&name) {
+            continue;
+        }
+        if let Some((id, _)) = vocab.artists.iter().find(|(_, n)| *n == name) {
+            if !intent.like_artists.contains(id) {
+                intent.like_artists.push(*id);
+                intent.summary.push(format!("like {name}"));
+            }
+        }
+    }
+    if let (None, Some((m, word))) = (intent.mood, mood) {
+        intent.mood = Some(m);
+        intent.summary.push(word);
+    }
+    let narrowed = intent.tempo.is_some()
+        || !intent.genres.is_empty()
+        || intent.years.is_some()
+        || !intent.like_artists.is_empty();
+    if let (None, false, Some((level, word))) = (intent.energy, narrowed, energy) {
+        intent.energy = Some(level);
+        intent.summary.push(word);
+    }
+    (!intent.is_empty()).then_some(intent)
+}
+
 /// Songs that fit, best first, and how many matched in all.
 pub fn rank(
     intent: &Intent,
@@ -606,11 +780,12 @@ pub fn rank(
             }
             _ => {}
         }
-        intent.genres.iter().all(|group| {
+        let in_group = |group: &Vec<String>| {
             group
                 .iter()
                 .any(|name| song.genres.iter().any(|g| genre_fits(g, name)))
-        })
+        };
+        intent.genres.iter().all(in_group) && !intent.not_genres.iter().any(in_group)
     };
     let mut matches: Vec<&SongFacts> = songs.iter().filter(|s| fits(s)).collect();
     let total = matches.len();
@@ -751,5 +926,62 @@ mod tests {
         assert_eq!(ids, [2, 1], "popular first; 1995 and synth pop don't fit");
         assert!(genre_fits("deep house", "house"));
         assert!(!genre_fits("housewife", "house"));
+
+        let no_glam = parse("80s metal, no glam", &vocab()).unwrap();
+        assert_eq!(no_glam.summary, ["1980s", "metal", "no glam"]);
+        let (ids, _) = rank(&no_glam, &songs, &SoundIndex::default(), 10);
+        assert_eq!(ids, [2], "the glam metal song is ruled out");
+    }
+
+    #[test]
+    fn merges_what_a_model_read() {
+        let v = vocab();
+        // Nothing the phrase reader knows: the model's reading, checked.
+        let request = "first dance at a wedding, no rap";
+        let asked = Asked {
+            genres: vec!["Synth Pop".into(), " sad".into(), "sappy ballads".into()],
+            not_genres: vec!["rap".into(), "metal".into()],
+            tempo: Some("slow".into()),
+            like_artists: vec!["Zara Larsson".into()],
+            ..Asked::default()
+        };
+        let i = merge(request, parse(request, &v), &asked, &v).unwrap();
+        assert_eq!(i.genres, [vec!["synth pop".to_owned()]]);
+        assert_eq!(i.mood, Some(Mood::Sad), "\"sad\" is a mood, not a genre");
+        assert_eq!(i.not_genres.len(), 1, "only rap was ruled out by name");
+        assert!(i.like_artists.is_empty(), "nobody named Zara Larsson");
+        assert_eq!(i.energy, None, "genres narrow it already");
+        assert!(i.unknown.is_empty());
+
+        // The phrase reader's parts stay; the model fills the gaps.
+        let request = "80s songs my dad likes";
+        let asked = Asked {
+            genres: vec!["80's glam metal".into()],
+            years: Some((1970, 1979)),
+            ..Asked::default()
+        };
+        let i = merge(request, parse(request, &v), &asked, &v).unwrap();
+        assert_eq!(i.years, Some((1980, 1989)));
+        assert!(i.genres[0].contains(&"glam metal".to_owned()));
+        assert_eq!(i.summary, ["1980s", "glam metal"]);
+
+        // "house" here is a place; the model gave no genres.
+        let request = "chill music to clean the house to";
+        let asked = Asked {
+            mood: Some("calm".into()),
+            ..Asked::default()
+        };
+        let i = merge(request, parse(request, &v), &asked, &v).unwrap();
+        assert!(i.genres.is_empty());
+        assert_eq!(i.summary, ["chill"]);
+
+        // Only a feeling: the tempo guess is all there is.
+        let asked = Asked {
+            mood: Some("calm".into()),
+            ..Asked::default()
+        };
+        let i = merge("music for cooking dinner", None, &asked, &v).unwrap();
+        assert_eq!(i.energy, Some(Level::Low));
+        assert_eq!(merge("hmm", None, &Asked::default(), &v), None);
     }
 }

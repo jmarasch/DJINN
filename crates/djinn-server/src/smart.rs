@@ -7,6 +7,7 @@ use std::collections::{HashMap, HashSet};
 use axum::extract::{Path, Query, State};
 use axum::routing::get;
 use axum::{Json, Router};
+use djinn_ai::Reading;
 use djinn_library::sound::SoundIndex;
 use djinn_library::vibe::{self, SongFacts, Vocabulary};
 use djinn_store::{ArtistSummary, Track};
@@ -172,31 +173,59 @@ pub struct Described {
     /// Songs that fit in all (more than shown).
     pub total: usize,
     pub artists: Vec<ArtistSummary>,
+    /// The AI reader read the query.
+    pub read_by_ai: bool,
+}
+
+/// True if the AI reader is on and `query` has words the phrase reader
+/// didn't understand (or reads as nothing and found nothing by name).
+pub fn worth_asking(state: &AppState, query: &str, plain_found: bool) -> bool {
+    if !state.ai.reader.ready() || query.split_whitespace().count() < 2 {
+        return false;
+    }
+    let Ok(catalog) = state.catalog.read() else {
+        return false;
+    };
+    match vibe::parse(query, &catalog.vocab) {
+        Some(intent) => !intent.unknown.is_empty(),
+        None => !plain_found,
+    }
 }
 
 /// If `query` describes music, the songs and artists that fit. With AI
 /// listening on, matches are ordered by how well they sound like the
 /// description, genres nobody tagged are found by sound, and when
 /// `plain_found` is false a query the phrase reader can't place is
-/// matched by sound alone ("music for cooking dinner").
+/// matched by sound alone ("music for cooking dinner"). `read` is what
+/// the AI reader made of it, if it read it.
 pub async fn describe(
     state: &AppState,
     query: &str,
     plain_found: bool,
+    read: Option<&Reading>,
 ) -> ApiResult<Option<Described>> {
     let intent = {
         let Ok(catalog) = state.catalog.read() else {
             return Ok(None);
         };
-        vibe::parse(query, &catalog.vocab)
+        let phrase = vibe::parse(query, &catalog.vocab);
+        match read {
+            Some(read) => vibe::merge(query, phrase, &asked(read), &catalog.vocab),
+            None => phrase,
+        }
     };
-    if intent.is_none() && plain_found {
+    if intent.is_none() && plain_found && read.is_none() {
         return Ok(None);
     }
     // What the description sounds like, if the model is loaded.
     let sound = match state.ai.model() {
         Some(model) => {
-            let text = query.to_owned();
+            // Lowercase, so "Chill" and "chill" find the same songs.
+            let text = match read.and_then(|r| r.sound.as_deref()) {
+                Some(sound) => format!("{}. {sound}", query.trim()),
+                None => query.trim().to_owned(),
+            }
+            .to_lowercase();
             tokio::task::spawn_blocking(move || model.embed_text(&text).ok())
                 .await
                 .ok()
@@ -286,7 +315,19 @@ pub async fn describe(
         tracks,
         total,
         artists: state.store.artists_by_ids(&artist_ids).await?,
+        read_by_ai: read.is_some(),
     }))
+}
+
+fn asked(read: &Reading) -> vibe::Asked {
+    vibe::Asked {
+        genres: read.genres.clone(),
+        not_genres: read.not_genres.clone(),
+        years: read.years,
+        tempo: read.tempo.clone(),
+        mood: read.mood.clone(),
+        like_artists: read.like_artists.clone(),
+    }
 }
 
 /// True if nothing in the description narrows the songs down (only mood

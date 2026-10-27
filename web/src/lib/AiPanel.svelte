@@ -25,7 +25,13 @@
     await attempt(() => api.removeAi(), 'AI model removed')
   }
 
+  async function removeReader() {
+    if (!confirm('Remove the AI reader model?')) return
+    await attempt(() => api.removeReader(), 'AI reader removed')
+  }
+
   const ai = $derived(app.ai)
+  const reader = $derived(app.ai?.reader)
   const total = $derived(ai ? ai.heard + ai.waiting : 0)
 </script>
 
@@ -74,6 +80,43 @@
   {/if}
 </section>
 
+<section class="card">
+  <h2>AI reader (optional)</h2>
+  <p class="small muted">
+    A small language model reads searches that DJINN's own phrase reader can't place, like "something for a first
+    dance at a wedding, no rap", and turns them into genres, years, and moods. It runs on this computer; nothing is
+    sent anywhere. Works best with AI listening on.
+  </p>
+  {#if reader}
+    {#if reader.error}<p class="small error">{reader.error}</p>{/if}
+    {#if reader.downloading}
+      <p class="small">Downloading the model: {mb(reader.downloading[0])} of {mb(reader.downloading[1])}</p>
+      <progress max={reader.downloading[1]} value={reader.downloading[0]}></progress>
+    {:else if !reader.installed}
+      <p class="small muted">
+        The model (Qwen2.5 1.5B Instruct, free to use) is a one-time {mb(reader.download_size)} download from Hugging
+        Face and needs about 1.5 GB of memory while on. Each new request takes a few seconds{reader.gpu_build
+          ? ''
+          : ' on the CPU'}; repeated ones are instant.
+      </p>
+      <button class="primary" onclick={() => attempt(() => api.downloadReader())}>Download the model</button>
+    {:else}
+      <label class="switch big">
+        <input
+          type="checkbox"
+          checked={reader.enabled}
+          onchange={(e) => attempt(() => api.setReader(e.currentTarget.checked))}
+        />
+        Read searches with AI
+      </label>
+      {#if reader.enabled && !reader.ready}
+        <p class="small"><span class="spinner" aria-hidden="true"></span> Loading the model...</p>
+      {/if}
+      <button class="small-button" onclick={removeReader}>Remove the model</button>
+    {/if}
+  {/if}
+</section>
+
 <style>
   progress {
     width: 100%;
@@ -102,23 +145,5 @@
     min-height: 36px;
     padding: 0 12px;
     font-size: 0.8125rem;
-  }
-
-  .spinner {
-    display: inline-block;
-    width: 12px;
-    height: 12px;
-    margin-right: 6px;
-    border: 2px solid var(--line);
-    border-top-color: var(--accent);
-    border-radius: 50%;
-    vertical-align: -1px;
-    animation: spin 0.8s linear infinite;
-  }
-
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
   }
 </style>

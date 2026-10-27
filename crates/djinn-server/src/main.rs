@@ -21,6 +21,7 @@ mod jukebox;
 mod library_api;
 mod player_api;
 mod playlist_api;
+mod reader;
 mod smart;
 mod sse;
 mod state;
@@ -228,6 +229,7 @@ async fn main() -> anyhow::Result<()> {
             smart::refresh(&state).await;
             audio_api::start_analysis(&state).await;
             ai::start(&state);
+            reader::start(&state);
         });
     }
     watcher::start(state.clone());

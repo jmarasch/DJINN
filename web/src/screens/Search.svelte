@@ -11,6 +11,8 @@
   let query = $state(sessionStorage.getItem('djinn-search') ?? '')
   let results = $state<SearchResults | null>(null)
   let loading = $state(false)
+  /** The AI reader is reading the query. */
+  let thinking = $state(false)
   let latest = 0
 
   $effect(() => {
@@ -21,13 +23,29 @@
       return
     }
     const id = ++latest
+    thinking = false
     const timer = setTimeout(async () => {
       loading = true
       try {
         const found = await api.search(q)
-        if (id === latest) results = found
+        if (id !== latest) return
+        results = found
+        loading = false
+        if (!found.ask) return
+        // Words the phrase reader didn't know: once typing stops, let the
+        // AI reader have a go (a few seconds).
+        thinking = true
+        await new Promise((resolve) => setTimeout(resolve, 600))
+        if (id !== latest) return
+        const read = await api.ask(q)
+        if (id === latest && read && results) results = { ...results, described: read }
+      } catch {
+        // Keep what was found.
       } finally {
-        if (id === latest) loading = false
+        if (id === latest) {
+          loading = false
+          thinking = false
+        }
       }
     }, 150)
     return () => clearTimeout(timer)
@@ -61,11 +79,17 @@
 </script>
 
 {#snippet describedSection()}
+  {#if thinking}
+    <p class="small muted thinking"><span class="spinner" aria-hidden="true"></span> Reading that with AI...</p>
+  {/if}
   {#if described}
     <div class="described">
       <div class="described-head">
         <div>
-          <h2>Matches <span class="muted">{described.summary.join(' · ')}</span></h2>
+          <h2>
+            Matches <span class="muted">{described.summary.join(' · ')}</span>
+            {#if described.read_by_ai}<span class="tag">read by AI</span>{/if}
+          </h2>
           {#if described.tracks.length}
             <p class="small muted">
               {described.total} {described.total === 1 ? 'song fits' : 'songs fit'}{described.total >
@@ -113,7 +137,7 @@
   />
 </div>
 
-{#if empty && !loading && !described}
+{#if empty && !loading && !thinking && !described}
   <p class="muted center">No matches for "{query.trim()}".</p>
 {/if}
 
@@ -153,6 +177,21 @@
 {/if}
 
 <style>
+  .thinking {
+    margin: 12px 0;
+  }
+
+  .tag {
+    margin-left: 6px;
+    padding: 1px 6px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    font-size: 0.6875rem;
+    font-weight: 500;
+    color: var(--muted);
+    vertical-align: 2px;
+  }
+
   .described-head {
     display: flex;
     align-items: flex-start;

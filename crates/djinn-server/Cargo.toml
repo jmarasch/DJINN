@@ -42,6 +42,11 @@ tower-http.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 
+[features]
+# The AI reader on a GPU (see djinn-ai); the CPU otherwise.
+cuda = ["djinn-ai/cuda"]
+metal = ["djinn-ai/metal"]
+
 [dev-dependencies]
 figment = { workspace = true, features = ["test"] }
 tower = { workspace = true, features = ["util"] }

@@ -92,6 +92,8 @@ export interface SearchResults {
   artists: Artist[]
   /** The query read as a description ("80's hair metal"), if it is one. */
   described: Described | null
+  /** The AI reader might understand the query better (see api.ask). */
+  ask: boolean
 }
 
 export interface Described {
@@ -103,6 +105,8 @@ export interface Described {
   /** Songs that fit in all (more than shown). */
   total: number
   artists: ArtistSummary[]
+  /** The AI reader read the query. */
+  read_by_ai: boolean
 }
 
 export interface AlbumDetail extends Album {
@@ -396,6 +400,19 @@ export interface AiStatus {
   heard: number
   waiting: number
   listening: boolean
+  reader: ReaderStatus
+}
+
+/** The AI reader for free-form search requests. */
+export interface ReaderStatus {
+  installed: boolean
+  enabled: boolean
+  ready: boolean
+  download_size: number
+  downloading: [number, number] | null
+  error: string | null
+  /** Built to use a GPU when there is one. */
+  gpu_build: boolean
 }
 
 export interface IdentifyStatus {

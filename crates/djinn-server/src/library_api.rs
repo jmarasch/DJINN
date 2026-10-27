@@ -27,6 +27,7 @@ const MAX_PAGE: i64 = 200;
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/search", get(search))
+        .route("/search/ask", get(ask))
         .route("/tracks", get(tracks))
         .route("/tracks/{id}", get(track))
         .route("/albums", get(albums))
@@ -53,6 +54,8 @@ struct SearchResponse {
     results: SearchResults,
     /// Songs fitting the query read as a description ("80's hair metal").
     described: Option<crate::smart::Described>,
+    /// The AI reader might understand it better: ask `/search/ask`.
+    ask: bool,
 }
 
 async fn search(
@@ -67,10 +70,27 @@ async fn search(
     let results = state.store.search(&query.q, limit).await?;
     let plain_found =
         !results.tracks.is_empty() || !results.albums.is_empty() || !results.artists.is_empty();
+    let read = state.ai.reader.cached(&query.q);
+    let ask = read.is_none() && crate::smart::worth_asking(&state, &query.q, plain_found);
     Ok(Json(SearchResponse {
-        described: crate::smart::describe(&state, &query.q, plain_found).await?,
+        described: crate::smart::describe(&state, &query.q, plain_found, read.as_ref()).await?,
         results,
+        ask,
     }))
+}
+
+/// The query read by the AI reader (a few seconds), as a description.
+async fn ask(
+    _: CurrentUser,
+    State(state): State<AppState>,
+    Query(query): Query<SearchQuery>,
+) -> ApiResult<Json<Option<crate::smart::Described>>> {
+    let Some(read) = crate::reader::read(&state, &query.q).await else {
+        return Ok(Json(None));
+    };
+    Ok(Json(
+        crate::smart::describe(&state, &query.q, false, Some(&read)).await?,
+    ))
 }
 
 #[derive(Deserialize)]

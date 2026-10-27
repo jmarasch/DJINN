@@ -26,7 +26,7 @@ pub struct Clap {
 }
 
 impl Clap {
-    /// Loads the model files from `dir` (see [`crate::models::FILES`]).
+    /// Loads the model files from `dir` (see [`crate::models::CLAP`]).
     /// Takes a few seconds.
     pub fn load(dir: &Path) -> Result<Self, AiError> {
         let model_error = |e: TractError| AiError::Model(format!("{e:#}"));

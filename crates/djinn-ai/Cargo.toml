@@ -7,10 +7,21 @@ publish.workspace = true
 # Optional local models (downloaded on request, run on the CPU) that listen
 # to songs and read descriptions. No web or database code here.
 [dependencies]
+candle-core = "0.11"
+candle-nn = "0.11"
+candle-transformers = "0.11"
 realfft = "3.5"
+serde.workspace = true
+serde_json = "1.0.154"
 thiserror.workspace = true
 tokenizers = { version = "0.22", default-features = false, features = ["fancy-regex"] }
 tract-onnx = "0.23.9"
+
+[features]
+# The reader on an NVIDIA GPU (needs the CUDA toolkit to build) or an
+# Apple GPU. Without a GPU at run time it uses the CPU.
+cuda = ["candle-core/cuda", "candle-nn/cuda", "candle-transformers/cuda"]
+metal = ["candle-core/metal", "candle-nn/metal", "candle-transformers/metal"]
 
 [lints]
 workspace = true
