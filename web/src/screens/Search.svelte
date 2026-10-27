@@ -75,8 +75,9 @@
             </p>
           {:else}
             <p class="small muted">
-              Nothing in the library fits that. Genres come from your files' tags and from MusicBrainz (Admin >
-              Rules), so songs without either can't match a genre.
+              Nothing in the library fits that.{#if isAdmin()}
+                Genres come from your files' tags and from MusicBrainz (Admin > Rules), so songs without either can't
+                match a genre.{/if}
             </p>
           {/if}
         </div>
