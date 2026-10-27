@@ -3,6 +3,7 @@ name = "djinn-library"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
+license.workspace = true
 
 [dependencies]
 djinn-store = { path = "../djinn-store" }

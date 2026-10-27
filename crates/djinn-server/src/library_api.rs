@@ -192,12 +192,15 @@ async fn artist(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> ApiResult<Json<ArtistDetail>> {
-    state
+    let mut artist = state
         .store
         .artist(id)
         .await?
-        .map(Json)
-        .ok_or_else(ApiError::not_found)
+        .ok_or_else(ApiError::not_found)?;
+    if artist.genres.as_deref().is_none_or(|g| g.trim().is_empty()) {
+        artist.genres = crate::smart::song_genres(&state, id);
+    }
+    Ok(Json(artist))
 }
 
 #[derive(Deserialize)]
@@ -345,6 +348,26 @@ pub fn lookup_status(state: &AppState) -> LookupStatus {
 
 /// Starts an online artist lookup in the background. Returns false if one
 /// is already running.
+/// At startup: finishes lookups that failed last time (a busy service, no
+/// network), without rechecking anything that already worked.
+pub async fn retry_unfinished_lookups(state: &AppState) {
+    let on = crate::jukebox::setting(&state.store, crate::jukebox::ONLINE_INFO, 0)
+        .await
+        .is_ok_and(|v| v == 1);
+    if !on {
+        return;
+    }
+    // Nothing is ever older than the oldest possible time, so these are
+    // only the ones never finished.
+    let artists = state.store.artists_for_info_lookup(i64::MIN).await;
+    let albums = state.store.albums_for_info_lookup(i64::MIN).await;
+    let due = artists.is_ok_and(|a| !a.is_empty()) || albums.is_ok_and(|a| !a.is_empty());
+    if due {
+        tracing::info!("finishing artist lookups that didn't complete last time");
+        start_artist_lookup(state, false);
+    }
+}
+
 pub fn start_artist_lookup(state: &AppState, force: bool) -> bool {
     if state.scan.lookup_running.swap(true, Ordering::AcqRel) {
         return false;

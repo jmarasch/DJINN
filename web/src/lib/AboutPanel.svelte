@@ -83,6 +83,12 @@
       A party jukebox by New Terra Studios.{#if about.commit}
         Build {about.commit}{about.commit_date ? `, ${about.commit_date}` : ''}.{/if}
     </p>
+    <p class="small muted">
+      Free for any non-commercial use under the
+      <a href="https://polyformproject.org/licenses/noncommercial/1.0.0" target="_blank" rel="noopener noreferrer"
+        >PolyForm Noncommercial License 1.0.0</a
+      >. Nobody may sell it or use it to make money.
+    </p>
     <div class="links">
       <a href={about.repository} target="_blank" rel="noopener noreferrer">Source code on GitHub</a>
       <a href="{about.repository}/issues" target="_blank" rel="noopener noreferrer">Report a problem</a>

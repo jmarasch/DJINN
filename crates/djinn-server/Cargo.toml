@@ -3,6 +3,7 @@ name = "djinn-server"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
+license.workspace = true
 
 [[bin]]
 name = "djinn"

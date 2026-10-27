@@ -228,6 +228,7 @@ async fn main() -> anyhow::Result<()> {
         let state = state.clone();
         tokio::spawn(async move {
             smart::refresh(&state).await;
+            library_api::retry_unfinished_lookups(&state).await;
             audio_api::start_analysis(&state).await;
             ai::start(&state);
             reader::start(&state);

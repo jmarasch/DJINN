@@ -262,9 +262,9 @@
     </Sheet>
   {/if}
 {:else if tab === 'audio'}
+  <CrossfadePanel />
   <OutputsPanel />
   <CastPanel />
-  <CrossfadePanel />
   <ReplayGainPanel />
 {:else if tab === 'ai'}
   <AiPanel />
@@ -352,7 +352,7 @@
       <p class="muted">No requests since the log was last cleared.</p>
     {/each}
   </section>
-{:else if settings}
+{:else if tab === 'rules' && settings}
   <section class="card">
     <h2>Rules</h2>
     <form class="settings" onsubmit={saveSettings}>

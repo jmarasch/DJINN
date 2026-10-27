@@ -224,6 +224,19 @@ impl Store {
         Ok(rows)
     }
 
+    /// (artist id, track id, featured) for each playable song an artist
+    /// is on.
+    pub async fn artist_tracks(&self) -> Result<Vec<(i64, i64, bool)>> {
+        let rows = sqlx::query_as(
+            "SELECT ta.artist_id, ta.track_id, ta.featured FROM track_artists ta \
+             JOIN tracks t ON t.id = ta.track_id \
+             WHERE t.removed_at IS NULL",
+        )
+        .fetch_all(self.pool())
+        .await?;
+        Ok(rows)
+    }
+
     /// Every artist with playable songs and their genres.
     pub async fn artist_genres(&self) -> Result<Vec<ArtistGenres>> {
         let rows = sqlx::query_as(

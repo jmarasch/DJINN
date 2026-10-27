@@ -30,8 +30,12 @@ const MIN_SOUND_SONGS: usize = 2;
 pub struct Catalog {
     songs: Vec<SongFacts>,
     vocab: Vocabulary,
-    /// Each artist's genres, normalized.
+    /// Each artist's genres, normalized: MusicBrainz's, else the ones most
+    /// of their songs have.
     artist_genres: HashMap<i64, HashSet<String>>,
+    /// Genres from their songs, for artists MusicBrainz has none for; best
+    /// first, for showing.
+    song_genres: HashMap<i64, Vec<String>>,
     /// What the AI model heard in each song (when it's on).
     heard: HashMap<i64, Vec<f32>>,
 }
@@ -61,7 +65,8 @@ pub async fn refresh(state: &AppState) {
         let facts = state.store.track_facts().await?;
         let artists = state.store.artist_genres().await?;
         let heard = state.store.heard_rows(djinn_ai::models::VERSION).await?;
-        Ok::<_, djinn_store::StoreError>((rows, facts, artists, heard))
+        let led = state.store.artist_tracks().await?;
+        Ok::<_, djinn_store::StoreError>((rows, facts, artists, heard, led))
     }
     .await;
     let genre_vectors = if crate::jukebox::setting(&state.store, crate::ai::GENRE_TAGS, 1)
@@ -72,7 +77,7 @@ pub async fn refresh(state: &AppState) {
     } else {
         Vec::new()
     };
-    let (rows, facts, artists, heard) = match loaded {
+    let (rows, facts, artists, heard, led) = match loaded {
         Ok(loaded) => loaded,
         Err(e) => {
             tracing::error!(error = %e, "loading song facts failed");
@@ -139,16 +144,45 @@ pub async fn refresh(state: &AppState) {
             all_genres.iter().map(String::as_str),
             artists.iter().map(|a| (a.id, a.name.as_str())),
         );
-        let artist_genres = artists
+        let mut artist_genres: HashMap<i64, HashSet<String>> = artists
             .iter()
             .map(|a| (a.id, split(&a.genres).into_iter().collect()))
             .collect();
+        // No genres from MusicBrainz: the ones most of their songs have
+        // (tags, identified songs, what the AI heard).
+        let by_id: HashMap<i64, &SongFacts> = songs.iter().map(|s| (s.id, s)).collect();
+        // Songs they lead; artists only ever featured go by those songs.
+        let mut led_songs: HashMap<i64, Vec<&Vec<String>>> = HashMap::new();
+        let mut featured_songs: HashMap<i64, Vec<&Vec<String>>> = HashMap::new();
+        for (artist, track, featured) in &led {
+            if let Some(song) = by_id.get(track) {
+                let into = if *featured {
+                    &mut featured_songs
+                } else {
+                    &mut led_songs
+                };
+                into.entry(*artist).or_default().push(&song.genres);
+            }
+        }
+        let mut song_genres = HashMap::new();
+        for (artist, genres) in artist_genres.iter_mut() {
+            if !genres.is_empty() {
+                continue;
+            }
+            let theirs = led_songs.get(artist).or_else(|| featured_songs.get(artist));
+            let found = genres_from_songs(theirs.map_or(&[][..], Vec::as_slice));
+            genres.extend(found.iter().cloned());
+            if !found.is_empty() {
+                song_genres.insert(*artist, found);
+            }
+        }
         (
             SoundIndex::build(rows),
             Catalog {
                 songs,
                 vocab,
                 artist_genres,
+                song_genres,
                 heard,
             },
         )
@@ -337,6 +371,35 @@ fn asked(read: &Reading) -> vibe::Asked {
     }
 }
 
+/// Genres shown for an artist with none from MusicBrainz, from their
+/// songs; `None` if they have their own or none can be told.
+pub fn song_genres(state: &AppState, artist: i64) -> Option<String> {
+    let catalog = state.catalog.read().ok()?;
+    catalog.song_genres.get(&artist).map(|g| g.join(", "))
+}
+
+/// The genres most of an artist's songs share, best first: up to five,
+/// each on at least a quarter of the songs (and two, with four or more).
+fn genres_from_songs(songs: &[&Vec<String>]) -> Vec<String> {
+    let mut counts: HashMap<&str, usize> = HashMap::new();
+    for genres in songs {
+        for genre in genres.iter() {
+            *counts.entry(genre.as_str()).or_default() += 1;
+        }
+    }
+    let needed = songs
+        .len()
+        .div_ceil(4)
+        .max(if songs.len() >= 4 { 2 } else { 1 });
+    let mut found: Vec<(&str, usize)> = counts.into_iter().filter(|(_, n)| *n >= needed).collect();
+    found.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
+    found
+        .into_iter()
+        .take(5)
+        .map(|(g, _)| g.to_owned())
+        .collect()
+}
+
 /// True if nothing in the description narrows the songs down (only mood
 /// words, or words the phrase reader didn't know).
 fn soft_only(intent: &vibe::Intent) -> bool {
@@ -453,4 +516,33 @@ fn rank_artists(id: i64, catalog: &Catalog, sound: &SoundIndex) -> Vec<i64> {
         .take(SIMILAR_ARTISTS)
         .map(|(_, other)| other)
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn artist_genres_from_their_songs() {
+        let g = |list: &[&str]| list.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
+        let songs = [
+            g(&["house", "edm"]),
+            g(&["house"]),
+            g(&["house", "dance pop"]),
+            g(&["edm"]),
+            g(&["trance"]),
+        ];
+        let refs: Vec<&Vec<String>> = songs.iter().collect();
+        assert_eq!(
+            genres_from_songs(&refs),
+            ["house", "edm"],
+            "trance and dance pop are one-offs"
+        );
+        let one = [g(&["synth pop"])];
+        assert_eq!(
+            genres_from_songs(&one.iter().collect::<Vec<_>>()),
+            ["synth pop"]
+        );
+        assert!(genres_from_songs(&[]).is_empty());
+    }
 }

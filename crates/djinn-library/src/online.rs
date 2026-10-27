@@ -528,24 +528,28 @@ impl Services {
 
 /// Sends a request, retrying once if the service is busy (429 or 5xx).
 async fn send(request: reqwest::RequestBuilder) -> Option<reqwest::Response> {
-    let retry = request.try_clone();
-    let response = request.send().await.ok()?;
-    let status = response.status();
-    if status.is_success() {
-        return Some(response);
+    // Busy spells (MusicBrainz's "server is busy") can outlast one retry.
+    let mut request = request;
+    for attempt in 1u64..=3 {
+        let retry = request.try_clone();
+        let response = request.send().await.ok()?;
+        let status = response.status();
+        if status.is_success() {
+            return Some(response);
+        }
+        if status != reqwest::StatusCode::TOO_MANY_REQUESTS && !status.is_server_error() {
+            return None;
+        }
+        let wait = response
+            .headers()
+            .get(reqwest::header::RETRY_AFTER)
+            .and_then(|v| v.to_str().ok()?.parse::<u64>().ok())
+            .map_or(Duration::from_secs(2 * attempt), Duration::from_secs)
+            .min(MAX_RETRY_WAIT);
+        tokio::time::sleep(wait).await;
+        request = retry?;
     }
-    if status != reqwest::StatusCode::TOO_MANY_REQUESTS && !status.is_server_error() {
-        return None;
-    }
-    let wait = response
-        .headers()
-        .get(reqwest::header::RETRY_AFTER)
-        .and_then(|v| v.to_str().ok()?.parse::<u64>().ok())
-        .map_or(Duration::from_secs(2), Duration::from_secs)
-        .min(MAX_RETRY_WAIT);
-    tokio::time::sleep(wait).await;
-    let response = retry?.send().await.ok()?;
-    response.status().is_success().then_some(response)
+    None
 }
 
 async fn get_json<T: serde::de::DeserializeOwned>(request: reqwest::RequestBuilder) -> Option<T> {

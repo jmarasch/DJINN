@@ -3,6 +3,7 @@ name = "djinn-ai"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
+license.workspace = true
 
 # Optional local models (downloaded on request, run on the CPU) that listen
 # to songs and read descriptions. No web or database code here.
