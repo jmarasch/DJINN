@@ -1,5 +1,7 @@
 import type {
   AiStatus,
+  IdentificationRow,
+  IdentifyStatus,
   Album,
   AlbumSort,
   AudioDevice,
@@ -156,6 +158,10 @@ export const api = {
     put<OutputConfig>(`/outputs/${o.id}`, { enabled: o.enabled, volume_trim: o.volume_trim, delay_ms: o.delay_ms }),
   removeOutput: (id: number) => del<void>(`/outputs/${id}`),
   replayGain: () => get<ReplayGainSettings>('/audio/replaygain'),
+  identify: () => get<IdentifyStatus & { found: IdentificationRow[] }>('/identify'),
+  startIdentify: () => post<void>('/identify/start'),
+  applyIdentified: (trackIds: number[]) => post<void>('/identify/apply', { track_ids: trackIds }),
+  dismissIdentified: (trackIds: number[]) => post<void>('/identify/dismiss', { track_ids: trackIds }),
   ai: () => get<AiStatus>('/ai'),
   setAi: (enabled: boolean) => put<AiStatus>('/ai', { enabled }),
   downloadAi: () => post<void>('/ai/download'),

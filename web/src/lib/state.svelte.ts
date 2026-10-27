@@ -4,6 +4,7 @@ import { api, ApiError } from './api'
 import { clearListCache } from './listCache'
 import type {
   AiStatus,
+  IdentifyStatus,
   CastDevice,
   LoudnessStatus,
   LookupStatus,
@@ -43,6 +44,8 @@ export const app = $state({
   lookup: { running: false, last: null, finished_at: null } as LookupStatus,
   /** ReplayGain loudness measuring; filled in on the Audio tab. */
   loudness: null as LoudnessStatus | null,
+  /** Identifying songs; filled in on the Library tab, kept current by SSE. */
+  identify: null as IdentifyStatus | null,
   /** AI listening; filled in on the Library tab, kept current by SSE. */
   ai: null as AiStatus | null,
   /** Cast devices; filled in on the Audio tab, kept current by SSE. */
@@ -109,6 +112,7 @@ export function connect() {
   on<LoudnessStatus>('loudness', (data) => (app.loudness = data))
   on<CastDevice[]>('cast_status', (data) => (app.casts = data))
   on<AiStatus>('ai_status', (data) => (app.ai = data))
+  on<IdentifyStatus>('identify_status', (data) => (app.identify = data))
 
   events.onerror = async () => {
     app.connected = false

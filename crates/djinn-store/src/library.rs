@@ -901,7 +901,55 @@ impl Store {
     }
 }
 
+/// The scanned track with gaps filled from an applied identification, if
+/// there's one for this file.
+async fn fill_from_identification(
+    tx: &mut Transaction<'_, Sqlite>,
+    t: &ScannedTrack,
+) -> Result<Option<ScannedTrack>> {
+    type Row = (
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<i64>,
+        Option<String>,
+    );
+    let row: Option<Row> = sqlx::query_as(
+        "SELECT ti.title, ti.artist, ti.album, ti.year, ti.genres FROM track_ids ti \
+         JOIN tracks t ON t.id = ti.track_id WHERE t.path = ? AND ti.status = 'applied'",
+    )
+    .bind(&t.path)
+    .fetch_optional(&mut **tx)
+    .await?;
+    let Some((title, artist, album, year, genres)) = row else {
+        return Ok(None);
+    };
+    let mut filled = t.clone();
+    if filled.title.trim().is_empty() {
+        if let Some(title) = title {
+            filled.title = title;
+        }
+    }
+    if filled.artist.is_none() {
+        filled.artist = artist;
+        filled.credits.clear();
+    }
+    if filled.album.is_none() {
+        filled.album = album;
+    }
+    if filled.year.is_none() {
+        filled.year = year;
+    }
+    if filled.genre.is_none() {
+        filled.genre = genres.filter(|g| !g.is_empty());
+    }
+    Ok(Some(filled))
+}
+
 async fn save_track(tx: &mut Transaction<'_, Sqlite>, t: &ScannedTrack, now: i64) -> Result<()> {
+    // An applied identification fills in what the tags lack.
+    let filled = fill_from_identification(tx, t).await?;
+    let t = filled.as_ref().unwrap_or(t);
     let credits: Vec<(&str, bool)> = if t.credits.is_empty() {
         t.artist
             .as_deref()

@@ -2,6 +2,7 @@
 
 pub mod art;
 pub mod credits;
+pub mod identify;
 pub mod online;
 pub mod sound;
 mod tags;
@@ -160,6 +161,54 @@ pub async fn scan(
     status.done = true;
     progress(&status);
     Ok(status)
+}
+
+/// Re-reads particular files (after an identification was applied, say)
+/// and saves them, then refreshes artwork. Files outside `roots` or gone
+/// from disk are skipped.
+pub async fn reread(
+    store: &Store,
+    roots: &[PathBuf],
+    art_dir: &Path,
+    paths: &[String],
+) -> Result<usize, LibraryError> {
+    let files: Vec<FoundFile> = paths
+        .iter()
+        .filter_map(|p| {
+            let path = PathBuf::from(p);
+            let root = roots.iter().find(|r| path.starts_with(r))?;
+            let meta = std::fs::metadata(&path).ok()?;
+            let mtime = meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                .and_then(|d| i64::try_from(d.as_millis()).ok())
+                .unwrap_or(0);
+            let artist_dir = path.strip_prefix(root).ok().and_then(|rel| {
+                let mut parts = rel.components();
+                let first = parts.next()?;
+                parts.next().map(|_| root.join(first))
+            });
+            Some(FoundFile {
+                path_str: p.clone(),
+                path,
+                artist_dir,
+                size: i64::try_from(meta.len()).unwrap_or(i64::MAX),
+                mtime,
+            })
+        })
+        .collect();
+    let art_dir = art_dir.to_path_buf();
+    let keep = keep_whole(store).await?;
+    let scanned = tokio::task::spawn_blocking(move || {
+        let cache = tags::ArtCache::default();
+        read_batch(&files, &art_dir, &cache, &keep)
+    })
+    .await
+    .map_err(|e| LibraryError::Task(e.to_string()))?;
+    store.save_scanned(&scanned).await?;
+    store.refresh_artwork().await?;
+    Ok(scanned.len())
 }
 
 /// Lists audio files under the roots. Returns them with the roots that could

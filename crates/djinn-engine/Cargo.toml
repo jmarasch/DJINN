@@ -8,6 +8,7 @@ publish.workspace = true
 cpal = "0.18.2"
 ebur128 = "0.1.10"
 realfft = "3.5"
+rusty-chromaprint = "0.3"
 rtrb = "0.4.1"
 rubato = "5.0.1"
 symphonia = { version = "0.6.1", features = ["mp3", "flac", "aac", "isomp4", "vorbis", "ogg", "wav", "pcm"] }

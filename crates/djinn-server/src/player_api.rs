@@ -279,6 +279,9 @@ struct Settings {
     /// Votes that skip a song; 0 turns skip voting off.
     #[serde(default)]
     skip_votes: i64,
+    /// AcoustID application key, for identifying songs by sound.
+    #[serde(default)]
+    acoustid_key: String,
 }
 
 fn default_true() -> bool {
@@ -313,6 +316,10 @@ async fn settings(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json
             .join("\n"),
         tv_page: crate::tv_api::enabled(&state).await?,
         skip_votes: jukebox::setting(store, jukebox::SKIP_VOTES, 0).await?,
+        acoustid_key: store
+            .get_setting(crate::identify_api::ACOUSTID_KEY)
+            .await?
+            .unwrap_or_default(),
     }))
 }
 
@@ -369,6 +376,15 @@ async fn update_settings(
         .await?;
     store
         .set_setting(jukebox::SKIP_VOTES, &body.skip_votes.to_string())
+        .await?;
+    let acoustid_key = body.acoustid_key.trim();
+    if acoustid_key.len() > 64 || !acoustid_key.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return Err(ApiError::bad_request(
+            "that doesn't look like an AcoustID key",
+        ));
+    }
+    store
+        .set_setting(crate::identify_api::ACOUSTID_KEY, acoustid_key)
         .await?;
     state
         .jukebox

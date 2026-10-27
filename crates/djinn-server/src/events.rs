@@ -32,6 +32,8 @@ pub enum ServerEvent {
     CastStatus(Vec<djinn_cast::CastStatus>),
     /// AI listening: download, model, and progress.
     AiStatus(crate::ai::AiStatus),
+    /// Identifying songs by fingerprint: progress.
+    IdentifyStatus(crate::identify_api::IdentifyStatus),
 }
 
 impl ServerEvent {
@@ -49,6 +51,7 @@ impl ServerEvent {
             Self::Loudness(_) => "loudness",
             Self::CastStatus(_) => "cast_status",
             Self::AiStatus(_) => "ai_status",
+            Self::IdentifyStatus(_) => "identify_status",
         }
     }
 }

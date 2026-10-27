@@ -14,6 +14,7 @@ mod drift;
 mod engine;
 mod error;
 mod features;
+mod fingerprint;
 mod loudness;
 mod mixdown;
 mod output;
@@ -30,6 +31,7 @@ pub use error::EngineError;
 pub use features::{
     analyze, decode_mono, describe, Analysis, Features, FEATURES_VERSION, FEATURE_COUNT,
 };
+pub use fingerprint::fingerprint;
 pub use loudness::{measure_loudness, Loudness, REFERENCE_LUFS};
 pub use player::MAX_CROSSFADE_SECS;
 pub use tap::{stream_tap, StreamTap, TapReader};

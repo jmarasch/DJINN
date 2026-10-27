@@ -1,5 +1,6 @@
 //! DJINN storage: SQLite access, migrations, and models.
 
+mod identify;
 mod library;
 mod loudness;
 mod outputs;
@@ -7,6 +8,7 @@ mod playlists;
 mod queue;
 mod users;
 
+pub use identify::*;
 pub use library::*;
 pub use loudness::*;
 pub use outputs::*;

@@ -3,6 +3,7 @@
   import FolderPicker from '../lib/FolderPicker.svelte'
   import Icon from '../lib/Icon.svelte'
   import AiPanel from '../lib/AiPanel.svelte'
+  import IdentifyPanel from '../lib/IdentifyPanel.svelte'
   import CastPanel from '../lib/CastPanel.svelte'
   import CrossfadePanel from '../lib/CrossfadePanel.svelte'
   import OutputsPanel from '../lib/OutputsPanel.svelte'
@@ -213,6 +214,7 @@
     <button disabled={scanning} onclick={checkForChanges}>Check for changes</button>
   </section>
 
+  <IdentifyPanel />
   <AiPanel />
 
   <section class="card">
@@ -378,6 +380,21 @@
         <span class="small muted">
           MusicBrainz needs no account, but asks apps to say who to contact if something goes wrong. It's sent with
           each MusicBrainz request and adds album covers, genres, and exact artist matches.
+        </span>
+      </label>
+      <label>
+        AcoustID key (for identifying songs by sound)
+        <input
+          type="text"
+          bind:value={settings.acoustid_key}
+          placeholder="Leave empty to skip"
+          maxlength="64"
+          autocapitalize="none"
+          spellcheck="false"
+        />
+        <span class="small muted">
+          Free for non-commercial use: register an application at acoustid.org/new-application and paste its key.
+          Song fingerprints (not the audio) are sent to AcoustID, and details come from MusicBrainz.
         </span>
       </label>
       <label>

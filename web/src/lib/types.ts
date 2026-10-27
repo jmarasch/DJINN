@@ -298,6 +298,8 @@ export interface Settings {
   tv_page: boolean
   /** Votes that skip a song; 0 turns skip voting off. */
   skip_votes: number
+  /** AcoustID application key, for identifying songs by sound. */
+  acoustid_key: string
 }
 
 export interface Page<T> {
@@ -394,4 +396,29 @@ export interface AiStatus {
   heard: number
   waiting: number
   listening: boolean
+}
+
+export interface IdentifyStatus {
+  /** Songs missing something, not checked yet. */
+  waiting: number
+  /** Found, waiting for review. */
+  found: number
+  applied: number
+  running: boolean
+  needs_key: boolean
+  needs_contact: boolean
+}
+
+export interface IdentificationRow {
+  track_id: number
+  score: number | null
+  title: string | null
+  artist: string | null
+  album: string | null
+  year: number | null
+  genres: string | null
+  current_title: string
+  current_artist: string | null
+  current_album: string | null
+  current_year: number | null
 }
