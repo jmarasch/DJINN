@@ -300,7 +300,11 @@ async fn live(
     } else {
         None
     };
-    live_response(stream, title.map(|t| (t, state.events.subscribe())))
+    live_response(
+        stream,
+        title.map(|t| (t, state.events.subscribe())),
+        state.shutdown.subscribe(),
+    )
 }
 
 /// How many audio bytes go between title blocks.
@@ -343,6 +347,8 @@ struct LiveBody {
     titles: Option<(String, bool, tokio::sync::broadcast::Receiver<ServerEvent>)>,
     until_title: usize,
     pending: Bytes,
+    /// Ends the stream when DJINN shuts down, so it can exit.
+    shutdown: tokio::sync::watch::Receiver<bool>,
 }
 
 impl LiveBody {
@@ -354,7 +360,11 @@ impl LiveBody {
             if let Some(frame) = self.backlog.pop_front() {
                 return Some(frame);
             }
-            match self.live.recv().await {
+            let frame = tokio::select! {
+                frame = self.live.recv() => frame,
+                _ = self.shutdown.wait_for(|stop| *stop) => return None,
+            };
+            match frame {
                 Ok(frame) => return Some(frame),
                 // A slow client skipped frames; MP3 picks up at the next.
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
@@ -397,6 +407,7 @@ impl LiveBody {
 fn live_response(
     stream: &LiveStream,
     titles: Option<(String, tokio::sync::broadcast::Receiver<ServerEvent>)>,
+    shutdown: tokio::sync::watch::Receiver<bool>,
 ) -> Response {
     let stream::Listener {
         backlog,
@@ -411,6 +422,7 @@ fn live_response(
         titles: titles.map(|(title, events)| (title, false, events)),
         until_title: ICY_METAINT,
         pending: Bytes::new(),
+        shutdown,
     };
     let body = futures_util::stream::unfold(state, |mut state| async move {
         let chunk = state.next().await?;

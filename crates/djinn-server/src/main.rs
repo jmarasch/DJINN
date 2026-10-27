@@ -221,8 +221,9 @@ async fn main() -> anyhow::Result<()> {
     watcher::start(state.clone());
 
     let shutdown = std::sync::Arc::clone(&state.shutdown);
+    let mut stopping = state.shutdown.subscribe();
     let shutdown_request = std::sync::Arc::clone(&state.shutdown_request);
-    axum::serve(
+    let server = axum::serve(
         listener,
         // Connection info gives handlers the client's IP (for MAC lookup).
         app(state).into_make_service_with_connect_info::<std::net::SocketAddr>(),
@@ -230,9 +231,17 @@ async fn main() -> anyhow::Result<()> {
     .with_graceful_shutdown(async move {
         shutdown_signal(shutdown_request).await;
         shutdown.send_replace(true);
-    })
-    .await
-    .context("server error")?;
+    });
+    // Long-lived responses end on shutdown; anything still open after a
+    // few seconds doesn't get to keep DJINN running.
+    let deadline = async move {
+        let _ = stopping.wait_for(|stop| *stop).await;
+        tokio::time::sleep(SHUTDOWN_GRACE).await;
+    };
+    tokio::select! {
+        result = async move { server.await } => result.context("server error")?,
+        () = deadline => tracing::warn!("connections still open; shutting down anyway"),
+    }
 
     // Remove the tray icon before exiting (Windows leaves a ghost icon
     // otherwise).
@@ -286,6 +295,9 @@ fn app(state: AppState) -> Router {
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }
+
+/// How long open connections get to finish after a shutdown request.
+const SHUTDOWN_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// Resolves on Ctrl+C, SIGTERM on Unix (systemd stop), or a request from
 /// the tray menu.
