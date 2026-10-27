@@ -38,6 +38,10 @@
   }
 
   async function playWild() {
+    if (wild) {
+      toast('Wild play is already on')
+      return
+    }
     try {
       await api.playWild()
       toast('Wild play: random songs from the whole library')
@@ -64,7 +68,7 @@
   </div>
 {/if}
 
-<div class="row wild" class:active={wild}>
+<button class="row wild" class:active={wild} onclick={playWild}>
   <span class="icon"><Icon name="shuffle" /></span>
   <span class="text">
     <span class="ellipsis block">Wild play</span>
@@ -73,9 +77,9 @@
   {#if wild}
     <span class="badge">Playing</span>
   {:else}
-    <button class="primary" onclick={playWild}>Play</button>
+    <span class="play">Play</span>
   {/if}
-</div>
+</button>
 
 <form class="new" onsubmit={create}>
   <input placeholder="New playlist, e.g. Chill or Dance" bind:value={name} maxlength="60" />
@@ -100,13 +104,25 @@
 
 <style>
   .wild {
+    width: 100%;
     margin-bottom: 12px;
+    padding: 0;
+    border-radius: 0;
+    background: transparent;
+    text-align: left;
+    font: inherit;
   }
 
-  .wild button {
+  .wild .play {
     flex: none;
+    display: grid;
+    place-items: center;
     min-height: 36px;
     padding: 0 16px;
+    border-radius: 10px;
+    background: var(--accent);
+    color: var(--accent-text);
+    font-weight: 600;
   }
 
   .playing {
