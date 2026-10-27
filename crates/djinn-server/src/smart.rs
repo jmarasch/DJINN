@@ -36,6 +36,12 @@ pub struct Catalog {
     /// Genres from their songs, for artists MusicBrainz has none for; best
     /// first, for showing.
     song_genres: HashMap<i64, Vec<String>>,
+    /// Each song's own styles, from AI listening.
+    styles: HashMap<i64, Vec<String>>,
+    /// Each song's genres and styles together.
+    tags: HashMap<i64, Vec<String>>,
+    /// Each artist's songs (the ones they lead, else the ones they're on).
+    artist_songs: HashMap<i64, Vec<i64>>,
     /// What the AI model heard in each song (when it's on).
     heard: HashMap<i64, Vec<f32>>,
 }
@@ -44,6 +50,10 @@ pub struct Catalog {
 /// they're clear enough.
 const HEARD_GENRES: usize = 2;
 const HEARD_GENRE_MIN: f32 = 0.35;
+/// A song's styles: up to this many genres the AI hears, each this close
+/// to the clearest one.
+const STYLES: usize = 3;
+const STYLE_MARGIN: f32 = 0.05;
 /// A description matched by sound alone keeps songs this close to the
 /// best match, and at least this close to the description.
 const SOUND_MARGIN: f32 = 0.08;
@@ -52,7 +62,194 @@ const SOUND_MIN: f32 = 0.2;
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/tracks/{id}/similar", get(similar_tracks))
+        .route("/tracks/{id}/tags", get(track_tags))
         .route("/artists/{id}/similar", get(similar_artists))
+        .route("/genres/{name}", get(genre))
+}
+
+impl Catalog {
+    /// Songs whose genres or styles include `genre` (normalized).
+    fn songs_in(&self, genre: &str) -> Vec<i64> {
+        self.tags
+            .iter()
+            .filter(|(_, tags)| tags.iter().any(|t| vibe::genre_fits(t, genre)))
+            .map(|(id, _)| *id)
+            .collect()
+    }
+}
+
+/// Radio's song picker, working from the same sound index and catalog as
+/// search.
+pub struct SmartMixer {
+    sound: std::sync::Arc<std::sync::RwLock<SoundIndex>>,
+    catalog: std::sync::Arc<std::sync::RwLock<Catalog>>,
+}
+
+impl SmartMixer {
+    pub fn new(state: &AppState) -> Self {
+        Self {
+            sound: std::sync::Arc::clone(&state.sound),
+            catalog: std::sync::Arc::clone(&state.catalog),
+        }
+    }
+}
+
+impl crate::jukebox::Mixer for SmartMixer {
+    fn radio(
+        &self,
+        seed: &crate::jukebox::RadioSeed,
+        played: &[i64],
+        skipped: &[i64],
+    ) -> Vec<(i64, f32)> {
+        use crate::jukebox::RadioSeed;
+        use djinn_library::radio::{rank, Seeds, Session};
+        let (Ok(catalog), Ok(index)) = (self.catalog.read(), self.sound.read()) else {
+            return Vec::new();
+        };
+        let seeds = match seed {
+            RadioSeed::Track { id } => Seeds {
+                tracks: vec![*id],
+                only: None,
+                genres: catalog
+                    .tags
+                    .get(id)
+                    .cloned()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .collect(),
+            },
+            RadioSeed::Artist { id } => Seeds {
+                tracks: catalog.artist_songs.get(id).cloned().unwrap_or_default(),
+                only: None,
+                genres: catalog.artist_genres.get(id).cloned().unwrap_or_default(),
+            },
+            RadioSeed::Genre { name } => {
+                let name = vibe::normalize(name);
+                let songs = catalog.songs_in(&name);
+                Seeds {
+                    only: Some(songs.iter().copied().collect()),
+                    tracks: songs,
+                    genres: [name].into_iter().collect(),
+                }
+            }
+        };
+        let session = Session {
+            played: played.to_vec(),
+            skipped: skipped.to_vec(),
+        };
+        rank(&index, &seeds, &catalog.tags, &session, RADIO_SONGS)
+    }
+}
+
+/// Songs radio considers at a time.
+const RADIO_SONGS: usize = 150;
+/// Songs and artists shown on a genre's page.
+const GENRE_SONGS: usize = 100;
+const GENRE_ARTISTS: usize = 24;
+
+#[derive(Serialize)]
+struct TrackTags {
+    /// From tags, the album, the artists, and identification.
+    genres: Vec<String>,
+    /// What AI listening heard in this song.
+    styles: Vec<String>,
+}
+
+async fn track_tags(
+    _: CurrentUser,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Json<TrackTags> {
+    let Ok(catalog) = state.catalog.read() else {
+        return Json(TrackTags {
+            genres: Vec::new(),
+            styles: Vec::new(),
+        });
+    };
+    let genres = catalog
+        .songs
+        .iter()
+        .find(|s| s.id == id)
+        .map(|s| s.genres.clone())
+        .unwrap_or_default();
+    let styles = catalog
+        .styles
+        .get(&id)
+        .into_iter()
+        .flatten()
+        .filter(|s| !genres.contains(s))
+        .cloned()
+        .collect();
+    Json(TrackTags { genres, styles })
+}
+
+#[derive(Serialize)]
+struct GenrePage {
+    name: String,
+    /// Songs with it (more than shown).
+    total: usize,
+    tracks: Vec<Track>,
+    artists: Vec<ArtistSummary>,
+}
+
+/// A genre's songs (by tags or by sound) and artists, most popular first.
+async fn genre(
+    _: CurrentUser,
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> ApiResult<Json<GenrePage>> {
+    let name = vibe::normalize(&name);
+    let (track_ids, total, artist_ids) = {
+        let Ok(catalog) = state.catalog.read() else {
+            return Ok(Json(GenrePage {
+                name,
+                total: 0,
+                tracks: Vec::new(),
+                artists: Vec::new(),
+            }));
+        };
+        let songs = catalog.songs_in(&name);
+        let in_genre: HashSet<i64> = songs.iter().copied().collect();
+        let popularity: HashMap<i64, i64> =
+            catalog.songs.iter().map(|s| (s.id, s.popularity)).collect();
+        let mut ranked = songs;
+        ranked.sort_by_key(|id| {
+            (
+                std::cmp::Reverse(popularity.get(id).copied().unwrap_or(0)),
+                *id,
+            )
+        });
+        let total = ranked.len();
+        ranked.truncate(GENRE_SONGS);
+        // Artists tagged with it first, then by how many of their songs
+        // have it.
+        let mut artists: Vec<(bool, usize, i64)> = catalog
+            .artist_songs
+            .iter()
+            .map(|(artist, ids)| {
+                let tagged = catalog
+                    .artist_genres
+                    .get(artist)
+                    .is_some_and(|g| g.iter().any(|t| vibe::genre_fits(t, &name)));
+                let count = ids.iter().filter(|id| in_genre.contains(id)).count();
+                (tagged, count, *artist)
+            })
+            .filter(|(tagged, count, _)| *tagged || *count > 0)
+            .collect();
+        artists.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)).then(a.2.cmp(&b.2)));
+        let artist_ids: Vec<i64> = artists
+            .into_iter()
+            .take(GENRE_ARTISTS)
+            .map(|(_, _, id)| id)
+            .collect();
+        (ranked, total, artist_ids)
+    };
+    Ok(Json(GenrePage {
+        name,
+        total,
+        tracks: state.store.tracks_by_ids(&track_ids).await?,
+        artists: state.store.artists_by_ids(&artist_ids).await?,
+    }))
 }
 
 /// Rebuilds the sound index and song facts from the database.
@@ -69,14 +266,10 @@ pub async fn refresh(state: &AppState) {
         Ok::<_, djinn_store::StoreError>((rows, facts, artists, heard, led))
     }
     .await;
-    let genre_vectors = if crate::jukebox::setting(&state.store, crate::ai::GENRE_TAGS, 1)
+    let genre_vectors = state.ai.genre_embeddings();
+    let tag_untagged = crate::jukebox::setting(&state.store, crate::ai::GENRE_TAGS, 1)
         .await
-        .is_ok_and(|v| v == 1)
-    {
-        state.ai.genre_embeddings()
-    } else {
-        Vec::new()
-    };
+        .is_ok_and(|v| v == 1);
     let (rows, facts, artists, heard, led) = match loaded {
         Ok(loaded) => loaded,
         Err(e) => {
@@ -104,24 +297,47 @@ pub async fn refresh(state: &AppState) {
                 .collect()
         };
         let heard: HashMap<i64, Vec<f32>> = heard.into_iter().collect();
+        // What the AI hears in each song, best first.
+        let heard_genres: HashMap<i64, Vec<(f32, String)>> = heard
+            .iter()
+            .filter(|_| !genre_vectors.is_empty())
+            .map(|(id, embedding)| {
+                let mut scored: Vec<(f32, String)> = genre_vectors
+                    .iter()
+                    .map(|(name, v)| (djinn_ai::similarity(v, embedding), vibe::normalize(name)))
+                    .collect();
+                scored.sort_by(|a, b| b.0.total_cmp(&a.0));
+                (*id, scored)
+            })
+            .collect();
+        // Each song's own styles: the genres the AI hears clearly in it.
+        let styles: HashMap<i64, Vec<String>> = heard_genres
+            .iter()
+            .map(|(id, scored)| {
+                let best = scored.first().map_or(0.0, |s| s.0);
+                let found: Vec<String> = scored
+                    .iter()
+                    .take(STYLES)
+                    .filter(|(score, _)| *score >= HEARD_GENRE_MIN && *score >= best - STYLE_MARGIN)
+                    .map(|(_, name)| name.clone())
+                    .collect();
+                (*id, found)
+            })
+            .filter(|(_, found)| !found.is_empty())
+            .collect();
         let songs: Vec<SongFacts> = facts
             .into_iter()
             .map(|f| {
                 let mut genres = split(&f.genres);
                 // No genres from tags or MusicBrainz: use what the AI hears.
-                if genres.is_empty() {
-                    if let Some(embedding) = heard.get(&f.id) {
-                        let mut scored: Vec<(f32, &String)> = genre_vectors
-                            .iter()
-                            .map(|(name, v)| (djinn_ai::similarity(v, embedding), name))
-                            .collect();
-                        scored.sort_by(|a, b| b.0.total_cmp(&a.0));
+                if genres.is_empty() && tag_untagged {
+                    if let Some(scored) = heard_genres.get(&f.id) {
                         genres.extend(
                             scored
-                                .into_iter()
+                                .iter()
                                 .take(HEARD_GENRES)
                                 .filter(|(score, _)| *score >= HEARD_GENRE_MIN)
-                                .map(|(_, name)| vibe::normalize(name)),
+                                .map(|(_, name)| name.clone()),
                         );
                     }
                 }
@@ -154,15 +370,21 @@ pub async fn refresh(state: &AppState) {
         // Songs they lead; artists only ever featured go by those songs.
         let mut led_songs: HashMap<i64, Vec<&Vec<String>>> = HashMap::new();
         let mut featured_songs: HashMap<i64, Vec<&Vec<String>>> = HashMap::new();
+        let mut artist_songs: HashMap<i64, Vec<i64>> = HashMap::new();
+        let mut featured_ids: HashMap<i64, Vec<i64>> = HashMap::new();
         for (artist, track, featured) in &led {
             if let Some(song) = by_id.get(track) {
-                let into = if *featured {
-                    &mut featured_songs
+                let (genres, ids) = if *featured {
+                    (&mut featured_songs, &mut featured_ids)
                 } else {
-                    &mut led_songs
+                    (&mut led_songs, &mut artist_songs)
                 };
-                into.entry(*artist).or_default().push(&song.genres);
+                genres.entry(*artist).or_default().push(&song.genres);
+                ids.entry(*artist).or_default().push(*track);
             }
+        }
+        for (artist, ids) in featured_ids {
+            artist_songs.entry(artist).or_insert(ids);
         }
         let mut song_genres = HashMap::new();
         for (artist, genres) in artist_genres.iter_mut() {
@@ -176,6 +398,18 @@ pub async fn refresh(state: &AppState) {
                 song_genres.insert(*artist, found);
             }
         }
+        let tags: HashMap<i64, Vec<String>> = songs
+            .iter()
+            .map(|song| {
+                let mut all = song.genres.clone();
+                for style in styles.get(&song.id).into_iter().flatten() {
+                    if !all.contains(style) {
+                        all.push(style.clone());
+                    }
+                }
+                (song.id, all)
+            })
+            .collect();
         (
             SoundIndex::build(rows),
             Catalog {
@@ -183,6 +417,9 @@ pub async fn refresh(state: &AppState) {
                 vocab,
                 artist_genres,
                 song_genres,
+                tags,
+                styles,
+                artist_songs,
                 heard,
             },
         )

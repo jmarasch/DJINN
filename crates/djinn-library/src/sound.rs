@@ -52,6 +52,14 @@ struct Entry {
     vector: Vec<f32>,
 }
 
+/// A song near some point in sound space.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Near {
+    pub track_id: i64,
+    pub distance: f32,
+    pub artist: Option<i64>,
+}
+
 /// The library's songs as points in sound space.
 #[derive(Default)]
 pub struct SoundIndex {
@@ -221,6 +229,48 @@ impl SoundIndex {
             out.push(entry.track_id);
         }
         out
+    }
+
+    /// Every analyzed song by how close it is to the weighted middle of
+    /// `seeds` (track id, weight), nearest first, with its distance and
+    /// main artist. One copy of each song (the seeds included). Empty if
+    /// no seed was analyzed.
+    pub fn around(&self, seeds: &[(i64, f32)]) -> Vec<Near> {
+        let dims = self.entries.first().map_or(0, |e| e.vector.len());
+        let mut center = vec![0.0f32; dims];
+        let mut total = 0.0;
+        for &(track, weight) in seeds {
+            let Some(&i) = self.by_track.get(&track) else {
+                continue;
+            };
+            let entry = &self.entries[i];
+            for (c, v) in center.iter_mut().zip(&entry.vector) {
+                *c += v * weight;
+            }
+            total += weight;
+        }
+        if total <= 0.0 {
+            return Vec::new();
+        }
+        for c in &mut center {
+            *c /= total;
+        }
+        let mut ranked: Vec<(f32, &Entry)> = self
+            .entries
+            .iter()
+            .map(|e| (distance(&center, &e.vector), e))
+            .collect();
+        ranked.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let mut songs = std::collections::HashSet::new();
+        ranked
+            .into_iter()
+            .filter(|(_, e)| songs.insert(e.song_key.as_str()))
+            .map(|(distance, e)| Near {
+                track_id: e.track_id,
+                distance,
+                artist: e.artist_ids.first().copied(),
+            })
+            .collect()
     }
 
     /// How far every other artist's sound is from `artist_id`'s, with how

@@ -1,5 +1,8 @@
 import type {
   About,
+  GenrePage,
+  RadioSeed,
+  TrackTags,
   AiOptions,
   AiStatus,
   IdentificationRow,
@@ -93,6 +96,9 @@ export const api = {
   artists: (offset: number) => get<Page<ArtistSummary>>(`/artists?offset=${offset}`),
   albums: (sort: AlbumSort, offset: number) => get<Page<Album>>(`/albums?sort=${sort}&offset=${offset}`),
   playWild: () => post<void>('/playlists/wild/play'),
+  playRadio: (seed: RadioSeed) => post<void>('/playlists/radio/play', seed),
+  trackTags: (id: number) => get<TrackTags>(`/tracks/${id}/tags`),
+  genre: (name: string) => get<GenrePage>(`/genres/${encodeURIComponent(name)}`),
   playlistFromSongs: (name: string, trackIds: number[]) =>
     post<PlaylistSummary>('/playlists/from-songs', { name, track_ids: trackIds }),
   tracks: (sort: TrackSort, offset: number) =>

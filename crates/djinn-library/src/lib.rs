@@ -4,6 +4,7 @@ pub mod art;
 pub mod credits;
 pub mod identify;
 pub mod online;
+pub mod radio;
 pub mod sound;
 mod tags;
 pub mod vibe;

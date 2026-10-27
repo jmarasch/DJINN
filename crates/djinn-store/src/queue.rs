@@ -393,6 +393,36 @@ impl Store {
         Ok(ids)
     }
 
+    /// How parties took each song that has any history: (track id, times
+    /// requested, times played to the end, times skipped).
+    pub async fn party_counts(&self) -> Result<Vec<(i64, i64, i64, i64)>> {
+        let rows = sqlx::query_as(
+            "SELECT track_id, sum(requests), sum(finished), sum(skipped) FROM ( \
+                 SELECT track_id, 1 AS requests, 0 AS finished, 0 AS skipped FROM request_events \
+                 UNION ALL \
+                 SELECT track_id, 0, CASE WHEN skipped = 0 AND ended_at IS NOT NULL THEN 1 ELSE 0 END, \
+                        skipped FROM play_events \
+             ) GROUP BY track_id",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows)
+    }
+
+    /// Songs that started since `since` (Unix ms) and have ended, newest
+    /// first, with whether each was skipped.
+    pub async fn plays_since(&self, since: i64) -> Result<Vec<(i64, bool)>> {
+        let rows = sqlx::query_as(
+            "SELECT track_id, skipped FROM play_events \
+             WHERE started_at >= ? AND ended_at IS NOT NULL \
+             ORDER BY started_at DESC, id DESC LIMIT 200",
+        )
+        .bind(since)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows)
+    }
+
     pub async fn start_play_event(
         &self,
         track_id: i64,

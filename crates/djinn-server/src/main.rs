@@ -162,6 +162,12 @@ async fn main() -> anyhow::Result<()> {
     .with_join_url(base_url.clone())
     .with_stream(stream, cast_api::token(&store).await?);
 
+    state
+        .jukebox
+        .lock()
+        .await
+        .set_mixer(std::sync::Arc::new(smart::SmartMixer::new(&state)));
+
     let guest_mode = jukebox::setting(&store, jukebox::GUEST_MODE, 0).await? == 1;
     state
         .guest_mode

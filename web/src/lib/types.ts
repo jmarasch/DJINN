@@ -421,6 +421,22 @@ export interface SystemInfo {
   memory_available: number | null
 }
 
+/** Where a radio starts from. */
+export type RadioSeed = { kind: 'track'; id: number } | { kind: 'artist'; id: number } | { kind: 'genre'; name: string }
+
+/** A song's genres (tags, album, artists) and styles (AI listening). */
+export interface TrackTags {
+  genres: string[]
+  styles: string[]
+}
+
+export interface GenrePage {
+  name: string
+  total: number
+  tracks: Track[]
+  artists: ArtistSummary[]
+}
+
 /** Version and updates (Admin > About). */
 export interface About {
   version: string

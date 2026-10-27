@@ -18,6 +18,7 @@
   import Queue from './screens/Queue.svelte'
   import Search from './screens/Search.svelte'
   import Setup from './screens/Setup.svelte'
+  import Genre from './screens/Genre.svelte'
   import Similar from './screens/Similar.svelte'
   import Tv from './screens/Tv.svelte'
   import SetupLibrary from './screens/SetupLibrary.svelte'
@@ -41,6 +42,10 @@
     if (app.ready && !app.me && !onJoinPage && !onTvPage) refreshMode()
   })
 
+  const genreName = $derived.by(() => {
+    const m = route.path.match(/^\/genre\/(.+)$/)
+    return m ? decodeURIComponent(m[1]) : null
+  })
   const albumId = $derived(param('/album'))
   const artistId = $derived(param('/artist'))
   const playlistId = $derived(param('/playlist'))
@@ -56,7 +61,7 @@
       | 'about',
   )
   const tab = $derived(
-    route.path.startsWith('/search') || albumId || artistId || similarId
+    route.path.startsWith('/search') || albumId || artistId || similarId || genreName
       ? 'search'
       : route.path.startsWith('/queue')
         ? 'queue'
@@ -96,6 +101,8 @@
   <main>
     {#if similarId}
       <Similar id={similarId} />
+    {:else if genreName}
+      <Genre name={genreName} />
     {:else if albumId}
       <AlbumView id={albumId} />
     {:else if artistId}

@@ -831,7 +831,7 @@ pub fn rank(
 
 /// Does genre `g` (from a song) count as `name` (from the query)? Exact,
 /// or `name` as a whole word inside it ("deep house" counts as house).
-fn genre_fits(g: &str, name: &str) -> bool {
+pub fn genre_fits(g: &str, name: &str) -> bool {
     g == name
         || g.starts_with(&format!("{name} "))
         || g.ends_with(&format!(" {name}"))

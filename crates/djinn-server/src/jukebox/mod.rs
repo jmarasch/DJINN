@@ -8,9 +8,12 @@
 
 mod bag;
 mod gain;
+mod mix;
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use djinn_engine::{Command, EndReason, Event as EngineEvent, PlayState as EngineState, TrackId};
 use djinn_store::{
@@ -25,6 +28,7 @@ use self::bag::ShuffleBag;
 pub use self::gain::{
     ReplayGain, ReplayGainMode, MAX_PREAMP_DB, REPLAY_GAIN_MODE, REPLAY_GAIN_PREAMP,
 };
+pub use self::mix::{Mixer, Radio, RadioSeed};
 use crate::events::{
     Entry, NowPlaying, OutputStatus, PlayState, PlayerState, PlaylistRef, ServerEvent,
 };
@@ -48,6 +52,16 @@ pub const ACTIVE_PLAYLIST: &str = "active_playlist";
 /// The active "playlist" id for wild play: random songs from the whole
 /// library.
 pub const WILD_PLAY: i64 = -1;
+/// The active "playlist" id for radio (see the `radio` setting).
+pub const RADIO: i64 = -2;
+/// Setting: the radio playing, as JSON ([`Radio`]).
+const RADIO_SETTING: &str = "radio";
+/// Radio draws from this many songs at a time.
+const RADIO_POOL: usize = 150;
+/// Only this much of the radio's history steers it.
+const RADIO_MEMORY_MS: i64 = 2 * 60 * 60 * 1000;
+/// How long party weights are reused before being read again.
+const PARTY_REFRESH: Duration = Duration::from_secs(120);
 /// Votes that skip a song; 0 turns skip voting off.
 pub const SKIP_VOTES: &str = "skip_votes";
 /// Last song the active playlist played, so in-order playback resumes.
@@ -117,6 +131,12 @@ pub struct Jukebox {
     /// Song to play next from the playlist ("play from here").
     start_at: Option<i64>,
     replay_gain: ReplayGain,
+    /// Picks radio songs (set once the server's sound index exists).
+    mixer: Option<Arc<dyn Mixer>>,
+    /// The radio, while it's the active "playlist".
+    radio: Option<Radio>,
+    /// Each song's party weight, and when it was read.
+    party: Option<(Instant, HashMap<i64, f32>)>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -188,6 +208,9 @@ impl Jukebox {
             cursor: (cursor > 0).then_some(cursor),
             start_at: None,
             replay_gain,
+            mixer: None,
+            radio: None,
+            party: None,
         };
         (jukebox.engine)(Command::SetVolume(gain(volume)));
         (jukebox.engine)(Command::SetCrossfade(u32::from(crossfade)));
@@ -362,6 +385,28 @@ impl Jukebox {
         Ok(())
     }
 
+    pub fn set_mixer(&mut self, mixer: Arc<dyn Mixer>) {
+        self.mixer = Some(mixer);
+    }
+
+    /// Starts a radio from `seed` (named `name`), like a playlist: a song
+    /// seed plays first, then songs like it.
+    pub async fn start_radio(&mut self, seed: RadioSeed, name: String) -> anyhow::Result<()> {
+        let first = match &seed {
+            RadioSeed::Track { id } => Some(*id),
+            _ => None,
+        };
+        let radio = Radio {
+            seed,
+            name,
+            started_at: djinn_store::now_ms(),
+        };
+        self.store
+            .set_setting(RADIO_SETTING, &serde_json::to_string(&radio)?)
+            .await?;
+        self.play_playlist(RADIO, first).await
+    }
+
     /// No playlist plays when the requests run out.
     pub async fn stop_auto_mix(&mut self) -> anyhow::Result<()> {
         self.store.set_setting(ACTIVE_PLAYLIST, "0").await?;
@@ -370,8 +415,22 @@ impl Jukebox {
 
     async fn load_active(&mut self) -> anyhow::Result<()> {
         let id = setting(&self.store, ACTIVE_PLAYLIST, 0).await?;
+        self.radio = None;
         self.active = match id {
             0 => None,
+            RADIO => {
+                let radio: Option<Radio> = self
+                    .store
+                    .get_setting(RADIO_SETTING)
+                    .await?
+                    .and_then(|json| serde_json::from_str(&json).ok());
+                self.radio = radio;
+                self.radio.as_ref().map(|r| PlaylistRef {
+                    id: RADIO,
+                    name: format!("Radio: {}", r.name),
+                    shuffle: true,
+                })
+            }
             WILD_PLAY => Some(PlaylistRef {
                 id: WILD_PLAY,
                 name: "Wild play".to_owned(),
@@ -392,13 +451,68 @@ impl Jukebox {
         Ok(())
     }
 
-    /// Songs the active playlist covers, in order.
-    async fn auto_mix_ids(&self) -> anyhow::Result<Vec<i64>> {
+    /// Songs the active playlist covers, in order, with weights (1 for a
+    /// playlist's songs; radio's from the mixer).
+    async fn auto_mix(&self) -> anyhow::Result<Vec<(i64, f32)>> {
+        let even = |ids: Vec<i64>| ids.into_iter().map(|id| (id, 1.0)).collect();
         Ok(match &self.active {
-            Some(playlist) if playlist.id == WILD_PLAY => self.store.library_track_ids().await?,
-            Some(playlist) => self.store.playlist_track_ids(playlist.id).await?,
+            Some(playlist) if playlist.id == WILD_PLAY => {
+                even(self.store.library_track_ids().await?)
+            }
+            Some(playlist) if playlist.id == RADIO => self.radio_pool().await?,
+            Some(playlist) => even(self.store.playlist_track_ids(playlist.id).await?),
             None => Vec::new(),
         })
+    }
+
+    async fn radio_pool(&self) -> anyhow::Result<Vec<(i64, f32)>> {
+        let (Some(radio), Some(mixer)) = (&self.radio, &self.mixer) else {
+            return Ok(Vec::new());
+        };
+        let since = radio
+            .started_at
+            .max(djinn_store::now_ms() - RADIO_MEMORY_MS);
+        let plays = self.store.plays_since(since).await?;
+        let played: Vec<i64> = plays.iter().filter(|p| !p.1).map(|p| p.0).collect();
+        let skipped: Vec<i64> = plays.iter().filter(|p| p.1).map(|p| p.0).collect();
+        let mut pool = mixer.radio(&radio.seed, &played, &skipped);
+        pool.truncate(RADIO_POOL);
+        tracing::debug!(
+            radio = %radio.name,
+            played = played.len(),
+            skipped = skipped.len(),
+            top = ?&pool[..pool.len().min(8)],
+            "radio pool"
+        );
+        Ok(pool)
+    }
+
+    /// True if the active playlist draws by weight (wild play and radio).
+    fn weighted(&self) -> bool {
+        self.active
+            .as_ref()
+            .is_some_and(|p| p.id == WILD_PLAY || p.id == RADIO)
+    }
+
+    /// Each song's weight after what parties did with it, read again every
+    /// couple of minutes.
+    async fn party_weights(&mut self) -> anyhow::Result<HashMap<i64, f32>> {
+        if let Some((at, weights)) = &self.party {
+            if at.elapsed() < PARTY_REFRESH {
+                return Ok(weights.clone());
+            }
+        }
+        let weights: HashMap<i64, f32> = self
+            .store
+            .party_counts()
+            .await?
+            .into_iter()
+            .map(|(id, requests, finished, skipped)| {
+                (id, mix::party_weight(requests, finished, skipped))
+            })
+            .collect();
+        self.party = Some((Instant::now(), weights.clone()));
+        Ok(weights)
     }
 
     pub fn play(&self) {
@@ -658,8 +772,12 @@ impl Jukebox {
                     track: head.track,
                 },
                 (None, Some(q)) if q.source == PlaySource::Pool => {
-                    let pool = self.auto_mix_ids().await?;
-                    if pool.contains(&q.track.id) && self.start_at.is_none() {
+                    // Radio's pool shifts as it goes; what it drew stays.
+                    if self.weighted() && self.start_at.is_none() {
+                        return Ok(());
+                    }
+                    let pool = self.auto_mix().await?;
+                    if pool.iter().any(|(id, _)| *id == q.track.id) && self.start_at.is_none() {
                         return Ok(());
                     }
                     match self.draw(&pool).await? {
@@ -668,7 +786,7 @@ impl Jukebox {
                     }
                 }
                 (None, _) => {
-                    let pool = self.auto_mix_ids().await?;
+                    let pool = self.auto_mix().await?;
                     match self.draw(&pool).await? {
                         Some(track) => track,
                         None => return self.clear_next(),
@@ -720,13 +838,17 @@ impl Jukebox {
 
     /// The active playlist's next song: shuffled through the bag, or the
     /// one after the last it played.
-    async fn draw(&mut self, pool: &[i64]) -> anyhow::Result<Option<Pending>> {
-        let id = match self.start_at.take().filter(|id| pool.contains(id)) {
+    async fn draw(&mut self, pool: &[(i64, f32)]) -> anyhow::Result<Option<Pending>> {
+        let ids: Vec<i64> = pool.iter().map(|(id, _)| *id).collect();
+        // A radio's first song needn't be in its pool.
+        let radio = self.active.as_ref().is_some_and(|p| p.id == RADIO);
+        let id = match self.start_at.take().filter(|id| radio || ids.contains(id)) {
             Some(id) => Some(id),
+            None if self.weighted() => self.weighted_draw(pool).await?,
             None if self.active.as_ref().is_some_and(|p| !p.shuffle) => {
-                next_in_order(pool, self.order_anchor())
+                next_in_order(&ids, self.order_anchor())
             }
-            None => self.shuffle_draw(pool).await?,
+            None => self.shuffle_draw(&ids).await?,
         };
         let Some(id) = id else { return Ok(None) };
         Ok(self.store.track(id).await?.map(|track| Pending {
@@ -754,11 +876,25 @@ impl Jukebox {
     }
 
     async fn shuffle_draw(&mut self, pool: &[i64]) -> anyhow::Result<Option<i64>> {
+        let (recent, window) = self.recent().await?;
+        Ok(self.bag.draw(pool, &recent, window, &mut self.rng))
+    }
+
+    /// Wild play and radio: by weight, after the party's history, never a
+    /// song that played recently.
+    async fn weighted_draw(&mut self, pool: &[(i64, f32)]) -> anyhow::Result<Option<i64>> {
+        let (recent, window) = self.recent().await?;
+        let recent: HashSet<i64> = recent.into_iter().take(window).collect();
+        let party = self.party_weights().await?;
+        Ok(mix::weighted_draw(pool, &recent, &party, &mut self.rng))
+    }
+
+    /// Songs played recently, newest first, and how many of them count:
+    /// those on their way, on top of the configured window of history.
+    async fn recent(&self) -> anyhow::Result<(Vec<i64>, usize)> {
         let window = setting(&self.store, HISTORY_WINDOW, DEFAULT_HISTORY_WINDOW)
             .await?
             .max(0);
-        // Tracks on their way count as recent too, newest first, on top of
-        // the configured window of history.
         let mut recent: Vec<i64> = self
             .in_flight
             .iter()
@@ -768,8 +904,7 @@ impl Jukebox {
             .collect();
         let upcoming = recent.len();
         recent.extend(self.store.recent_track_ids(window).await?);
-        let window = usize::try_from(window).unwrap_or(0) + upcoming;
-        Ok(self.bag.draw(pool, &recent, window, &mut self.rng))
+        Ok((recent, usize::try_from(window).unwrap_or(0) + upcoming))
     }
 
     fn clear_next(&mut self) -> anyhow::Result<()> {
@@ -1043,6 +1178,66 @@ mod tests {
             seen.insert(h.play_next().await);
         }
         assert_eq!(seen.len(), h.tracks.len(), "every song, none repeated");
+    }
+
+    /// A mixer with a fixed pool that notes what it was told.
+    struct FixedMixer {
+        pool: Vec<(i64, f32)>,
+        heard: Arc<Mutex<Vec<(Vec<i64>, Vec<i64>)>>>,
+    }
+
+    impl Mixer for FixedMixer {
+        fn radio(&self, _: &RadioSeed, played: &[i64], skipped: &[i64]) -> Vec<(i64, f32)> {
+            self.heard
+                .lock()
+                .unwrap()
+                .push((played.to_vec(), skipped.to_vec()));
+            self.pool.clone()
+        }
+    }
+
+    #[tokio::test]
+    async fn radio_plays_the_seed_then_songs_like_it() {
+        let mut h = Harness::new(0).await;
+        let pool = vec![(h.tracks[1], 1.0), (h.tracks[2], 1.0)];
+        let heard = Arc::new(Mutex::new(Vec::new()));
+        h.jukebox.set_mixer(Arc::new(FixedMixer {
+            pool: pool.clone(),
+            heard: Arc::clone(&heard),
+        }));
+        let seed = h.tracks[0];
+        h.jukebox
+            .start_radio(RadioSeed::Track { id: seed }, "Song 0".into())
+            .await
+            .unwrap();
+        assert_eq!(
+            h.jukebox.player_state().playlist.unwrap().name,
+            "Radio: Song 0"
+        );
+        let first = h.play_next().await;
+        assert_eq!(first, seed, "the seed song plays first");
+        h.finish(first).await;
+        let second = h.play_next().await;
+        assert!(pool.iter().any(|(id, _)| *id == second));
+        h.event(EngineEvent::TrackEnded {
+            id: TrackId(second),
+            played_ms: 500,
+            reason: EndReason::Skipped,
+        })
+        .await;
+        let third = h.play_next().await;
+        assert!(pool.iter().any(|(id, _)| *id == third));
+        assert_ne!(third, second, "the skipped song played recently");
+        let (played, skipped) = heard.lock().unwrap().last().cloned().unwrap();
+        assert_eq!(played, [seed], "what played through steers the radio");
+        assert_eq!(skipped, [second], "and what was skipped steers it away");
+
+        // It's still on after a restart.
+        let (events, _) = broadcast::channel(4);
+        let again = Jukebox::new(h.store.clone(), Box::new(|_| {}), events)
+            .await
+            .unwrap();
+        assert_eq!(again.player_state().playlist.unwrap().name, "Radio: Song 0");
     }
 
     #[tokio::test]

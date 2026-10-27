@@ -1,6 +1,8 @@
 <script lang="ts">
   import AddToPlaylist from '../lib/AddToPlaylist.svelte'
+  import GenreChips from '../lib/GenreChips.svelte'
   import QueueAll from '../lib/QueueAll.svelte'
+  import RadioButton from '../lib/RadioButton.svelte'
   import { api } from '../lib/api'
   import Art from '../lib/Art.svelte'
   import Icon from '../lib/Icon.svelte'
@@ -59,11 +61,10 @@
     <div class="heading">
       <h1>{artist.name}</h1>
       {#if artist.genres}
-        <div class="genres">
-          {#each artist.genres.split(', ') as genre (genre)}<span class="genre">{genre}</span>{/each}
-        </div>
+        <div class="genres"><GenreChips genres={artist.genres.split(', ')} /></div>
       {/if}
       <div class="admin-actions">
+        <RadioButton seed={{ kind: 'artist', id: artist.id }} />
         <QueueAll kind="artist" refId={artist.id} />
         <AddToPlaylist kind="artist" refId={artist.id} label={artist.name} />
       </div>
@@ -175,14 +176,6 @@
     flex-wrap: wrap;
     gap: 6px;
     margin-top: 6px;
-  }
-
-  .genre {
-    padding: 2px 10px;
-    border-radius: 999px;
-    background: var(--surface-2);
-    color: var(--muted);
-    font-size: 0.8125rem;
   }
 
   .credit {

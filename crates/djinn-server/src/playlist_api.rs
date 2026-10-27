@@ -19,6 +19,7 @@ pub fn router() -> Router<AppState> {
         .route("/playlists", get(list).post(create))
         .route("/playlists/stop", post(stop))
         .route("/playlists/wild/play", post(play_wild))
+        .route("/playlists/radio/play", post(play_radio))
         .route("/playlists/from-songs", post(from_songs))
         .route("/playlists/{id}", get(detail).patch(update).delete(remove))
         .route("/playlists/{id}/play", post(play))
@@ -190,6 +191,26 @@ async fn play_wild(_: AdminUser, State(state): State<AppState>) -> ApiResult<Sta
         .await
         .play_playlist(crate::jukebox::WILD_PLAY, None)
         .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Radio from a song, an artist, or a genre: songs like it when the
+/// requests run out, steered by what the party plays and skips.
+async fn play_radio(
+    _: AdminUser,
+    State(state): State<AppState>,
+    Json(seed): Json<crate::jukebox::RadioSeed>,
+) -> ApiResult<StatusCode> {
+    use crate::jukebox::RadioSeed;
+    let name = match &seed {
+        RadioSeed::Track { id } => state.store.track(*id).await?.map(|t| t.title),
+        RadioSeed::Artist { id } => state.store.artist(*id).await?.map(|a| a.artist.name),
+        RadioSeed::Genre { name } => {
+            Some(djinn_library::vibe::normalize(name)).filter(|n| !n.is_empty())
+        }
+    }
+    .ok_or_else(ApiError::not_found)?;
+    state.jukebox.lock().await.start_radio(seed, name).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
