@@ -12,11 +12,12 @@
   import { app, logout, toast } from '../lib/state.svelte'
   import type { GuestSummary, LibraryRoot, RequestLogEntry, Role, Settings, User } from '../lib/types'
 
-  type Tab = 'library' | 'audio' | 'users' | 'log' | 'rules'
+  type Tab = 'library' | 'audio' | 'ai' | 'users' | 'log' | 'rules'
   let { tab = 'library' }: { tab?: Tab } = $props()
   const tabs: { id: Tab; label: string }[] = [
     { id: 'library', label: 'Library' },
     { id: 'audio', label: 'Audio' },
+    { id: 'ai', label: 'AI' },
     { id: 'users', label: 'Users' },
     { id: 'log', label: 'Log' },
     { id: 'rules', label: 'Rules' },
@@ -214,9 +215,6 @@
     <button disabled={scanning} onclick={checkForChanges}>Check for changes</button>
   </section>
 
-  <IdentifyPanel />
-  <AiPanel />
-
   <section class="card">
     <h2>Artist photos and bios</h2>
     {#if settings?.online_artist_info}
@@ -266,6 +264,9 @@
   <CastPanel />
   <CrossfadePanel />
   <ReplayGainPanel />
+{:else if tab === 'ai'}
+  <AiPanel />
+  <IdentifyPanel />
 {:else if tab === 'users'}
   <section class="card">
     <h2>Accounts</h2>
@@ -393,7 +394,9 @@
           spellcheck="false"
         />
         <span class="small muted">
-          Free for non-commercial use: register an application at acoustid.org/new-application and paste its key.
+          Free for non-commercial use: register an application at
+          <a href="https://acoustid.org/new-application" target="_blank" rel="noopener noreferrer">acoustid.org/new-application</a>
+          and paste its key.
           Song fingerprints (not the audio) are sent to AcoustID, and details come from MusicBrainz.
         </span>
       </label>

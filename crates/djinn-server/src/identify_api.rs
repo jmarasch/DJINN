@@ -24,11 +24,14 @@ const BATCH: i64 = 10;
 
 /// Whether an identification run is going.
 pub static RUNNING: AtomicBool = AtomicBool::new(false);
+/// The admin asked the run to stop.
+static STOP: AtomicBool = AtomicBool::new(false);
 
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/identify", get(status))
         .route("/identify/start", post(start))
+        .route("/identify/stop", post(stop))
         .route("/identify/apply", post(apply))
         .route("/identify/dismiss", post(dismiss))
 }
@@ -103,6 +106,7 @@ async fn start(_: AdminUser, State(state): State<AppState>) -> ApiResult<StatusC
     if RUNNING.swap(true, Ordering::AcqRel) {
         return Ok(StatusCode::ACCEPTED);
     }
+    STOP.store(false, Ordering::Release);
     let task_state = state.clone();
     tokio::spawn(async move {
         if let Err(e) = run(&task_state, &key, &contact).await {
@@ -113,6 +117,12 @@ async fn start(_: AdminUser, State(state): State<AppState>) -> ApiResult<StatusC
     });
     broadcast(&state).await;
     Ok(StatusCode::ACCEPTED)
+}
+
+/// Stops after the song being looked up; what was found so far stays.
+async fn stop(_: AdminUser) -> StatusCode {
+    STOP.store(true, Ordering::Release);
+    StatusCode::NO_CONTENT
 }
 
 async fn run(state: &AppState, key: &str, contact: &str) -> Result<(), String> {
@@ -128,6 +138,10 @@ async fn run(state: &AppState, key: &str, contact: &str) -> Result<(), String> {
             break;
         }
         for song in batch {
+            if STOP.load(Ordering::Acquire) {
+                tracing::info!(checked, found, "identifying songs stopped");
+                return Ok(());
+            }
             let path = std::path::PathBuf::from(&song.path);
             let print = tokio::task::spawn_blocking(move || djinn_engine::fingerprint(&path))
                 .await

@@ -1,7 +1,8 @@
 //! Quantized Qwen2 (GGUF), adapted from candle-transformers'
 //! `quantized_qwen2` (MIT OR Apache-2.0, Copyright the candle authors).
-//! The change: [`Qwen2::rewind`] keeps the first part of the attention
-//! cache, so a fixed system prompt is read once instead of per request.
+//! The changes: [`Qwen2::rewind`] keeps the first part of the attention
+//! cache, so a fixed system prompt is read once instead of per request,
+//! and the token table is kept as f16 (half the memory, about 450 MB).
 
 use candle_core::quantized::{gguf_file, QMatMul};
 use candle_core::{DType, Device, IndexOp, Module, Result, Tensor};
@@ -121,7 +122,8 @@ impl Qwen2 {
 
         let embeddings = ct
             .tensor(reader, "token_embd.weight", device)?
-            .dequantize(device)?;
+            .dequantize(device)?
+            .to_dtype(DType::F16)?;
         let norm = RmsNorm::from_qtensor(ct.tensor(reader, "output_norm.weight", device)?, eps)?;
         let output = match ct.tensor(reader, "output.weight", device) {
             Ok(v) => QMatMul::from_qtensor(v)?,
@@ -186,7 +188,7 @@ impl Qwen2 {
         } else {
             Some(build_causal_mask(seq_len, index_pos, x.device())?)
         };
-        let mut hidden = self.embeddings.forward(x)?;
+        let mut hidden = self.embeddings.forward(x)?.to_dtype(DType::F32)?;
         for layer in &mut self.layers {
             let attn = layer.attention(
                 &layer.attention_norm.forward(&hidden)?,

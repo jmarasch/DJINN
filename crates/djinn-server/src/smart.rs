@@ -64,7 +64,14 @@ pub async fn refresh(state: &AppState) {
         Ok::<_, djinn_store::StoreError>((rows, facts, artists, heard))
     }
     .await;
-    let genre_vectors = state.ai.genre_embeddings();
+    let genre_vectors = if crate::jukebox::setting(&state.store, crate::ai::GENRE_TAGS, 1)
+        .await
+        .is_ok_and(|v| v == 1)
+    {
+        state.ai.genre_embeddings()
+    } else {
+        Vec::new()
+    };
     let (rows, facts, artists, heard) = match loaded {
         Ok(loaded) => loaded,
         Err(e) => {

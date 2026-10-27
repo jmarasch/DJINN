@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex, RwLock};
 
 use axum::extract::State;
 use axum::http::StatusCode;
-use axum::routing::{delete, get, post};
+use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use djinn_ai::{models, Clap};
 use futures_util::StreamExt;
@@ -24,6 +24,11 @@ use crate::state::AppState;
 
 /// Setting key: AI listening is on.
 const AI_LISTENING: &str = "ai_listening";
+/// Setting key: how many songs are listened to at once: "gentle" (one),
+/// "normal", or "fast" (half the processor cores).
+const LISTEN_SPEED: &str = "ai_listen_speed";
+/// Setting key: songs with no genres get the ones the AI hears.
+pub const GENRE_TAGS: &str = "ai_genre_tags";
 /// Songs listened to per round between progress updates.
 const BATCH: i64 = 8;
 /// Longest stretch of a song decoded for listening.
@@ -79,6 +84,8 @@ pub struct Fetch {
     /// (done, total) bytes while downloading.
     progress: Mutex<Option<(u64, u64)>>,
     error: Mutex<Option<String>>,
+    /// The admin stopped the download.
+    cancel: AtomicBool,
 }
 
 impl Fetch {
@@ -88,6 +95,11 @@ impl Fetch {
 
     pub fn error(&self) -> Option<String> {
         self.error.lock().ok().and_then(|e| e.clone())
+    }
+
+    /// Stops a download in progress.
+    pub fn cancel(&self) {
+        self.cancel.store(true, Ordering::Release);
     }
 
     pub fn set_error(&self, error: Option<String>) {
@@ -106,6 +118,8 @@ pub struct AiState {
     fetch: Fetch,
     loading: AtomicBool,
     listening: AtomicBool,
+    /// The admin stopped listening for now.
+    stop_listening: AtomicBool,
     /// The AI reader for free-form requests.
     pub reader: crate::reader::ReaderState,
 }
@@ -120,6 +134,7 @@ impl AiState {
             fetch: Fetch::default(),
             loading: AtomicBool::new(false),
             listening: AtomicBool::new(false),
+            stop_listening: AtomicBool::new(false),
             reader: crate::reader::ReaderState::new(&models_dir.join(models::READER.folder)),
         }
     }
@@ -138,7 +153,11 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/ai", get(status).put(set_enabled))
         .route("/ai/download", post(download))
+        .route("/ai/download/cancel", post(cancel_download))
         .route("/ai/model", delete(remove_model))
+        .route("/ai/listen/stop", post(stop_listening))
+        .route("/ai/listen/start", post(continue_listening))
+        .route("/ai/options", put(set_options))
         .merge(crate::reader::router())
 }
 
@@ -156,6 +175,84 @@ pub struct AiStatus {
     waiting: i64,
     listening: bool,
     reader: crate::reader::ReaderStatus,
+    options: AiOptions,
+    system: SystemInfo,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AiOptions {
+    /// "gentle", "normal", or "fast".
+    listen_speed: String,
+    genre_tags: bool,
+    /// Who the AI reader reads searches for: "everyone", "users" (not
+    /// guests), or "admins".
+    reader_for: String,
+}
+
+/// What this computer has, to compare with what the models need.
+#[derive(Clone, Debug, Serialize)]
+pub struct SystemInfo {
+    cores: usize,
+    /// Bytes; `None` where DJINN can't tell.
+    memory_total: Option<u64>,
+    memory_available: Option<u64>,
+}
+
+fn system_info() -> SystemInfo {
+    let memory = djinn_platform::system::memory();
+    SystemInfo {
+        cores: std::thread::available_parallelism().map_or(1, |n| n.get()),
+        memory_total: memory.map(|m| m.total),
+        memory_available: memory.map(|m| m.available),
+    }
+}
+
+pub async fn options(state: &AppState) -> ApiResult<AiOptions> {
+    let text = |key: &'static str, default: &'static str| async move {
+        Ok::<_, ApiError>(
+            state
+                .store
+                .get_setting(key)
+                .await?
+                .unwrap_or_else(|| default.to_owned()),
+        )
+    };
+    Ok(AiOptions {
+        listen_speed: text(LISTEN_SPEED, "normal").await?,
+        genre_tags: crate::jukebox::setting(&state.store, GENRE_TAGS, 1).await? == 1,
+        reader_for: text(crate::reader::READER_FOR, "everyone").await?,
+    })
+}
+
+async fn set_options(
+    _: AdminUser,
+    State(state): State<AppState>,
+    Json(body): Json<AiOptions>,
+) -> ApiResult<StatusCode> {
+    if !["gentle", "normal", "fast"].contains(&body.listen_speed.as_str()) {
+        return Err(ApiError::bad_request("unknown listening speed"));
+    }
+    if !["everyone", "users", "admins"].contains(&body.reader_for.as_str()) {
+        return Err(ApiError::bad_request("unknown choice for the AI reader"));
+    }
+    let tags_changed = options(&state).await?.genre_tags != body.genre_tags;
+    state
+        .store
+        .set_setting(LISTEN_SPEED, &body.listen_speed)
+        .await?;
+    state
+        .store
+        .set_setting(GENRE_TAGS, if body.genre_tags { "1" } else { "0" })
+        .await?;
+    state
+        .store
+        .set_setting(crate::reader::READER_FOR, &body.reader_for)
+        .await?;
+    if tags_changed {
+        crate::smart::refresh(&state).await;
+    }
+    broadcast(&state).await;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 pub async fn ai_status(state: &AppState) -> ApiResult<AiStatus> {
@@ -172,6 +269,8 @@ pub async fn ai_status(state: &AppState) -> ApiResult<AiStatus> {
         waiting,
         listening: ai.listening.load(Ordering::Acquire),
         reader: crate::reader::status(state).await?,
+        options: options(state).await?,
+        system: system_info(),
     })
 }
 
@@ -273,9 +372,14 @@ async fn listen(state: &AppState) {
     if state.ai.listening.swap(true, Ordering::AcqRel) {
         return;
     }
-    let workers = std::thread::available_parallelism()
-        .map_or(1, |n| n.get() / 4)
-        .clamp(1, 2);
+    state.ai.stop_listening.store(false, Ordering::Release);
+    let cores = std::thread::available_parallelism().map_or(1, |n| n.get());
+    let speed = state.store.get_setting(LISTEN_SPEED).await.ok().flatten();
+    let workers = match speed.as_deref() {
+        Some("gentle") => 1,
+        Some("fast") => (cores / 2).clamp(1, 8),
+        _ => (cores / 4).clamp(1, 2),
+    };
     let started = std::time::Instant::now();
     let mut heard = 0usize;
     'rounds: loop {
@@ -288,10 +392,13 @@ async fn listen(state: &AppState) {
             }
         };
         for chunk in batch.chunks(workers) {
-            // Switched off (or the model removed) meanwhile.
+            // Switched off, stopped, or the model removed meanwhile.
             let Some(model) = state.ai.model() else {
                 break 'rounds;
             };
+            if state.ai.stop_listening.load(Ordering::Acquire) {
+                break 'rounds;
+            }
             let jobs: Vec<_> = chunk
                 .iter()
                 .map(|(id, path)| {
@@ -343,6 +450,23 @@ async fn listen(state: &AppState) {
     broadcast(state).await;
 }
 
+/// Stops listening for now; it carries on when DJINN starts again, new
+/// music arrives, or the admin continues.
+async fn stop_listening(_: AdminUser, State(state): State<AppState>) -> StatusCode {
+    state.ai.stop_listening.store(true, Ordering::Release);
+    StatusCode::NO_CONTENT
+}
+
+async fn continue_listening(_: AdminUser, State(state): State<AppState>) -> StatusCode {
+    start(&state);
+    StatusCode::NO_CONTENT
+}
+
+async fn cancel_download(_: AdminUser, State(state): State<AppState>) -> StatusCode {
+    state.ai.fetch.cancel();
+    StatusCode::NO_CONTENT
+}
+
 async fn download(_: AdminUser, State(state): State<AppState>) -> ApiResult<StatusCode> {
     let dir = state.ai.dir.clone();
     start_download(&state, &models::CLAP, dir, |ai| &ai.fetch)
@@ -369,6 +493,7 @@ pub fn start_download(
         *progress = Some((0, model.download_size()));
     }
     fetch(&state.ai).set_error(None);
+    fetch(&state.ai).cancel.store(false, Ordering::Release);
     let task_state = state.clone();
     tokio::spawn(async move {
         let result = fetch_all(&task_state, model, &dir, fetch).await;
@@ -378,6 +503,9 @@ pub fn start_download(
         }
         match result {
             Ok(()) => tracing::info!(model = model.folder, "AI model downloaded"),
+            Err(_) if progress.cancel.load(Ordering::Acquire) => {
+                tracing::info!(model = model.folder, "AI model download stopped");
+            }
             Err(e) => {
                 tracing::error!(model = model.folder, error = %e, "downloading an AI model failed");
                 progress.set_error(Some(e));
@@ -430,6 +558,11 @@ async fn fetch_all(
         let mut written = 0u64;
         let mut stream = response.bytes_stream();
         while let Some(chunk) = stream.next().await {
+            if fetch(&state.ai).cancel.load(Ordering::Acquire) {
+                drop(out);
+                let _ = tokio::fs::remove_file(&partial).await;
+                return Err("stopped".into());
+            }
             let chunk = chunk.map_err(|e| format!("download of {} broke off: {e}", file.local))?;
             hasher.update(&chunk);
             out.write_all(&chunk).await.map_err(|e| e.to_string())?;

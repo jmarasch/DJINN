@@ -80,6 +80,11 @@ impl Reader {
         Ok(reader)
     }
 
+    /// True if it runs on a GPU.
+    pub fn on_gpu(&self) -> bool {
+        !self.device.is_cpu()
+    }
+
     /// Reads one request. Takes a few seconds on a CPU.
     pub fn read(&mut self, request: &str) -> Result<Reading, AiError> {
         // No way to slip in chat markers.

@@ -62,9 +62,11 @@
         {#if status.running}<span class="spinner" aria-hidden="true"></span> Listening for matches...{/if}
         {status.waiting} {status.waiting === 1 ? 'song' : 'songs'} to check, {status.applied} filled in so far.
       </p>
-      <button disabled={status.running || !status.waiting} onclick={() => attempt(() => api.startIdentify())}>
-        {status.running ? 'Identifying...' : 'Identify songs'}
-      </button>
+      {#if status.running}
+        <button onclick={() => attempt(() => api.stopIdentify(), 'Stopping after this song')}>Stop</button>
+      {:else}
+        <button disabled={!status.waiting} onclick={() => attempt(() => api.startIdentify())}>Identify songs</button>
+      {/if}
     {/if}
   {/if}
 

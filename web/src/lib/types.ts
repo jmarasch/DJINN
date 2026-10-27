@@ -401,6 +401,24 @@ export interface AiStatus {
   waiting: number
   listening: boolean
   reader: ReaderStatus
+  options: AiOptions
+  system: SystemInfo
+}
+
+export interface AiOptions {
+  listen_speed: 'gentle' | 'normal' | 'fast'
+  /** Songs with no genres get the ones the AI hears. */
+  genre_tags: boolean
+  /** Whose searches the AI reader reads. */
+  reader_for: 'everyone' | 'users' | 'admins'
+}
+
+/** What this computer has. */
+export interface SystemInfo {
+  cores: number
+  /** Bytes; null where DJINN can't tell. */
+  memory_total: number | null
+  memory_available: number | null
 }
 
 /** The AI reader for free-form search requests. */
@@ -413,6 +431,8 @@ export interface ReaderStatus {
   error: string | null
   /** Built to use a GPU when there is one. */
   gpu_build: boolean
+  /** Loaded onto a GPU. */
+  on_gpu: boolean
 }
 
 export interface IdentifyStatus {

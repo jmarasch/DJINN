@@ -23,6 +23,9 @@ use crate::state::AppState;
 
 /// Setting key: the AI reader is on.
 const AI_READER: &str = "ai_reader";
+/// Setting key: whose searches it reads: "everyone", "users" (not
+/// guests), or "admins".
+pub const READER_FOR: &str = "ai_reader_for";
 /// Answers remembered (forgotten all at once when full).
 const MAX_ANSWERS: usize = 500;
 /// How long a request waits for the reader before giving up.
@@ -33,6 +36,8 @@ pub struct ReaderState {
     model: RwLock<Option<Arc<tokio::sync::Mutex<Reader>>>>,
     fetch: Fetch,
     loading: AtomicBool,
+    /// Loaded onto a GPU.
+    on_gpu: AtomicBool,
     /// Requests read so far, by their normalized text.
     answers: Mutex<HashMap<String, Reading>>,
 }
@@ -44,6 +49,7 @@ impl ReaderState {
             model: RwLock::new(None),
             fetch: Fetch::default(),
             loading: AtomicBool::new(false),
+            on_gpu: AtomicBool::new(false),
             answers: Mutex::new(HashMap::new()),
         }
     }
@@ -74,6 +80,7 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/ai/reader", put(set_enabled))
         .route("/ai/reader/download", post(download))
+        .route("/ai/reader/download/cancel", post(cancel_download))
         .route("/ai/reader/model", delete(remove_model))
 }
 
@@ -87,6 +94,8 @@ pub struct ReaderStatus {
     error: Option<String>,
     /// Built to use a GPU when there is one.
     gpu_build: bool,
+    /// Loaded onto a GPU.
+    on_gpu: bool,
 }
 
 pub async fn status(state: &AppState) -> ApiResult<ReaderStatus> {
@@ -99,7 +108,19 @@ pub async fn status(state: &AppState) -> ApiResult<ReaderStatus> {
         downloading: reader.fetch.progress(),
         error: reader.fetch.error(),
         gpu_build: cfg!(any(feature = "cuda", feature = "metal")),
+        on_gpu: reader.ready() && reader.on_gpu.load(Ordering::Acquire),
     })
+}
+
+/// True if the reader may read searches for `user` (see [`READER_FOR`]).
+pub async fn allowed_for(state: &AppState, user: &djinn_store::User) -> bool {
+    use djinn_store::Role;
+    let setting = state.store.get_setting(READER_FOR).await.ok().flatten();
+    match setting.as_deref() {
+        Some("admins") => user.role == Role::Admin,
+        Some("users") => user.role != Role::Guest,
+        _ => true,
+    }
 }
 
 async fn enabled(state: &AppState) -> ApiResult<bool> {
@@ -138,6 +159,11 @@ async fn download(_: AdminUser, State(state): State<AppState>) -> ApiResult<Stat
     start_download(&state, &models::READER, dir, |ai| &ai.reader.fetch)
 }
 
+async fn cancel_download(_: AdminUser, State(state): State<AppState>) -> StatusCode {
+    state.ai.reader.fetch.cancel();
+    StatusCode::NO_CONTENT
+}
+
 async fn remove_model(_: AdminUser, State(state): State<AppState>) -> ApiResult<StatusCode> {
     state.store.set_setting(AI_READER, "0").await?;
     state.ai.reader.set_model(None);
@@ -170,6 +196,7 @@ pub fn start(state: &AppState) {
             Ok(Ok(model)) => {
                 tracing::info!(secs = started.elapsed().as_secs_f32(), "AI reader loaded");
                 reader.fetch.set_error(None);
+                reader.on_gpu.store(model.on_gpu(), Ordering::Release);
                 // Switched off while loading: drop it.
                 if enabled(&state).await.unwrap_or(false) {
                     reader.set_model(Some(model));

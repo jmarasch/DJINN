@@ -59,7 +59,7 @@ struct SearchResponse {
 }
 
 async fn search(
-    _: CurrentUser,
+    CurrentUser(user): CurrentUser,
     State(state): State<AppState>,
     Query(query): Query<SearchQuery>,
 ) -> ApiResult<Json<SearchResponse>> {
@@ -70,8 +70,10 @@ async fn search(
     let results = state.store.search(&query.q, limit).await?;
     let plain_found =
         !results.tracks.is_empty() || !results.albums.is_empty() || !results.artists.is_empty();
-    let read = state.ai.reader.cached(&query.q);
-    let ask = read.is_none() && crate::smart::worth_asking(&state, &query.q, plain_found);
+    let allowed = crate::reader::allowed_for(&state, &user).await;
+    let read = allowed.then(|| state.ai.reader.cached(&query.q)).flatten();
+    let ask =
+        allowed && read.is_none() && crate::smart::worth_asking(&state, &query.q, plain_found);
     Ok(Json(SearchResponse {
         described: crate::smart::describe(&state, &query.q, plain_found, read.as_ref()).await?,
         results,
@@ -81,10 +83,13 @@ async fn search(
 
 /// The query read by the AI reader (a few seconds), as a description.
 async fn ask(
-    _: CurrentUser,
+    CurrentUser(user): CurrentUser,
     State(state): State<AppState>,
     Query(query): Query<SearchQuery>,
 ) -> ApiResult<Json<Option<crate::smart::Described>>> {
+    if !crate::reader::allowed_for(&state, &user).await {
+        return Ok(Json(None));
+    }
     let Some(read) = crate::reader::read(&state, &query.q).await else {
         return Ok(Json(None));
     };
