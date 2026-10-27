@@ -1180,10 +1180,13 @@ mod tests {
         assert_eq!(seen.len(), h.tracks.len(), "every song, none repeated");
     }
 
+    /// (played, skipped) as the mixer was told, each time.
+    type Heard = Arc<Mutex<Vec<(Vec<i64>, Vec<i64>)>>>;
+
     /// A mixer with a fixed pool that notes what it was told.
     struct FixedMixer {
         pool: Vec<(i64, f32)>,
-        heard: Arc<Mutex<Vec<(Vec<i64>, Vec<i64>)>>>,
+        heard: Heard,
     }
 
     impl Mixer for FixedMixer {
@@ -1200,7 +1203,7 @@ mod tests {
     async fn radio_plays_the_seed_then_songs_like_it() {
         let mut h = Harness::new(0).await;
         let pool = vec![(h.tracks[1], 1.0), (h.tracks[2], 1.0)];
-        let heard = Arc::new(Mutex::new(Vec::new()));
+        let heard: Heard = Arc::default();
         h.jukebox.set_mixer(Arc::new(FixedMixer {
             pool: pool.clone(),
             heard: Arc::clone(&heard),
