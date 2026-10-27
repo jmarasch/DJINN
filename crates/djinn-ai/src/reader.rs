@@ -8,7 +8,7 @@ use std::path::Path;
 
 use candle_core::quantized::gguf_file;
 use candle_core::{Device, Tensor};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tokenizers::Tokenizer;
 
 use crate::qwen2::Qwen2;
@@ -27,7 +27,7 @@ const MAX_ANSWER: usize = 120;
 
 /// What a request asks for. Strings are trimmed and lowercased (except
 /// artist names); empty ones are dropped.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Reading {
     pub genres: Vec<String>,
     pub not_genres: Vec<String>,

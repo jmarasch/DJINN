@@ -18,6 +18,11 @@ thiserror.workspace = true
 tokenizers = { version = "0.22", default-features = false, features = ["fancy-regex"] }
 tract-onnx = "0.23.9"
 
+[[bin]]
+# The AI reader on an NVIDIA GPU, as a helper DJINN runs (see src/bin).
+name = "djinn-gpu"
+required-features = ["cuda"]
+
 [features]
 # The reader on an NVIDIA GPU (needs the CUDA toolkit to build) or an
 # Apple GPU. Without a GPU at run time it uses the CPU.

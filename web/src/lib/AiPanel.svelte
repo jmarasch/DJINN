@@ -85,8 +85,8 @@
         )} of memory ({gb(system.memory_available ?? 0)} free right now){/if}.
     </p>
     <p class="small muted">
-      The AI tools are optional and run on the processor (CPU), so no graphics card is needed.{reader?.gpu_build
-        ? ' This copy of DJINN can also run the AI reader on a graphics card (GPU) when it finds one.'
+      The AI tools are optional and run on the processor (CPU), so no graphics card is needed.{reader?.nvidia
+        ? ' This computer has an NVIDIA graphics card, which can make the AI reader much faster (see below).'
         : ''} Without enough memory they can slow the whole computer down, music included, so check the specs below.
     </p>
   </section>
@@ -208,6 +208,43 @@
         <p class="small"><span class="spinner" aria-hidden="true"></span> Loading the model...</p>
       {:else if reader.ready}
         <p class="small muted">Ready, running on the {reader.on_gpu ? 'graphics card (GPU)' : 'processor (CPU)'}.</p>
+      {/if}
+      {#if reader.nvidia}
+        <div class="options">
+          <strong class="small">NVIDIA graphics card</strong>
+          {#if reader.gpu_downloading}
+            <p class="small">
+              Downloading the GPU pack: {mb(reader.gpu_downloading[0])} of {mb(reader.gpu_downloading[1])}
+            </p>
+            <progress max={reader.gpu_downloading[1]} value={reader.gpu_downloading[0]}></progress>
+            <button class="small-button" onclick={() => attempt(() => api.cancelGpuPack(), 'Download stopped')}>
+              Stop download
+            </button>
+          {:else if !reader.gpu_installed}
+            <p class="small muted">
+              On the graphics card each new search takes about 0.3 seconds instead of 2 to 10. That needs DJINN's GPU
+              pack: about {mb(reader.gpu_pack_size)} from GitHub, with NVIDIA's CUDA libraries, so nothing else has to
+              be installed. If the card ever fails, DJINN goes back to the processor by itself.
+            </p>
+            <button class="small-button" onclick={() => attempt(() => api.downloadGpuPack())}>Download the GPU pack</button>
+          {:else}
+            <label class="switch">
+              <input
+                type="checkbox"
+                checked={reader.gpu_enabled}
+                onchange={(e) => attempt(() => api.setReaderGpu(e.currentTarget.checked))}
+              />
+              Use the graphics card
+            </label>
+            {#if reader.gpu_enabled && reader.gpu_note}
+              <p class="small error">On the processor instead: {reader.gpu_note}. Switch it off and on to try again.</p>
+            {/if}
+            <button class="small-button" onclick={() => attempt(() => api.removeGpuPack(), 'GPU pack removed')}>
+              Remove the GPU pack
+            </button>
+          {/if}
+          {#if reader.gpu_error}<p class="small error">{reader.gpu_error}</p>{/if}
+        </div>
       {/if}
       <div class="options">
         <label>

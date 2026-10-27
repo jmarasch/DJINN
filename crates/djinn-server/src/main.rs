@@ -16,6 +16,7 @@ mod desktop;
 mod error;
 mod events;
 mod folders;
+mod gpu;
 mod identify_api;
 mod jukebox;
 mod library_api;

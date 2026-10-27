@@ -477,6 +477,17 @@ export interface ReaderStatus {
   gpu_build: boolean
   /** Loaded onto a GPU. */
   on_gpu: boolean
+  /** An NVIDIA graphics driver is installed, so the GPU pack can help. */
+  nvidia: boolean
+  gpu_installed: boolean
+  /** Use the graphics card when the pack is installed. */
+  gpu_enabled: boolean
+  /** Rough download size of the pack, in bytes. */
+  gpu_pack_size: number
+  gpu_downloading: [number, number] | null
+  gpu_error: string | null
+  /** Why the reader runs on the processor although it could use the graphics card. */
+  gpu_note: string | null
 }
 
 export interface IdentifyStatus {

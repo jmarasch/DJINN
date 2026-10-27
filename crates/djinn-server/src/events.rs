@@ -31,7 +31,7 @@ pub enum ServerEvent {
     /// Cast devices and how their casts are going.
     CastStatus(Vec<djinn_cast::CastStatus>),
     /// AI listening: download, model, and progress.
-    AiStatus(crate::ai::AiStatus),
+    AiStatus(Box<crate::ai::AiStatus>),
     /// Identifying songs by fingerprint: progress.
     IdentifyStatus(crate::identify_api::IdentifyStatus),
 }

@@ -102,6 +102,31 @@ impl Fetch {
         self.cancel.store(true, Ordering::Release);
     }
 
+    /// Marks a download as starting; false if one is already going.
+    pub fn begin(&self, total: u64) -> bool {
+        let Ok(mut progress) = self.progress.lock() else {
+            return false;
+        };
+        if progress.is_some() {
+            return false;
+        }
+        *progress = Some((0, total));
+        self.cancel.store(false, Ordering::Release);
+        drop(progress);
+        self.set_error(None);
+        true
+    }
+
+    pub fn set_progress(&self, progress: Option<(u64, u64)>) {
+        if let Ok(mut p) = self.progress.lock() {
+            *p = progress;
+        }
+    }
+
+    pub fn cancelled(&self) -> bool {
+        self.cancel.load(Ordering::Acquire)
+    }
+
     pub fn set_error(&self, error: Option<String>) {
         if let Ok(mut e) = self.error.lock() {
             *e = error;
@@ -135,7 +160,10 @@ impl AiState {
             loading: AtomicBool::new(false),
             listening: AtomicBool::new(false),
             stop_listening: AtomicBool::new(false),
-            reader: crate::reader::ReaderState::new(&models_dir.join(models::READER.folder)),
+            reader: crate::reader::ReaderState::new(
+                &models_dir.join(models::READER.folder),
+                &crate::gpu::pack_dir(models_dir),
+            ),
         }
     }
 
@@ -280,7 +308,7 @@ async fn enabled(state: &AppState) -> ApiResult<bool> {
 
 pub async fn broadcast(state: &AppState) {
     if let Ok(status) = ai_status(state).await {
-        let _ = state.events.send(ServerEvent::AiStatus(status));
+        let _ = state.events.send(ServerEvent::AiStatus(Box::new(status)));
     }
 }
 

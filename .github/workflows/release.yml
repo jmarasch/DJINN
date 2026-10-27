@@ -70,8 +70,61 @@ jobs:
           path: out/${{ matrix.asset }}
           if-no-files-found: error
 
+  # The optional GPU pack: the AI reader built for NVIDIA cards plus the
+  # CUDA libraries it needs, each file zstd-compressed as
+  # gpu-<os>-<arch>.<file>.zst. DJINN downloads it from Admin > AI.
+  gpu:
+    name: GPU pack ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            prefix: gpu-linux-x86_64
+            helper: djinn-gpu
+            libs: lib64/libcudart.so.12 lib64/libcublas.so.12 lib64/libcublasLt.so.12 lib64/libcurand.so.10
+          - os: windows-latest
+            prefix: gpu-windows-x86_64
+            helper: djinn-gpu.exe
+            libs: bin/cudart64_12.dll bin/cublas64_12.dll bin/cublasLt64_12.dll bin/curand64_10.dll
+    runs-on: ${{ matrix.os }}
+    env:
+      # No GPU on the runner: build for Turing and newer (the code is JIT
+      # compiled for newer cards). Older cards fall back to the processor.
+      CUDA_COMPUTE_CAP: 75
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: Jimver/cuda-toolkit@v0.2.16
+        with:
+          cuda: '12.4.0'
+          method: network
+          sub-packages: '["nvcc", "cudart", "cublas", "cublas_dev", "curand", "curand_dev", "nvrtc", "nvrtc_dev"]'
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - run: cargo build --release --locked -p djinn-ai --features cuda --bin djinn-gpu
+
+      - name: Pack
+        shell: bash
+        run: |
+          mkdir out
+          cp target/release/${{ matrix.helper }} "out/${{ matrix.prefix }}.${{ matrix.helper }}"
+          for lib in ${{ matrix.libs }}; do
+            cp -L "$CUDA_PATH/$lib" "out/${{ matrix.prefix }}.$(basename "$lib")"
+          done
+          cd out
+          for f in *; do zstd -19 -T0 --rm -q "$f"; done
+          ls -l
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.prefix }}
+          path: out/*.zst
+          if-no-files-found: error
+
   publish:
-    needs: build
+    needs: [build, gpu]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -88,7 +141,7 @@ jobs:
           DJINN_SIGNING_KEY: ${{ secrets.DJINN_SIGNING_KEY }}
         run: |
           cd out
-          sha256sum djinn-* > SHA256SUMS
+          sha256sum djinn-* gpu-* > SHA256SUMS
           cat SHA256SUMS
           umask 077
           printf '%s\n' "$DJINN_SIGNING_KEY" > "$RUNNER_TEMP/signing.key"

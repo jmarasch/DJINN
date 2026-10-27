@@ -283,7 +283,79 @@ async fn tick(state: &AppState) {
     }
 }
 
-fn client() -> Result<reqwest::Client, String> {
+/// The files of this version's release, with its SHA256SUMS already
+/// checked against the release key.
+pub struct ReleaseFiles {
+    /// (name, download URL, size).
+    pub files: Vec<(String, String, u64)>,
+    pub sums: String,
+}
+
+/// This version's release on GitHub. `None` if there isn't one (or the
+/// repository is private).
+pub async fn this_release() -> Result<Option<ReleaseFiles>, String> {
+    // For testing against a stand-in server, like DJINN_RELEASES_URL.
+    let url = std::env::var("DJINN_THIS_RELEASE_URL").unwrap_or_else(|_| {
+        format!(
+            "https://api.github.com/repos/{REPOSITORY}/releases/tags/v{}",
+            env!("CARGO_PKG_VERSION")
+        )
+    });
+    let client = client()?;
+    let response = client
+        .get(url)
+        .header("accept", "application/vnd.github+json")
+        .send()
+        .await
+        .map_err(|e| format!("cannot reach GitHub: {e}"))?;
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(None);
+    }
+    let release: GitHubRelease = response
+        .error_for_status()
+        .map_err(|e| format!("GitHub said: {e}"))?
+        .json()
+        .await
+        .map_err(|e| format!("unexpected answer from GitHub: {e}"))?;
+    let find = |name: &str| {
+        release
+            .assets
+            .iter()
+            .find(|a| a.name == name)
+            .map(|a| a.browser_download_url.clone())
+    };
+    let (Some(sums_url), Some(sig_url)) = (find("SHA256SUMS"), find("SHA256SUMS.sig")) else {
+        return Err("this release has no checksums".into());
+    };
+    let text = |url: String| {
+        let client = client.clone();
+        async move {
+            client
+                .get(url)
+                .send()
+                .await
+                .and_then(|r| r.error_for_status())
+                .map_err(|e| format!("download failed: {e}"))?
+                .text()
+                .await
+                .map_err(|e| format!("download failed: {e}"))
+        }
+    };
+    let sums = text(sums_url).await?;
+    if !signed(sums.as_bytes(), &text(sig_url).await?, PUBLIC_KEY) {
+        return Err("this release isn't signed with DJINN's release key".into());
+    }
+    Ok(Some(ReleaseFiles {
+        files: release
+            .assets
+            .into_iter()
+            .map(|a| (a.name, a.browser_download_url, a.size))
+            .collect(),
+        sums,
+    }))
+}
+
+pub fn client() -> Result<reqwest::Client, String> {
     let _ = rustls::crypto::ring::default_provider().install_default();
     reqwest::Client::builder()
         .user_agent(concat!("DJINN/", env!("CARGO_PKG_VERSION")))
@@ -436,7 +508,7 @@ fn unhex<const N: usize>(text: &str) -> Option<[u8; N]> {
 }
 
 /// The sum for `name` in a SHA256SUMS file ("<hex>  <name>" lines).
-fn expected_sum(sums: &str, name: &str) -> Option<String> {
+pub fn expected_sum(sums: &str, name: &str) -> Option<String> {
     sums.lines().find_map(|line| {
         let (sum, file) = line.split_once(char::is_whitespace)?;
         (file.trim().trim_start_matches('*') == name).then(|| sum.to_lowercase())

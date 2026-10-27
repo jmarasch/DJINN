@@ -34,6 +34,19 @@ printed public key in `update.rs`.
    `SHA256SUMS`, and publishes the release with generated notes. Edit the
    notes on GitHub if you like; the About tab shows them.
 
+## The GPU pack
+
+The same workflow builds the optional GPU pack: `djinn-gpu` (the AI
+reader built with CUDA, `cargo build -p djinn-ai --features cuda --bin
+djinn-gpu`) and NVIDIA's CUDA runtime libraries (cudart, cuBLAS,
+cuBLASLt, cuRAND, which NVIDIA allows apps to ship), each compressed as
+`gpu-<os>-<arch>.<file>.zst` and listed in the signed `SHA256SUMS`.
+DJINN downloads the pack for its own version from Admin > AI when it sees
+an NVIDIA driver, runs the reader through the helper, and falls back to
+the processor if the helper fails. It's built for Turing (GTX 16xx, RTX
+20xx) and newer. The GPU job hasn't run yet; check its output on the
+first release.
+
 ## How an install works
 
 The app downloads the binary for its system next to itself, checks size
