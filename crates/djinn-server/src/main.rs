@@ -28,6 +28,7 @@ mod state;
 #[cfg(test)]
 mod test_util;
 mod tv_api;
+mod update;
 mod watcher;
 mod web;
 
@@ -187,7 +188,7 @@ async fn main() -> anyhow::Result<()> {
         Some(url)
     };
 
-    let listener = match tokio::net::TcpListener::bind(config.server.listen).await {
+    let listener = match bind(config.server.listen).await {
         Ok(listener) => listener,
         // Probably DJINN is already running (opened twice from the app
         // menu): show the running one instead of failing silently.
@@ -233,6 +234,8 @@ async fn main() -> anyhow::Result<()> {
         });
     }
     watcher::start(state.clone());
+    update::start(&state);
+    let update = std::sync::Arc::clone(&state.update);
 
     let shutdown = std::sync::Arc::clone(&state.shutdown);
     let mut stopping = state.shutdown.subscribe();
@@ -264,7 +267,29 @@ async fn main() -> anyhow::Result<()> {
     drop(engine);
     store.close().await;
     tracing::info!("shut down");
+    if update.restart_requested() {
+        if let Some(exe) = update.exe() {
+            tracing::info!("starting the new version");
+            update::restart(exe).context("starting the new version failed")?;
+        }
+    }
     Ok(())
+}
+
+/// Binds the listen address. Right after an update restart the old process
+/// may still hold it for a moment, so keep trying for a few seconds.
+async fn bind(addr: std::net::SocketAddr) -> std::io::Result<tokio::net::TcpListener> {
+    let restarted = std::env::var_os(update::RESTARTED).is_some();
+    let mut tries = 0;
+    loop {
+        match tokio::net::TcpListener::bind(addr).await {
+            Err(e) if restarted && e.kind() == std::io::ErrorKind::AddrInUse && tries < 40 => {
+                tries += 1;
+                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+            }
+            result => return result,
+        }
+    }
 }
 
 fn init_logging(file: Option<&std::path::Path>) -> anyhow::Result<()> {

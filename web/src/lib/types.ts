@@ -421,6 +421,34 @@ export interface SystemInfo {
   memory_available: number | null
 }
 
+/** Version and updates (Admin > About). */
+export interface About {
+  version: string
+  commit: string
+  commit_date: string
+  repository: string
+  contact: string
+  check_updates: boolean
+  auto_update: boolean
+  /** Unix ms of the last check. */
+  checked_at: number | null
+  latest: Release | null
+  update_available: boolean
+  /** Why the update can't be installed from here. */
+  cannot_install: string | null
+  error: string | null
+  installing: boolean
+  /** [done, total] bytes while downloading an update. */
+  progress: [number, number] | null
+}
+
+export interface Release {
+  version: string
+  url: string
+  notes: string
+  published_at: string | null
+}
+
 /** The AI reader for free-form search requests. */
 export interface ReaderStatus {
   installed: boolean

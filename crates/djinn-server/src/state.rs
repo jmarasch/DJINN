@@ -47,6 +47,8 @@ pub struct AppState {
     pub catalog: Arc<std::sync::RwLock<crate::smart::Catalog>>,
     /// Optional AI listening.
     pub ai: Arc<crate::ai::AiState>,
+    /// Version checks and self-updates.
+    pub update: Arc<crate::update::UpdateState>,
 }
 
 #[derive(Default)]
@@ -94,6 +96,7 @@ impl AppState {
             sound: Arc::default(),
             catalog: Arc::default(),
             ai: Arc::new(crate::ai::AiState::new(&art_dir_for_models)),
+            update: Arc::default(),
         }
     }
 

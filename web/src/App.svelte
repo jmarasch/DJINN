@@ -46,13 +46,14 @@
   const playlistId = $derived(param('/playlist'))
   const similarId = $derived(param('/similar'))
   const adminTab = $derived(
-    (route.path.match(/^\/admin\/(library|audio|ai|users|log|rules)$/)?.[1] ?? 'library') as
+    (route.path.match(/^\/admin\/(library|audio|ai|users|log|rules|about)$/)?.[1] ?? 'library') as
       | 'library'
       | 'audio'
       | 'ai'
       | 'users'
       | 'log'
-      | 'rules',
+      | 'rules'
+      | 'about',
   )
   const tab = $derived(
     route.path.startsWith('/search') || albumId || artistId || similarId

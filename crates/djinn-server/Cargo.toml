@@ -20,6 +20,7 @@ djinn-engine = { path = "../djinn-engine" }
 djinn-library = { path = "../djinn-library" }
 djinn-store = { path = "../djinn-store" }
 djinn-platform = { path = "../djinn-platform" }
+ed25519-dalek = "2.2"
 figment.workspace = true
 futures-util = "0.3.34"
 getrandom = "0.4.3"

@@ -2,6 +2,7 @@
   import { api } from '../lib/api'
   import FolderPicker from '../lib/FolderPicker.svelte'
   import Icon from '../lib/Icon.svelte'
+  import AboutPanel from '../lib/AboutPanel.svelte'
   import AiPanel from '../lib/AiPanel.svelte'
   import IdentifyPanel from '../lib/IdentifyPanel.svelte'
   import CastPanel from '../lib/CastPanel.svelte'
@@ -12,7 +13,7 @@
   import { app, logout, toast } from '../lib/state.svelte'
   import type { GuestSummary, LibraryRoot, RequestLogEntry, Role, Settings, User } from '../lib/types'
 
-  type Tab = 'library' | 'audio' | 'ai' | 'users' | 'log' | 'rules'
+  type Tab = 'library' | 'audio' | 'ai' | 'users' | 'log' | 'rules' | 'about'
   let { tab = 'library' }: { tab?: Tab } = $props()
   const tabs: { id: Tab; label: string }[] = [
     { id: 'library', label: 'Library' },
@@ -21,6 +22,7 @@
     { id: 'users', label: 'Users' },
     { id: 'log', label: 'Log' },
     { id: 'rules', label: 'Rules' },
+    { id: 'about', label: 'About' },
   ]
 
   let roots = $state<LibraryRoot[]>([])
@@ -432,6 +434,8 @@
       <button class="primary">Save</button>
     </form>
   </section>
+{:else if tab === 'about'}
+  <AboutPanel />
 {/if}
 
 <button class="signout" onclick={logout}>Sign out</button>

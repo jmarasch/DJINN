@@ -12,5 +12,10 @@ tray-icon = { version = "0.26.1", default-features = false, features = ["ksni"] 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_UI_WindowsAndMessaging", "Win32_System_Console", "Win32_System_SystemInformation"] }
 
+[dev-dependencies]
+# For the release signing tool (examples/sign.rs).
+ed25519-dalek = "2.2"
+getrandom = "0.4.3"
+
 [lints]
 workspace = true
