@@ -288,10 +288,15 @@ Runtime-tunable settings live in the `settings` table, not the config file.
 - Similarity search: "more like this track/artist", seeded radio for the auto pool.
 - Use play/skip history to weight results.
 - Optional: small local language model that turns plain-language prompts ("chill 90s, nothing too slow") into structured queries over tags, features, and history. Must run fully offline.
+- Optional AI listening: a local audio-text model (CLAP) hears genre and mood in songs with no tags and matches free descriptions against the audio. Downloaded on request, runs on the CPU (a GPU only speeds it up). Results live in DJINN's database; music folders stay read-only.
+- Identify songs with missing or wrong tags by audio fingerprint (AcoustID, then MusicBrainz), opt-in like other online lookups; corrections are stored in DJINN, not written to files.
 
 ### Phase 7: Personal streaming
 - Stream tracks to a phone for personal listening (HTTP range requests, optional ffmpeg transcode).
 - Comes last. Likely its own listener on a separate port, sharing the database and library with the jukebox.
+
+### Phase 8: Library backup and import
+- Back up everything DJINN knows (settings, users, playlists, request history, outputs, casts, artwork cache, analysis) to one file, and restore or import it on another machine, remapping music folder paths. The music files themselves are not part of it.
 
 ## 16. Coding rules
 
