@@ -131,6 +131,7 @@
       <option value="title">Title</option>
       <option value="artist">Artist</option>
       <option value="added">Recently added</option>
+      <option value="popular">Most popular</option>
     </select>
   </label>
   <InfiniteList

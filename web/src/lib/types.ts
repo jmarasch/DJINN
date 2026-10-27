@@ -299,7 +299,7 @@ export interface ArtistSummary {
   track_count: number
 }
 
-export type TrackSort = 'title' | 'artist' | 'added'
+export type TrackSort = 'title' | 'artist' | 'added' | 'popular'
 
 /** Year is newest first. */
 export type AlbumSort = 'name' | 'year'

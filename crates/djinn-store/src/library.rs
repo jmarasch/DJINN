@@ -194,6 +194,8 @@ pub enum TrackSort {
     Artist,
     /// Most recently added first.
     Added,
+    /// Most requested, then most played (as artist pages rank top songs).
+    Popular,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -788,6 +790,15 @@ impl Store {
                 available!(),
                 " ORDER BY t.added_at DESC, t.id DESC LIMIT ? OFFSET ?"
             ),
+            TrackSort::Popular => concat!(
+                "SELECT ",
+                track_columns!(),
+                " FROM tracks t WHERE ",
+                available!(),
+                " ORDER BY (SELECT count(*) FROM request_events r WHERE r.track_id = t.id) DESC,
+                           (SELECT count(*) FROM play_events p WHERE p.track_id = t.id) DESC,
+                           t.title COLLATE NOCASE LIMIT ? OFFSET ?"
+            ),
         };
         let items = sqlx::query_as(sql)
             .bind(limit)
@@ -1280,6 +1291,26 @@ mod tests {
             "newest first, unknown years last"
         );
         assert_eq!(store.library_track_ids().await.unwrap().len(), 4);
+
+        // Popular: requests first, then plays, then title.
+        let ids = store.library_track_ids().await.unwrap();
+        let user = store
+            .create_user("u", "h", crate::Role::User)
+            .await
+            .unwrap()
+            .id;
+        let origin = crate::RequestOrigin::default();
+        store
+            .add_request(ids[2], user, crate::RequestLimits::default(), &origin)
+            .await
+            .unwrap();
+        store
+            .start_play_event(ids[3], crate::PlaySource::Pool, None)
+            .await
+            .unwrap();
+        let popular = store.tracks_page(TrackSort::Popular, 0, 10).await.unwrap();
+        let order: Vec<i64> = popular.items.iter().map(|t| t.id).collect();
+        assert_eq!(&order[..2], &[ids[2], ids[3]]);
     }
 
     #[tokio::test]
