@@ -223,6 +223,25 @@ impl SoundIndex {
         out
     }
 
+    /// How far every other artist's sound is from `artist_id`'s, with how
+    /// many distinct songs each has. Empty if the artist wasn't analyzed.
+    pub fn artist_distances(&self, artist_id: i64) -> Vec<(i64, f32, usize)> {
+        let Some(center) = self.artists.get(&artist_id) else {
+            return Vec::new();
+        };
+        self.artists
+            .iter()
+            .filter(|(&id, _)| id != artist_id)
+            .map(|(&id, v)| {
+                (
+                    id,
+                    distance(center, v),
+                    self.artist_songs.get(&id).copied().unwrap_or(0),
+                )
+            })
+            .collect()
+    }
+
     /// Artists who sound most like `artist_id`, closest first.
     pub fn similar_artists(&self, artist_id: i64, limit: usize) -> Vec<i64> {
         let Some(center) = self.artists.get(&artist_id) else {

@@ -90,6 +90,19 @@ export interface SearchResults {
   tracks: Track[]
   albums: Album[]
   artists: Artist[]
+  /** The query read as a description ("80's hair metal"), if it is one. */
+  described: Described | null
+}
+
+export interface Described {
+  /** What was understood, like ["1980s", "hair metal"]. */
+  summary: string[]
+  /** Words that weren't understood. */
+  unknown: string[]
+  tracks: Track[]
+  /** Songs that fit in all (more than shown). */
+  total: number
+  artists: ArtistSummary[]
 }
 
 export interface AlbumDetail extends Album {

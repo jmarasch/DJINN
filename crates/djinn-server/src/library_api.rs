@@ -47,16 +47,27 @@ struct SearchQuery {
     limit: Option<i64>,
 }
 
+#[derive(Serialize)]
+struct SearchResponse {
+    #[serde(flatten)]
+    results: SearchResults,
+    /// Songs fitting the query read as a description ("80's hair metal").
+    described: Option<crate::smart::Described>,
+}
+
 async fn search(
     _: CurrentUser,
     State(state): State<AppState>,
     Query(query): Query<SearchQuery>,
-) -> ApiResult<Json<SearchResults>> {
+) -> ApiResult<Json<SearchResponse>> {
     let limit = query
         .limit
         .unwrap_or(DEFAULT_SEARCH_LIMIT)
         .clamp(1, MAX_SEARCH_LIMIT);
-    Ok(Json(state.store.search(&query.q, limit).await?))
+    Ok(Json(SearchResponse {
+        results: state.store.search(&query.q, limit).await?,
+        described: crate::smart::describe(&state, &query.q).await?,
+    }))
 }
 
 #[derive(Deserialize)]
@@ -349,6 +360,11 @@ pub fn start_artist_lookup(state: &AppState, force: bool) -> bool {
                         }
                     }
                     let _ = state.events.send(ServerEvent::LibraryChanged);
+                    // New genres change search by description and similar
+                    // artists.
+                    if did_work {
+                        crate::smart::refresh(&state).await;
+                    }
                 }
                 Err(e) => tracing::error!(error = %e, "artist lookup failed"),
             }

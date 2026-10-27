@@ -5,6 +5,7 @@ pub mod credits;
 pub mod online;
 pub mod sound;
 mod tags;
+pub mod vibe;
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};

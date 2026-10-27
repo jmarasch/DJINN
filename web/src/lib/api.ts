@@ -85,6 +85,8 @@ export const api = {
   artists: (offset: number) => get<Page<ArtistSummary>>(`/artists?offset=${offset}`),
   albums: (sort: AlbumSort, offset: number) => get<Page<Album>>(`/albums?sort=${sort}&offset=${offset}`),
   playWild: () => post<void>('/playlists/wild/play'),
+  playlistFromSongs: (name: string, trackIds: number[]) =>
+    post<PlaylistSummary>('/playlists/from-songs', { name, track_ids: trackIds }),
   tracks: (sort: TrackSort, offset: number) =>
     get<Page<Track>>(`/tracks?sort=${sort}&offset=${offset}`),
   track: (id: number) => get<Track>(`/tracks/${id}`),

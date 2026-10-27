@@ -43,6 +43,8 @@ pub struct AppState {
     pub caster: djinn_cast::Caster,
     /// Songs as points in sound space, for "more like this".
     pub sound: Arc<std::sync::RwLock<djinn_library::sound::SoundIndex>>,
+    /// Song facts for search by description.
+    pub catalog: Arc<std::sync::RwLock<crate::smart::Catalog>>,
 }
 
 #[derive(Default)]
@@ -84,6 +86,7 @@ impl AppState {
             cast_token: Arc::new(String::new()),
             caster: djinn_cast::Caster::new(),
             sound: Arc::default(),
+            catalog: Arc::default(),
         }
     }
 

@@ -33,6 +33,29 @@ pub struct SoundRow {
     pub features: Vec<f32>,
 }
 
+/// What search needs to know about a song to match descriptions like
+/// "80s hair metal" or "chill house".
+#[derive(Clone, Debug, PartialEq, FromRow)]
+pub struct TrackFacts {
+    pub id: i64,
+    /// The song's year, else its album's.
+    pub year: Option<i64>,
+    /// Genre words from the file's tag, its album, and its artists
+    /// (MusicBrainz), comma separated, lowercase.
+    pub genres: String,
+    /// Times requested plus times played.
+    pub popularity: i64,
+}
+
+/// An artist's genres, for similar artists.
+#[derive(Clone, Debug, PartialEq, FromRow)]
+pub struct ArtistGenres {
+    pub id: i64,
+    pub name: String,
+    /// Comma separated, lowercase; empty if unknown.
+    pub genres: String,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct LoudnessProgress {
     /// Songs whose loudness is known (from tags or measured).
@@ -118,6 +141,36 @@ impl Store {
                     .collect(),
             })
             .collect())
+    }
+
+    /// Facts about every playable song, for descriptive search.
+    pub async fn track_facts(&self) -> Result<Vec<TrackFacts>> {
+        let rows = sqlx::query_as(
+            "SELECT t.id, coalesce(t.year, al.year) AS year, \
+                    lower(coalesce(t.genre, '') || ',' || coalesce(al.genres, '') || ',' || \
+                      coalesce((SELECT group_concat(ar.genres, ',') FROM track_artists ta \
+                                JOIN artists ar ON ar.id = ta.artist_id \
+                                WHERE ta.track_id = t.id AND ar.genres IS NOT NULL), '')) AS genres, \
+                    (SELECT count(*) FROM request_events r WHERE r.track_id = t.id) + \
+                    (SELECT count(*) FROM play_events p WHERE p.track_id = t.id) AS popularity \
+             FROM tracks t LEFT JOIN albums al ON al.id = t.album_id \
+             WHERE t.removed_at IS NULL",
+        )
+        .fetch_all(self.pool())
+        .await?;
+        Ok(rows)
+    }
+
+    /// Every artist with playable songs and their genres.
+    pub async fn artist_genres(&self) -> Result<Vec<ArtistGenres>> {
+        let rows = sqlx::query_as(
+            "SELECT ar.id, ar.name, lower(coalesce(ar.genres, '')) AS genres FROM artists ar \
+             WHERE EXISTS (SELECT 1 FROM track_artists ta JOIN tracks t ON t.id = ta.track_id \
+                           WHERE ta.artist_id = ar.id AND t.removed_at IS NULL)",
+        )
+        .fetch_all(self.pool())
+        .await?;
+        Ok(rows)
     }
 
     /// How far measuring has got, `version` being the current features

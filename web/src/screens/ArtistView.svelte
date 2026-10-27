@@ -127,6 +127,12 @@
     </div>
   {/if}
 
+  {#if moreSongs.length}
+    <h2>More songs</h2>
+    {#each moreSongs as track (track.id)}
+      <TrackRow {track} />
+    {/each}
+  {/if}
   {#if similar.length}
     <h2>Similar artists</h2>
     <div class="artists">
@@ -137,13 +143,6 @@
         </a>
       {/each}
     </div>
-  {/if}
-
-  {#if moreSongs.length}
-    <h2>More songs</h2>
-    {#each moreSongs as track (track.id)}
-      <TrackRow {track} />
-    {/each}
   {/if}
 {/if}
 

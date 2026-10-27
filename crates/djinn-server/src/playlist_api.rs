@@ -19,6 +19,7 @@ pub fn router() -> Router<AppState> {
         .route("/playlists", get(list).post(create))
         .route("/playlists/stop", post(stop))
         .route("/playlists/wild/play", post(play_wild))
+        .route("/playlists/from-songs", post(from_songs))
         .route("/playlists/{id}", get(detail).patch(update).delete(remove))
         .route("/playlists/{id}/play", post(play))
         .route("/playlists/{id}/entries", post(add_entry))
@@ -140,6 +141,44 @@ async fn play(
         .play_playlist(id, body.from_track_id)
         .await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+struct FromSongs {
+    name: String,
+    track_ids: Vec<i64>,
+}
+
+/// Makes a playlist out of a list of songs (search results by
+/// description, say).
+async fn from_songs(
+    AdminUser(admin): AdminUser,
+    State(state): State<AppState>,
+    Json(body): Json<FromSongs>,
+) -> ApiResult<(StatusCode, Json<PlaylistSummary>)> {
+    let name = validate_name(&body.name)?;
+    if body.track_ids.is_empty() || body.track_ids.len() > 500 {
+        return Err(ApiError::bad_request("pick 1 to 500 songs"));
+    }
+    let playlist = state.store.create_playlist(admin.id, &name).await?;
+    for &id in &body.track_ids {
+        match state
+            .store
+            .add_playlist_entry(playlist.id, EntryKind::Track, id)
+            .await
+        {
+            Ok(_) | Err(AddEntryError::AlreadyIn) | Err(AddEntryError::NotFound) => {}
+            Err(e) => return Err(anyhow::Error::from(e).into()),
+        }
+    }
+    let summary = state
+        .store
+        .playlists()
+        .await?
+        .into_iter()
+        .find(|p| p.id == playlist.id)
+        .unwrap_or(playlist);
+    Ok((StatusCode::CREATED, Json(summary)))
 }
 
 /// Wild play: random songs from the whole library when the requests run
