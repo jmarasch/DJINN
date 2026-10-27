@@ -428,6 +428,35 @@ impl Store {
         Ok(track)
     }
 
+    /// Playable tracks by id, in the order given (missing ones skipped).
+    pub async fn tracks_by_ids(&self, ids: &[i64]) -> Result<Vec<Track>> {
+        let list = json_ids(ids);
+        let found: Vec<Track> = sqlx::query_as(concat!(
+            "SELECT ",
+            track_columns!(),
+            " FROM tracks t WHERE t.id IN (SELECT value FROM json_each(?)) AND ",
+            available!()
+        ))
+        .bind(list)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(in_order(ids, found, |t| t.id))
+    }
+
+    /// Artists by id, in the order given, with their song counts.
+    pub async fn artists_by_ids(&self, ids: &[i64]) -> Result<Vec<ArtistSummary>> {
+        let list = json_ids(ids);
+        let found: Vec<ArtistSummary> = sqlx::query_as(concat!(
+            "SELECT id, name, art_hash, track_count FROM (",
+            artist_counts!(),
+            ") WHERE track_count > 0 AND id IN (SELECT value FROM json_each(?))"
+        ))
+        .bind(list)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(in_order(ids, found, |a| a.id))
+    }
+
     /// Every playable track (for wild play).
     pub async fn library_track_ids(&self) -> Result<Vec<i64>> {
         let ids = sqlx::query_scalar(concat!(
@@ -925,7 +954,9 @@ async fn save_track(tx: &mut Transaction<'_, Sqlite>, t: &ScannedTrack, now: i64
             loudness_peak = CASE WHEN size = excluded.size AND mtime = excluded.mtime
                                  THEN loudness_peak END,
             loudness_checked_at = CASE WHEN size = excluded.size AND mtime = excluded.mtime
-                                       THEN loudness_checked_at END
+                                       THEN loudness_checked_at END,
+            features_version = CASE WHEN size = excluded.size AND mtime = excluded.mtime
+                                    THEN features_version END
          RETURNING id",
     )
     .bind(&t.path)
@@ -1017,6 +1048,20 @@ fn fts_query(input: &str) -> Option<String> {
         .map(|w| format!("\"{w}\"*"))
         .collect();
     (!terms.is_empty()).then(|| terms.join(" "))
+}
+
+/// Ids as a JSON array, for `json_each(?)`: one static query for any
+/// number of ids.
+fn json_ids(ids: &[i64]) -> String {
+    let parts: Vec<String> = ids.iter().map(i64::to_string).collect();
+    format!("[{}]", parts.join(","))
+}
+
+/// Puts `found` in the order of `ids`.
+fn in_order<T>(ids: &[i64], found: Vec<T>, id: impl Fn(&T) -> i64) -> Vec<T> {
+    let mut by_id: std::collections::HashMap<i64, T> =
+        found.into_iter().map(|item| (id(&item), item)).collect();
+    ids.iter().filter_map(|i| by_id.remove(i)).collect()
 }
 
 #[cfg(test)]

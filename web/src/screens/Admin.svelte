@@ -3,6 +3,7 @@
   import FolderPicker from '../lib/FolderPicker.svelte'
   import Icon from '../lib/Icon.svelte'
   import CastPanel from '../lib/CastPanel.svelte'
+  import CrossfadePanel from '../lib/CrossfadePanel.svelte'
   import OutputsPanel from '../lib/OutputsPanel.svelte'
   import ReplayGainPanel from '../lib/ReplayGainPanel.svelte'
   import Sheet from '../lib/Sheet.svelte'
@@ -35,7 +36,13 @@
 
   async function load(which: Tab) {
     if (which === 'library') {
-      const [r, status, s] = await Promise.all([api.libraryRoots(), api.libraryStatus(), api.settings()])
+      const [r, status, s, rg] = await Promise.all([
+        api.libraryRoots(),
+        api.libraryStatus(),
+        api.settings(),
+        api.replayGain(),
+      ])
+      app.loudness = rg.loudness
       roots = r
       trackCount = status.tracks
       artDir = status.art_dir
@@ -191,6 +198,17 @@
     {:else if app.scan}
       <p class="small muted">Last check found {app.scan.found} files, read {app.scan.read}, removed {app.scan.removed}.</p>
     {/if}
+    {#if app.loudness}
+      {@const total = app.loudness.analyzed + app.loudness.waiting}
+      {#if app.loudness.waiting > 0}
+        <p class="small">
+          {#if app.loudness.running}<span class="spinner" aria-hidden="true"></span>{/if}
+          Listening to songs for "more like this" and leveling: {app.loudness.analyzed} of {total} done.
+        </p>
+      {:else if total}
+        <p class="small muted">All {total} songs analyzed for "more like this" and leveling.</p>
+      {/if}
+    {/if}
     <button disabled={scanning} onclick={checkForChanges}>Check for changes</button>
   </section>
 
@@ -241,6 +259,7 @@
 {:else if tab === 'audio'}
   <OutputsPanel />
   <CastPanel />
+  <CrossfadePanel />
   <ReplayGainPanel />
 {:else if tab === 'users'}
   <section class="card">

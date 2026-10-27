@@ -14,9 +14,7 @@ use serde::{Deserialize, Serialize};
 use crate::auth::AdminUser;
 use crate::error::{ApiError, ApiResult};
 use crate::events::{LoudnessStatus, OutputStatus, ServerEvent};
-use crate::jukebox::{
-    ReplayGain, ReplayGainMode, MAX_PREAMP_DB, REPLAY_GAIN_MODE, REPLAY_GAIN_PREAMP,
-};
+use crate::jukebox::{ReplayGain, MAX_PREAMP_DB, REPLAY_GAIN_MODE, REPLAY_GAIN_PREAMP};
 use crate::state::AppState;
 
 const MAX_LABEL: usize = 60;
@@ -216,26 +214,26 @@ async fn set_replay_gain(
         .set_setting(REPLAY_GAIN_PREAMP, &body.preamp_db.to_string())
         .await?;
     state.jukebox.lock().await.set_replay_gain(body);
-    start_measuring(&state).await;
     replay_gain(admin, State(state)).await
 }
 
 async fn loudness_status(state: &AppState) -> ApiResult<LoudnessStatus> {
     Ok(LoudnessStatus {
-        progress: state.store.loudness_progress().await?,
+        progress: state
+            .store
+            .loudness_progress(djinn_engine::FEATURES_VERSION)
+            .await?,
         running: state.scan.loudness_running.load(Ordering::Acquire),
     })
 }
 
-/// Songs measured per round between progress updates.
-const MEASURE_BATCH: i64 = 16;
+/// Songs analyzed per round between progress updates.
+const ANALYSIS_BATCH: i64 = 16;
 
-/// Measures the loudness of songs without ReplayGain tags in the
-/// background, while ReplayGain is on. Does nothing if it already runs.
-pub async fn start_measuring(state: &AppState) {
-    if state.jukebox.lock().await.replay_gain().mode == ReplayGainMode::Off {
-        return;
-    }
+/// Analyzes songs not analyzed yet in the background: loudness (for
+/// ReplayGain) and sound (for smart playlists), one decode each. Does
+/// nothing if it already runs.
+pub async fn start_analysis(state: &AppState) {
     if state.scan.loudness_running.swap(true, Ordering::AcqRel) {
         return;
     }
@@ -244,29 +242,27 @@ pub async fn start_measuring(state: &AppState) {
         let workers = std::thread::available_parallelism()
             .map_or(1, |n| n.get() / 2)
             .clamp(1, 4);
+        let version = djinn_engine::FEATURES_VERSION;
         let started = std::time::Instant::now();
-        let mut measured = 0usize;
+        let mut analyzed = 0usize;
         loop {
-            if state.jukebox.lock().await.replay_gain().mode == ReplayGainMode::Off {
-                break;
-            }
-            let batch = match state.store.tracks_to_measure(MEASURE_BATCH).await {
+            let batch = match state.store.tracks_to_analyze(version, ANALYSIS_BATCH).await {
                 Ok(batch) if !batch.is_empty() => batch,
                 Ok(_) => break,
                 Err(e) => {
-                    tracing::error!(error = %e, "reading songs to measure failed");
+                    tracing::error!(error = %e, "reading songs to analyze failed");
                     break;
                 }
             };
-            // Measure a few at a time on blocking threads; decoding is
-            // CPU-heavy and leaves cores for playback.
+            // A few at a time on blocking threads; decoding is CPU-heavy,
+            // and this leaves cores for playback.
             for chunk in batch.chunks(workers) {
                 let jobs: Vec<_> = chunk
                     .iter()
                     .map(|(id, path)| {
                         let (id, path) = (*id, std::path::PathBuf::from(path));
                         tokio::task::spawn_blocking(move || {
-                            (id, djinn_engine::measure_loudness(&path), path)
+                            (id, djinn_engine::analyze(&path), path)
                         })
                     })
                     .collect();
@@ -274,17 +270,29 @@ pub async fn start_measuring(state: &AppState) {
                     let Ok((id, result, path)) = job.await else {
                         continue;
                     };
-                    let loudness = match result {
-                        Ok(loudness) => loudness.map(|l| (l.lufs, l.peak)),
+                    let (loudness, features) = match result {
+                        Ok(analysis) => (
+                            analysis.loudness.map(|l| (l.lufs, l.peak)),
+                            analysis.features,
+                        ),
                         Err(e) => {
-                            tracing::debug!(path = %path.display(), error = %e, "cannot measure loudness");
-                            None
+                            tracing::debug!(path = %path.display(), error = %e, "cannot analyze song");
+                            (None, None)
                         }
                     };
-                    if let Err(e) = state.store.save_loudness(id, loudness).await {
-                        tracing::error!(error = %e, "saving loudness failed");
+                    let saved = state
+                        .store
+                        .save_analysis(
+                            id,
+                            version,
+                            loudness,
+                            features.as_ref().map(|f| (f.values.as_slice(), f.bpm)),
+                        )
+                        .await;
+                    if let Err(e) = saved {
+                        tracing::error!(error = %e, "saving analysis failed");
                     }
-                    measured += 1;
+                    analyzed += 1;
                 }
             }
             if let Ok(status) = loudness_status(&state).await {
@@ -292,12 +300,13 @@ pub async fn start_measuring(state: &AppState) {
             }
         }
         state.scan.loudness_running.store(false, Ordering::Release);
-        if measured > 0 {
+        if analyzed > 0 {
             tracing::info!(
-                songs = measured,
+                songs = analyzed,
                 secs = started.elapsed().as_secs_f32(),
-                "loudness measured"
+                "songs analyzed"
             );
+            crate::smart::refresh(&state).await;
         }
         if let Ok(status) = loudness_status(&state).await {
             let _ = state.events.send(ServerEvent::Loudness(status));

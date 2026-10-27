@@ -18,6 +18,7 @@
   import Queue from './screens/Queue.svelte'
   import Search from './screens/Search.svelte'
   import Setup from './screens/Setup.svelte'
+  import Similar from './screens/Similar.svelte'
   import Tv from './screens/Tv.svelte'
   import SetupLibrary from './screens/SetupLibrary.svelte'
 
@@ -43,6 +44,7 @@
   const albumId = $derived(param('/album'))
   const artistId = $derived(param('/artist'))
   const playlistId = $derived(param('/playlist'))
+  const similarId = $derived(param('/similar'))
   const adminTab = $derived(
     (route.path.match(/^\/admin\/(library|audio|users|log|rules)$/)?.[1] ?? 'library') as
       | 'library'
@@ -52,7 +54,7 @@
       | 'rules',
   )
   const tab = $derived(
-    route.path.startsWith('/search') || albumId || artistId
+    route.path.startsWith('/search') || albumId || artistId || similarId
       ? 'search'
       : route.path.startsWith('/queue')
         ? 'queue'
@@ -90,7 +92,9 @@
     <div class="offline">Reconnecting to the jukebox...</div>
   {/if}
   <main>
-    {#if albumId}
+    {#if similarId}
+      <Similar id={similarId} />
+    {:else if albumId}
       <AlbumView id={albumId} />
     {:else if artistId}
       <ArtistView id={artistId} />

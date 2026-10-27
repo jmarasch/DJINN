@@ -26,7 +26,6 @@
   const total = $derived(current?.track.duration_ms ?? 0)
   let position = $state(0)
   let volume = $state(app.player.volume)
-  let crossfade = $state(app.player.crossfade_secs)
 
   onMount(() => {
     let frame = 0
@@ -42,15 +41,6 @@
   $effect(() => {
     volume = app.player.volume
   })
-  $effect(() => {
-    crossfade = app.player.crossfade_secs
-  })
-
-  let crossfadeTimer: ReturnType<typeof setTimeout>
-  function onCrossfade() {
-    clearTimeout(crossfadeTimer)
-    crossfadeTimer = setTimeout(() => control(() => api.setCrossfade(crossfade)), 200)
-  }
 
   let volumeTimer: ReturnType<typeof setTimeout>
   function onVolume() {
@@ -182,12 +172,6 @@
       <label class="volume">
         <span class="row-label">Volume <span class="muted">{volume}</span></span>
         <input type="range" min="0" max="100" bind:value={volume} oninput={onVolume} />
-      </label>
-      <label class="volume">
-        <span class="row-label">
-          Crossfade <span class="muted">{crossfade ? `${crossfade} s` : 'Off (gapless)'}</span>
-        </span>
-        <input type="range" min="0" max="12" step="1" bind:value={crossfade} oninput={onCrossfade} />
       </label>
       <p class="small muted">
         {#if app.output.error}

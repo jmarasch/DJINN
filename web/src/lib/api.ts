@@ -88,6 +88,8 @@ export const api = {
   tracks: (sort: TrackSort, offset: number) =>
     get<Page<Track>>(`/tracks?sort=${sort}&offset=${offset}`),
   track: (id: number) => get<Track>(`/tracks/${id}`),
+  similarTracks: (id: number) => get<{ tracks: Track[]; analyzed: boolean }>(`/tracks/${id}/similar`),
+  similarArtists: (id: number) => get<ArtistSummary[]>(`/artists/${id}/similar`),
   album: (id: number) => get<AlbumDetail>(`/albums/${id}`),
   artist: (id: number) => get<ArtistDetail>(`/artists/${id}`),
   /** Cover art; `size` (pixels) asks for a thumbnail. */

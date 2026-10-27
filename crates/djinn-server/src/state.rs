@@ -41,6 +41,8 @@ pub struct AppState {
     /// Secret in the stream URL.
     pub cast_token: Arc<String>,
     pub caster: djinn_cast::Caster,
+    /// Songs as points in sound space, for "more like this".
+    pub sound: Arc<std::sync::RwLock<djinn_library::sound::SoundIndex>>,
 }
 
 #[derive(Default)]
@@ -81,6 +83,7 @@ impl AppState {
             stream: None,
             cast_token: Arc::new(String::new()),
             caster: djinn_cast::Caster::new(),
+            sound: Arc::default(),
         }
     }
 

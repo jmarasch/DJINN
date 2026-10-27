@@ -7,20 +7,27 @@
   import SortChoice from '../lib/SortChoice.svelte'
   import TrackRow from '../lib/TrackRow.svelte'
   import { byName } from '../lib/format'
-  import type { Album, ArtistDetail } from '../lib/types'
+  import type { Album, ArtistDetail, ArtistSummary } from '../lib/types'
 
   let { id }: { id: number } = $props()
   let artist = $state<ArtistDetail | null>(null)
   let error = $state('')
   let bioOpen = $state(false)
 
+  let similar = $state<ArtistSummary[]>([])
+
   $effect(() => {
     artist = null
+    similar = []
     bioOpen = false
     api
       .artist(id)
       .then((a) => (artist = a))
       .catch((e) => (error = e.message))
+    api
+      .similarArtists(id)
+      .then((list) => (similar = list))
+      .catch(() => {})
   })
 
   /** Top songs earn the title once anyone has requested or played them. */
@@ -120,6 +127,18 @@
     </div>
   {/if}
 
+  {#if similar.length}
+    <h2>Similar artists</h2>
+    <div class="artists">
+      {#each similar as other (other.id)}
+        <a class="artist" href="#/artist/{other.id}">
+          <Art hash={other.art_hash} size={96} round={999} letter={other.name.charAt(0).toUpperCase()} />
+          <span class="ellipsis">{other.name}</span>
+        </a>
+      {/each}
+    </div>
+  {/if}
+
   {#if moreSongs.length}
     <h2>More songs</h2>
     {#each moreSongs as track (track.id)}
@@ -201,6 +220,31 @@
     padding: 0;
     background: transparent;
     color: var(--accent);
+  }
+
+  .artists {
+    display: flex;
+    gap: 14px;
+    overflow-x: auto;
+    padding-bottom: 6px;
+    scrollbar-width: none;
+  }
+
+  .artist {
+    flex: none;
+    width: 96px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    color: var(--text);
+    text-decoration: none;
+    font-size: 0.8125rem;
+    text-align: center;
+  }
+
+  .artist span {
+    max-width: 100%;
   }
 
   .section-head {

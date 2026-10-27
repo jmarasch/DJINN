@@ -45,7 +45,7 @@
   }
 
   const progress = $derived(app.loudness)
-  const total = $derived(progress ? progress.known + progress.waiting : 0)
+  const total = $derived(progress ? progress.analyzed + progress.waiting : 0)
 </script>
 
 <section class="card">
@@ -84,10 +84,10 @@
         {#if progress.waiting > 0}
           <p class="small">
             {#if progress.running}<span class="spinner" aria-hidden="true"></span>{/if}
-            Measured {progress.known} of {total} songs{progress.running ? '' : ' (continues after the next library check)'}.
+            Measured {progress.analyzed} of {total} songs{progress.running ? '' : ' (continues after the next library check)'}.
             Songs not measured yet play unchanged.
           </p>
-          <progress max={total} value={progress.known}></progress>
+          <progress max={total} value={progress.analyzed}></progress>
         {:else}
           <p class="small muted">All {total} songs are measured.</p>
         {/if}

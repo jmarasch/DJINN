@@ -11,16 +11,28 @@
     refId,
     label,
     compact = false,
-  }: { kind: EntryKind; refId: number; label: string; compact?: boolean } = $props()
+    trigger = true,
+    open = $bindable(false),
+  }: {
+    kind: EntryKind
+    refId: number
+    label: string
+    compact?: boolean
+    /** False when something else (a menu) opens it through `open`. */
+    trigger?: boolean
+    open?: boolean
+  } = $props()
 
-  let open = $state(false)
   let playlists = $state<PlaylistListItem[]>([])
   let newName = $state('')
 
-  async function show(e: Event) {
+  $effect(() => {
+    if (open) api.playlists().then((list) => (playlists = list))
+  })
+
+  function show(e: Event) {
     e.stopPropagation()
     open = true
-    playlists = await api.playlists()
   }
 
   async function add(id: number, name: string) {
@@ -48,7 +60,9 @@
 </script>
 
 {#if isAdmin()}
-  {#if compact}
+  {#if !trigger}
+    <!-- Opened from elsewhere. -->
+  {:else if compact}
     <button class="icon-only" aria-label="Add {label} to a playlist" onclick={show}>
       <Icon name="playlist" size={20} />
     </button>

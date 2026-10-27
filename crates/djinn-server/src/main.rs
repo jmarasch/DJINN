@@ -19,6 +19,7 @@ mod jukebox;
 mod library_api;
 mod player_api;
 mod playlist_api;
+mod smart;
 mod sse;
 mod state;
 #[cfg(test)]
@@ -218,6 +219,14 @@ async fn main() -> anyhow::Result<()> {
     // changes on disk in the background.
     library_api::start_scan(&state);
     cast_api::spawn_background(&state);
+    {
+        // Load what's been analyzed, then analyze anything new.
+        let state = state.clone();
+        tokio::spawn(async move {
+            smart::refresh(&state).await;
+            audio_api::start_analysis(&state).await;
+        });
+    }
     watcher::start(state.clone());
 
     let shutdown = std::sync::Arc::clone(&state.shutdown);

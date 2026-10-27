@@ -3,6 +3,7 @@
 pub mod art;
 pub mod credits;
 pub mod online;
+pub mod sound;
 mod tags;
 
 use std::collections::{HashMap, HashSet};

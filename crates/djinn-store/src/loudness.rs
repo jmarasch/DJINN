@@ -1,5 +1,5 @@
-//! Track loudness for ReplayGain: values from tags, and what DJINN measured
-//! for files without them.
+//! What DJINN measures in each song: loudness (for ReplayGain on files
+//! without tags) and sound features (for smart playlists), from one pass.
 
 use serde::Serialize;
 use sqlx::FromRow;
@@ -22,55 +22,122 @@ pub struct GainInfo {
     pub album_peak: Option<f64>,
 }
 
+/// One song's sound features.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SoundRow {
+    pub track_id: i64,
+    pub album_id: Option<i64>,
+    /// Credited artists.
+    pub artist_ids: Vec<i64>,
+    pub title: String,
+    pub features: Vec<f32>,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct LoudnessProgress {
     /// Songs whose loudness is known (from tags or measured).
     pub known: i64,
     /// Songs still to measure.
     pub waiting: i64,
+    /// Songs whose sound has been analyzed.
+    pub analyzed: i64,
 }
 
 impl Store {
-    /// Up to `limit` tracks without ReplayGain tags that haven't been
-    /// measured, as (id, path).
-    pub async fn tracks_to_measure(&self, limit: i64) -> Result<Vec<(i64, String)>> {
+    /// Up to `limit` tracks to analyze: never analyzed with the current
+    /// `version` of the features. As (id, path).
+    pub async fn tracks_to_analyze(&self, version: i64, limit: i64) -> Result<Vec<(i64, String)>> {
         let rows = sqlx::query_as(
             "SELECT id, path FROM tracks \
-             WHERE removed_at IS NULL AND rg_track_gain IS NULL AND loudness_checked_at IS NULL \
+             WHERE removed_at IS NULL AND (features_version IS NULL OR features_version < ?) \
              ORDER BY id LIMIT ?",
         )
+        .bind(version)
         .bind(limit)
         .fetch_all(self.pool())
         .await?;
         Ok(rows)
     }
 
-    /// Records a measurement; `None` marks the track as unmeasurable
-    /// (silent or unreadable) so it isn't tried again until it changes.
-    pub async fn save_loudness(&self, id: i64, loudness: Option<(f64, f64)>) -> Result<()> {
+    /// Records an analysis. `None`s mean there was nothing to measure, so
+    /// the track isn't tried again until it changes.
+    pub async fn save_analysis(
+        &self,
+        id: i64,
+        version: i64,
+        loudness: Option<(f64, f64)>,
+        features: Option<(&[f32], f32)>,
+    ) -> Result<()> {
+        let blob = features.map(|(values, _)| {
+            values
+                .iter()
+                .flat_map(|v| v.to_le_bytes())
+                .collect::<Vec<u8>>()
+        });
         sqlx::query(
-            "UPDATE tracks SET loudness_lufs = ?, loudness_peak = ?, loudness_checked_at = ? \
-             WHERE id = ?",
+            "UPDATE tracks SET loudness_lufs = ?, loudness_peak = ?, loudness_checked_at = ?, \
+                    features = ?, bpm = ?, features_version = ? WHERE id = ?",
         )
         .bind(loudness.map(|l| l.0))
         .bind(loudness.map(|l| l.1))
         .bind(now_ms())
+        .bind(blob)
+        .bind(features.map(|(_, bpm)| bpm))
+        .bind(version)
         .bind(id)
         .execute(self.pool())
         .await?;
         Ok(())
     }
 
-    pub async fn loudness_progress(&self) -> Result<LoudnessProgress> {
-        let (known, waiting): (i64, i64) = sqlx::query_as(
+    /// Every playable song's features, for the similarity index.
+    pub async fn sound_rows(&self, version: i64) -> Result<Vec<SoundRow>> {
+        // id, album, features, title, credited artist ids (comma separated).
+        type Row = (i64, Option<i64>, Vec<u8>, String, String);
+        let rows: Vec<Row> = sqlx::query_as(
+            "SELECT t.id, t.album_id, t.features, t.title, \
+                    coalesce((SELECT group_concat(ta.artist_id) FROM track_artists ta WHERE ta.track_id = t.id), '') \
+             FROM tracks t \
+             WHERE t.removed_at IS NULL AND t.features IS NOT NULL AND t.features_version = ?",
+        )
+        .bind(version)
+        .fetch_all(self.pool())
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|(track_id, album_id, blob, title, artists)| SoundRow {
+                track_id,
+                album_id,
+                title,
+                artist_ids: artists.split(',').filter_map(|a| a.parse().ok()).collect(),
+                features: blob
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .map(|b| f32::from_le_bytes(*b))
+                    .collect(),
+            })
+            .collect())
+    }
+
+    /// How far measuring has got, `version` being the current features
+    /// version.
+    pub async fn loudness_progress(&self, version: i64) -> Result<LoudnessProgress> {
+        let (known, waiting, analyzed): (i64, i64, i64) = sqlx::query_as(
             "SELECT \
                 count(*) FILTER (WHERE rg_track_gain IS NOT NULL OR loudness_lufs IS NOT NULL), \
-                count(*) FILTER (WHERE rg_track_gain IS NULL AND loudness_checked_at IS NULL) \
+                count(*) FILTER (WHERE features_version IS NULL OR features_version < ?1), \
+                count(*) FILTER (WHERE features_version >= ?1) \
              FROM tracks WHERE removed_at IS NULL",
         )
+        .bind(version)
         .fetch_one(self.pool())
         .await?;
-        Ok(LoudnessProgress { known, waiting })
+        Ok(LoudnessProgress {
+            known,
+            waiting,
+            analyzed,
+        })
     }
 
     pub async fn gain_info(&self, id: i64) -> Result<Option<GainInfo>> {
@@ -125,7 +192,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn measured_loudness_and_album_average() {
+    async fn analysis_is_stored_and_redone_when_files_change() {
         let store = Store::open_in_memory().await.unwrap();
         let mut tagged = track("/m/tagged.flac", 60_000);
         tagged.replay_gain.track_gain = Some(-5.0);
@@ -137,35 +204,49 @@ mod tests {
             ])
             .await
             .unwrap();
-        let todo = store.tracks_to_measure(10).await.unwrap();
-        assert_eq!(todo.len(), 2, "tagged tracks need no measuring");
+        let todo = store.tracks_to_analyze(1, 10).await.unwrap();
+        assert_eq!(todo.len(), 3, "every song gets analyzed");
         assert_eq!(
-            store.loudness_progress().await.unwrap(),
+            store.loudness_progress(1).await.unwrap(),
             LoudnessProgress {
                 known: 1,
-                waiting: 2
+                waiting: 3,
+                analyzed: 0
             }
         );
 
+        let features = [0.5f32, -1.25, 3.0];
         store
-            .save_loudness(todo[0].0, Some((-10.0, 0.9)))
+            .save_analysis(todo[0].0, 1, Some((-10.0, 0.9)), Some((&features, 128.0)))
             .await
             .unwrap();
         store
-            .save_loudness(todo[1].0, Some((-10.0, 0.7)))
+            .save_analysis(todo[1].0, 1, Some((-10.0, 0.7)), None)
             .await
             .unwrap();
-        assert!(store.tracks_to_measure(10).await.unwrap().is_empty());
+        store.save_analysis(todo[2].0, 1, None, None).await.unwrap();
+        assert!(store.tracks_to_analyze(1, 10).await.unwrap().is_empty());
+        assert_eq!(
+            store.tracks_to_analyze(2, 10).await.unwrap().len(),
+            3,
+            "a new version redoes all"
+        );
+
         let info = store.gain_info(todo[0].0).await.unwrap().unwrap();
         assert_eq!(info.loudness_lufs, Some(-10.0));
         let album = info.album_lufs.unwrap();
         assert!((album + 10.0).abs() < 1e-9, "album {album}");
         assert_eq!(info.album_peak, Some(0.9));
 
-        // A changed file is measured again.
+        let rows = store.sound_rows(1).await.unwrap();
+        assert_eq!(rows.len(), 1, "only songs with features");
+        assert_eq!(rows[0].features, features);
+        assert_eq!(rows[0].artist_ids.len(), 1);
+
+        // A changed file is analyzed again.
         let mut changed = track("/m/a.flac", 60_000);
         changed.mtime = 2;
         store.save_scanned(&[changed]).await.unwrap();
-        assert_eq!(store.tracks_to_measure(10).await.unwrap().len(), 1);
+        assert_eq!(store.tracks_to_analyze(1, 10).await.unwrap().len(), 1);
     }
 }

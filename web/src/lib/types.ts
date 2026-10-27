@@ -328,8 +328,10 @@ export type ReplayGainMode = 'off' | 'track' | 'album'
 export interface LoudnessStatus {
   /** Songs whose loudness is known (tags or measured). */
   known: number
-  /** Songs still to measure. */
+  /** Songs still to analyze. */
   waiting: number
+  /** Songs analyzed (loudness and sound). */
+  analyzed: number
   running: boolean
 }
 

@@ -1,12 +1,12 @@
 <script lang="ts">
   // One song: tap its picture or title to queue it; the artist and album
   // names go to their pages.
-  import AddToPlaylist from './AddToPlaylist.svelte'
   import Art from './Art.svelte'
   import Credits from './Credits.svelte'
   import { duration } from './format'
   import Icon from './Icon.svelte'
   import { tapTrack, toggleRequest, trackStatus } from './state.svelte'
+  import TrackMenu from './TrackMenu.svelte'
   import type { Track } from './types'
 
   let {
@@ -47,7 +47,7 @@
       {#if note}<span class="meta"> · {note}</span>{/if}
     </div>
   </div>
-  <AddToPlaylist kind="track" refId={track.id} label={track.title} compact />
+  <TrackMenu {track} />
   <button
     class="queue"
     class:done={status !== null && status !== 'queued'}

@@ -1006,7 +1006,7 @@ mod tests {
     async fn replay_gain_reaches_the_engine() {
         let mut h = Harness::new(1).await;
         h.store
-            .save_loudness(h.tracks[0], Some((-8.0, 0.5)))
+            .save_analysis(h.tracks[0], 1, Some((-8.0, 0.5)), None)
             .await
             .unwrap();
         let gain_sent = |h: &Harness| {
