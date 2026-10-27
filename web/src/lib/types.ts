@@ -380,3 +380,18 @@ export interface CastList {
   devices: CastDevice[]
   listeners: number
 }
+
+export interface AiStatus {
+  installed: boolean
+  enabled: boolean
+  /** Loaded and ready. */
+  ready: boolean
+  /** Bytes. */
+  download_size: number
+  /** [done, total] bytes while downloading. */
+  downloading: [number, number] | null
+  error: string | null
+  heard: number
+  waiting: number
+  listening: boolean
+}

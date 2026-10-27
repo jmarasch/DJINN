@@ -4,6 +4,7 @@
 // the interface); see `djinn_platform::console`.
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
+mod ai;
 mod api;
 mod audio_api;
 mod auth;
@@ -225,6 +226,7 @@ async fn main() -> anyhow::Result<()> {
         tokio::spawn(async move {
             smart::refresh(&state).await;
             audio_api::start_analysis(&state).await;
+            ai::start(&state);
         });
     }
     watcher::start(state.clone());

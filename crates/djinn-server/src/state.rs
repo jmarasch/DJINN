@@ -45,6 +45,8 @@ pub struct AppState {
     pub sound: Arc<std::sync::RwLock<djinn_library::sound::SoundIndex>>,
     /// Song facts for search by description.
     pub catalog: Arc<std::sync::RwLock<crate::smart::Catalog>>,
+    /// Optional AI listening.
+    pub ai: Arc<crate::ai::AiState>,
 }
 
 #[derive(Default)]
@@ -69,6 +71,10 @@ impl AppState {
         jukebox: Jukebox,
         events: broadcast::Sender<ServerEvent>,
     ) -> Self {
+        // Models live next to the art cache, in DJINN's data folder.
+        let art_dir_for_models = art_dir
+            .parent()
+            .map_or_else(|| PathBuf::from("models"), |dir| dir.join("models"));
         Self {
             store,
             art_dir: Arc::new(art_dir),
@@ -87,6 +93,7 @@ impl AppState {
             caster: djinn_cast::Caster::new(),
             sound: Arc::default(),
             catalog: Arc::default(),
+            ai: Arc::new(crate::ai::AiState::new(&art_dir_for_models)),
         }
     }
 

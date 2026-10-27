@@ -161,6 +161,39 @@ pub fn analyze(path: &Path) -> Result<Analysis, EngineError> {
     })
 }
 
+/// Decodes up to `max_secs` of a file to mono at `rate` (for models that
+/// listen to songs).
+pub fn decode_mono(path: &Path, rate: u32, max_secs: u32) -> Result<Vec<f32>, EngineError> {
+    let mut decoder = TrackDecoder::open(path)?;
+    let source = decoder.sample_rate();
+    let mut resampler = if source == rate {
+        None
+    } else {
+        Some(StreamResampler::fixed(source, rate)?)
+    };
+    let max = max_secs as usize * rate as usize;
+    let (mut mono, mut stereo, mut staged) = (Vec::new(), Vec::new(), Vec::new());
+    while mono.len() < max {
+        stereo.clear();
+        if !decoder.decode_next(&mut stereo)? {
+            if let Some(r) = resampler.as_mut() {
+                staged.clear();
+                r.finish(&mut staged)?;
+                mono.extend(staged.as_chunks::<2>().0.iter().map(|[l, r]| (l + r) * 0.5));
+            }
+            break;
+        }
+        staged.clear();
+        match resampler.as_mut() {
+            Some(r) => r.process(&stereo, &mut staged)?,
+            None => staged.extend_from_slice(&stereo),
+        }
+        mono.extend(staged.as_chunks::<2>().0.iter().map(|[l, r]| (l + r) * 0.5));
+    }
+    mono.truncate(max);
+    Ok(mono)
+}
+
 /// Features of mono audio at 22.05 kHz.
 fn features(mono: &[f32], lufs: Option<f32>) -> Option<Features> {
     if mono.len() < FRAME * 8 {

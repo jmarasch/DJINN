@@ -1,4 +1,5 @@
 import type {
+  AiStatus,
   Album,
   AlbumSort,
   AudioDevice,
@@ -155,6 +156,10 @@ export const api = {
     put<OutputConfig>(`/outputs/${o.id}`, { enabled: o.enabled, volume_trim: o.volume_trim, delay_ms: o.delay_ms }),
   removeOutput: (id: number) => del<void>(`/outputs/${id}`),
   replayGain: () => get<ReplayGainSettings>('/audio/replaygain'),
+  ai: () => get<AiStatus>('/ai'),
+  setAi: (enabled: boolean) => put<AiStatus>('/ai', { enabled }),
+  downloadAi: () => post<void>('/ai/download'),
+  removeAi: () => del<void>('/ai/model'),
   casts: () => get<CastList>('/cast'),
   discoverCasts: () => post<CastList>('/cast/discover'),
   startCast: (id: string, mode: 'audio' | 'page') =>

@@ -30,6 +30,8 @@ pub enum ServerEvent {
     Loudness(LoudnessStatus),
     /// Cast devices and how their casts are going.
     CastStatus(Vec<djinn_cast::CastStatus>),
+    /// AI listening: download, model, and progress.
+    AiStatus(crate::ai::AiStatus),
 }
 
 impl ServerEvent {
@@ -46,6 +48,7 @@ impl ServerEvent {
             Self::ArtistLookup(_) => "artist_lookup",
             Self::Loudness(_) => "loudness",
             Self::CastStatus(_) => "cast_status",
+            Self::AiStatus(_) => "ai_status",
         }
     }
 }

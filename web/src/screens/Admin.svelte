@@ -2,6 +2,7 @@
   import { api } from '../lib/api'
   import FolderPicker from '../lib/FolderPicker.svelte'
   import Icon from '../lib/Icon.svelte'
+  import AiPanel from '../lib/AiPanel.svelte'
   import CastPanel from '../lib/CastPanel.svelte'
   import CrossfadePanel from '../lib/CrossfadePanel.svelte'
   import OutputsPanel from '../lib/OutputsPanel.svelte'
@@ -211,6 +212,8 @@
     {/if}
     <button disabled={scanning} onclick={checkForChanges}>Check for changes</button>
   </section>
+
+  <AiPanel />
 
   <section class="card">
     <h2>Artist photos and bios</h2>

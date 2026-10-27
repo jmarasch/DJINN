@@ -143,6 +143,69 @@ impl Store {
             .collect())
     }
 
+    /// Up to `limit` songs the AI model hasn't listened to with `version`,
+    /// as (id, path).
+    pub async fn tracks_to_hear(&self, version: i64, limit: i64) -> Result<Vec<(i64, String)>> {
+        let rows = sqlx::query_as(
+            "SELECT id, path FROM tracks \
+             WHERE removed_at IS NULL AND (heard_version IS NULL OR heard_version < ?) \
+             ORDER BY id LIMIT ?",
+        )
+        .bind(version)
+        .bind(limit)
+        .fetch_all(self.pool())
+        .await?;
+        Ok(rows)
+    }
+
+    /// Records what the AI model heard; `None` if there was nothing.
+    pub async fn save_heard(&self, id: i64, version: i64, heard: Option<&[f32]>) -> Result<()> {
+        let blob = heard.map(|v| v.iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<u8>>());
+        sqlx::query("UPDATE tracks SET heard = ?, heard_version = ? WHERE id = ?")
+            .bind(blob)
+            .bind(version)
+            .bind(id)
+            .execute(self.pool())
+            .await?;
+        Ok(())
+    }
+
+    /// Every playable song the AI model heard with `version`.
+    pub async fn heard_rows(&self, version: i64) -> Result<Vec<(i64, Vec<f32>)>> {
+        let rows: Vec<(i64, Vec<u8>)> = sqlx::query_as(
+            "SELECT id, heard FROM tracks \
+             WHERE removed_at IS NULL AND heard IS NOT NULL AND heard_version = ?",
+        )
+        .bind(version)
+        .fetch_all(self.pool())
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|(id, blob)| {
+                let v = blob
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .map(|b| f32::from_le_bytes(*b))
+                    .collect();
+                (id, v)
+            })
+            .collect())
+    }
+
+    /// (heard, waiting) song counts for the AI model's `version`.
+    pub async fn heard_progress(&self, version: i64) -> Result<(i64, i64)> {
+        let counts = sqlx::query_as(
+            "SELECT count(*) FILTER (WHERE heard_version >= ?1), \
+                    count(*) FILTER (WHERE heard_version IS NULL OR heard_version < ?1) \
+             FROM tracks WHERE removed_at IS NULL",
+        )
+        .bind(version)
+        .fetch_one(self.pool())
+        .await?;
+        Ok(counts)
+    }
+
     /// Facts about every playable song, for descriptive search.
     pub async fn track_facts(&self) -> Result<Vec<TrackFacts>> {
         let rows = sqlx::query_as(
@@ -296,10 +359,22 @@ mod tests {
         assert_eq!(rows[0].features, features);
         assert_eq!(rows[0].artist_ids.len(), 1);
 
+        // What the AI heard is kept, and redone with the file too.
+        store
+            .save_heard(todo[0].0, 1, Some(&[0.6, 0.8]))
+            .await
+            .unwrap();
+        assert_eq!(
+            store.heard_rows(1).await.unwrap(),
+            [(todo[0].0, vec![0.6, 0.8])]
+        );
+        assert_eq!(store.heard_progress(1).await.unwrap(), (1, 2));
+
         // A changed file is analyzed again.
         let mut changed = track("/m/a.flac", 60_000);
         changed.mtime = 2;
         store.save_scanned(&[changed]).await.unwrap();
         assert_eq!(store.tracks_to_analyze(1, 10).await.unwrap().len(), 1);
+        assert_eq!(store.tracks_to_hear(1, 10).await.unwrap().len(), 3);
     }
 }

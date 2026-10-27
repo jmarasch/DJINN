@@ -64,9 +64,12 @@ async fn search(
         .limit
         .unwrap_or(DEFAULT_SEARCH_LIMIT)
         .clamp(1, MAX_SEARCH_LIMIT);
+    let results = state.store.search(&query.q, limit).await?;
+    let plain_found =
+        !results.tracks.is_empty() || !results.albums.is_empty() || !results.artists.is_empty();
     Ok(Json(SearchResponse {
-        results: state.store.search(&query.q, limit).await?,
-        described: crate::smart::describe(&state, &query.q).await?,
+        described: crate::smart::describe(&state, &query.q, plain_found).await?,
+        results,
     }))
 }
 
@@ -433,6 +436,7 @@ pub fn start_scan(state: &AppState) -> bool {
                     start_artist_lookup(&state, false);
                 }
                 crate::audio_api::start_analysis(&state).await;
+                crate::ai::start(&state);
                 // New tracks may have joined albums and artists in the
                 // active playlist.
                 if let Err(e) = state.jukebox.lock().await.auto_mix_changed().await {

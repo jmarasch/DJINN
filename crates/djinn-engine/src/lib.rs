@@ -27,7 +27,9 @@ use std::path::PathBuf;
 pub use devices::{output_devices, DeviceInfo};
 pub use engine::{Engine, EngineConfig};
 pub use error::EngineError;
-pub use features::{analyze, describe, Analysis, Features, FEATURES_VERSION, FEATURE_COUNT};
+pub use features::{
+    analyze, decode_mono, describe, Analysis, Features, FEATURES_VERSION, FEATURE_COUNT,
+};
 pub use loudness::{measure_loudness, Loudness, REFERENCE_LUFS};
 pub use player::MAX_CROSSFADE_SECS;
 pub use tap::{stream_tap, StreamTap, TapReader};
