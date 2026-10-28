@@ -13,6 +13,10 @@
 //! position counts from) the start of the blend; the previous one ends when
 //! its tail runs out. With N = 0, or for tracks marked gapless, nothing is
 //! held and tracks join sample-exactly.
+//!
+//! A skip with a crossfade set blends too, over a shorter stretch (at most
+//! [`SKIP_FADE_SECS`]): what was decoded of the skipped track but not yet
+//! written fades out under the start of the next one.
 
 use std::collections::VecDeque;
 use std::f32::consts::FRAC_PI_2;
@@ -37,6 +41,8 @@ pub(crate) trait Sink {
 
 /// Longest crossfade, in seconds.
 pub const MAX_CROSSFADE_SECS: u32 = 12;
+/// Longest blend on a skip, so skipping still feels quick.
+pub const SKIP_FADE_SECS: u32 = 2;
 
 struct Deck {
     track: Track,
@@ -235,6 +241,9 @@ impl Player {
     pub fn skip(&mut self, sink: &mut dyn Sink) {
         let consumed = sink.consumed_frames();
         self.update(consumed);
+        if self.skip_with_fade(sink, consumed) {
+            return;
+        }
 
         let target = match self.audible.pop() {
             Some((id, start)) => {
@@ -298,6 +307,54 @@ impl Player {
             },
             None => {}
         }
+    }
+
+    /// With a crossfade set, blends the skipped track into the next one
+    /// instead of cutting it off. Like a hard skip it drops what the output
+    /// holds (a second's worth), so the blend starts right away; what was
+    /// decoded after that fades out under the start of the next track. Only
+    /// in the plain case of one track playing, still decoding, and the next
+    /// one ready; returns false otherwise, for a hard cut.
+    fn skip_with_fade(&mut self, sink: &mut dyn Sink, consumed: u64) -> bool {
+        let playing = self.audible.last().map(|&(id, _)| id);
+        let plain = self.fade_frames > 0
+            && self.audible.len() == 1
+            && self.mix.is_none()
+            && self.marks.is_empty()
+            && self.next.is_some()
+            && self.current.as_ref().map(|deck| deck.track.id) == playing;
+        if !plain {
+            return false;
+        }
+        let (Some((id, start)), Some(next)) = (self.audible.pop(), self.next.take()) else {
+            return false;
+        };
+        self.events.push(Event::TrackEnded {
+            id,
+            played_ms: self.frames_to_ms(consumed.saturating_sub(start)),
+            reason: EndReason::Skipped,
+        });
+        let fade = self
+            .fade_frames
+            .min((SKIP_FADE_SECS * self.master_rate) as usize);
+        let mut tail: Vec<f32> = self.buf.drain(..).chain(self.held.drain(..)).collect();
+        tail.truncate(fade * 2);
+        sink.flush();
+        // The skipped track's decoder and resampler go; the next track
+        // starts a stage of its own.
+        self.current = None;
+        self.stage = None;
+        let next_id = next.track.id;
+        let overlap = tail.len() / 2;
+        if self.start_deck(next, overlap) {
+            if overlap > 0 {
+                self.mix = Some(Mix { tail, done: 0 });
+            }
+            self.events.push(Event::NextNeeded {
+                after: Some(next_id),
+            });
+        }
+        true
     }
 
     /// Produces more master-rate audio. Returns false when there is
@@ -990,6 +1047,63 @@ pub(crate) mod tests {
             );
         }
         assert!(out.iter().all(|s| s.abs() <= 1.0));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn skipping_with_a_crossfade_blends_into_the_next_track() {
+        let dir = temp_dir("crossfade-skip-blend");
+        let (a, b) = (dir.join("a.wav"), dir.join("b.wav"));
+        let tone = sine_i16(48_000, 0, 192_000); // 4 s
+        let level = level_i16(96_000, 8_000); // 2 s
+        write_wav(&a, 48_000, &tone);
+        write_wav(&b, 48_000, &level);
+        let mut player = Player::new(48_000);
+        player.set_crossfade(1);
+        let mut sink = VecSink::default();
+        player.set_next(Some(track(0, &a)));
+        sink.budget = 1_000;
+        player.fill(&mut sink);
+        player.set_next(Some(track(1, &b)));
+        sink.budget = 59_000;
+        player.fill(&mut sink);
+        player.update(sink.consumed_frames());
+        player.take_events().for_each(drop);
+
+        let at = sink.out.len() / 2;
+        player.skip(&mut sink);
+        let mut events: Vec<Event> = player.take_events().collect();
+        for _ in 0..1_000 {
+            sink.budget = 4_096;
+            player.fill(&mut sink);
+            player.update(sink.consumed_frames());
+            events.extend(player.take_events());
+            if !player.is_active() {
+                break;
+            }
+        }
+
+        // The skipped track fades out over the crossfade (1 s, under the
+        // 2 s cap) while the next one fades in, then the next one alone.
+        let fade = 48_000;
+        let (tone, level) = (to_f32(&tone), to_f32(&level));
+        assert_eq!(sink.out.len() / 2, at + 96_000);
+        for i in [0, 1, 24_000, 47_999] {
+            let t = (i as f32 + 0.5) / fade as f32 * FRAC_PI_2;
+            let want = tone[(at + i) * 2] * t.cos() + level[i * 2] * t.sin();
+            let got = sink.out[(at + i) * 2];
+            assert!((got - want).abs() < 1e-5, "frame {i}: {got} vs {want}");
+        }
+        assert_eq!(sink.out[(at + fade) * 2..], level[fade * 2..]);
+        assert!(events.iter().any(|e| matches!(
+            e,
+            Event::TrackEnded {
+                id: TrackId(0),
+                reason: EndReason::Skipped,
+                ..
+            }
+        )));
+        assert!(events.contains(&Event::TrackStarted { id: TrackId(1) }));
         std::fs::remove_dir_all(dir).unwrap();
     }
 
