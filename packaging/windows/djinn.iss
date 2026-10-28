@@ -5,9 +5,9 @@
 ;
 ; Build the binary first (see CLAUDE.md). Installs for the current user
 ; only, under %LOCALAPPDATA%\Programs\DJINN, so no admin rights are needed
-; and DJINN can update itself in place. Settings, the database and AI
-; models live in %APPDATA%\djinn and are kept on uninstall unless the user
-; asks to remove them.
+; and DJINN can update itself in place. On Windows DJINN keeps its config,
+; database, log, art and AI models next to djinn.exe; uninstalling keeps
+; them unless the user asks to remove them.
 
 #ifndef Binary
   #define Binary "..\..\target\release\djinn.exe"
@@ -78,7 +78,8 @@ var
 begin
   if (CurUninstallStep = usPostUninstall) and not UninstallSilent then
   begin
-    Data := ExpandConstant('{userappdata}\djinn');
+    // Whatever is left in the folder is DJINN's own data.
+    Data := ExpandConstant('{app}');
     if DirExists(Data) and (MsgBox('Also remove your DJINN settings, users, playlists, play history and downloaded AI models?' + #13#10#13#10 +
         'Your music is never touched either way.', mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES) then
       DelTree(Data, True, True, True);

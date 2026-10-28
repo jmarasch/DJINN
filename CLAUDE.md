@@ -2,6 +2,8 @@
 
 Self-hosted, headless party jukebox in Rust. Audio plays on the server's own output devices; guests queue songs from a phone-first web UI.
 
+**On Windows: read `docs/windows-testing.md` first.** The Windows machine is for testing, troubleshooting, and filing issues only; never write or change code there.
+
 **`djinn-spec.md` is the source of truth.** Read it before starting new work. Build in phase order and do not start a later phase until the current one meets its acceptance criteria. This file only summarizes spec sections 4, 5, and 16.
 
 ## Commands
