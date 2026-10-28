@@ -3,3 +3,5 @@
 *.db-shm
 *.db-wal
 /config.toml
+# Local notes (test setup and the like); kept out of the public repo.
+/notes/

@@ -2,8 +2,6 @@
 
 Self-hosted, headless party jukebox in Rust. Audio plays on the server's own output devices; guests queue songs from a phone-first web UI.
 
-**On Windows: read `docs/windows-testing.md` first.** The Windows machine is for testing, troubleshooting, and filing issues only; never write or change code there.
-
 **`djinn-spec.md` is the source of truth.** Read it before starting new work. Build in phase order and do not start a later phase until the current one meets its acceptance criteria. This file only summarizes spec sections 4, 5, and 16.
 
 ## Commands
@@ -23,7 +21,7 @@ cargo build --release                  # single binary: target/release/djinn
 
 Linux build prerequisite: `libasound2-dev` and `pkg-config`.
 
-Windows build prerequisites: rustup (MSVC toolchain), Visual Studio Build Tools with the C++ workload (SQLite and the exe icon compile with it), Node.js LTS; exact winget commands are in `docs/windows-testing.md`. Use the commands above from PowerShell.
+Windows build prerequisites: rustup (MSVC toolchain), Visual Studio Build Tools with the C++ workload (SQLite and the exe icon compile with it), Node.js LTS, and Inno Setup 6 for the installer. With winget: `winget install Rustlang.Rustup OpenJS.NodeJS.LTS JRSoftware.InnoSetup` and `winget install Microsoft.VisualStudio.2022.BuildTools --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"` (without the override it installs no C++ compiler). Use the commands above from PowerShell.
 
 Installers (current user, no admin; see `docs/releasing.md`):
 
@@ -78,7 +76,7 @@ migrations/        sqlx migrations
 - Identifying songs: `djinn_engine::fingerprint` (Chromaprint via rusty-chromaprint), `djinn-library::identify` (AcoustID lookup, then MusicBrainz for year and genres; a match must agree with existing title/artist tags), `identify_api.rs` (job, review, apply). Applied matches live in `track_ids` and fill gaps whenever `save_track` saves the file; files are never changed. Needs an AcoustID key and the MusicBrainz contact (Rules).
 - Updates: `update.rs` serves Admin > About (version, commit from `build.rs`, links) and checks `jmarasch/DJINN` releases daily; installs verify a signed `SHA256SUMS` (ed25519, `PUBLIC_KEY`), replace the binary, and restart (`update::restart` after shutdown). Releases come from `.github/workflows/release.yml` on a `v*` tag; see `docs/releasing.md`.
 - Store: one module per area (`library`, `playlists`, `users`, `queue`, `outputs`, `loudness`); all SQL is static strings (sqlx 0.9 rejects dynamic SQL), with shared column lists as macros used through `concat!`.
-- Golden-sample audio fixtures: `crates/djinn-engine/tests/fixtures/` (README says how to regenerate). Acceptance checklists: `docs/phase1-test-party.md`, `docs/phase3-outputs.md`, `docs/phase5-casting.md`.
+- Golden-sample audio fixtures: `crates/djinn-engine/tests/fixtures/` (README says how to regenerate). Acceptance checklists and test notes are kept locally in `notes/`, which is not in the repository.
 
 ## Coding rules (spec section 16)
 

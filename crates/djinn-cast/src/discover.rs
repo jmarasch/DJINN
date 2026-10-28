@@ -190,7 +190,7 @@ mod tests {
 
     #[test]
     fn reads_renderer_replies_only() {
-        let reply = b"HTTP/1.1 200 OK\r\nCACHE-CONTROL: max-age=1800\r\nLOCATION: http://192.168.0.40:1400/xml/device_description.xml\r\nST: urn:schemas-upnp-org:device:MediaRenderer:1\r\nUSN: uuid:RINCON_000E58::urn:schemas-upnp-org:device:MediaRenderer:1\r\n\r\n";
+        let reply = b"HTTP/1.1 200 OK\r\nCACHE-CONTROL: max-age=1800\r\nLOCATION: http://192.168.0.40:1400/xml/device_description.xml\r\nST: urn:schemas-upnp-org:device:MediaRenderer:1\r\nUSN: uuid:RINCON_000000::urn:schemas-upnp-org:device:MediaRenderer:1\r\n\r\n";
         assert_eq!(
             parse_ssdp_location(reply).as_deref(),
             Some("http://192.168.0.40:1400/xml/device_description.xml")

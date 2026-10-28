@@ -41,7 +41,7 @@ pub fn output_devices() -> Result<Vec<DeviceInfo>, EngineError> {
 }
 
 /// Gives devices that share a name (two identical monitors on one graphics
-/// card) a number: "Sceptre F27 (1)", "Sceptre F27 (2)". Numbered in id
+/// card) a number: "Monitor (1)", "Monitor (2)". Numbered in id
 /// order, so each keeps its number from one listing to the next.
 fn number_twins(devices: &mut [DeviceInfo]) {
     let ids: Vec<(String, String)> = devices
@@ -79,12 +79,12 @@ mod tests {
     #[test]
     fn identical_names_get_numbers_in_id_order() {
         let mut devices = vec![
-            device("wasapi:{e0dd}", "Sceptre F27"),
-            device("wasapi:{22d1}", "SONY TV"),
-            device("wasapi:{987f}", "Sceptre F27"),
+            device("wasapi:{e0dd}", "Monitor"),
+            device("wasapi:{22d1}", "TV"),
+            device("wasapi:{987f}", "Monitor"),
         ];
         number_twins(&mut devices);
         let names: Vec<&str> = devices.iter().map(|d| d.name.as_str()).collect();
-        assert_eq!(names, ["Sceptre F27 (2)", "SONY TV", "Sceptre F27 (1)"]);
+        assert_eq!(names, ["Monitor (2)", "TV", "Monitor (1)"]);
     }
 }

@@ -347,11 +347,11 @@ mod tests {
 <root xmlns="urn:schemas-upnp-org:device-1-0">
   <device>
     <deviceType>urn:schemas-upnp-org:device:ZonePlayer:1</deviceType>
-    <friendlyName>192.168.0.40 - Sonos One - RINCON_000E58</friendlyName>
+    <friendlyName>192.168.0.40 - Sonos One - RINCON_000000</friendlyName>
     <manufacturer>Sonos, Inc.</manufacturer>
     <modelName>Sonos One</modelName>
-    <roomName>Kitchen</roomName>
-    <UDN>uuid:RINCON_000E58</UDN>
+    <roomName>Living Room</roomName>
+    <UDN>uuid:RINCON_000000</UDN>
     <serviceList>
       <service>
         <serviceType>urn:schemas-upnp-org:service:AlarmClock:1</serviceType>
@@ -361,8 +361,8 @@ mod tests {
     <deviceList>
       <device>
         <deviceType>urn:schemas-upnp-org:device:MediaRenderer:1</deviceType>
-        <friendlyName>Kitchen - Sonos One Media Renderer</friendlyName>
-        <UDN>uuid:RINCON_000E58_MR</UDN>
+        <friendlyName>Living Room - Sonos One Media Renderer</friendlyName>
+        <UDN>uuid:RINCON_000000_MR</UDN>
         <serviceList>
           <service>
             <serviceType>urn:schemas-upnp-org:service:RenderingControl:1</serviceType>
@@ -404,7 +404,7 @@ mod tests {
                 .unwrap();
         assert_eq!(
             (id.as_str(), name.as_str(), kind),
-            ("upnp:RINCON_000E58", "Kitchen", DeviceKind::Sonos)
+            ("upnp:RINCON_000000", "Living Room", DeviceKind::Sonos)
         );
         assert_eq!(
             control.av_transport.control_url,
