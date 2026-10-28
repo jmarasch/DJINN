@@ -30,9 +30,31 @@ printed public key in `update.rs`.
    `cargo build` so `Cargo.lock` follows, and commit.
 2. Tag and push: `git tag v0.2.0 && git push origin v0.2.0`.
 3. The Release workflow builds Linux and Windows binaries
-   (`djinn-linux-x86_64`, `djinn-windows-x86_64.exe`), writes and signs
-   `SHA256SUMS`, and publishes the release with generated notes. Edit the
-   notes on GitHub if you like; the About tab shows them.
+   (`djinn-linux-x86_64`, `djinn-windows-x86_64.exe`) and the downloads
+   for first installs (below), writes and signs `SHA256SUMS`, and
+   publishes the release with generated notes. Edit the notes on GitHub
+   if you like; the About tab shows them.
+
+## Installers
+
+Both install for the current user only, with no admin or root rights,
+so DJINN can update itself in place afterwards. Settings, the database
+and AI models are kept on uninstall (Windows asks if you want them gone).
+
+- **Windows:** `djinn-setup-windows-x86_64.exe`, an Inno Setup program
+  (`packaging/windows/djinn.iss`). It installs to
+  `%LOCALAPPDATA%\Programs\DJINN`, adds a Start menu entry, optionally a
+  desktop shortcut, starts DJINN at sign-in unless unticked, and shows up
+  in Settings > Apps for uninstalling. Build it locally with
+  `iscc packaging\windows\djinn.iss` after a release build (Inno Setup 6:
+  `winget install JRSoftware.InnoSetup`); it lands in `target\installer\`.
+  The setup program isn't code signed, so SmartScreen says "Windows
+  protected your PC" the first time: More info, then Run anyway. On first
+  start Windows also asks whether DJINN may use the network; allow
+  private networks so phones can reach it.
+- **Linux:** `djinn-linux-x86_64.tar.gz` holds the binary, icon, menu
+  entry and `install.sh`. Unpack and run `./djinn/install.sh` (add
+  `--autostart` to start at login, `--uninstall` to remove).
 
 ## The GPU pack
 

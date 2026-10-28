@@ -21,6 +21,15 @@ cargo build --release                  # single binary: target/release/djinn
 
 Linux build prerequisite: `libasound2-dev` and `pkg-config`.
 
+Windows build prerequisites: rustup (MSVC toolchain), Visual Studio Build Tools with "Desktop development with C++" (SQLite and the exe icon compile with it), Node.js LTS. Use the commands above from PowerShell.
+
+Installers (current user, no admin; see `docs/releasing.md`):
+
+```sh
+iscc packaging\windows\djinn.iss     # Windows, after the release build: target\installer\djinn-setup-windows-x86_64.exe
+packaging/linux/install.sh            # Linux, after the release build (the release tarball ships the same script)
+```
+
 ## Tech stack (spec section 4)
 
 - Rust stable, 2021 edition. tokio runtime, axum for REST + Server-Sent Events.

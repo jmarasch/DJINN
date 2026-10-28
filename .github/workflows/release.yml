@@ -58,16 +58,36 @@ jobs:
 
       - run: cargo build --release --locked
 
+      # The bare binary is what in-app updates download; people installing
+      # for the first time get the tarball or the setup program.
       - name: Name the binary
         shell: bash
         run: |
           mkdir out
           cp target/release/${{ matrix.binary }} out/${{ matrix.asset }}
 
+      - name: Linux download (tarball with install.sh)
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p stage/djinn
+          cp target/release/djinn packaging/linux/install.sh packaging/linux/djinn.desktop.in LICENSE.md stage/djinn/
+          cp web/public/icon-512.png stage/djinn/djinn.png
+          tar czf out/djinn-linux-x86_64.tar.gz -C stage djinn
+
+      - name: Windows setup program
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+          & $iscc /Qp "/DVersion=$("$env:GITHUB_REF_NAME".TrimStart('v'))" packaging\windows\djinn.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item target\installer\djinn-setup-windows-x86_64.exe out\
+
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset }}
-          path: out/${{ matrix.asset }}
+          path: out/*
           if-no-files-found: error
 
   # The optional GPU pack: the AI reader built for NVIDIA cards plus the
