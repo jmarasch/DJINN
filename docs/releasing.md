@@ -74,9 +74,10 @@ cuBLASLt, cuRAND, which NVIDIA allows apps to ship), each compressed as
 `gpu-<os>-<arch>.<file>.zst` and listed in the signed `SHA256SUMS`.
 DJINN downloads the pack for its own version from Admin > AI when it sees
 an NVIDIA driver, runs the reader through the helper, and falls back to
-the processor if the helper fails. It's built for Turing (GTX 16xx, RTX
-20xx) and newer. The GPU job hasn't run yet; check its output on the
-first release.
+the processor if the helper fails. It's built for Ampere (RTX 30xx) and
+newer; older cards, Turing (GTX 16xx, RTX 20xx) included, use the
+processor. The GPU job builds on ubuntu-22.04 and windows-2022 because
+CUDA 12.4 doesn't support the newer runners' Ubuntu or Visual Studio.
 
 ## How an install works
 

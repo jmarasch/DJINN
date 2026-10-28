@@ -134,9 +134,11 @@ jobs:
             lib-packages: '[]'
     runs-on: ${{ matrix.os }}
     env:
-      # No GPU on the runner: build for Turing and newer (the code is JIT
+      # No GPU on the runner: build for Ampere and newer (the code is JIT
       # compiled for newer cards). Older cards fall back to the processor.
-      CUDA_COMPUTE_CAP: 75
+      # Not Turing (75): candle-kernels 0.11 redefines __hmax_nan and
+      # __hmin_nan below 80, which CUDA 12.4's headers already define.
+      CUDA_COMPUTE_CAP: 80
     steps:
       - uses: actions/checkout@v4
 
