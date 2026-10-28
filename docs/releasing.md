@@ -6,8 +6,7 @@ release's `SHA256SUMS`, and only if `SHA256SUMS.sig` is signed with
 DJINN's release key. The public half of that key is `PUBLIC_KEY` in
 `crates/djinn-server/src/update.rs`.
 
-While the repository is private, GitHub hides releases from the app, so
-the About tab says "No releases published yet". Releases still build.
+Before a first release, the About tab says "No releases published yet".
 
 ## The release key
 
@@ -29,7 +28,7 @@ printed public key in `update.rs`.
 1. Bump `version` in the root `Cargo.toml` (for example `0.2.0`), run
    `cargo build` so `Cargo.lock` follows, and commit.
 2. Tag and push: `git tag v0.2.0 && git push origin v0.2.0`.
-3. The Release workflow builds Linux and Windows binaries
+3. The Release workflow (`.github/workflows/release.yml`) builds Linux and Windows binaries
    (`djinn-linux-x86_64`, `djinn-windows-x86_64.exe`) and the downloads
    for first installs (below), writes and signs `SHA256SUMS`, and
    publishes the release with generated notes. Edit the notes on GitHub
@@ -53,9 +52,18 @@ and AI models are kept on uninstall (Windows asks if you want them gone).
   protected your PC" the first time: More info, then Run anyway. On first
   start Windows also asks whether DJINN may use the network; allow
   private networks so phones can reach it.
-- **Linux:** `djinn-linux-x86_64.tar.gz` holds the binary, icon, menu
-  entry and `install.sh`. Unpack and run `./djinn/install.sh` (add
-  `--autostart` to start at login, `--uninstall` to remove).
+- **Linux:** `install.sh` is a release asset, so
+  `curl -fsSL https://github.com/jmarasch/DJINN/releases/latest/download/install.sh | sh`
+  downloads the latest `djinn-linux-x86_64.tar.gz`, checks it against
+  `SHA256SUMS`, and runs the `install.sh` inside it. The tarball holds the
+  binary, icon, menu entry and `install.sh`; unpacked, run
+  `./djinn/install.sh` (add `--autostart` to start at login, `--uninstall`
+  to remove). It's built in an Ubuntu 22.04 container, so it needs glibc
+  2.35 or newer.
+
+To try the whole workflow without publishing, run it from the Actions tab
+(Run workflow): it builds every download and the GPU pack, and skips
+signing and the release.
 
 ## The GPU pack
 

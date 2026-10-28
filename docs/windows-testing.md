@@ -37,8 +37,7 @@ example `%USERPROFILE%\djinn-test\config.toml`) and pass `--config`.
   do you.
 - Don't cast to or interrupt any speaker, TV, or Sonos without the user
   saying so for that device. Discovery (`--example discover`) is fine.
-- The GitHub repo `jmarasch/DJINN` stays private. Never change its
-  visibility.
+- Don't change the GitHub repo's settings or visibility.
 - Never send the user's email address to any service.
 - AcoustID needs the user's own key; don't register one or work around it.
 - The release signing key is not on this machine and must never be.
@@ -165,10 +164,9 @@ before using speakers in a shared room)
   pack is expected to fail with "GPU packs come with published releases"
   (no release exists yet). That's not a bug.
 - Casting: discovery only, unless the user picks a device to test.
-- Admin > About: version 0.1.0 and the commit you built. "Check for
-  updates" is expected to fail or find nothing, since the repo is private
-  and has no releases. Report the exact message so it can be made
-  friendlier.
+- Admin > About: the version and the commit you built. "Check for
+  updates" finds the latest release; a build newer than it says it's up
+  to date. Report the exact message.
 
 **F. Tray and restarts**
 - Tray menu: Open, join code, TV page, Quit. No console windows flash,

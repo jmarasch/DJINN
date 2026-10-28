@@ -50,7 +50,7 @@ use crate::jukebox::Jukebox;
 use crate::state::AppState;
 
 #[derive(Parser)]
-#[command(version, about)]
+#[command(name = "djinn", version, about)]
 struct Cli {
     /// Path to config.toml. Defaults to next to the binary on Windows and
     /// ~/.config/djinn/config.toml elsewhere.
