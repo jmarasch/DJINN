@@ -152,7 +152,8 @@ before using speakers in a shared room)
   blocks incoming connections on Public networks; switching the Wi-Fi to
   Private (Settings > Network & internet > Wi-Fi > the network) is the
   user's call. On Public, Admin and the join card should say "Phones
-  can't reach DJINN right now" within a minute, and the log warns once.
+  can't reach DJINN right now" after a reload (DJINN checks when those
+  pages open, at most once a minute), and the log warns once.
 
 **E. Features**
 - Playlists, radio from a song, artist and genre, "More like this".
@@ -172,7 +173,8 @@ before using speakers in a shared room)
 **F. Tray and restarts**
 - Tray menu: Open, join code, TV page, Quit. No console windows flash,
   including when the AI helper starts.
-- Sign out and back in (or reboot): DJINN starts by itself.
+- Sign out and back in (or reboot): DJINN starts by itself (Windows
+  starts it in System32, so this also checks it finds its data folder).
 - Quit and start from the Start menu: settings and library survive.
 
 **G. Upgrade**

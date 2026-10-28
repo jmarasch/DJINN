@@ -26,6 +26,9 @@
   const LISTENING: Spec = { uses: 0.7 * GB, minMemory: 4 * GB, minCores: 2, goodMemory: 8 * GB, goodCores: 4 }
   const READER: Spec = { uses: 1.6 * GB, minMemory: 8 * GB, minCores: 4, goodMemory: 16 * GB, goodCores: 8 }
 
+  /** A stop or continue button was pressed and hasn't been answered yet. */
+  let pending = $state(false)
+
   async function attempt(action: () => Promise<unknown>, done?: string) {
     try {
       await action()
@@ -33,6 +36,12 @@
     } catch (e) {
       toast(e instanceof Error ? e.message : 'That did not work', true)
     }
+  }
+
+  async function pressed(action: () => Promise<unknown>, done: string) {
+    pending = true
+    await attempt(action, done)
+    pending = false
   }
 
   async function remove() {
@@ -134,11 +143,21 @@
           </p>
           <progress max={total} value={ai.heard}></progress>
           {#if ai.listening}
-            <button class="small-button" onclick={() => attempt(() => api.stopListening(), 'Stopping after these songs')}>
+            <button
+              class="small-button"
+              disabled={pending}
+              onclick={() => pressed(() => api.stopListening(), 'Stopping after these songs')}
+            >
               Stop for now
             </button>
           {:else}
-            <button class="small-button" onclick={() => attempt(() => api.continueListening())}>Continue</button>
+            <button
+              class="small-button"
+              disabled={pending}
+              onclick={() => pressed(() => api.continueListening(), 'Listening again')}
+            >
+              {pending ? 'Starting...' : 'Continue'}
+            </button>
           {/if}
         {:else}
           <p class="small muted">Listened to all {total} songs.</p>

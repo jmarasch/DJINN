@@ -220,14 +220,17 @@ impl Store {
                     None
                 };
                 if let Some((ahead_id, ahead_position)) = ahead {
-                    for (id, position) in [(queue_id, ahead_position), (ahead_id, position)] {
-                        sqlx::query("UPDATE request_queue SET position = ? WHERE id = ?")
-                            .bind(position)
-                            .bind(id)
-                            .execute(&mut *tx)
-                            .await
-                            .map_err(StoreError::from)?;
-                    }
+                    swap_places(&mut tx, (queue_id, position), (ahead_id, ahead_position))
+                        .await
+                        .map_err(StoreError::from)?;
+                    sqlx::query(
+                        "UPDATE request_boosts SET moved = 1 WHERE queue_id = ? AND user_id = ?",
+                    )
+                    .bind(queue_id)
+                    .bind(user_id)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(StoreError::from)?;
                 }
                 (queue_id, RequestOutcome::Backed)
             }
@@ -293,6 +296,37 @@ impl Store {
                 .execute(&mut *tx)
                 .await?;
         if unbacked.rows_affected() > 0 {
+            // Undo the place this backing won, and forget it, so backing
+            // again moves it up again: no way to walk it to the top.
+            let moved: Option<bool> = sqlx::query_scalar(
+                "DELETE FROM request_boosts WHERE queue_id = ? AND user_id = ? RETURNING moved",
+            )
+            .bind(id)
+            .bind(user_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+            if moved == Some(true) {
+                let here: Option<i64> =
+                    sqlx::query_scalar("SELECT position FROM request_queue WHERE id = ?")
+                        .bind(id)
+                        .fetch_optional(&mut *tx)
+                        .await?;
+                let behind: Option<(i64, i64)> = match here {
+                    Some(position) => {
+                        sqlx::query_as(
+                            "SELECT id, position FROM request_queue WHERE position > ? \
+                             ORDER BY position LIMIT 1",
+                        )
+                        .bind(position)
+                        .fetch_optional(&mut *tx)
+                        .await?
+                    }
+                    None => None,
+                };
+                if let (Some(position), Some(behind)) = (here, behind) {
+                    swap_places(&mut tx, (id, position), behind).await?;
+                }
+            }
             tx.commit().await?;
             return Ok(Withdrawal::Unbacked);
         }
@@ -488,6 +522,22 @@ impl Store {
     }
 }
 
+/// Trades the positions of two queued requests, each given as (id, position).
+async fn swap_places(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    (a, a_position): (i64, i64),
+    (b, b_position): (i64, i64),
+) -> std::result::Result<(), sqlx::Error> {
+    for (id, position) in [(a, b_position), (b, a_position)] {
+        sqlx::query("UPDATE request_queue SET position = ? WHERE id = ?")
+            .bind(position)
+            .bind(id)
+            .execute(&mut **tx)
+            .await?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -532,7 +582,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn backing_again_after_stepping_back_doesnt_move_it() {
+    async fn backing_and_stepping_back_comes_out_even() {
         let (store, ana, ids) = setup().await;
         let sam = store.create_user("sam", "h", Role::User).await.unwrap().id;
         for &id in &ids[..4] {
@@ -555,22 +605,27 @@ mod tests {
             .add_request(ids[3], sam, per_user(None), &origin())
             .await
             .unwrap();
-        assert_eq!(
-            place(store.clone()).await,
-            Some(2),
-            "the first backing moves it"
-        );
+        assert_eq!(place(store.clone()).await, Some(2), "backing moves it up");
         for _ in 0..3 {
             assert_eq!(
                 store.withdraw_request(item.id, sam).await.unwrap(),
                 Withdrawal::Unbacked
             );
+            assert_eq!(
+                place(store.clone()).await,
+                Some(3),
+                "stepping back moves it down"
+            );
             store
                 .add_request(ids[3], sam, per_user(None), &origin())
                 .await
                 .unwrap();
+            assert_eq!(
+                place(store.clone()).await,
+                Some(2),
+                "never past one place up"
+            );
         }
-        assert_eq!(place(store.clone()).await, Some(2), "backing again doesn't");
 
         // Handing a request over and backing it again doesn't move it either.
         assert_eq!(

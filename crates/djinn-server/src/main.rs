@@ -66,6 +66,16 @@ struct Cli {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let result = run().await;
+    if let Err(e) = &result {
+        // Started from the Start menu or at sign-in there is no console for
+        // the error to go to, so put it in the log too.
+        tracing::error!(error = %format!("{e:#}"), "DJINN stopped");
+    }
+    result
+}
+
+async fn run() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     // Without a console (Windows release build started from Explorer or the
@@ -255,7 +265,7 @@ async fn main() -> anyhow::Result<()> {
     }
     watcher::start(state.clone());
     update::start(&state);
-    network::start(&state);
+    network::refresh(&state);
     let update = std::sync::Arc::clone(&state.update);
 
     let shutdown = std::sync::Arc::clone(&state.shutdown);
@@ -281,9 +291,23 @@ async fn main() -> anyhow::Result<()> {
         () = deadline => tracing::warn!("connections still open; shutting down anyway"),
     }
 
-    // Stop audio before closing the database.
-    drop(engine);
-    store.close().await;
+    // Stop audio before closing the database. Neither may hold up the end:
+    // at sign-out Windows' audio service may be going away too, and Windows
+    // only waits so long.
+    let (stopped, audio_stopped) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        drop(engine);
+        let _ = stopped.send(());
+    });
+    if audio_stopped.recv_timeout(STOP_WAIT).is_err() {
+        tracing::warn!("audio didn't stop in time; carrying on");
+    }
+    if tokio::time::timeout(STOP_WAIT, store.close())
+        .await
+        .is_err()
+    {
+        tracing::warn!("the database was still busy; closing anyway");
+    }
     // Remove the tray icon before exiting (Windows leaves a ghost icon
     // otherwise). Last, since on Windows it also lets a waiting sign-out or
     // installer go ahead.
@@ -363,6 +387,8 @@ fn app(state: AppState) -> Router {
 
 /// How long open connections get to finish after a shutdown request.
 const SHUTDOWN_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
+/// How long stopping audio, and then closing the database, may each take.
+const STOP_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// Resolves on Ctrl+C, SIGTERM on Unix (systemd stop), or a request from
 /// the tray menu.

@@ -35,6 +35,10 @@ pub fn start_tray(state: &AppState, listen: SocketAddr) -> Option<Tray> {
             tracing::info!("shutdown requested from the tray");
             shutdown.notify_one();
         }
+        TrayAction::SessionEnding => {
+            tracing::info!("Windows asked DJINN to close (sign-out, shutdown, or an installer)");
+            shutdown.notify_one();
+        }
     });
     match result {
         Ok(tray) => {

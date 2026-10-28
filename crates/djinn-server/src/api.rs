@@ -62,11 +62,11 @@ struct Join {
 /// The address guests open. Public: the join page is shown on a screen
 /// for people who aren't signed in yet.
 async fn join(State(state): State<AppState>) -> Json<Join> {
+    // Answers with the last check; a reload shows a newer one.
+    crate::network::refresh(&state);
     Json(Join {
         url: state.join_url.to_string(),
-        public_network: state
-            .public_network
-            .load(std::sync::atomic::Ordering::Relaxed),
+        public_network: state.network.public(),
     })
 }
 

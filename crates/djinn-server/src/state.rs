@@ -34,8 +34,8 @@ pub struct AppState {
     pub roots_changed: Arc<Notify>,
     /// The URL guests open, shown on the join page.
     pub join_url: Arc<String>,
-    /// Windows has the guests' network set to Public (see `network.rs`).
-    pub public_network: Arc<AtomicBool>,
+    /// Whether Windows has the guests' network set to Public.
+    pub network: Arc<crate::network::Watch>,
     /// Guests may join with just a name. Mirrors the `guest_mode` setting.
     pub guest_mode: Arc<AtomicBool>,
     /// The live stream for casting, when the engine runs.
@@ -91,7 +91,7 @@ impl AppState {
             shutdown_request: Arc::new(Notify::new()),
             roots_changed: Arc::new(Notify::new()),
             join_url: Arc::new(String::new()),
-            public_network: Arc::new(AtomicBool::new(false)),
+            network: Arc::default(),
             guest_mode: Arc::new(AtomicBool::new(false)),
             stream: None,
             cast_token: Arc::new(String::new()),

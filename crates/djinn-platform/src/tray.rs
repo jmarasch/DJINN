@@ -24,6 +24,9 @@ pub enum TrayAction {
     /// The full-screen now-playing page, for a TV.
     ShowTv,
     Quit,
+    /// Windows is signing out or shutting down, or an installer asked
+    /// DJINN to close. Shut down quickly.
+    SessionEnding,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -66,7 +69,7 @@ impl Tray {
                 #[cfg(windows)]
                 {
                     let on_action = std::sync::Arc::clone(&on_action);
-                    session::watch(move || on_action(TrayAction::Quit));
+                    session::watch(move || on_action(TrayAction::SessionEnding));
                 }
                 install_handlers(on_action);
                 let _ = ready_tx.send(Ok(()));
@@ -197,8 +200,9 @@ mod session {
     /// Set when DJINN has shut down, so Windows may end the session.
     pub static DONE: AtomicBool = AtomicBool::new(false);
     /// Windows ends the session once WM_ENDSESSION returns; hold it this
-    /// long at most while the database closes.
-    const WAIT: Duration = Duration::from_secs(10);
+    /// long at most while DJINN shuts down (connections get 5 s, audio and
+    /// the database 2 s each).
+    const WAIT: Duration = Duration::from_secs(12);
 
     /// Creates the window on the calling thread, which must pump messages.
     pub fn watch(on_end: impl Fn() + Send + Sync + 'static) {

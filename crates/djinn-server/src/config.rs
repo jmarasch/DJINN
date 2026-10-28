@@ -105,9 +105,14 @@ impl Config {
         };
 
         let mut config = Self::from_figment(figment(path.as_deref()))?;
-        // Relative paths are relative to the config file, so a service finds
-        // its database no matter what directory it was started from.
-        if let Some(dir) = path.as_deref().and_then(Path::parent) {
+        // Relative paths are relative to the config file, or to where it
+        // would be, so DJINN finds its database no matter what directory it
+        // was started from (Windows starts sign-in programs in System32).
+        let base = match &source {
+            Source::File(file) => file.parent(),
+            Source::Defaults { looked_at } => looked_at.as_deref().and_then(Path::parent),
+        };
+        if let Some(dir) = base {
             config.resolve_relative_paths(dir);
         }
         Ok((config, source))
@@ -173,6 +178,29 @@ mod tests {
 
     // Every test that reads env goes through Jail, which serializes them so
     // one test's DJINN_* vars can't leak into another.
+    #[test]
+    fn without_a_config_file_the_database_sits_where_it_would_be() {
+        Jail::expect_with(|jail| {
+            // Keep the developer's own config out of it (Linux looks here).
+            let home = jail.directory().display().to_string();
+            jail.set_env("XDG_CONFIG_HOME", home);
+            let (config, source) = Config::load(None).unwrap();
+            let Source::Defaults {
+                looked_at: Some(looked_at),
+            } = source
+            else {
+                panic!("expected defaults, got {source:?}");
+            };
+            assert_eq!(
+                config.database.path,
+                looked_at.parent().unwrap().join("djinn.db"),
+                "not relative to wherever DJINN was started"
+            );
+            assert!(config.database.path.is_absolute());
+            Ok(())
+        });
+    }
+
     #[test]
     fn defaults_are_valid() {
         Jail::expect_with(|_| {
