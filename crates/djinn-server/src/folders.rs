@@ -84,6 +84,21 @@ async fn roots_view(state: &AppState) -> anyhow::Result<Vec<Root>> {
         .collect())
 }
 
+/// `canonicalize` without the `\\?\` prefix Windows adds to drive paths,
+/// which nobody expects to see and other paths (config.toml, the folder
+/// browser) don't have.
+fn canonical(path: &Path) -> std::io::Result<PathBuf> {
+    let path = path.canonicalize()?;
+    if cfg!(windows) {
+        if let Some(rest) = path.to_str().and_then(|p| p.strip_prefix(r"\\?\")) {
+            if rest.as_bytes().get(1) == Some(&b':') {
+                return Ok(PathBuf::from(rest));
+            }
+        }
+    }
+    Ok(path)
+}
+
 #[derive(Deserialize)]
 struct RootPath {
     path: PathBuf,
@@ -95,9 +110,7 @@ async fn add(
     State(state): State<AppState>,
     Json(body): Json<RootPath>,
 ) -> ApiResult<(StatusCode, Json<Vec<Root>>)> {
-    let path = body
-        .path
-        .canonicalize()
+    let path = canonical(&body.path)
         .ok()
         .filter(|p| p.is_dir())
         .ok_or_else(|| ApiError::bad_request("that folder doesn't exist or can't be read"))?;

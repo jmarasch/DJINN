@@ -308,8 +308,7 @@ async fn bind(addr: std::net::SocketAddr) -> std::io::Result<tokio::net::TcpList
 }
 
 fn init_logging(file: Option<&std::path::Path>) -> anyhow::Result<()> {
-    let filter =
-        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info,symphonia=warn"));
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(LOG_DEFAULT));
     let builder = tracing_subscriber::fmt().with_env_filter(filter);
     match file {
         Some(path) => {
@@ -330,6 +329,11 @@ fn init_logging(file: Option<&std::path::Path>) -> anyhow::Result<()> {
     }
     Ok(())
 }
+
+/// Log levels unless `RUST_LOG` says otherwise. Symphonia warns about junk
+/// bytes before the audio of many files, every time one is read, which
+/// buried everything else while analysis ran.
+const LOG_DEFAULT: &str = "info,symphonia=warn,symphonia_core::formats::probe=error";
 
 /// `djinn.log` next to the binary on Windows (where its config lives too),
 /// in `~/.config/djinn/` elsewhere.
