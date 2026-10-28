@@ -109,9 +109,14 @@ jobs:
   gpu:
     name: GPU pack ${{ matrix.os }}
     strategy:
+      # Let each OS finish, so one failure doesn't hide the other's result.
+      fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          # Pinned: NVIDIA has no CUDA 12.4 packages for the Ubuntu that
+          # ubuntu-latest now runs. 22.04 also matches the main Linux
+          # build's glibc, so the helper runs on the same distros.
+          - os: ubuntu-22.04
             prefix: gpu-linux-x86_64
             helper: djinn-gpu
             libs: lib64/libcudart.so.12 lib64/libcublas.so.12 lib64/libcublasLt.so.12 lib64/libcurand.so.10
