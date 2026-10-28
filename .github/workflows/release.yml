@@ -113,17 +113,25 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Pinned: NVIDIA has no CUDA 12.4 packages for the Ubuntu that
-          # ubuntu-latest now runs. 22.04 also matches the main Linux
-          # build's glibc, so the helper runs on the same distros.
+          # Both pinned to what CUDA 12.4 supports: NVIDIA has no 12.4
+          # packages for the Ubuntu that ubuntu-latest runs, and its nvcc
+          # rejects the Visual Studio 2026 on windows-latest. 22.04 also
+          # matches the main Linux build's glibc, so the helper runs on the
+          # same distros.
           - os: ubuntu-22.04
             prefix: gpu-linux-x86_64
             helper: djinn-gpu
             libs: lib64/libcudart.so.12 lib64/libcublas.so.12 lib64/libcublasLt.so.12 lib64/libcurand.so.10
-          - os: windows-latest
+            # apt names: cuda-<name>-12-4, and the math libraries without
+            # the cuda- prefix. driver-dev has the libcuda stub to link with.
+            cuda-packages: '["nvcc", "cudart", "cudart-dev", "nvrtc", "nvrtc-dev", "driver-dev"]'
+            lib-packages: '["libcublas", "libcublas-dev", "libcurand", "libcurand-dev"]'
+          - os: windows-2022
             prefix: gpu-windows-x86_64
             helper: djinn-gpu.exe
             libs: bin/cudart64_12.dll bin/cublas64_12.dll bin/cublasLt64_12.dll bin/curand64_10.dll
+            cuda-packages: '["nvcc", "cudart", "cublas", "cublas_dev", "curand", "curand_dev", "nvrtc", "nvrtc_dev"]'
+            lib-packages: '[]'
     runs-on: ${{ matrix.os }}
     env:
       # No GPU on the runner: build for Turing and newer (the code is JIT
@@ -136,7 +144,12 @@ jobs:
         with:
           cuda: '12.4.0'
           method: network
-          sub-packages: '["nvcc", "cudart", "cublas", "cublas_dev", "curand", "curand_dev", "nvrtc", "nvrtc_dev"]'
+          sub-packages: ${{ matrix.cuda-packages }}
+          non-cuda-sub-packages: ${{ matrix.lib-packages }}
+
+      # nvcc compiles with MSVC's cl.exe, which isn't on the PATH by default.
+      - uses: ilammy/msvc-dev-cmd@v1
+        if: runner.os == 'Windows'
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
