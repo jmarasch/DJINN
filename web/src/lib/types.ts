@@ -441,6 +441,14 @@ export interface GenrePage {
   artists: ArtistSummary[]
 }
 
+/** Every genre in the library and how they relate (Library > Genres). */
+export interface GenreMap {
+  /** By name, with how many songs have each. */
+  genres: { name: string; songs: number }[]
+  /** Related genres, as indexes into `genres`; strength 0 to 1. */
+  links: { a: number; b: number; strength: number }[]
+}
+
 /** Version and updates (Admin > About). */
 export interface About {
   version: string

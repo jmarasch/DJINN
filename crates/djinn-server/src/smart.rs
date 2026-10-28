@@ -8,6 +8,7 @@ use axum::extract::{Path, Query, State};
 use axum::routing::get;
 use axum::{Json, Router};
 use djinn_ai::Reading;
+use djinn_library::genres::GenreMap;
 use djinn_library::sound::SoundIndex;
 use djinn_library::vibe::{self, SongFacts, Vocabulary};
 use djinn_store::{ArtistSummary, Track};
@@ -64,6 +65,7 @@ pub fn router() -> Router<AppState> {
         .route("/tracks/{id}/similar", get(similar_tracks))
         .route("/tracks/{id}/tags", get(track_tags))
         .route("/artists/{id}/similar", get(similar_artists))
+        .route("/genres", get(genres))
         .route("/genres/{name}", get(genre))
 }
 
@@ -209,6 +211,16 @@ struct GenrePage {
     total: usize,
     tracks: Vec<Track>,
     artists: Vec<ArtistSummary>,
+}
+
+/// Every genre in the library and how they relate, for browsing by genre
+/// and the genre cloud.
+async fn genres(_: CurrentUser, State(state): State<AppState>) -> Json<GenreMap> {
+    let map = match (state.catalog.read(), state.sound.read()) {
+        (Ok(catalog), Ok(index)) => djinn_library::genres::map(&catalog.tags, &index),
+        _ => GenreMap::default(),
+    };
+    Json(map)
 }
 
 /// A genre's songs (by tags or by sound) and artists, most popular first.

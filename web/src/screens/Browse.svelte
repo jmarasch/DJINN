@@ -1,18 +1,22 @@
 <script lang="ts">
   import { api } from '../lib/api'
   import Art from '../lib/Art.svelte'
+  import GenreCloud from '../lib/GenreCloud.svelte'
+  import GenreTags from '../lib/GenreTags.svelte'
   import Icon from '../lib/Icon.svelte'
   import InfiniteList from '../lib/InfiniteList.svelte'
   import TrackRow from '../lib/TrackRow.svelte'
   import TrackTile from '../lib/TrackTile.svelte'
-  import type { AlbumSort, TrackSort } from '../lib/types'
+  import type { AlbumSort, GenreMap, TrackSort } from '../lib/types'
 
-  type Tab = 'artists' | 'albums' | 'songs'
+  type Tab = 'artists' | 'albums' | 'songs' | 'genres'
   type View = 'list' | 'grid'
+  type GenreView = 'tags' | 'cloud'
   const tabs: { id: Tab; label: string }[] = [
     { id: 'artists', label: 'Artists' },
     { id: 'albums', label: 'Albums' },
     { id: 'songs', label: 'Songs' },
+    { id: 'genres', label: 'Genres' },
   ]
 
   // Tab and sort last for the session; the list/grid choice is kept on
@@ -21,22 +25,41 @@
   let sort = $state((sessionStorage.getItem('djinn-browse-sort') as TrackSort) || 'title')
   let albumSort = $state((sessionStorage.getItem('djinn-browse-album-sort') as AlbumSort) || 'name')
   let view = $state<View>(readView())
+  let genreView = $state<GenreView>(readStored('djinn-genre-view') === 'cloud' ? 'cloud' : 'tags')
+  let genres = $state<GenreMap | null>(null)
+  let genresFailed = $state(false)
   $effect(() => sessionStorage.setItem('djinn-browse-tab', tab))
   $effect(() => sessionStorage.setItem('djinn-browse-sort', sort))
   $effect(() => sessionStorage.setItem('djinn-browse-album-sort', albumSort))
+  $effect(() => store('djinn-browse-view', view))
+  $effect(() => store('djinn-genre-view', genreView))
+
+  // The genres load the first time their tab opens.
   $effect(() => {
-    try {
-      localStorage.setItem('djinn-browse-view', view)
-    } catch {
-      // Storage unavailable (private mode); the choice just isn't kept.
-    }
+    if (tab !== 'genres' || genres) return
+    api
+      .genres()
+      .then((map) => (genres = map))
+      .catch(() => (genresFailed = true))
   })
 
   function readView(): View {
+    return readStored('djinn-browse-view') === 'grid' ? 'grid' : 'list'
+  }
+
+  function readStored(key: string): string | null {
     try {
-      return localStorage.getItem('djinn-browse-view') === 'grid' ? 'grid' : 'list'
+      return localStorage.getItem(key)
     } catch {
-      return 'list'
+      return null
+    }
+  }
+
+  function store(key: string, value: string) {
+    try {
+      localStorage.setItem(key, value)
+    } catch {
+      // Storage unavailable (private mode); the choice just isn't kept.
     }
   }
 
@@ -54,12 +77,31 @@
     {/each}
   </div>
   <div class="views" role="group" aria-label="Layout">
-    <button class:active={!grid} aria-label="List" aria-pressed={!grid} onclick={() => (view = 'list')}>
-      <Icon name="list" size={20} />
-    </button>
-    <button class:active={grid} aria-label="Grid" aria-pressed={grid} onclick={() => (view = 'grid')}>
-      <Icon name="grid" size={20} />
-    </button>
+    {#if tab === 'genres'}
+      <button
+        class:active={genreView === 'tags'}
+        aria-label="Tags"
+        aria-pressed={genreView === 'tags'}
+        onclick={() => (genreView = 'tags')}
+      >
+        <Icon name="list" size={20} />
+      </button>
+      <button
+        class:active={genreView === 'cloud'}
+        aria-label="Cloud"
+        aria-pressed={genreView === 'cloud'}
+        onclick={() => (genreView = 'cloud')}
+      >
+        <Icon name="cloud" size={20} />
+      </button>
+    {:else}
+      <button class:active={!grid} aria-label="List" aria-pressed={!grid} onclick={() => (view = 'list')}>
+        <Icon name="list" size={20} />
+      </button>
+      <button class:active={grid} aria-label="Grid" aria-pressed={grid} onclick={() => (view = 'grid')}>
+        <Icon name="grid" size={20} />
+      </button>
+    {/if}
   </div>
 </div>
 
@@ -88,6 +130,26 @@
       {/if}
     {/snippet}
   </InfiniteList>
+{:else if tab === 'genres'}
+  {#if genres === null}
+    <p class="muted small">{genresFailed ? 'Could not load the genres.' : 'Loading genres...'}</p>
+  {:else if genres.genres.length === 0}
+    <p class="muted">
+      No genres yet. They come from your songs' tags, MusicBrainz lookups (Admin > Rules), and AI listening (Admin >
+      AI).
+    </p>
+  {:else}
+    <p class="muted small">
+      {plural(genres.genres.length, 'genre', 'genres')}{genreView === 'cloud'
+        ? ' · bigger means more songs, lines join related genres'
+        : ''}
+    </p>
+    {#if genreView === 'cloud'}
+      <GenreCloud map={genres} />
+    {:else}
+      <GenreTags map={genres} />
+    {/if}
+  {/if}
 {:else if tab === 'albums'}
   <label class="sort">
     <span class="muted small">Sort by</span>

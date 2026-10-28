@@ -273,6 +273,35 @@ impl SoundIndex {
             .collect()
     }
 
+    /// The average sound of `tracks` and how many of them were analyzed.
+    /// `None` if none were.
+    pub fn center(&self, tracks: impl IntoIterator<Item = i64>) -> Option<(Vec<f32>, usize)> {
+        let dims = self.entries.first()?.vector.len();
+        let mut sum = vec![0.0f32; dims];
+        let mut count = 0;
+        for track in tracks {
+            let Some(&i) = self.by_track.get(&track) else {
+                continue;
+            };
+            for (s, v) in sum.iter_mut().zip(&self.entries[i].vector) {
+                *s += v;
+            }
+            count += 1;
+        }
+        if count == 0 {
+            return None;
+        }
+        for s in &mut sum {
+            *s /= count as f32;
+        }
+        Some((sum, count))
+    }
+
+    /// How far apart two points from [`SoundIndex::center`] are.
+    pub fn distance(a: &[f32], b: &[f32]) -> f32 {
+        distance(a, b)
+    }
+
     /// How far every other artist's sound is from `artist_id`'s, with how
     /// many distinct songs each has. Empty if the artist wasn't analyzed.
     pub fn artist_distances(&self, artist_id: i64) -> Vec<(i64, f32, usize)> {
