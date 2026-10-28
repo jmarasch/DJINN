@@ -5,6 +5,9 @@
 //! the AppIndicator extension); Windows uses the native notification area.
 //! The tray lives on its own thread, which Windows needs for its message
 //! loop and which keeps the Linux backend's runtime out of the caller's.
+//!
+//! On Windows the same thread also answers sign-out, shutdown, and
+//! installers asking DJINN to close (`session`), as if Quit was picked.
 
 use std::sync::mpsc;
 use std::thread::JoinHandle;
@@ -59,6 +62,12 @@ impl Tray {
                         return;
                     }
                 };
+                let on_action = std::sync::Arc::new(on_action);
+                #[cfg(windows)]
+                {
+                    let on_action = std::sync::Arc::clone(&on_action);
+                    session::watch(move || on_action(TrayAction::Quit));
+                }
                 install_handlers(on_action);
                 let _ = ready_tx.send(Ok(()));
                 run_until_quit(&quit_rx);
@@ -78,7 +87,11 @@ impl Tray {
 }
 
 impl Drop for Tray {
+    /// Drop it last when shutting down: on Windows this tells a waiting
+    /// sign-out or installer that DJINN is done.
     fn drop(&mut self) {
+        #[cfg(windows)]
+        session::DONE.store(true, std::sync::atomic::Ordering::Release);
         let _ = self.quit.send(());
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
@@ -109,8 +122,7 @@ fn build(tooltip: &str) -> Result<TrayIcon, TrayError> {
         .map_err(|e| unavailable(&e))
 }
 
-fn install_handlers(on_action: impl Fn(TrayAction) + Send + Sync + 'static) {
-    let on_action = std::sync::Arc::new(on_action);
+fn install_handlers(on_action: std::sync::Arc<impl Fn(TrayAction) + Send + Sync + 'static>) {
     let on_click = std::sync::Arc::clone(&on_action);
     TrayIconEvent::set_event_handler(Some(move |event| {
         if let TrayIconEvent::Click {
@@ -159,6 +171,101 @@ fn pump_messages() {
         while PeekMessageW(&mut msg, std::ptr::null_mut(), 0, 0, PM_REMOVE) != 0 {
             TranslateMessage(&msg);
             DispatchMessageW(&msg);
+        }
+    }
+}
+
+/// Windows asks a program to close by sending its top-level windows
+/// WM_QUERYENDSESSION and WM_ENDSESSION (sign-out, shutdown, and installers
+/// through the Restart Manager) or WM_CLOSE (`taskkill` without `/F`).
+/// tray-icon's own window ignores them, so DJINN would be killed after a
+/// timeout; this hidden window turns them into Quit instead.
+#[cfg(windows)]
+mod session {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::OnceLock;
+    use std::time::{Duration, Instant};
+
+    use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+    use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        CreateWindowExW, DefWindowProcW, RegisterClassW, WM_CLOSE, WM_ENDSESSION,
+        WM_QUERYENDSESSION, WNDCLASSW, WS_OVERLAPPED,
+    };
+
+    static ON_END: OnceLock<Box<dyn Fn() + Send + Sync>> = OnceLock::new();
+    /// Set when DJINN has shut down, so Windows may end the session.
+    pub static DONE: AtomicBool = AtomicBool::new(false);
+    /// Windows ends the session once WM_ENDSESSION returns; hold it this
+    /// long at most while the database closes.
+    const WAIT: Duration = Duration::from_secs(10);
+
+    /// Creates the window on the calling thread, which must pump messages.
+    pub fn watch(on_end: impl Fn() + Send + Sync + 'static) {
+        if ON_END.set(Box::new(on_end)).is_err() {
+            return;
+        }
+        let class: Vec<u16> = "DJINN session\0".encode_utf16().collect();
+        // SAFETY: the class name outlives both calls (Windows copies it),
+        // the window procedure is a plain function, and a zeroed WNDCLASSW
+        // is valid (null handles and no extra bytes).
+        unsafe {
+            let instance = GetModuleHandleW(std::ptr::null());
+            let wc = WNDCLASSW {
+                lpfnWndProc: Some(window_proc),
+                hInstance: instance,
+                lpszClassName: class.as_ptr(),
+                ..std::mem::zeroed()
+            };
+            RegisterClassW(&wc);
+            // Top level (not message-only), since that's what Windows asks;
+            // never shown.
+            CreateWindowExW(
+                0,
+                class.as_ptr(),
+                class.as_ptr(),
+                WS_OVERLAPPED,
+                0,
+                0,
+                0,
+                0,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                instance,
+                std::ptr::null(),
+            );
+        }
+    }
+
+    unsafe extern "system" fn window_proc(
+        hwnd: HWND,
+        msg: u32,
+        wparam: WPARAM,
+        lparam: LPARAM,
+    ) -> LRESULT {
+        match msg {
+            // Yes, DJINN can close.
+            WM_QUERYENDSESSION => 1,
+            WM_ENDSESSION if wparam != 0 => {
+                end();
+                let started = Instant::now();
+                while !DONE.load(Ordering::Acquire) && started.elapsed() < WAIT {
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                0
+            }
+            WM_CLOSE => {
+                end();
+                0
+            }
+            // SAFETY: the arguments are the ones Windows passed in.
+            _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
+        }
+    }
+
+    fn end() {
+        if let Some(on_end) = ON_END.get() {
+            on_end();
         }
     }
 }

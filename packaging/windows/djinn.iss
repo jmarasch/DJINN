@@ -40,7 +40,8 @@ UninstallDisplayName=DJINN
 WizardStyle=modern
 Compression=lzma2/max
 SolidCompression=yes
-; DJINN sits in the tray with no window, so close it outright.
+; PrepareToInstall asks a running DJINN to quit first; this only catches
+; what that missed.
 CloseApplications=force
 RestartApplications=no
 OutputDir=..\..\target\installer
@@ -64,19 +65,53 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 [Run]
 Filename: "{app}\djinn.exe"; Description: "Start DJINN now"; Flags: nowait postinstall skipifsilent
 
-[UninstallRun]
-Filename: "{sys}\taskkill.exe"; Parameters: "/F /IM djinn.exe /IM djinn-gpu.exe"; Flags: runhidden; RunOnceId: "StopDjinn"
-
 [UninstallDelete]
 ; Left behind by an in-app update.
 Type: files; Name: "{app}\djinn.old.exe"
 Type: dirifempty; Name: "{app}"
 
 [Code]
+function DjinnRunning(): Boolean;
+var
+  Code: Integer;
+begin
+  Result := Exec(ExpandConstant('{cmd}'), '/C tasklist /NH /FI "IMAGENAME eq djinn.exe" | find /I "djinn.exe"',
+    '', SW_HIDE, ewWaitUntilTerminated, Code) and (Code = 0);
+end;
+
+// Asks a running DJINN to quit (taskkill without /F sends WM_CLOSE, which
+// DJINN treats like Shut down in the tray), waits for it to save and exit,
+// and only forces it if it doesn't.
+procedure StopDjinn();
+var
+  Code, Waited: Integer;
+begin
+  if not DjinnRunning() then
+    Exit;
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/IM djinn.exe', '', SW_HIDE, ewWaitUntilTerminated, Code);
+  Waited := 0;
+  while DjinnRunning() and (Waited < 15000) do
+  begin
+    Sleep(250);
+    Waited := Waited + 250;
+  end;
+  if DjinnRunning() then
+    Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM djinn.exe /IM djinn-gpu.exe', '', SW_HIDE,
+      ewWaitUntilTerminated, Code);
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  StopDjinn();
+  Result := '';
+end;
+
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   Data: String;
 begin
+  if CurUninstallStep = usUninstall then
+    StopDjinn();
   if (CurUninstallStep = usPostUninstall) and not UninstallSilent then
   begin
     // Whatever is left in the folder is DJINN's own data.

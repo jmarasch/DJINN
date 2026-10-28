@@ -271,7 +271,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("djinn-roots-{}", std::process::id()));
         std::fs::create_dir_all(dir.join("Music")).unwrap();
         std::fs::create_dir_all(dir.join(".hidden")).unwrap();
-        let canonical = dir.join("Music").canonicalize().unwrap();
+        let canonical = super::canonical(&dir.join("Music")).unwrap();
         let body = serde_json::json!({ "path": dir.join("Music") }).to_string();
 
         let (status, _) = call(

@@ -281,12 +281,13 @@ async fn main() -> anyhow::Result<()> {
         () = deadline => tracing::warn!("connections still open; shutting down anyway"),
     }
 
-    // Remove the tray icon before exiting (Windows leaves a ghost icon
-    // otherwise).
-    drop(tray);
     // Stop audio before closing the database.
     drop(engine);
     store.close().await;
+    // Remove the tray icon before exiting (Windows leaves a ghost icon
+    // otherwise). Last, since on Windows it also lets a waiting sign-out or
+    // installer go ahead.
+    drop(tray);
     tracing::info!("shut down");
     if update.restart_requested() {
         if let Some(exe) = update.exe() {

@@ -176,12 +176,17 @@ before using speakers in a shared room)
 - Quit and start from the Start menu: settings and library survive.
 
 **G. Upgrade**
-- With DJINN running, run the same setup program again. It should close
-  DJINN, install, and keep all data. Note any "files in use" prompts.
+- With DJINN running, run the same setup program again. It should ask
+  DJINN to quit, which takes a few seconds (djinn.log ends with "shut
+  down"), install, and keep all data. Note any "files in use" prompts and
+  how long it waits.
+- Sign out with DJINN running: djinn.log should end with "shut down"
+  rather than stopping mid-way.
 
 **H. Uninstall**
-- Settings > Apps > DJINN > Uninstall. It should stop DJINN, then ask
-  whether to remove settings and data (default No).
+- Settings > Apps > DJINN > Uninstall. It should stop DJINN cleanly (log
+  ends with "shut down"), then ask whether to remove settings and data
+  (default No).
 - Answer No: the folder keeps `djinn.db` and friends; reinstalling picks
   them up again.
 - Uninstall again and answer Yes: `%LOCALAPPDATA%\Programs\DJINN` is
