@@ -185,6 +185,8 @@ export interface PlayerState {
   skip_voters: number[]
   /** Votes that skip it; 0 when skip voting is off. */
   skip_votes_needed: number
+  /** Voted to skip the last song, so sit this one out. */
+  skip_resting: number[]
 }
 
 export interface OutputStatus {

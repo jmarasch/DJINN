@@ -43,7 +43,7 @@ fn queue_error(err: QueueError) -> ApiError {
             | AddRequestError::LimitReached(_)
             | AddRequestError::QueueFull(_)),
         ) => ApiError::conflict(e.to_string()),
-        QueueError::NothingPlaying => ApiError::conflict(err.to_string()),
+        QueueError::NothingPlaying | QueueError::SkipResting => ApiError::conflict(err.to_string()),
         QueueError::NotYours | QueueError::SkipVotesOff => {
             ApiError::new(StatusCode::FORBIDDEN, err.to_string())
         }

@@ -63,6 +63,7 @@
   )
   const canVote = $derived(!!current && !isAdmin() && (soleRequester || app.player.skip_votes_needed > 0))
   const voted = $derived(app.player.skip_voters.includes(app.me?.id ?? -1))
+  const resting = $derived(!soleRequester && app.player.skip_resting.includes(app.me?.id ?? -1))
 
   async function voteSkip() {
     try {
@@ -131,10 +132,12 @@
       <span>{duration(total)}</span>
     </div>
     {#if canVote}
-      <button class="skip-vote" disabled={voted} onclick={voteSkip}>
+      <button class="skip-vote" disabled={voted || resting} onclick={voteSkip}>
         <Icon name="skip" size={18} />
         {#if soleRequester}
           Skip my song
+        {:else if resting}
+          You can vote to skip again after this song
         {:else if voted}
           Voted to skip · {app.player.skip_votes} of {app.player.skip_votes_needed}
         {:else}

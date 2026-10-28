@@ -37,6 +37,7 @@ export const app = $state({
     skip_votes: 0,
     skip_voters: [],
     skip_votes_needed: 0,
+    skip_resting: [],
   } as PlayerState,
   output: { device: null, sample_rate: null, error: null, outputs: [] } as OutputStatus,
   queue: [] as QueueItem[],

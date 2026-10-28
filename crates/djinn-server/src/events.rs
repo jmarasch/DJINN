@@ -97,6 +97,8 @@ pub struct PlayerState {
     pub skip_voters: Vec<i64>,
     /// Votes that skip it; 0 when skip voting is off.
     pub skip_votes_needed: u32,
+    /// People who voted to skip the previous song, so sit this one out.
+    pub skip_resting: Vec<i64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]

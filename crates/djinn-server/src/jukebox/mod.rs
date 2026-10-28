@@ -122,6 +122,11 @@ pub struct Jukebox {
     skip_votes: HashSet<i64>,
     /// Votes that skip a song; 0 when skip voting is off.
     skip_votes_needed: u32,
+    /// Songs started so far, to count songs since someone's skip vote.
+    songs_started: u64,
+    /// The song (by `songs_started`) each person last voted to skip. They
+    /// sit out the next one, so one guest can't vote down every song.
+    skip_voted_on: HashMap<i64, u64>,
     output: OutputStatus,
     last_position_second: Option<u64>,
     /// The playlist feeding the music, if any.
@@ -151,6 +156,8 @@ pub enum QueueError {
     NothingPlaying,
     #[error("skip voting is off")]
     SkipVotesOff,
+    #[error("you can vote to skip again after this song")]
+    SkipResting,
     #[error(transparent)]
     Store(#[from] djinn_store::StoreError),
     #[error(transparent)]
@@ -202,6 +209,8 @@ impl Jukebox {
             skip_requested_by: None,
             skip_votes: HashSet::new(),
             skip_votes_needed,
+            songs_started: 0,
+            skip_voted_on: HashMap::new(),
             output: OutputStatus::default(),
             last_position_second: None,
             active: None,
@@ -239,6 +248,12 @@ impl Jukebox {
             skip_votes: u32::try_from(self.skip_votes.len()).unwrap_or(u32::MAX),
             skip_voters: self.skip_votes.iter().copied().collect(),
             skip_votes_needed: self.skip_votes_needed,
+            skip_resting: self
+                .skip_voted_on
+                .iter()
+                .filter(|&(_, &song)| song + 1 == self.songs_started)
+                .map(|(&user, _)| user)
+                .collect(),
         }
     }
 
@@ -553,6 +568,17 @@ impl Jukebox {
         if self.skip_votes_needed == 0 {
             return Err(QueueError::SkipVotesOff);
         }
+        if self.skip_votes.contains(&user.id) {
+            return Ok(false);
+        }
+        if self
+            .skip_voted_on
+            .get(&user.id)
+            .is_some_and(|&song| song + 1 == self.songs_started)
+        {
+            return Err(QueueError::SkipResting);
+        }
+        self.skip_voted_on.insert(user.id, self.songs_started);
         self.skip_votes.insert(user.id);
         let skipped = self.skip_votes.len() >= self.skip_votes_needed as usize;
         if skipped {
@@ -692,7 +718,12 @@ impl Jukebox {
         });
         self.last_position_second = None;
         self.broadcast_now_playing();
-        if !self.skip_votes.is_empty() {
+        self.songs_started += 1;
+        let songs = self.songs_started;
+        // Only last song's voters still sit out (this one).
+        let resting = self.skip_voted_on.len();
+        self.skip_voted_on.retain(|_, song| *song + 1 == songs);
+        if !self.skip_votes.is_empty() || resting > 0 {
             self.skip_votes.clear();
             self.send(ServerEvent::PlayerState(self.player_state()));
         }
@@ -1111,9 +1142,21 @@ mod tests {
         assert!(h.jukebox.vote_skip(&other).unwrap());
         assert_eq!(skips(&h), 1);
 
-        // A new song starts with no votes.
+        // A new song starts with no votes, and last song's voters sit it
+        // out.
         h.play_next().await;
         assert_eq!(h.jukebox.player_state().skip_votes, 0);
+        let mut resting = h.jukebox.player_state().skip_resting;
+        resting.sort();
+        assert_eq!(resting, [user.id, other.id]);
+        assert!(matches!(
+            h.jukebox.vote_skip(&user),
+            Err(QueueError::SkipResting)
+        ));
+        // The song after that, they can vote again.
+        h.play_next().await;
+        assert!(h.jukebox.player_state().skip_resting.is_empty());
+        assert!(!h.jukebox.vote_skip(&user).unwrap());
         // Admins skip at once.
         assert!(h.jukebox.vote_skip(&admin).unwrap());
         assert_eq!(skips(&h), 2);
