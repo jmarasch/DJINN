@@ -76,6 +76,10 @@ async fn main() -> anyhow::Result<()> {
         .clone()
         .or_else(|| (!has_console).then(default_log_file).flatten());
     init_logging(log_file.as_deref())?;
+    if !has_console {
+        // Otherwise loading the listening model flashes a console window.
+        djinn_ai::settle_cache_probe();
+    }
 
     let (config, source) = Config::load(cli.config.as_deref())?;
     match &source {
