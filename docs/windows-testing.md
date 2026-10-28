@@ -121,8 +121,9 @@ Work through it in order and keep notes as you go. Tick off what passed
 in your final summary; file an issue for each thing that failed.
 
 **A. Fresh install**
-- Run the setup program. Expected: SmartScreen "Windows protected your
-  PC" (unsigned), More info, Run anyway. Note anything else unexpected.
+- Run the setup program. A downloaded one shows SmartScreen "Windows
+  protected your PC" (unsigned): More info, Run anyway. A locally built
+  one doesn't (no download mark), so SmartScreen waits for a release.
 - License page, task options (desktop shortcut off, start at sign-in on),
   install with no admin prompt.
 - "Start DJINN now": tray icon appears, browser opens the setup page,

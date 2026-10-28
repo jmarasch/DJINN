@@ -13,7 +13,8 @@
   #define Binary "..\..\target\release\djinn.exe"
 #endif
 #ifndef Version
-  #define Version GetVersionNumbersString(Binary)
+  ; "0.1.0" as Cargo.toml has it (the numeric file version adds a ".0").
+  #define Version GetStringFileInfo(Binary, "ProductVersion")
 #endif
 
 [Setup]

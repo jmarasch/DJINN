@@ -225,6 +225,13 @@ async fn main() -> anyhow::Result<()> {
     } else {
         None
     };
+    // First start on a desktop: go straight to creating the admin.
+    if tray.is_some() {
+        let token = state.bootstrap_token.lock().ok().and_then(|t| t.clone());
+        if let Some(token) = token {
+            desktop::open_setup(config.server.listen, &token);
+        }
+    }
 
     // Ready to serve from what the database already knows; look for
     // changes on disk in the background.

@@ -48,6 +48,12 @@ pub fn start_tray(state: &AppState, listen: SocketAddr) -> Option<Tray> {
     }
 }
 
+/// Opens the page for creating the admin account (first start, before
+/// there is one).
+pub fn open_setup(listen: SocketAddr, token: &str) {
+    open_browser(&format!("{}/setup?token={token}", local_url(listen)));
+}
+
 /// Opens the admin page of a DJINN that is already running on `listen`.
 pub fn open_existing(listen: SocketAddr) {
     if has_desktop() {
