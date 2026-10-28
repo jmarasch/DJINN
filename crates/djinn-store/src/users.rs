@@ -278,10 +278,11 @@ impl Store {
         let guests = sqlx::query_as(
             "SELECT u.id, coalesce(u.display_name, u.username) AS name, u.mac, u.unlimited,
                     coalesce((SELECT group_concat(name, ', ') FROM (
-                        SELECT name, max(at) AS last FROM guest_joins WHERE user_id = u.id
-                        GROUP BY name ORDER BY last DESC)), '') AS names,
-                    (SELECT ip FROM guest_joins WHERE user_id = u.id ORDER BY at DESC LIMIT 1)
-                        AS last_ip,
+                        SELECT name, max(at) AS last, max(id) AS newest FROM guest_joins
+                        WHERE user_id = u.id
+                        GROUP BY name ORDER BY last DESC, newest DESC)), '') AS names,
+                    (SELECT ip FROM guest_joins WHERE user_id = u.id ORDER BY at DESC, id DESC
+                        LIMIT 1) AS last_ip,
                     u.created_at AS first_seen,
                     coalesce((SELECT max(at) FROM guest_joins WHERE user_id = u.id), u.created_at)
                         AS last_seen,

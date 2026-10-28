@@ -1,9 +1,17 @@
 name: CI
 
+# Docs-only pushes skip CI, and a newer push cancels the run it replaces:
+# the repo is private, so runner minutes count (Windows ones double).
 on:
   push:
     branches: [main]
+    paths-ignore: ['**.md', 'docs/**', 'LICENSE*']
   pull_request:
+    paths-ignore: ['**.md', 'docs/**', 'LICENSE*']
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
