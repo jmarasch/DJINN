@@ -150,15 +150,33 @@ async fn albums(
     ))
 }
 
+/// A song in the library's song list, with a genre or two to show.
+#[derive(Serialize)]
+struct ListedTrack {
+    #[serde(flatten)]
+    track: Track,
+    genres: Vec<String>,
+}
+
 async fn tracks(
     _: CurrentUser,
     State(state): State<AppState>,
     Query(page): Query<PageQuery>,
-) -> ApiResult<Json<Page<Track>>> {
+) -> ApiResult<Json<Page<ListedTrack>>> {
     let (offset, limit) = page.bounds();
-    Ok(Json(
-        state.store.tracks_page(page.sort, offset, limit).await?,
-    ))
+    let found = state.store.tracks_page(page.sort, offset, limit).await?;
+    let mut genres = crate::smart::list_genres(&state, found.items.iter().map(|t| t.id));
+    Ok(Json(Page {
+        total: found.total,
+        items: found
+            .items
+            .into_iter()
+            .map(|track| ListedTrack {
+                genres: genres.remove(&track.id).unwrap_or_default(),
+                track,
+            })
+            .collect(),
+    }))
 }
 
 async fn track(

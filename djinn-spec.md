@@ -290,6 +290,7 @@ Runtime-tunable settings live in the `settings` table, not the config file.
 - Optional: small local language model that turns plain-language prompts ("chill 90s, nothing too slow") into structured queries over tags, features, and history. Must run fully offline.
 - Optional AI listening: a local audio-text model (CLAP) hears genre and mood in songs with no tags and matches free descriptions against the audio. Downloaded on request, runs on the CPU (a GPU only speeds it up). Results live in DJINN's database; music folders stay read-only.
 - Identify songs with missing or wrong tags by audio fingerprint (AcoustID, then MusicBrainz), opt-in like other online lookups; corrections are stored in DJINN, not written to files.
+- Later: a web of related genres on each genre page, genres linked by shared artists and songs and by how alike they sound, each one clickable.
 
 ### Phase 7: Personal streaming
 - Stream tracks to a phone for personal listening (HTTP range requests, optional ffmpeg transcode).

@@ -45,6 +45,11 @@
       {/if}
       {#if track.duration_ms}<span class="meta"> · {duration(track.duration_ms)}</span>{/if}
       {#if note}<span class="meta"> · {note}</span>{/if}
+      {#each track.genres ?? [] as genre, i (genre)}
+        <span class="meta">{i === 0 ? ' · ' : ', '}</span><a class="genre" href="#/genre/{encodeURIComponent(genre)}"
+          >{genre}</a
+        >
+      {/each}
     </div>
   </div>
   <TrackMenu {track} />
@@ -143,6 +148,10 @@
 
   .meta {
     font-variant-numeric: tabular-nums;
+  }
+
+  .genre {
+    color: var(--accent);
   }
 
   .queue {

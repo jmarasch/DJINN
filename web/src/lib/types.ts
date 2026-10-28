@@ -67,6 +67,8 @@ export interface Track {
   genre: string | null
   duration_ms: number | null
   art_hash: string | null
+  /** A genre or two, in the library's song list. */
+  genres?: string[]
 }
 
 export interface Album {

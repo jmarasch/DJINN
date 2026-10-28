@@ -147,6 +147,25 @@ const RADIO_SONGS: usize = 150;
 const GENRE_SONGS: usize = 100;
 const GENRE_ARTISTS: usize = 24;
 
+/// Genres shown next to a song in lists.
+const LIST_GENRES: usize = 2;
+
+/// The first genres (or, failing those, styles) of each song, for lists.
+pub fn list_genres(
+    state: &AppState,
+    ids: impl IntoIterator<Item = i64>,
+) -> HashMap<i64, Vec<String>> {
+    let Ok(catalog) = state.catalog.read() else {
+        return HashMap::new();
+    };
+    ids.into_iter()
+        .filter_map(|id| {
+            let tags = catalog.tags.get(&id)?;
+            (!tags.is_empty()).then(|| (id, tags.iter().take(LIST_GENRES).cloned().collect()))
+        })
+        .collect()
+}
+
 #[derive(Serialize)]
 struct TrackTags {
     /// From tags, the album, the artists, and identification.
