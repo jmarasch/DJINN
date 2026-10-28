@@ -55,6 +55,8 @@ async fn health() -> Json<Health> {
 #[derive(Serialize)]
 struct Join {
     url: String,
+    /// Windows has this network set to Public, so phones can't get in.
+    public_network: bool,
 }
 
 /// The address guests open. Public: the join page is shown on a screen
@@ -62,6 +64,9 @@ struct Join {
 async fn join(State(state): State<AppState>) -> Json<Join> {
     Json(Join {
         url: state.join_url.to_string(),
+        public_network: state
+            .public_network
+            .load(std::sync::atomic::Ordering::Relaxed),
     })
 }
 

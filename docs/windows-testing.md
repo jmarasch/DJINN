@@ -151,8 +151,8 @@ before using speakers in a shared room)
   network is set to Public (see Troubleshooting) before reporting. Windows
   blocks incoming connections on Public networks; switching the Wi-Fi to
   Private (Settings > Network & internet > Wi-Fi > the network) is the
-  user's call. Note how DJINN behaves either way: a guest who can't reach
-  it is the most likely real-world Windows problem.
+  user's call. On Public, Admin and the join card should say "Phones
+  can't reach DJINN right now" within a minute, and the log warns once.
 
 **E. Features**
 - Playlists, radio from a song, artist and genre, "More like this".

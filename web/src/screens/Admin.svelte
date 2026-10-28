@@ -8,6 +8,7 @@
   import CastPanel from '../lib/CastPanel.svelte'
   import CrossfadePanel from '../lib/CrossfadePanel.svelte'
   import OutputsPanel from '../lib/OutputsPanel.svelte'
+  import PublicNetworkNote from '../lib/PublicNetworkNote.svelte'
   import ReplayGainPanel from '../lib/ReplayGainPanel.svelte'
   import Sheet from '../lib/Sheet.svelte'
   import { app, logout, toast } from '../lib/state.svelte'
@@ -167,6 +168,7 @@
 </script>
 
 <h1>Admin</h1>
+<PublicNetworkNote />
 <nav class="tabs" aria-label="Admin sections">
   {#each tabs as t (t.id)}
     <a href="#/admin/{t.id}" class:active={tab === t.id} aria-current={tab === t.id ? 'page' : undefined}>{t.label}</a>

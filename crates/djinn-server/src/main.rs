@@ -20,6 +20,7 @@ mod gpu;
 mod identify_api;
 mod jukebox;
 mod library_api;
+mod network;
 mod player_api;
 mod playlist_api;
 mod reader;
@@ -250,6 +251,7 @@ async fn main() -> anyhow::Result<()> {
     }
     watcher::start(state.clone());
     update::start(&state);
+    network::start(&state);
     let update = std::sync::Arc::clone(&state.update);
 
     let shutdown = std::sync::Arc::clone(&state.shutdown);

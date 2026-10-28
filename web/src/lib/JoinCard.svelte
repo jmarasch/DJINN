@@ -2,6 +2,7 @@
   // The join QR code with steps for guests. Used by the /join page and the
   // Join button in the app.
   import { onMount } from 'svelte'
+  import PublicNetworkNote from './PublicNetworkNote.svelte'
 
   let { big = false }: { big?: boolean } = $props()
   let url = $state('')
@@ -15,6 +16,7 @@
 </script>
 
 <div class="join" class:big>
+  <PublicNetworkNote />
   <div class="qr">
     <img src="/api/join/qr.svg" alt="QR code for {url}" />
   </div>

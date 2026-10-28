@@ -195,15 +195,30 @@ impl Store {
                 .execute(&mut *tx)
                 .await
                 .map_err(StoreError::from)?;
-                // Trade places with the song just ahead.
-                let ahead: Option<(i64, i64)> = sqlx::query_as(
-                    "SELECT id, position FROM request_queue WHERE position < ? \
-                     ORDER BY position DESC LIMIT 1",
+                // Trade places with the song just ahead, once per person:
+                // backing again after stepping back doesn't move it.
+                let first_boost = sqlx::query(
+                    "INSERT OR IGNORE INTO request_boosts (queue_id, user_id) VALUES (?, ?)",
                 )
-                .bind(position)
-                .fetch_optional(&mut *tx)
+                .bind(queue_id)
+                .bind(user_id)
+                .execute(&mut *tx)
                 .await
-                .map_err(StoreError::from)?;
+                .map_err(StoreError::from)?
+                .rows_affected()
+                    > 0;
+                let ahead: Option<(i64, i64)> = if first_boost {
+                    sqlx::query_as(
+                        "SELECT id, position FROM request_queue WHERE position < ? \
+                         ORDER BY position DESC LIMIT 1",
+                    )
+                    .bind(position)
+                    .fetch_optional(&mut *tx)
+                    .await
+                    .map_err(StoreError::from)?
+                } else {
+                    None
+                };
                 if let Some((ahead_id, ahead_position)) = ahead {
                     for (id, position) in [(queue_id, ahead_position), (ahead_id, position)] {
                         sqlx::query("UPDATE request_queue SET position = ? WHERE id = ?")
@@ -228,7 +243,16 @@ impl Store {
                 .fetch_one(&mut *tx)
                 .await;
                 match inserted {
-                    Ok(id) => (id, RequestOutcome::Added),
+                    Ok(id) => {
+                        // Asking placed it; that's this person's move.
+                        sqlx::query("INSERT INTO request_boosts (queue_id, user_id) VALUES (?, ?)")
+                            .bind(id)
+                            .bind(user_id)
+                            .execute(&mut *tx)
+                            .await
+                            .map_err(StoreError::from)?;
+                        (id, RequestOutcome::Added)
+                    }
                     Err(sqlx::Error::Database(e)) if e.is_unique_violation() => {
                         return Err(AddRequestError::AlreadyQueued)
                     }
@@ -505,6 +529,59 @@ mod tests {
             .map(|k| k.id)
             .collect();
         (store, user, ids)
+    }
+
+    #[tokio::test]
+    async fn backing_again_after_stepping_back_doesnt_move_it() {
+        let (store, ana, ids) = setup().await;
+        let sam = store.create_user("sam", "h", Role::User).await.unwrap().id;
+        for &id in &ids[..4] {
+            store
+                .add_request(id, ana, per_user(None), &origin())
+                .await
+                .unwrap();
+        }
+        let song = ids[3];
+        let place = |store: Store| async move {
+            store
+                .queue()
+                .await
+                .unwrap()
+                .iter()
+                .position(|q| q.track.id == song)
+        };
+        assert_eq!(place(store.clone()).await, Some(3));
+        let (item, _) = store
+            .add_request(ids[3], sam, per_user(None), &origin())
+            .await
+            .unwrap();
+        assert_eq!(
+            place(store.clone()).await,
+            Some(2),
+            "the first backing moves it"
+        );
+        for _ in 0..3 {
+            assert_eq!(
+                store.withdraw_request(item.id, sam).await.unwrap(),
+                Withdrawal::Unbacked
+            );
+            store
+                .add_request(ids[3], sam, per_user(None), &origin())
+                .await
+                .unwrap();
+        }
+        assert_eq!(place(store.clone()).await, Some(2), "backing again doesn't");
+
+        // Handing a request over and backing it again doesn't move it either.
+        assert_eq!(
+            store.withdraw_request(item.id, ana).await.unwrap(),
+            Withdrawal::HandedOver
+        );
+        store
+            .add_request(ids[3], ana, per_user(None), &origin())
+            .await
+            .unwrap();
+        assert_eq!(place(store.clone()).await, Some(2));
     }
 
     #[tokio::test]
