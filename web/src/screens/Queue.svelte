@@ -8,6 +8,10 @@
 
   const mine = $derived(app.queue.filter((q) => involvement(q) !== null).length)
 
+  /** Songs with more backers play first, so a song only moves among those
+   * with as many backers as it has. */
+  const sameSupport = (a: QueueItem | undefined, b: QueueItem) => !!a && a.backers.length === b.backers.length
+
   async function move(item: QueueItem, index: number) {
     const before = app.queue
     const next = app.queue.filter((q) => q.id !== item.id)
@@ -57,12 +61,16 @@
         {/if}
         {#if isAdmin()}
           <div class="order">
-            <button aria-label="Move up" disabled={i === 0} onclick={() => move(item, i - 1)}>
+            <button
+              aria-label="Move up"
+              disabled={!sameSupport(app.queue[i - 1], item)}
+              onclick={() => move(item, i - 1)}
+            >
               <Icon name="up" size={20} />
             </button>
             <button
               aria-label="Move down"
-              disabled={i === app.queue.length - 1}
+              disabled={!sameSupport(app.queue[i + 1], item)}
               onclick={() => move(item, i + 1)}
             >
               <Icon name="down" size={20} />

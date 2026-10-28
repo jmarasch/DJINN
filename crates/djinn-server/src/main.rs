@@ -322,11 +322,11 @@ async fn run() -> anyhow::Result<()> {
     {
         tracing::warn!("the database was still busy; closing anyway");
     }
+    tracing::info!("shut down");
     // Remove the tray icon before exiting (Windows leaves a ghost icon
     // otherwise). Last, since on Windows it also lets a waiting sign-out or
-    // installer go ahead.
+    // installer go ahead, and Windows may end DJINN the moment it does.
     drop(tray);
-    tracing::info!("shut down");
     if update.restart_requested() {
         if let Some(exe) = update.exe() {
             tracing::info!("starting the new version");

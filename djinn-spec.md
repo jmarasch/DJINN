@@ -134,7 +134,7 @@ The `djinn-engine` crate must be testable on its own with a CLI harness (`cargo 
 
 Two sources:
 
-1. **Request queue**: FIFO of songs added by users.
+1. **Request queue**: songs added by users, first come first served, except that songs more people asked for play first (see backing below).
 2. **Auto pool**: the "approved" list, managed by admin.
 
 When the current track ends (or the transition starts):
@@ -144,8 +144,8 @@ When the current track ends (or the transition starts):
 
 Rules:
 - Per-user limit on queued, unplayed requests (default 3, configurable). Admin is exempt.
-- Same track cannot be in the request queue twice.
-- Admin can reorder, remove, skip, and pause.
+- Same track cannot be in the request queue twice. Asking for a queued song backs it instead: it uses one of your request slots, and the queue is ordered by how many people back each song, then by request order. Stepping back restores the order exactly.
+- Admin can reorder (among songs with as many backers), remove, skip, and pause.
 - Users can remove their own requests.
 - The approved pool can be built from: individual tracks, whole albums, whole artists, or saved playlists.
 

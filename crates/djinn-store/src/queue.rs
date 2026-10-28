@@ -104,6 +104,23 @@ pub enum PlaySource {
     Pool,
 }
 
+/// How many people back a queued request (`q`), besides its requester.
+macro_rules! backer_count {
+    () => {
+        "(SELECT count(*) FROM request_backers rb WHERE rb.queue_id = q.id)"
+    };
+}
+
+/// Play order: songs more people asked for first, then first come first
+/// served (`position`, which an admin can change within the same support).
+/// Worked out on every read, so it never depends on the order people
+/// backed or stepped back in.
+macro_rules! queue_order {
+    () => {
+        concat!(backer_count!(), " DESC, q.position")
+    };
+}
+
 macro_rules! queue_select {
     () => {
         concat!(
@@ -143,13 +160,13 @@ impl Store {
         if !available {
             return Err(AddRequestError::NotFound);
         }
-        let existing: Option<(i64, i64, i64)> =
-            sqlx::query_as("SELECT id, user_id, position FROM request_queue WHERE track_id = ?")
+        let existing: Option<(i64, i64)> =
+            sqlx::query_as("SELECT id, user_id FROM request_queue WHERE track_id = ?")
                 .bind(track_id)
                 .fetch_optional(&mut *tx)
                 .await
                 .map_err(StoreError::from)?;
-        if let Some((queue_id, owner, _)) = existing {
+        if let Some((queue_id, owner)) = existing {
             let backing: bool = sqlx::query_scalar(
                 "SELECT EXISTS (SELECT 1 FROM request_backers WHERE queue_id = ? AND user_id = ?)",
             )
@@ -185,7 +202,8 @@ impl Store {
         }
         let now = now_ms();
         let (id, outcome) = match existing {
-            Some((queue_id, _, position)) => {
+            Some((queue_id, _)) => {
+                // More backers puts it further up the queue (see QUEUE_ORDER).
                 sqlx::query(
                     "INSERT INTO request_backers (queue_id, user_id, added_at) VALUES (?, ?, ?)",
                 )
@@ -195,52 +213,6 @@ impl Store {
                 .execute(&mut *tx)
                 .await
                 .map_err(StoreError::from)?;
-                // Trade places with the song just ahead, once per person:
-                // backing again after stepping back doesn't move it.
-                let first_boost = sqlx::query(
-                    "INSERT OR IGNORE INTO request_boosts (queue_id, user_id) VALUES (?, ?)",
-                )
-                .bind(queue_id)
-                .bind(user_id)
-                .execute(&mut *tx)
-                .await
-                .map_err(StoreError::from)?
-                .rows_affected()
-                    > 0;
-                // Not past a song this person already asked for or backed:
-                // their picks keep the order they chose them in.
-                let ahead: Option<(i64, i64, bool)> = if first_boost {
-                    sqlx::query_as(
-                        "SELECT q.id, q.position, q.user_id = ?2 OR EXISTS (
-                             SELECT 1 FROM request_backers b
-                             WHERE b.queue_id = q.id AND b.user_id = ?2)
-                         FROM request_queue q WHERE q.position < ?1
-                         ORDER BY q.position DESC LIMIT 1",
-                    )
-                    .bind(position)
-                    .bind(user_id)
-                    .fetch_optional(&mut *tx)
-                    .await
-                    .map_err(StoreError::from)?
-                } else {
-                    None
-                };
-                let ahead = ahead
-                    .filter(|&(_, _, mine)| !mine)
-                    .map(|(id, position, _)| (id, position));
-                if let Some((ahead_id, ahead_position)) = ahead {
-                    swap_places(&mut tx, (queue_id, position), (ahead_id, ahead_position))
-                        .await
-                        .map_err(StoreError::from)?;
-                    sqlx::query(
-                        "UPDATE request_boosts SET moved = 1 WHERE queue_id = ? AND user_id = ?",
-                    )
-                    .bind(queue_id)
-                    .bind(user_id)
-                    .execute(&mut *tx)
-                    .await
-                    .map_err(StoreError::from)?;
-                }
                 (queue_id, RequestOutcome::Backed)
             }
             None => {
@@ -255,16 +227,7 @@ impl Store {
                 .fetch_one(&mut *tx)
                 .await;
                 match inserted {
-                    Ok(id) => {
-                        // Asking placed it; that's this person's move.
-                        sqlx::query("INSERT INTO request_boosts (queue_id, user_id) VALUES (?, ?)")
-                            .bind(id)
-                            .bind(user_id)
-                            .execute(&mut *tx)
-                            .await
-                            .map_err(StoreError::from)?;
-                        (id, RequestOutcome::Added)
-                    }
+                    Ok(id) => (id, RequestOutcome::Added),
                     Err(sqlx::Error::Database(e)) if e.is_unique_violation() => {
                         return Err(AddRequestError::AlreadyQueued)
                     }
@@ -305,37 +268,6 @@ impl Store {
                 .execute(&mut *tx)
                 .await?;
         if unbacked.rows_affected() > 0 {
-            // Undo the place this backing won, and forget it, so backing
-            // again moves it up again: no way to walk it to the top.
-            let moved: Option<bool> = sqlx::query_scalar(
-                "DELETE FROM request_boosts WHERE queue_id = ? AND user_id = ? RETURNING moved",
-            )
-            .bind(id)
-            .bind(user_id)
-            .fetch_optional(&mut *tx)
-            .await?;
-            if moved == Some(true) {
-                let here: Option<i64> =
-                    sqlx::query_scalar("SELECT position FROM request_queue WHERE id = ?")
-                        .bind(id)
-                        .fetch_optional(&mut *tx)
-                        .await?;
-                let behind: Option<(i64, i64)> = match here {
-                    Some(position) => {
-                        sqlx::query_as(
-                            "SELECT id, position FROM request_queue WHERE position > ? \
-                             ORDER BY position LIMIT 1",
-                        )
-                        .bind(position)
-                        .fetch_optional(&mut *tx)
-                        .await?
-                    }
-                    None => None,
-                };
-                if let (Some(position), Some(behind)) = (here, behind) {
-                    swap_places(&mut tx, (id, position), behind).await?;
-                }
-            }
             tx.commit().await?;
             return Ok(Withdrawal::Unbacked);
         }
@@ -403,7 +335,8 @@ impl Store {
     pub async fn queue(&self) -> Result<Vec<QueueItem>> {
         let items = sqlx::query_as(concat!(
             queue_select!(),
-            " WHERE t.removed_at IS NULL ORDER BY q.position"
+            " WHERE t.removed_at IS NULL ORDER BY ",
+            queue_order!()
         ))
         .fetch_all(&self.pool)
         .await?;
@@ -426,21 +359,34 @@ impl Store {
         Ok(result.rows_affected() > 0)
     }
 
-    /// Moves a request to `index` (0-based, clamped) in the queue.
+    /// Moves a request to `index` (0-based) in the queue, as far as it can
+    /// go among songs with as many backers: a song with more support stays
+    /// ahead, one with less behind (see `queue_order!`).
     pub async fn move_request(&self, id: i64, index: usize) -> Result<bool> {
         let mut tx = self.pool.begin().await?;
-        let mut ids: Vec<i64> =
-            sqlx::query_scalar("SELECT id FROM request_queue ORDER BY position")
-                .fetch_all(&mut *tx)
-                .await?;
-        let Some(from) = ids.iter().position(|&i| i == id) else {
+        let rows: Vec<(i64, i64, i64)> = sqlx::query_as(concat!(
+            "SELECT q.id, q.position, ",
+            backer_count!(),
+            " FROM request_queue q ORDER BY ",
+            queue_order!()
+        ))
+        .fetch_all(&mut *tx)
+        .await?;
+        let Some(from) = rows.iter().position(|&(i, _, _)| i == id) else {
             return Ok(false);
         };
-        ids.remove(from);
-        ids.insert(index.min(ids.len()), id);
-        for (position, id) in ids.iter().enumerate() {
+        let support = rows[from].2;
+        // The songs with the same support sit together in play order.
+        let first = rows.iter().position(|r| r.2 == support).unwrap_or(from);
+        let last = rows.iter().rposition(|r| r.2 == support).unwrap_or(from);
+        let to = index.clamp(first, last);
+        let mut tier: Vec<i64> = rows[first..=last].iter().map(|r| r.0).collect();
+        let positions: Vec<i64> = rows[first..=last].iter().map(|r| r.1).collect();
+        let moved = tier.remove(from - first);
+        tier.insert(to - first, moved);
+        for (id, position) in tier.iter().zip(positions) {
             sqlx::query("UPDATE request_queue SET position = ? WHERE id = ?")
-                .bind(i64::try_from(position).unwrap_or(i64::MAX) + 1)
+                .bind(position)
                 .bind(id)
                 .execute(&mut *tx)
                 .await?;
@@ -531,22 +477,6 @@ impl Store {
     }
 }
 
-/// Trades the positions of two queued requests, each given as (id, position).
-async fn swap_places(
-    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-    (a, a_position): (i64, i64),
-    (b, b_position): (i64, i64),
-) -> std::result::Result<(), sqlx::Error> {
-    for (id, position) in [(a, b_position), (b, a_position)] {
-        sqlx::query("UPDATE request_queue SET position = ? WHERE id = ?")
-            .bind(position)
-            .bind(id)
-            .execute(&mut **tx)
-            .await?;
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -591,72 +521,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn backing_and_stepping_back_comes_out_even() {
+    async fn the_queue_follows_how_many_back_each_song() {
         let (store, ana, ids) = setup().await;
         let sam = store.create_user("sam", "h", Role::User).await.unwrap().id;
+        let jo = store.create_user("jo", "h", Role::User).await.unwrap().id;
+        let mut queued = Vec::new();
         for &id in &ids[..4] {
-            store
+            let (item, _) = store
                 .add_request(id, ana, per_user(None), &origin())
                 .await
                 .unwrap();
-        }
-        let song = ids[3];
-        let place = |store: Store| async move {
-            store
-                .queue()
-                .await
-                .unwrap()
-                .iter()
-                .position(|q| q.track.id == song)
-        };
-        assert_eq!(place(store.clone()).await, Some(3));
-        let (item, _) = store
-            .add_request(ids[3], sam, per_user(None), &origin())
-            .await
-            .unwrap();
-        assert_eq!(place(store.clone()).await, Some(2), "backing moves it up");
-        for _ in 0..3 {
-            assert_eq!(
-                store.withdraw_request(item.id, sam).await.unwrap(),
-                Withdrawal::Unbacked
-            );
-            assert_eq!(
-                place(store.clone()).await,
-                Some(3),
-                "stepping back moves it down"
-            );
-            store
-                .add_request(ids[3], sam, per_user(None), &origin())
-                .await
-                .unwrap();
-            assert_eq!(
-                place(store.clone()).await,
-                Some(2),
-                "never past one place up"
-            );
-        }
-
-        // Handing a request over and backing it again doesn't move it either.
-        assert_eq!(
-            store.withdraw_request(item.id, ana).await.unwrap(),
-            Withdrawal::HandedOver
-        );
-        store
-            .add_request(ids[3], ana, per_user(None), &origin())
-            .await
-            .unwrap();
-        assert_eq!(place(store.clone()).await, Some(2));
-    }
-
-    #[tokio::test]
-    async fn backing_doesnt_leapfrog_your_own_picks() {
-        let (store, ana, ids) = setup().await;
-        let sam = store.create_user("sam", "h", Role::User).await.unwrap().id;
-        for &id in &ids[..3] {
-            store
-                .add_request(id, ana, per_user(None), &origin())
-                .await
-                .unwrap();
+            queued.push(item.id);
         }
         let order = |store: Store| async move {
             store
@@ -667,18 +542,71 @@ mod tests {
                 .map(|q| q.track.id)
                 .collect::<Vec<_>>()
         };
-        // Sam backs #2 (up to first), then #3: #3 moves up to second, not
-        // past Sam's own pick.
+        let original = [ids[0], ids[1], ids[2], ids[3]];
+        let back = |track, user| {
+            let store = store.clone();
+            async move {
+                store
+                    .add_request(track, user, per_user(None), &origin())
+                    .await
+                    .unwrap();
+            }
+        };
+
+        // Backed songs go ahead of unbacked ones, in the order they were
+        // asked for, whatever order they were backed in.
+        back(ids[3], sam).await;
+        back(ids[1], sam).await;
+        assert_eq!(order(store.clone()).await, [ids[1], ids[3], ids[0], ids[2]]);
+        // Two backers beat one.
+        back(ids[3], jo).await;
+        assert_eq!(order(store.clone()).await, [ids[3], ids[1], ids[0], ids[2]]);
+
+        // Stepping back, in any order, restores the original order.
+        for (queue_id, user) in [(queued[1], sam), (queued[3], jo), (queued[3], sam)] {
+            assert_eq!(
+                store.withdraw_request(queue_id, user).await.unwrap(),
+                Withdrawal::Unbacked
+            );
+        }
+        assert_eq!(order(store.clone()).await, original);
+    }
+
+    #[tokio::test]
+    async fn admin_moves_stay_among_songs_with_as_much_support() {
+        let (store, ana, ids) = setup().await;
+        let sam = store.create_user("sam", "h", Role::User).await.unwrap().id;
+        let mut queued = Vec::new();
+        for &id in &ids[..4] {
+            let (item, _) = store
+                .add_request(id, ana, per_user(None), &origin())
+                .await
+                .unwrap();
+            queued.push(item.id);
+        }
         store
-            .add_request(ids[1], sam, per_user(None), &origin())
+            .add_request(ids[3], sam, per_user(None), &origin())
             .await
             .unwrap();
-        assert_eq!(order(store.clone()).await, [ids[1], ids[0], ids[2]]);
-        store
-            .add_request(ids[2], sam, per_user(None), &origin())
-            .await
-            .unwrap();
-        assert_eq!(order(store.clone()).await, [ids[1], ids[2], ids[0]]);
+        let order = || async {
+            store
+                .queue()
+                .await
+                .unwrap()
+                .iter()
+                .map(|q| q.track.id)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(order().await, [ids[3], ids[0], ids[1], ids[2]]);
+        // Moving the last song to the top stops below the backed one.
+        assert!(store.move_request(queued[2], 0).await.unwrap());
+        assert_eq!(order().await, [ids[3], ids[2], ids[0], ids[1]]);
+        // And the backed one can't be pushed below the others.
+        assert!(store.move_request(queued[3], 3).await.unwrap());
+        assert_eq!(order().await[0], ids[3]);
+        // Once Sam steps back, everyone keeps the admin's order.
+        store.withdraw_request(queued[3], sam).await.unwrap();
+        assert_eq!(order().await, [ids[2], ids[0], ids[1], ids[3]]);
     }
 
     #[tokio::test]
@@ -703,7 +631,7 @@ mod tests {
                 .collect::<Vec<_>>()
         };
 
-        // Sam backs the last song: it moves up one place, not to the top.
+        // Sam backs the last song: backed songs go first.
         let (item, outcome) = store
             .add_request(ids[2], sam, limit, &origin())
             .await
@@ -712,9 +640,9 @@ mod tests {
         assert_eq!(item.backers[0].name, "sam");
         assert_eq!(
             order(store.clone()).await,
-            [(ids[0], 0), (ids[2], 1), (ids[1], 0)]
+            [(ids[2], 1), (ids[0], 0), (ids[1], 0)]
         );
-        // Jo backs it too: now it's first.
+        // Jo backs it too.
         store
             .add_request(ids[2], jo, limit, &origin())
             .await
