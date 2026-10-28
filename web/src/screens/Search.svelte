@@ -15,6 +15,29 @@
   let thinking = $state(false)
   let latest = 0
 
+  const musings = [
+    'Thinking...',
+    'Digging through the crates...',
+    'Flipping through records...',
+    'Asking the DJ...',
+    'Reading the room...',
+    'Checking the back catalog...',
+    'Cueing up ideas...',
+  ]
+  let musing = $state(musings[0])
+
+  // A new phrase every couple of seconds while the reader works.
+  $effect(() => {
+    if (!thinking) return
+    let at = Math.floor(Math.random() * musings.length)
+    musing = musings[at]
+    const timer = setInterval(() => {
+      at = (at + 1 + Math.floor(Math.random() * (musings.length - 1))) % musings.length
+      musing = musings[at]
+    }, 2200)
+    return () => clearInterval(timer)
+  })
+
   $effect(() => {
     const q = query.trim()
     sessionStorage.setItem('djinn-search', query)
@@ -80,7 +103,7 @@
 
 {#snippet describedSection()}
   {#if thinking}
-    <p class="small muted thinking"><span class="spinner" aria-hidden="true"></span> Reading that with AI...</p>
+    <p class="small muted thinking"><span class="spinner" aria-hidden="true"></span> {musing}</p>
   {/if}
   {#if described}
     <div class="described">
