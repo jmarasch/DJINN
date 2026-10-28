@@ -1,6 +1,7 @@
 # Testing DJINN on Windows
 
-Context for a Claude Code session on the Windows test machine. Read this
+Context for an AI agent session (Claude Code or Codex) on the Windows test
+machine. Read this
 and `CLAUDE.md` before doing anything else.
 
 ## Your job on this machine
