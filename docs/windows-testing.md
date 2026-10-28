@@ -85,18 +85,28 @@ DJINN keeps everything next to `djinn.exe`:
 
 ## Setup
 
-1. Tools (all with `winget install`): `Rustlang.Rustup` (then
-   `rustup default stable-msvc`), `Microsoft.VisualStudio.2022.BuildTools`
-   with the "Desktop development with C++" workload, `OpenJS.NodeJS.LTS`,
-   `Git.Git`, `GitHub.cli`, `JRSoftware.InnoSetup`. Then `gh auth login`.
+1. Tools, from PowerShell:
+   ```
+   winget install Rustlang.Rustup OpenJS.NodeJS.LTS Git.Git GitHub.cli JRSoftware.InnoSetup
+   winget install Microsoft.VisualStudio.2022.BuildTools --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+   rustup default stable-msvc
+   gh auth login
+   ```
+   The Build Tools need that `--override`, or they install without the C++
+   compiler. If a Build Tools install was interrupted, winget may call it
+   installed while nothing works; run the same command with `--force`.
+   Open a new PowerShell window afterwards so the new tools are on PATH.
 2. `gh repo clone jmarasch/DJINN` and `cd DJINN`. Note the commit you
    test: `git log --oneline -1`.
 3. Build, from PowerShell:
    ```
    cd web; npm ci; npm run build; cd ..
    cargo build --release
-   & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" packaging\windows\djinn.iss
+   $iscc = @("$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe", "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
+   & $iscc packaging\windows\djinn.iss
    ```
+   winget installs Inno Setup for the current user (the first path); an
+   installer from the Inno Setup site goes to Program Files (the second).
    The setup program lands in `target\installer\djinn-setup-windows-x86_64.exe`.
 4. Also run the checks CI runs and report any failure with full output:
    `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
@@ -136,8 +146,12 @@ before using speakers in a shared room)
 **D. Guests**
 - A phone on the same Wi-Fi opens the join URL or QR code. Requests,
   skip votes, queue updates live.
-- If the phone can't connect: check the firewall rule (see
-  Troubleshooting) before reporting.
+- If the phone can't connect: check the firewall rule and whether the
+  network is set to Public (see Troubleshooting) before reporting. Windows
+  blocks incoming connections on Public networks; switching the Wi-Fi to
+  Private (Settings > Network & internet > Wi-Fi > the network) is the
+  user's call. Note how DJINN behaves either way: a guest who can't reach
+  it is the most likely real-world Windows problem.
 
 **E. Features**
 - Playlists, radio from a song, artist and genre, "More like this".

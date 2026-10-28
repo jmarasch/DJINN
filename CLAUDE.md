@@ -23,7 +23,7 @@ cargo build --release                  # single binary: target/release/djinn
 
 Linux build prerequisite: `libasound2-dev` and `pkg-config`.
 
-Windows build prerequisites: rustup (MSVC toolchain), Visual Studio Build Tools with "Desktop development with C++" (SQLite and the exe icon compile with it), Node.js LTS. Use the commands above from PowerShell.
+Windows build prerequisites: rustup (MSVC toolchain), Visual Studio Build Tools with the C++ workload (SQLite and the exe icon compile with it), Node.js LTS; exact winget commands are in `docs/windows-testing.md`. Use the commands above from PowerShell.
 
 Installers (current user, no admin; see `docs/releasing.md`):
 

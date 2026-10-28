@@ -47,7 +47,8 @@ and AI models are kept on uninstall (Windows asks if you want them gone).
   desktop shortcut, starts DJINN at sign-in unless unticked, and shows up
   in Settings > Apps for uninstalling. Build it locally with
   `iscc packaging\windows\djinn.iss` after a release build (Inno Setup 6:
-  `winget install JRSoftware.InnoSetup`); it lands in `target\installer\`.
+  `winget install JRSoftware.InnoSetup`, which puts `ISCC.exe` in
+  `%LOCALAPPDATA%\Programs\Inno Setup 6\`); it lands in `target\installer\`.
   The setup program isn't code signed, so SmartScreen says "Windows
   protected your PC" the first time: More info, then Run anyway. On first
   start Windows also asks whether DJINN may use the network; allow
