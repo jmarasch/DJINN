@@ -207,18 +207,27 @@ impl Store {
                 .map_err(StoreError::from)?
                 .rows_affected()
                     > 0;
-                let ahead: Option<(i64, i64)> = if first_boost {
+                // Not past a song this person already asked for or backed:
+                // their picks keep the order they chose them in.
+                let ahead: Option<(i64, i64, bool)> = if first_boost {
                     sqlx::query_as(
-                        "SELECT id, position FROM request_queue WHERE position < ? \
-                         ORDER BY position DESC LIMIT 1",
+                        "SELECT q.id, q.position, q.user_id = ?2 OR EXISTS (
+                             SELECT 1 FROM request_backers b
+                             WHERE b.queue_id = q.id AND b.user_id = ?2)
+                         FROM request_queue q WHERE q.position < ?1
+                         ORDER BY q.position DESC LIMIT 1",
                     )
                     .bind(position)
+                    .bind(user_id)
                     .fetch_optional(&mut *tx)
                     .await
                     .map_err(StoreError::from)?
                 } else {
                     None
                 };
+                let ahead = ahead
+                    .filter(|&(_, _, mine)| !mine)
+                    .map(|(id, position, _)| (id, position));
                 if let Some((ahead_id, ahead_position)) = ahead {
                     swap_places(&mut tx, (queue_id, position), (ahead_id, ahead_position))
                         .await
@@ -637,6 +646,39 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(place(store.clone()).await, Some(2));
+    }
+
+    #[tokio::test]
+    async fn backing_doesnt_leapfrog_your_own_picks() {
+        let (store, ana, ids) = setup().await;
+        let sam = store.create_user("sam", "h", Role::User).await.unwrap().id;
+        for &id in &ids[..3] {
+            store
+                .add_request(id, ana, per_user(None), &origin())
+                .await
+                .unwrap();
+        }
+        let order = |store: Store| async move {
+            store
+                .queue()
+                .await
+                .unwrap()
+                .iter()
+                .map(|q| q.track.id)
+                .collect::<Vec<_>>()
+        };
+        // Sam backs #2 (up to first), then #3: #3 moves up to second, not
+        // past Sam's own pick.
+        store
+            .add_request(ids[1], sam, per_user(None), &origin())
+            .await
+            .unwrap();
+        assert_eq!(order(store.clone()).await, [ids[1], ids[0], ids[2]]);
+        store
+            .add_request(ids[2], sam, per_user(None), &origin())
+            .await
+            .unwrap();
+        assert_eq!(order(store.clone()).await, [ids[1], ids[2], ids[0]]);
     }
 
     #[tokio::test]

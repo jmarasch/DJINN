@@ -29,6 +29,8 @@ pub struct AppState {
     pub shutdown: Arc<watch::Sender<bool>>,
     /// Notified to request a shutdown (from the tray menu).
     pub shutdown_request: Arc<Notify>,
+    /// Windows is signing out or shutting down: close fast, it won't wait.
+    pub session_ending: Arc<AtomicBool>,
     /// Notified when library folders are added or removed, so the folder
     /// watcher follows.
     pub roots_changed: Arc<Notify>,
@@ -89,6 +91,7 @@ impl AppState {
             scan: Arc::default(),
             shutdown: Arc::new(watch::Sender::new(false)),
             shutdown_request: Arc::new(Notify::new()),
+            session_ending: Arc::new(AtomicBool::new(false)),
             roots_changed: Arc::new(Notify::new()),
             join_url: Arc::new(String::new()),
             network: Arc::default(),

@@ -17,6 +17,7 @@ pub fn start_tray(state: &AppState, listen: SocketAddr) -> Option<Tray> {
     let local = local_url(listen);
     let bootstrap = Arc::clone(&state.bootstrap_token);
     let shutdown = Arc::clone(&state.shutdown_request);
+    let session_ending = Arc::clone(&state.session_ending);
     let tooltip = format!("DJINN jukebox\n{}", state.join_url);
 
     let result = Tray::spawn(tooltip, move |action| match action {
@@ -37,6 +38,7 @@ pub fn start_tray(state: &AppState, listen: SocketAddr) -> Option<Tray> {
         }
         TrayAction::SessionEnding => {
             tracing::info!("Windows asked DJINN to close (sign-out, shutdown, or an installer)");
+            session_ending.store(true, std::sync::atomic::Ordering::Release);
             shutdown.notify_one();
         }
     });

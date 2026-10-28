@@ -191,6 +191,9 @@ mod session {
 
     use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows_sys::Win32::System::Shutdown::{
+        ShutdownBlockReasonCreate, ShutdownBlockReasonDestroy,
+    };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         CreateWindowExW, DefWindowProcW, RegisterClassW, WM_CLOSE, WM_ENDSESSION,
         WM_QUERYENDSESSION, WNDCLASSW, WS_OVERLAPPED,
@@ -200,9 +203,10 @@ mod session {
     /// Set when DJINN has shut down, so Windows may end the session.
     pub static DONE: AtomicBool = AtomicBool::new(false);
     /// Windows ends the session once WM_ENDSESSION returns; hold it this
-    /// long at most while DJINN shuts down (connections get 5 s, audio and
-    /// the database 2 s each).
-    const WAIT: Duration = Duration::from_secs(12);
+    /// long at most while DJINN shuts down (1 s each for connections,
+    /// audio, and the database). Windows shows "preventing sign-out" after
+    /// a few seconds, so keep it short.
+    const WAIT: Duration = Duration::from_secs(4);
 
     /// Creates the window on the calling thread, which must pump messages.
     pub fn watch(on_end: impl Fn() + Send + Sync + 'static) {
@@ -248,14 +252,25 @@ mod session {
         lparam: LPARAM,
     ) -> LRESULT {
         match msg {
-            // Yes, DJINN can close.
-            WM_QUERYENDSESSION => 1,
-            WM_ENDSESSION if wparam != 0 => {
-                end();
-                let started = Instant::now();
-                while !DONE.load(Ordering::Acquire) && started.elapsed() < WAIT {
-                    std::thread::sleep(Duration::from_millis(20));
+            // Yes, DJINN can close. If Windows has to wait, its screen
+            // says why instead of "an app".
+            WM_QUERYENDSESSION => {
+                let reason: Vec<u16> = "DJINN is saving and closing...\0".encode_utf16().collect();
+                // SAFETY: a live window of this thread and a terminated
+                // string Windows copies.
+                unsafe { ShutdownBlockReasonCreate(hwnd, reason.as_ptr()) };
+                1
+            }
+            WM_ENDSESSION => {
+                if wparam != 0 {
+                    end();
+                    let started = Instant::now();
+                    while !DONE.load(Ordering::Acquire) && started.elapsed() < WAIT {
+                        std::thread::sleep(Duration::from_millis(20));
+                    }
                 }
+                // SAFETY: as above; harmless if no reason was set.
+                unsafe { ShutdownBlockReasonDestroy(hwnd) };
                 0
             }
             WM_CLOSE => {

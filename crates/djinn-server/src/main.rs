@@ -269,6 +269,9 @@ async fn run() -> anyhow::Result<()> {
     let update = std::sync::Arc::clone(&state.update);
 
     let shutdown = std::sync::Arc::clone(&state.shutdown);
+    // Windows is signing out: every shutdown step gets less time.
+    let session_ending = std::sync::Arc::clone(&state.session_ending);
+    let hurry = move || session_ending.load(std::sync::atomic::Ordering::Acquire);
     let mut stopping = state.shutdown.subscribe();
     let shutdown_request = std::sync::Arc::clone(&state.shutdown_request);
     let server = axum::serve(
@@ -281,10 +284,18 @@ async fn run() -> anyhow::Result<()> {
         shutdown.send_replace(true);
     });
     // Long-lived responses end on shutdown; anything still open after a
-    // few seconds doesn't get to keep DJINN running.
+    // few seconds (one, when Windows is signing out) doesn't get to keep
+    // DJINN running.
+    let deadline_hurry = hurry.clone();
     let deadline = async move {
         let _ = stopping.wait_for(|stop| *stop).await;
-        tokio::time::sleep(SHUTDOWN_GRACE).await;
+        tracing::info!("stopping the web server");
+        let grace = if deadline_hurry() {
+            QUICK_STOP_WAIT
+        } else {
+            SHUTDOWN_GRACE
+        };
+        tokio::time::sleep(grace).await;
     };
     tokio::select! {
         result = async move { server.await } => result.context("server error")?,
@@ -293,16 +304,19 @@ async fn run() -> anyhow::Result<()> {
 
     // Stop audio before closing the database. Neither may hold up the end:
     // at sign-out Windows' audio service may be going away too, and Windows
-    // only waits so long.
+    // only waits a few seconds in all.
+    let stop_wait = if hurry() { QUICK_STOP_WAIT } else { STOP_WAIT };
+    tracing::info!("stopping audio");
     let (stopped, audio_stopped) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         drop(engine);
         let _ = stopped.send(());
     });
-    if audio_stopped.recv_timeout(STOP_WAIT).is_err() {
+    if audio_stopped.recv_timeout(stop_wait).is_err() {
         tracing::warn!("audio didn't stop in time; carrying on");
     }
-    if tokio::time::timeout(STOP_WAIT, store.close())
+    tracing::info!("closing the database");
+    if tokio::time::timeout(stop_wait, store.close())
         .await
         .is_err()
     {
@@ -389,6 +403,9 @@ fn app(state: AppState) -> Router {
 const SHUTDOWN_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
 /// How long stopping audio, and then closing the database, may each take.
 const STOP_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
+/// The same three waits while Windows signs out, which shows "an app is
+/// preventing sign-out" after a few seconds.
+const QUICK_STOP_WAIT: std::time::Duration = std::time::Duration::from_secs(1);
 
 /// Resolves on Ctrl+C, SIGTERM on Unix (systemd stop), or a request from
 /// the tray menu.

@@ -11,7 +11,7 @@ thiserror.workspace = true
 tray-icon = { version = "0.26.1", default-features = false, features = ["ksni"] }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_System_Console", "Win32_System_LibraryLoader", "Win32_System_SystemInformation"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_System_Console", "Win32_System_LibraryLoader", "Win32_System_Shutdown", "Win32_System_SystemInformation"] }
 
 [dev-dependencies]
 # For the release signing tool (examples/sign.rs).
