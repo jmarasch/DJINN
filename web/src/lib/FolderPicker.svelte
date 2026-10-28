@@ -34,7 +34,8 @@
   {#if error}<p class="error">{error}</p>{/if}
   <div class="dirs">
     {#if listing.parent !== null}
-      <button class="dir" onclick={() => open(listing?.parent || undefined)}>
+      <!-- An empty parent is the top level (the drives on Windows). -->
+      <button class="dir" onclick={() => open(listing?.parent ?? undefined)}>
         <Icon name="back" size={18} /> Up
       </button>
     {/if}

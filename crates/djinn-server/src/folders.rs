@@ -171,8 +171,9 @@ struct Listing {
     places: Vec<Folder>,
 }
 
-/// Lists the subfolders of `path` (default: the home folder), so the admin
-/// can pick a library folder from the browser.
+/// Lists the subfolders of `path` (default: the home folder; an empty path
+/// is the top level, every drive on Windows), so the admin can pick a
+/// library folder from the browser.
 async fn browse(_: AdminUser, Query(query): Query<BrowseQuery>) -> ApiResult<Json<Listing>> {
     let listing = tokio::task::spawn_blocking(move || list_dirs(query.path))
         .await
@@ -182,8 +183,8 @@ async fn browse(_: AdminUser, Query(query): Query<BrowseQuery>) -> ApiResult<Jso
 
 fn list_dirs(path: Option<PathBuf>) -> ApiResult<Listing> {
     let path = match path.or_else(dirs::home_dir) {
-        Some(path) => path,
-        None => return Ok(top_level()),
+        Some(path) if !path.as_os_str().is_empty() => path,
+        _ => return Ok(top_level()),
     };
     let entries = std::fs::read_dir(&path)
         .map_err(|e| ApiError::bad_request(format!("can't open {}: {e}", path.display())))?;
@@ -210,17 +211,23 @@ fn list_dirs(path: Option<PathBuf>) -> ApiResult<Listing> {
     })
 }
 
-/// Windows drive letters that exist.
+/// Windows drive letters that exist (hard drives, USB drives, mapped
+/// network drives).
+fn drives() -> Vec<Folder> {
+    ('A'..='Z')
+        .map(|d| PathBuf::from(format!("{d}:\\")))
+        .filter(|p| p.is_dir())
+        .map(|path| Folder {
+            name: path.display().to_string(),
+            path,
+        })
+        .collect()
+}
+
+/// Every drive on Windows, `/` elsewhere.
 fn top_level() -> Listing {
     let dirs = if cfg!(windows) {
-        ('A'..='Z')
-            .map(|d| PathBuf::from(format!("{d}:\\")))
-            .filter(|p| p.is_dir())
-            .map(|path| Folder {
-                name: path.display().to_string(),
-                path,
-            })
-            .collect()
+        drives()
     } else {
         vec![Folder {
             name: "/".to_owned(),
@@ -254,6 +261,10 @@ fn places() -> Vec<Folder> {
         push("Media", Some(PathBuf::from("/media")));
         push("Mounts", Some(PathBuf::from("/mnt")));
     }
+    if cfg!(windows) {
+        // Every drive, so music on D: or a USB drive is one click away.
+        places.extend(drives());
+    }
     places
 }
 
@@ -263,6 +274,15 @@ mod tests {
     use crate::test_util::{call, session};
     use axum::http::Method;
     use djinn_store::Role;
+
+    #[test]
+    fn an_empty_path_lists_the_top_level() {
+        // Going up from a drive root on Windows asks for "".
+        let listing = list_dirs(Some(PathBuf::new())).unwrap();
+        assert_eq!(listing.path, None);
+        assert_eq!(listing.parent, None);
+        assert!(!listing.dirs.is_empty(), "the drives, or / elsewhere");
+    }
 
     #[tokio::test]
     async fn add_and_remove_library_folders() {
