@@ -95,6 +95,16 @@ impl Store {
         Ok(result.rows_affected() > 0)
     }
 
+    /// Renames an output (what the admin calls it, not the device).
+    pub async fn rename_output(&self, id: i64, label: &str) -> Result<bool> {
+        let result = sqlx::query("UPDATE outputs SET label = ? WHERE id = ?")
+            .bind(label)
+            .bind(id)
+            .execute(self.pool())
+            .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
     /// Removes an output. The system default can't be removed.
     pub async fn delete_output(&self, id: i64) -> Result<bool> {
         let result = sqlx::query("DELETE FROM outputs WHERE id = ? AND device_name != ''")
@@ -130,6 +140,8 @@ mod tests {
             .update_output(speaker.id, true, 0.8, 250)
             .await
             .unwrap());
+        assert!(store.rename_output(speaker.id, "Patio").await.unwrap());
+        assert!(store.rename_output(speaker.id, "Speaker").await.unwrap());
         let list = store.outputs().await.unwrap();
         assert_eq!(
             list.iter()

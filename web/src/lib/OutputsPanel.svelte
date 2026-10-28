@@ -46,6 +46,19 @@
     save(output, 0)
   }
 
+  async function rename(output: OutputConfig) {
+    const label = prompt('Name this output (for example "Left monitor"):', output.label)?.trim()
+    if (!label || label === output.label) return
+    const before = output.label
+    output.label = label
+    try {
+      await api.updateOutput(output)
+    } catch (e) {
+      output.label = before
+      toast(e instanceof Error ? e.message : 'Could not rename it', true)
+    }
+  }
+
   async function openPicker() {
     adding = true
     devices = null
@@ -128,6 +141,7 @@
           <input type="checkbox" bind:checked={output.enabled} onchange={() => save(output, 0)} />
           On
         </label>
+        <button class="icon" aria-label="Rename {output.label}" onclick={() => rename(output)}><Icon name="edit" /></button>
         {#if output.device_id}
           <button class="icon" aria-label="Remove {output.label}" onclick={() => remove(output)}><Icon name="close" /></button>
         {/if}

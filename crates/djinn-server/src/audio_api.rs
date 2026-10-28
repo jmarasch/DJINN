@@ -128,6 +128,9 @@ struct OutputUpdate {
     enabled: bool,
     volume_trim: f64,
     delay_ms: i64,
+    /// A new name, if renamed.
+    #[serde(default)]
+    label: Option<String>,
 }
 
 async fn update(
@@ -150,6 +153,13 @@ async fn update(
         .await?
     {
         return Err(ApiError::not_found());
+    }
+    if let Some(label) = body.label.as_deref().map(str::trim) {
+        if label.is_empty() {
+            return Err(ApiError::bad_request("give the output a name"));
+        }
+        let label: String = label.chars().take(MAX_LABEL).collect();
+        state.store.rename_output(id, &label).await?;
     }
     apply(&state).await?;
     output(&state.store, id).await.map(Json)

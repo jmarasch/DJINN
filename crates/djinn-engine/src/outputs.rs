@@ -400,6 +400,7 @@ impl Outputs {
                     tracing::info!(
                         output = slot.config.id,
                         device = output.name(),
+                        device_id = ?output.device_id().map(ToString::to_string),
                         rate = output.sample_rate(),
                         channels = output.channels(),
                         "audio output opened"

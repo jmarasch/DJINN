@@ -166,7 +166,12 @@ export const api = {
   audioDevices: () => get<AudioDevice[]>('/outputs/devices'),
   addOutput: (device_id: string, label: string) => post<OutputConfig>('/outputs', { device_id, label }),
   updateOutput: (o: OutputConfig) =>
-    put<OutputConfig>(`/outputs/${o.id}`, { enabled: o.enabled, volume_trim: o.volume_trim, delay_ms: o.delay_ms }),
+    put<OutputConfig>(`/outputs/${o.id}`, {
+      enabled: o.enabled,
+      volume_trim: o.volume_trim,
+      delay_ms: o.delay_ms,
+      label: o.label,
+    }),
   removeOutput: (id: number) => del<void>(`/outputs/${id}`),
   replayGain: () => get<ReplayGainSettings>('/audio/replaygain'),
   identify: () => get<IdentifyStatus & { found: IdentificationRow[] }>('/identify'),
