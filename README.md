@@ -1,4 +1,4 @@
-# DJINN
+# DJINN: Dynamic Jukebox with Intelligent Neural Navigation
 
 A party jukebox for your own music. DJINN runs on a Windows or Linux computer
 and plays through that computer's speakers (or several at once). Guests scan a
