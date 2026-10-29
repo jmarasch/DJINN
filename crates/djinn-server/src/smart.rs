@@ -211,6 +211,8 @@ struct GenrePage {
     total: usize,
     tracks: Vec<Track>,
     artists: Vec<ArtistSummary>,
+    /// Genres linked to it on the genre cloud, strongest first.
+    related: Vec<djinn_library::genres::Related>,
 }
 
 /// Every genre in the library and how they relate, for browsing by genre
@@ -237,6 +239,7 @@ async fn genre(
                 total: 0,
                 tracks: Vec::new(),
                 artists: Vec::new(),
+                related: Vec::new(),
             }));
         };
         let songs = catalog.songs_in(&name);
@@ -275,11 +278,18 @@ async fn genre(
             .collect();
         (ranked, total, artist_ids)
     };
+    let related = match (state.catalog.read(), state.sound.read()) {
+        (Ok(catalog), Ok(index)) => {
+            djinn_library::genres::map(&catalog.tags, &index).related(&name)
+        }
+        _ => Vec::new(),
+    };
     Ok(Json(GenrePage {
         name,
         total,
         tracks: state.store.tracks_by_ids(&track_ids).await?,
         artists: state.store.artists_by_ids(&artist_ids).await?,
+        related,
     }))
 }
 

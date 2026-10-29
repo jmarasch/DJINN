@@ -277,6 +277,7 @@
 
   .tabs {
     flex: 1;
+    min-width: 0;
   }
 
   .tabs button,
@@ -288,7 +289,15 @@
 
   .tabs button {
     flex: 1;
-    padding: 0 6px;
+    min-width: 0;
+    padding: 0 4px;
+  }
+
+  /* Four tabs and the layout buttons fit on a small phone. */
+  @media (max-width: 400px) {
+    .tabs button {
+      font-size: 0.9375rem;
+    }
   }
 
   .views button {

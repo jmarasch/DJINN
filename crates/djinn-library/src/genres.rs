@@ -31,6 +31,43 @@ pub struct GenreMap {
     pub links: Vec<Link>,
 }
 
+/// A genre related to another, as on the genre cloud.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct Related {
+    pub name: String,
+    pub songs: usize,
+    pub strength: f32,
+}
+
+impl GenreMap {
+    /// The genres linked to `name` (the lines from it on the cloud),
+    /// strongest first.
+    pub fn related(&self, name: &str) -> Vec<Related> {
+        let Some(at) = self.genres.iter().position(|g| g.name == name) else {
+            return Vec::new();
+        };
+        let mut found: Vec<Related> = self
+            .links
+            .iter()
+            .filter_map(|l| match (l.a == at, l.b == at) {
+                (true, _) => Some((l.b, l.strength)),
+                (_, true) => Some((l.a, l.strength)),
+                _ => None,
+            })
+            .filter_map(|(other, strength)| {
+                let genre = self.genres.get(other)?;
+                Some(Related {
+                    name: genre.name.clone(),
+                    songs: genre.songs,
+                    strength,
+                })
+            })
+            .collect();
+        found.sort_by(|a, b| b.strength.total_cmp(&a.strength).then(a.name.cmp(&b.name)));
+        found
+    }
+}
+
 /// Each genre gets at most this many links, its strongest, so big genres
 /// don't tie everything together; each keeps at least its strongest one.
 const LINKS_PER_GENRE: usize = 4;
@@ -194,6 +231,9 @@ mod tests {
         assert!(linked(&map, "house", "deep house"));
         assert!(linked(&map, "rock", "metal"));
         assert!(!linked(&map, "house", "rock"));
+        let near: Vec<String> = map.related("rock").into_iter().map(|r| r.name).collect();
+        assert_eq!(near, ["metal"]);
+        assert!(map.related("polka").is_empty());
     }
 
     #[test]

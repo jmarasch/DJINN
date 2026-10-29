@@ -446,6 +446,8 @@ export interface GenrePage {
   total: number
   tracks: Track[]
   artists: ArtistSummary[]
+  /** Genres linked to it on the genre cloud, strongest first (0 to 1). */
+  related: { name: string; songs: number; strength: number }[]
 }
 
 /** Every genre in the library and how they relate (Library > Genres). */

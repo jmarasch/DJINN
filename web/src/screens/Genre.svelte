@@ -34,6 +34,22 @@
       : ''}.
   </p>
   <RadioButton seed={{ kind: 'genre', name: page.name }} label="{title} radio" />
+  {#if page.related.length}
+    <h2>Related genres</h2>
+    <div class="chips">
+      {#each page.related as genre (genre.name)}
+        <a
+          class="chip related"
+          href="#/genre/{encodeURIComponent(genre.name)}"
+          style:--strength={genre.strength}
+          title="{genre.songs} {genre.songs === 1 ? 'song' : 'songs'}"
+        >
+          {genre.name}
+          <span class="count">{genre.songs}</span>
+        </a>
+      {/each}
+    </div>
+  {/if}
   {#if page.artists.length}
     <h2>Artists</h2>
     <div class="chips">
@@ -67,6 +83,22 @@
     background: var(--surface-2);
     color: var(--text);
     text-decoration: none;
+  }
+
+  /* The more related, the stronger the outline, like the lines on the
+     genre cloud. */
+  .related {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    box-shadow: inset 0 0 0 calc(1px + 1.5px * var(--strength))
+      color-mix(in srgb, var(--accent) calc(25% + 60% * var(--strength)), transparent);
+  }
+
+  .count {
+    color: var(--muted);
+    font-size: 0.8125rem;
+    font-variant-numeric: tabular-nums;
   }
 
   h2 {

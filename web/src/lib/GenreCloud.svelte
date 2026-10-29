@@ -2,8 +2,10 @@
   // The genre cloud: each genre a dot sized by its number of songs, with
   // lines between related genres (songs in common, similar sound). Tap one to
   // open its page. Laid out once by a small force simulation from a fixed
-  // spiral, so the same library always looks the same. Drawn at full size in
-  // a scrolling box, so labels stay readable on a phone.
+  // spiral, so the same library always looks the same. It opens at full size
+  // so labels stay readable on a phone; drag to move around, and pinch,
+  // scroll or use the buttons to zoom, without zooming the page.
+  import Icon from './Icon.svelte'
   import type { GenreMap } from './types'
 
   let { map, limit = 80 }: { map: GenreMap; limit?: number } = $props()
@@ -25,11 +27,32 @@
   }
 
   const STEPS = 320
+  /** Zooming in goes up to this many times full size. */
+  const MAX_ZOOM = 3
+  /** A press that moves further than this (pixels) is a drag, not a tap. */
+  const DRAG_PX = 6
   const layout = $derived(lay(map, limit))
   let hovered = $state<number | null>(null)
-  let box = $state<HTMLDivElement | null>(null)
-  /** The drawing is bigger than the box, so it scrolls. */
-  let overflows = $state(false)
+  let svg = $state<SVGSVGElement>()
+  let boxWidth = $state(0)
+  let boxHeight = $state(0)
+  /** The point of the drawing at the middle of the box, and how many screen
+   * pixels one unit of the drawing takes. */
+  let cx = $state(0)
+  let cy = $state(0)
+  let zoom = $state(1)
+  /** Pointers down on the drawing, and where they were last. */
+  const pointers = new Map<number, { x: number; y: number }>()
+  let dragged = false
+  let pressedAt: { x: number; y: number } | null = null
+
+  /** Small enough to see the whole cloud (but not bigger than full size). */
+  const fit = $derived(
+    boxWidth && boxHeight ? Math.min(1, boxWidth / layout.width, boxHeight / layout.height) : 1,
+  )
+  const viewBox = $derived(
+    `${cx - boxWidth / 2 / zoom} ${cy - boxHeight / 2 / zoom} ${boxWidth / zoom} ${boxHeight / zoom}`,
+  )
 
   /** Dots linked to the hovered one, which stay bright. */
   const near = $derived.by(() => {
@@ -42,12 +65,117 @@
     return set
   })
 
-  // Start scrolled to the middle of the cloud.
+  // Start at full size in the middle of the cloud.
   $effect(() => {
-    if (!box || !layout.dots.length) return
-    box.scrollLeft = (box.scrollWidth - box.clientWidth) / 2
-    box.scrollTop = (box.scrollHeight - box.clientHeight) / 2
-    overflows = box.scrollWidth > box.clientWidth + 1 || box.scrollHeight > box.clientHeight + 1
+    const l = layout
+    cx = l.left + l.width / 2
+    cy = l.top + l.height / 2
+    zoom = 1
+  })
+
+  /** Zooms by `factor`, keeping the point under (x, y) (pixels in the box)
+   * where it is. */
+  function zoomBy(factor: number, x = boxWidth / 2, y = boxHeight / 2) {
+    const next = Math.max(fit * 0.9, Math.min(MAX_ZOOM, zoom * factor))
+    const [px, py] = [cx + (x - boxWidth / 2) / zoom, cy + (y - boxHeight / 2) / zoom]
+    zoom = next
+    cx = px - (x - boxWidth / 2) / zoom
+    cy = py - (y - boxHeight / 2) / zoom
+    keepInView()
+  }
+
+  function moveBy(dx: number, dy: number) {
+    cx -= dx / zoom
+    cy -= dy / zoom
+    keepInView()
+  }
+
+  /** Keeps some of the cloud in the box. */
+  function keepInView() {
+    const l = layout
+    cx = Math.max(l.left, Math.min(l.left + l.width, cx))
+    cy = Math.max(l.top, Math.min(l.top + l.height, cy))
+  }
+
+  function showAll() {
+    cx = layout.left + layout.width / 2
+    cy = layout.top + layout.height / 2
+    zoom = fit
+  }
+
+  function local(e: PointerEvent | WheelEvent) {
+    const box = svg?.getBoundingClientRect()
+    return { x: e.clientX - (box?.left ?? 0), y: e.clientY - (box?.top ?? 0) }
+  }
+
+  function down(e: PointerEvent) {
+    if (pointers.size === 0) {
+      dragged = false
+      pressedAt = local(e)
+    }
+    pointers.set(e.pointerId, local(e))
+  }
+
+  function move(e: PointerEvent) {
+    const last = pointers.get(e.pointerId)
+    if (!last) return
+    const now = local(e)
+    if (!dragged && pressedAt && Math.hypot(now.x - pressedAt.x, now.y - pressedAt.y) > DRAG_PX) {
+      dragged = true
+      // Only now, so a plain tap still reaches the genre's link.
+      svg?.setPointerCapture(e.pointerId)
+    }
+    if (pointers.size === 2) {
+      // Pinch: zoom by how much the fingers spread, around their middle,
+      // and move with the middle.
+      const [a, b] = [...pointers.entries()].map(([id, p]) => (id === e.pointerId ? now : p))
+      const [oa, ob] = [...pointers.values()]
+      const before = Math.hypot(oa.x - ob.x, oa.y - ob.y)
+      const after = Math.hypot(a.x - b.x, a.y - b.y)
+      const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }
+      const oldMid = { x: (oa.x + ob.x) / 2, y: (oa.y + ob.y) / 2 }
+      dragged = true
+      if (before > 0) zoomBy(after / before, mid.x, mid.y)
+      moveBy(mid.x - oldMid.x, mid.y - oldMid.y)
+    } else if (dragged) {
+      moveBy(now.x - last.x, now.y - last.y)
+    }
+    pointers.set(e.pointerId, now)
+  }
+
+  function up(e: PointerEvent) {
+    pointers.delete(e.pointerId)
+  }
+
+  function wheel(e: WheelEvent) {
+    e.preventDefault()
+    const { x, y } = local(e)
+    // Trackpads send pinches as wheel events with ctrl held, in small steps.
+    const step = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY
+    zoomBy(Math.exp(-step * (e.ctrlKey ? 0.01 : 0.002)), x, y)
+  }
+
+  // A drag that ends on a genre doesn't open it.
+  function click(e: MouseEvent) {
+    if (!dragged) return
+    e.preventDefault()
+    e.stopPropagation()
+    dragged = false
+  }
+
+  // Wheel and gesture listeners can't be passive, or the page zooms too.
+  $effect(() => {
+    if (!svg) return
+    const el = svg
+    const stop = (e: Event) => e.preventDefault()
+    el.addEventListener('wheel', wheel, { passive: false })
+    el.addEventListener('gesturestart', stop)
+    el.addEventListener('gesturechange', stop)
+    return () => {
+      el.removeEventListener('wheel', wheel)
+      el.removeEventListener('gesturestart', stop)
+      el.removeEventListener('gesturechange', stop)
+    }
   })
 
   function lay(map: GenreMap, limit: number) {
@@ -93,7 +221,7 @@
     if (!dots.length) [left, top, right, bottom] = [0, 0, 0, 0]
     const width = right - left + pad * 2
     const height = bottom - top + pad * 2
-    return { dots, lines, width, height, viewBox: `${left - pad} ${top - pad} ${width} ${height}` }
+    return { dots, lines, width, height, left: left - pad, top: top - pad }
   }
 
   const labelWidth = (d: Dot) => d.name.length * d.font * 0.56
@@ -182,14 +310,19 @@
   }
 </script>
 
-{#if overflows}<p class="hint small muted">Drag or scroll to see the rest.</p>{/if}
-<div class="cloud" bind:this={box}>
+<p class="hint small muted">Drag to move around; pinch, scroll or use + and - to zoom.</p>
+<div class="cloud" bind:clientWidth={boxWidth} bind:clientHeight={boxHeight}>
+  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
   <svg
-    width={layout.width}
-    height={layout.height}
-    viewBox={layout.viewBox}
+    bind:this={svg}
+    {viewBox}
     role="img"
     aria-label="Genres and how they relate"
+    onpointerdown={down}
+    onpointermove={move}
+    onpointerup={up}
+    onpointercancel={up}
+    onclickcapture={click}
   >
     {#each layout.lines as line, i (i)}
       {@const a = layout.dots[line.a]}
@@ -220,15 +353,38 @@
       </a>
     {/each}
   </svg>
+  <div class="zoom">
+    <button aria-label="Zoom in" onclick={() => zoomBy(1.4)}><Icon name="plus" size={20} /></button>
+    <button aria-label="Zoom out" onclick={() => zoomBy(1 / 1.4)}><Icon name="minus" size={20} /></button>
+    <button aria-label="Show all" onclick={showAll}><Icon name="fit" size={20} /></button>
+  </div>
 </div>
 
 <style>
   .cloud {
+    position: relative;
     height: min(70vh, 640px);
-    overflow: auto;
+    overflow: hidden;
     border-radius: 14px;
     background: var(--surface);
-    -webkit-overflow-scrolling: touch;
+  }
+
+  .zoom {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .zoom button {
+    width: 40px;
+    min-height: 40px;
+    padding: 0;
+    border-radius: 10px;
+    background: var(--surface-3);
+    color: var(--text);
   }
 
   .hint {
@@ -237,7 +393,14 @@
 
   svg {
     display: block;
-    margin: auto;
+    width: 100%;
+    height: 100%;
+    /* The drawing handles pinches and drags itself, so the page doesn't
+       zoom or scroll under the finger. */
+    touch-action: none;
+    cursor: grab;
+    user-select: none;
+    -webkit-user-select: none;
   }
 
   line {

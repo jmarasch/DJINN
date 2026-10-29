@@ -6,6 +6,8 @@
     | 'pause'
     | 'skip'
     | 'plus'
+    | 'minus'
+    | 'fit'
     | 'check'
     | 'close'
     | 'up'
@@ -38,6 +40,8 @@
     pause: 'M7 5h4v14H7zM13 5h4v14h-4z',
     skip: 'M6 5l9 7-9 7zM16 5h2v14h-2z',
     plus: 'M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z',
+    minus: 'M5 11h14v2H5z',
+    fit: 'M4 4h6v2H6v4H4zm10 0h6v6h-2V6h-4zM4 14h2v4h4v2H4zm14 0h2v6h-6v-2h4z',
     check: 'M9.5 16.2L5.3 12l-1.4 1.4 5.6 5.6L20.1 8.4 18.7 7z',
     close: 'M6.4 5L5 6.4 10.6 12 5 17.6 6.4 19l5.6-5.6 5.6 5.6 1.4-1.4-5.6-5.6L19 6.4 17.6 5 12 10.6z',
     up: 'M12 7l-6 6 1.4 1.4 4.6-4.6 4.6 4.6L18 13z',
