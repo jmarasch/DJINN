@@ -17,10 +17,9 @@ use djinn_store::now_ms;
 use ed25519_dalek::{Signature, VerifyingKey};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
-use tokio::io::AsyncWriteExt;
 
 use crate::auth::AdminUser;
+use crate::download::CheckedFile;
 use crate::error::{ApiError, ApiResult};
 use crate::events::PlayState;
 use crate::settings;
@@ -567,7 +566,7 @@ async fn install(state: &AppState, release: &Release) -> Result<(), String> {
         .ok_or("the release's checksums don't list this download")?;
 
     let partial = dir.join(PARTIAL);
-    let mut out = tokio::fs::File::create(&partial)
+    let mut out = CheckedFile::create(&partial)
         .await
         .map_err(|e| format!("cannot write to {}: {e}", dir.display()))?;
     let response = client
@@ -577,29 +576,15 @@ async fn install(state: &AppState, release: &Release) -> Result<(), String> {
         .await
         .and_then(|r| r.error_for_status())
         .map_err(|e| format!("download failed: {e}"))?;
-    let mut hasher = Sha256::new();
-    let mut written = 0u64;
     let mut stream = response.bytes_stream();
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|e| format!("download broke off: {e}"))?;
-        hasher.update(&chunk);
-        out.write_all(&chunk).await.map_err(|e| e.to_string())?;
-        written += chunk.len() as u64;
+        let written = out.write(&chunk).await?;
         state
             .update
             .update(|s| s.progress = Some((written, asset.size)));
     }
-    out.flush().await.map_err(|e| e.to_string())?;
-    drop(out);
-    let sum: String = hasher
-        .finalize()
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect();
-    if written != asset.size || sum != expected {
-        let _ = tokio::fs::remove_file(&partial).await;
-        return Err("the download came down damaged; try again".into());
-    }
+    out.finish(asset.size, &expected, "the download").await?;
     replace(&exe, &partial).map_err(|e| {
         let _ = std::fs::remove_file(&partial);
         format!("cannot replace {}: {e}", exe.display())

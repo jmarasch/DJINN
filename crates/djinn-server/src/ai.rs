@@ -14,10 +14,9 @@ use axum::{Json, Router};
 use djinn_ai::{models, Clap};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
-use tokio::io::AsyncWriteExt;
 
 use crate::auth::AdminUser;
+use crate::download::CheckedFile;
 use crate::error::{ApiError, ApiResult};
 use crate::events::ServerEvent;
 use crate::settings;
@@ -574,22 +573,17 @@ async fn fetch_all(
             .await
             .and_then(|r| r.error_for_status())
             .map_err(|e| format!("cannot download {}: {e}", file.local))?;
-        let mut out = tokio::fs::File::create(&partial)
+        let mut out = CheckedFile::create(&partial)
             .await
             .map_err(|e| e.to_string())?;
-        let mut hasher = Sha256::new();
-        let mut written = 0u64;
         let mut stream = response.bytes_stream();
         while let Some(chunk) = stream.next().await {
             if fetch(&state.ai).cancel.load(Ordering::Acquire) {
-                drop(out);
-                let _ = tokio::fs::remove_file(&partial).await;
+                out.discard().await;
                 return Err("stopped".into());
             }
             let chunk = chunk.map_err(|e| format!("download of {} broke off: {e}", file.local))?;
-            hasher.update(&chunk);
-            out.write_all(&chunk).await.map_err(|e| e.to_string())?;
-            written += chunk.len() as u64;
+            let written = out.write(&chunk).await?;
             if let Ok(mut progress) = fetch(&state.ai).progress.lock() {
                 *progress = Some((done + written, total));
             }
@@ -598,17 +592,7 @@ async fn fetch_all(
                 broadcast(state).await;
             }
         }
-        out.flush().await.map_err(|e| e.to_string())?;
-        drop(out);
-        let sum: String = hasher
-            .finalize()
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect();
-        if written != file.size || sum != file.sha256 {
-            let _ = tokio::fs::remove_file(&partial).await;
-            return Err(format!("{} came down damaged; try again", file.local));
-        }
+        out.finish(file.size, file.sha256, file.local).await?;
         tokio::fs::rename(&partial, &target)
             .await
             .map_err(|e| e.to_string())?;

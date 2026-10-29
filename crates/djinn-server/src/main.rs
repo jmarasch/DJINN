@@ -13,6 +13,7 @@ mod cast_api;
 mod client;
 mod config;
 mod desktop;
+mod download;
 mod error;
 mod events;
 mod folders;
