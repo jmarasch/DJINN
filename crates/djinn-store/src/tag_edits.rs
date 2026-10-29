@@ -48,6 +48,18 @@ impl TagChange {
     }
 }
 
+/// A song an artist edit touches: one they're credited on, or on one of
+/// their albums.
+#[derive(Clone, Debug, FromRow)]
+pub struct ArtistSong {
+    pub id: i64,
+    /// The artist credit and album artist as the song reads now.
+    pub artist: Option<String>,
+    pub album_artist: Option<String>,
+    /// They lead the song rather than only being featured.
+    pub leads: bool,
+}
+
 #[derive(FromRow)]
 struct PathEdit {
     path: String,
@@ -76,6 +88,47 @@ impl Store {
         .fetch_optional(&self.pool)
         .await?;
         Ok(edit.unwrap_or_default())
+    }
+
+    /// The songs an artist is on, or whose album is theirs.
+    pub async fn artist_songs(&self, artist_id: i64) -> Result<Vec<ArtistSong>> {
+        let songs = sqlx::query_as(
+            "SELECT t.id, t.artist, t.album_artist, \
+                    EXISTS (SELECT 1 FROM track_artists ta \
+                            WHERE ta.track_id = t.id AND ta.artist_id = ?1 AND NOT ta.featured) AS leads \
+             FROM tracks t LEFT JOIN albums al ON al.id = t.album_id \
+             WHERE t.removed_at IS NULL \
+               AND (al.artist_id = ?1 OR EXISTS (SELECT 1 FROM track_artists ta \
+                                                 WHERE ta.track_id = t.id AND ta.artist_id = ?1))",
+        )
+        .bind(artist_id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(songs)
+    }
+
+    /// Renames an artist in place, keeping their photo, bio and looked-up
+    /// details, unless another artist has the name already. Their songs'
+    /// corrections should follow, or the next read of the files undoes it.
+    pub async fn rename_artist(&self, id: i64, name: &str) -> Result<()> {
+        sqlx::query(
+            "UPDATE artists SET name = ?1 WHERE id = ?2 \
+               AND NOT EXISTS (SELECT 1 FROM artists WHERE name = ?1 AND id != ?2)",
+        )
+        .bind(name)
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// The artist with this name (any case), if there is one.
+    pub async fn artist_named(&self, name: &str) -> Result<Option<i64>> {
+        let id = sqlx::query_scalar("SELECT id FROM artists WHERE name = ?")
+            .bind(name)
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(id)
     }
 
     /// Applies `change` to each song's corrections. Returns the songs' file

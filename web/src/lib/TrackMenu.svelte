@@ -94,7 +94,7 @@
       album: t.album ?? '',
       album_artist: t.album_artist ?? '',
       year: t.year?.toString() ?? '',
-      genre: t.genre ?? '',
+      genre: t.genre ?? tags?.genres.join(', ') ?? '',
     }}
     edited={songFields.filter((f) => editing?.edited[f] != null)}
     onclose={() => (editing = null)}

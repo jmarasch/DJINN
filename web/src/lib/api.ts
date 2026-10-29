@@ -133,6 +133,10 @@ export const api = {
   listen: () => get<{ url: string | null }>('/listen'),
   trackEdit: (id: number) => get<TrackEdit>(`/tracks/${id}/edit`),
   editTracks: (change: TagChange) => put<void>('/tracks/edit', change),
+  /** Renames an artist on all their songs and sets the genres of the songs
+   * they lead; answers where the artist is now. */
+  editArtist: (id: number, change: { name?: string | null; genre?: string | null }) =>
+    put<{ id: number }>(`/artists/${id}/edit`, change),
   removeRequest: (id: number) => del<void>(`/queue/${id}`),
   queueAll: (kind: EntryKind, refId: number) =>
     post<{ added: number }>('/queue/all', { kind, ref_id: refId }),

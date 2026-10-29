@@ -1,6 +1,7 @@
 //! Browsing the library: search, tracks, albums, artists, art, rescans,
 //! and tag corrections.
 
+use std::collections::BTreeMap;
 use std::sync::atomic::Ordering;
 
 use axum::extract::{Path, Query, State};
@@ -41,6 +42,7 @@ pub fn router() -> Router<AppState> {
         .route("/artists", get(artists))
         .route("/artists/jumps", get(artist_jumps))
         .route("/artists/{id}", get(artist))
+        .route("/artists/{id}/edit", put(edit_artist))
         .route("/art/{hash}", get(cover_art))
         .route("/library/rescan", post(rescan))
         .route("/library/artist-info", post(artist_info))
@@ -313,6 +315,131 @@ async fn edit_tracks(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// Corrections for an artist: a new name on every song and album they're
+/// on, and genres for the songs they lead. Left out stays, null goes back
+/// to the files' values.
+#[derive(Deserialize)]
+struct EditArtist {
+    #[serde(default, deserialize_with = "present")]
+    name: Option<Option<String>>,
+    #[serde(default, deserialize_with = "present")]
+    genre: Option<Option<String>>,
+}
+
+#[derive(Serialize)]
+struct EditedArtist {
+    /// Where the artist is now; a new name can make them a new artist.
+    id: i64,
+}
+
+async fn edit_artist(
+    _: AdminUser,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Json(body): Json<EditArtist>,
+) -> ApiResult<Json<EditedArtist>> {
+    let old = state
+        .store
+        .artist(id)
+        .await?
+        .ok_or_else(ApiError::not_found)?
+        .artist
+        .name;
+    let name = text_field(body.name, "name")?;
+    let genre = text_field(body.genre, "genre")?;
+    let songs = state.store.artist_songs(id).await?;
+    let mut paths = Vec::new();
+    match &name {
+        None => {}
+        Some(None) => {
+            let ids: Vec<i64> = songs.iter().map(|s| s.id).collect();
+            let change = TagChange {
+                artist: Some(None),
+                album_artist: Some(None),
+                ..Default::default()
+            };
+            paths.extend(state.store.edit_tags(&ids, &change).await?);
+        }
+        Some(Some(new)) => {
+            // Songs whose credits end up the same are corrected together.
+            let mut groups: BTreeMap<(Option<String>, Option<String>), Vec<i64>> = BTreeMap::new();
+            for song in &songs {
+                let artist = song.artist.as_deref().and_then(|a| renamed(a, &old, new));
+                let album_artist = song
+                    .album_artist
+                    .as_deref()
+                    .and_then(|a| renamed(a, &old, new));
+                if artist.is_some() || album_artist.is_some() {
+                    groups
+                        .entry((artist, album_artist))
+                        .or_default()
+                        .push(song.id);
+                }
+            }
+            for ((artist, album_artist), ids) in groups {
+                let change = TagChange {
+                    artist: artist.map(Some),
+                    album_artist: album_artist.map(Some),
+                    ..Default::default()
+                };
+                paths.extend(state.store.edit_tags(&ids, &change).await?);
+            }
+            state.store.rename_artist(id, new).await?;
+        }
+    }
+    if let Some(genre) = genre {
+        let led: Vec<i64> = songs.iter().filter(|s| s.leads).map(|s| s.id).collect();
+        let change = TagChange {
+            genre: Some(genre),
+            ..Default::default()
+        };
+        paths.extend(state.store.edit_tags(&led, &change).await?);
+    }
+    paths.sort();
+    paths.dedup();
+    if !paths.is_empty() {
+        reread(&state, &paths).await?;
+    }
+    let now = match name {
+        Some(Some(new)) => state.store.artist_named(&new).await?,
+        // Whoever the files name on a song they led.
+        Some(None) => match songs.iter().find(|s| s.leads).or(songs.first()) {
+            Some(song) => state.store.track(song.id).await?.and_then(|t| t.artist_id),
+            None => None,
+        },
+        None => None,
+    };
+    Ok(Json(EditedArtist {
+        id: now.unwrap_or(id),
+    }))
+}
+
+/// `credit` with the name `old` replaced by `new` wherever it stands as a
+/// whole name ("A feat. Old" becomes "A feat. New"); `None` if it isn't in
+/// there.
+fn renamed(credit: &str, old: &str, new: &str) -> Option<String> {
+    let is_name = |c: char| c.is_alphanumeric();
+    let mut out = String::with_capacity(credit.len());
+    let mut rest = credit;
+    let mut found = false;
+    while !rest.is_empty() {
+        let starts_word = !out.chars().next_back().is_some_and(is_name);
+        let at = rest
+            .get(..old.len())
+            .filter(|s| s.eq_ignore_ascii_case(old));
+        let ends_word = !rest[at.map_or(0, str::len)..].starts_with(is_name);
+        if let (Some(at), true, true) = (at, starts_word, ends_word) {
+            out.push_str(new);
+            rest = &rest[at.len()..];
+            found = true;
+        } else if let Some(c) = rest.chars().next() {
+            out.push(c);
+            rest = &rest[c.len_utf8()..];
+        }
+    }
+    found.then_some(out)
+}
+
 /// Reads files again after something changed how they read (a correction,
 /// an identification), and tells everyone.
 pub async fn reread(state: &AppState, paths: &[String]) -> ApiResult<()> {
@@ -322,6 +449,13 @@ pub async fn reread(state: &AppState, paths: &[String]) -> ApiResult<()> {
         .map_err(anyhow::Error::from)?;
     let _ = state.events.send(ServerEvent::LibraryChanged);
     crate::smart::refresh(state).await;
+    // A new name makes a new artist or album to look up.
+    if settings::flag(&state.store, settings::ONLINE_INFO, false)
+        .await
+        .unwrap_or(false)
+    {
+        start_artist_lookup(state, false);
+    }
     Ok(())
 }
 
@@ -695,6 +829,72 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::OK, "already checking for changes");
+    }
+
+    #[test]
+    fn renaming_finds_whole_names_only() {
+        assert_eq!(renamed("Kream", "kream", "KREAM").as_deref(), Some("KREAM"));
+        assert_eq!(
+            renamed("Zara Larsson feat. Kream", "Kream", "KREAM").as_deref(),
+            Some("Zara Larsson feat. KREAM")
+        );
+        assert_eq!(renamed("Kreamy", "Kream", "KREAM"), None);
+        assert_eq!(renamed("Björk", "Björk", "Bjork").as_deref(), Some("Bjork"));
+        assert_eq!(renamed("Someone", "Kream", "KREAM"), None);
+    }
+
+    #[tokio::test]
+    async fn renaming_an_artist_corrects_their_songs() {
+        use djinn_store::ScannedTrack;
+        let state = AppState::for_tests().await;
+        let admin = session(&state, "admin", Role::Admin).await;
+        state
+            .store
+            .save_scanned(&[
+                ScannedTrack {
+                    path: "/gone/a.flac".into(),
+                    title: "Own".into(),
+                    artist: Some("Kream".into()),
+                    album: Some("Ours".into()),
+                    credits: vec![("Kream".into(), false)],
+                    ..Default::default()
+                },
+                ScannedTrack {
+                    path: "/gone/b.flac".into(),
+                    title: "Guest spot".into(),
+                    artist: Some("Zara feat. Kream".into()),
+                    credits: vec![("Zara".into(), false), ("Kream".into(), true)],
+                    ..Default::default()
+                },
+            ])
+            .await
+            .unwrap();
+        let kream = state.store.artist_named("Kream").await.unwrap().unwrap();
+        let ids = state.store.library_track_ids().await.unwrap();
+        let body = r#"{"name":"KREAM Two","genre":"House"}"#;
+        let (status, _) = call(
+            &state,
+            Method::PUT,
+            &format!("/api/artists/{kream}/edit"),
+            Some(body),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let mut edits = Vec::new();
+        for id in ids {
+            edits.push(state.store.tag_edit(id).await.unwrap());
+        }
+        edits.sort_by(|a, b| a.artist.cmp(&b.artist));
+        assert_eq!(edits[0].artist.as_deref(), Some("KREAM Two"));
+        assert_eq!(edits[0].genre.as_deref(), Some("House"), "songs they lead");
+        assert_eq!(edits[1].artist.as_deref(), Some("Zara feat. KREAM Two"));
+        assert_eq!(edits[1].genre, None, "only featured");
+        assert_eq!(
+            state.store.artist_named("KREAM Two").await.unwrap(),
+            Some(kream),
+            "the same artist, keeping their photo and bio"
+        );
     }
 
     #[tokio::test]

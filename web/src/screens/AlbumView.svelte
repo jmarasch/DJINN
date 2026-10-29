@@ -3,6 +3,7 @@
   import Art from '../lib/Art.svelte'
   import Icon from '../lib/Icon.svelte'
   import AddToPlaylist from '../lib/AddToPlaylist.svelte'
+  import GenreChips from '../lib/GenreChips.svelte'
   import QueueAll from '../lib/QueueAll.svelte'
   import SortChoice from '../lib/SortChoice.svelte'
   import TagEditor from '../lib/TagEditor.svelte'
@@ -57,7 +58,9 @@
       <h1>{album.title}</h1>
       <a href="#/artist/{album.artist_id}">{album.artist}</a>
       {#if album.year}<span class="muted"> · {album.year}</span>{/if}
-      {#if album.genres}<div class="muted small genres">{album.genres}</div>{/if}
+      {#if album.genres}
+        <div class="genres"><GenreChips genres={album.genres.split(',').map((g) => g.trim())} /></div>
+      {/if}
       <div class="admin-actions">
         <QueueAll kind="album" refId={album.id} />
         <AddToPlaylist kind="album" refId={album.id} label={album.title} />
@@ -85,7 +88,7 @@
         album: album.title,
         album_artist: album.artist,
         year: album.year?.toString() ?? '',
-        genre: album.tracks[0]?.genre ?? '',
+        genre: album.genres ?? '',
       }}
       onclose={() => (editing = false)}
       onsaved={() => edited(ids)}
@@ -94,6 +97,10 @@
 {/if}
 
 <style>
+  .genres {
+    margin: 6px 0 2px;
+  }
+
   .admin-actions {
     display: flex;
     flex-wrap: wrap;

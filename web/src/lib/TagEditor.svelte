@@ -6,11 +6,13 @@
   import { api } from './api'
   import Sheet from './Sheet.svelte'
   import { toast } from './state.svelte'
-  import type { TagChange, TagField } from './types'
+  import type { TagField, TagFields } from './types'
 
   let {
     title,
-    trackIds,
+    trackIds = [],
+    save: store,
+    applies,
     fields,
     initial,
     edited = [],
@@ -18,7 +20,11 @@
     onsaved,
   }: {
     title: string
-    trackIds: number[]
+    trackIds?: number[]
+    /** Saves the changed fields some other way than on `trackIds`. */
+    save?: (change: TagFields) => Promise<void>
+    /** Which songs the change applies to, when not just `trackIds`. */
+    applies?: string
     fields: TagField[]
     /** What the songs show now, per field. */
     initial: Partial<Record<TagField, string>>
@@ -34,16 +40,16 @@
     album: 'Album',
     album_artist: 'Album artist',
     year: 'Year',
-    genre: 'Genre',
+    genre: 'Genres',
   }
   const start = untrack(() => Object.fromEntries(fields.map((f) => [f, initial[f] ?? ''])))
   let values = $state<Record<string, string>>({ ...start })
   let saving = $state(false)
 
-  async function send(change: TagChange) {
+  async function send(change: TagFields) {
     saving = true
     try {
-      await api.editTracks(change)
+      await (store ? store(change) : api.editTracks({ track_ids: trackIds, ...change }))
       toast('Saved')
       onsaved()
     } catch (e) {
@@ -55,7 +61,7 @@
 
   function save(e: SubmitEvent) {
     e.preventDefault()
-    const change: TagChange = { track_ids: trackIds }
+    const change: TagFields = {}
     for (const f of fields) {
       const value = values[f].trim()
       if (value === start[f].trim()) continue
@@ -65,7 +71,7 @@
       }
       change[f] = value === '' ? null : f === 'year' ? Number(value) : value
     }
-    if (Object.keys(change).length === 1) {
+    if (!Object.keys(change).length) {
       onclose()
       return
     }
@@ -74,7 +80,7 @@
 
   /** Back to the file's value for one field, or all of them. */
   function useFile(only?: TagField) {
-    const change: TagChange = { track_ids: trackIds }
+    const change: TagFields = {}
     for (const f of only ? [only] : fields) change[f] = null
     void send(change)
   }
@@ -95,13 +101,15 @@
         <input
           bind:value={values[field]}
           inputmode={field === 'year' ? 'numeric' : undefined}
+          placeholder={field === 'genre' ? 'Like synth-pop, industrial' : undefined}
           maxlength={field === 'year' ? 4 : 300}
         />
       </label>
     {/each}
     <p class="small muted">
-      {trackIds.length > 1 ? `Applies to all ${trackIds.length} songs. ` : ''}DJINN keeps corrections
-      itself; your music files aren't changed. Empty a field to use what the file says.
+      {applies ?? (trackIds.length > 1 ? `Applies to all ${trackIds.length} songs.` : '')}
+      DJINN keeps corrections itself; your music files aren't changed. Empty a field to go back to what
+      the files say.
     </p>
     <div class="actions">
       <button class="primary" disabled={saving}>Save</button>

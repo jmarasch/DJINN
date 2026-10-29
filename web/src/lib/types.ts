@@ -593,8 +593,11 @@ export interface TrackEdit {
   edited: TagEdit
 }
 
-/** Corrections for songs: a field left out stays, null goes back to the file's. */
-export type TagChange = { track_ids: number[] } & { [F in TagField]?: string | number | null }
+/** Changed fields: one left out stays, null goes back to the file's. */
+export type TagFields = { [F in TagField]?: string | number | null }
+
+/** Corrections for songs. */
+export type TagChange = { track_ids: number[] } & TagFields
 
 /** A backup waiting to be restored. */
 export interface UploadedBackup {
