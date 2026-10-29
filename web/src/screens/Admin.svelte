@@ -531,8 +531,6 @@
   }
 
   .switch {
-    flex-direction: row;
-    align-items: center;
     gap: 6px;
     font-size: 0.8125rem;
     color: var(--muted);
@@ -543,13 +541,6 @@
     font-size: 1rem;
     color: var(--text);
     white-space: normal;
-  }
-
-  .switch input {
-    flex: none;
-    width: 20px;
-    min-height: 20px;
-    accent-color: var(--accent);
   }
 
   .log-head {

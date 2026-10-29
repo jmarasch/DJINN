@@ -17,12 +17,12 @@ use djinn_store::now_ms;
 use ed25519_dalek::{Signature, VerifyingKey};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
-use tokio::io::AsyncWriteExt;
 
 use crate::auth::AdminUser;
+use crate::download::CheckedFile;
 use crate::error::{ApiError, ApiResult};
 use crate::events::PlayState;
+use crate::settings;
 use crate::state::AppState;
 
 pub const REPOSITORY: &str = "jmarasch/DJINN";
@@ -176,8 +176,8 @@ async fn about_info(state: &AppState) -> ApiResult<About> {
         commit_date: env!("DJINN_COMMIT_DATE"),
         repository: format!("https://github.com/{REPOSITORY}"),
         contact: CONTACT,
-        check_updates: crate::jukebox::setting(&state.store, CHECK_UPDATES, 1).await? == 1,
-        auto_update: crate::jukebox::setting(&state.store, AUTO_UPDATE, 0).await? == 1,
+        check_updates: settings::flag(&state.store, CHECK_UPDATES, true).await?,
+        auto_update: settings::flag(&state.store, AUTO_UPDATE, false).await?,
         checked_at: checked.at,
         update_available: available.is_some(),
         cannot_install: available.and_then(|r| update.blocker(r)),
@@ -222,15 +222,8 @@ async fn set_settings(
     State(state): State<AppState>,
     Json(body): Json<Settings>,
 ) -> ApiResult<StatusCode> {
-    let flag = |on: bool| if on { "1" } else { "0" };
-    state
-        .store
-        .set_setting(CHECK_UPDATES, flag(body.check_updates))
-        .await?;
-    state
-        .store
-        .set_setting(AUTO_UPDATE, flag(body.auto_update))
-        .await?;
+    settings::set_flag(&state.store, CHECK_UPDATES, body.check_updates).await?;
+    settings::set_flag(&state.store, AUTO_UPDATE, body.auto_update).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -252,7 +245,7 @@ pub fn start(state: &AppState) {
 }
 
 async fn tick(state: &AppState) {
-    let setting = |key, default| crate::jukebox::setting(&state.store, key, default);
+    let setting = |key, default| settings::number(&state.store, key, default);
     if setting(CHECK_UPDATES, 1).await.ok() != Some(1) {
         return;
     }
@@ -302,21 +295,9 @@ pub async fn this_release() -> Result<Option<ReleaseFiles>, String> {
         )
     });
     let client = client()?;
-    let response = client
-        .get(url)
-        .header("accept", "application/vnd.github+json")
-        .send()
-        .await
-        .map_err(|e| format!("cannot reach GitHub: {e}"))?;
-    if response.status() == reqwest::StatusCode::NOT_FOUND {
+    let Some(release) = github_release(&client, url).await? else {
         return Ok(None);
-    }
-    let release: GitHubRelease = response
-        .error_for_status()
-        .map_err(|e| format!("GitHub said: {e}"))?
-        .json()
-        .await
-        .map_err(|e| format!("unexpected answer from GitHub: {e}"))?;
+    };
     let find = |name: &str| {
         release
             .assets
@@ -403,23 +384,32 @@ async fn latest() -> Result<Option<Release>, String> {
     // release key's signature.
     let url = std::env::var("DJINN_RELEASES_URL")
         .unwrap_or_else(|_| format!("https://api.github.com/repos/{REPOSITORY}/releases/latest"));
-    let response = client()?
+    let release = github_release(&client()?, url).await?;
+    Ok(release.map(|release| from_github(release, &asset_name())))
+}
+
+/// A release from GitHub's API; `None` if there isn't one (no releases
+/// yet, or the repository is private).
+async fn github_release(
+    client: &reqwest::Client,
+    url: String,
+) -> Result<Option<GitHubRelease>, String> {
+    let response = client
         .get(url)
         .header("accept", "application/vnd.github+json")
         .send()
         .await
         .map_err(|e| format!("cannot reach GitHub: {e}"))?;
-    // No releases yet, or the repository is private.
     if response.status() == reqwest::StatusCode::NOT_FOUND {
         return Ok(None);
     }
-    let release: GitHubRelease = response
+    let release = response
         .error_for_status()
         .map_err(|e| format!("GitHub said: {e}"))?
         .json()
         .await
         .map_err(|e| format!("unexpected answer from GitHub: {e}"))?;
-    Ok(Some(from_github(release, &asset_name())))
+    Ok(Some(release))
 }
 
 fn from_github(release: GitHubRelease, wanted: &str) -> Release {
@@ -573,7 +563,7 @@ async fn install(state: &AppState, release: &Release) -> Result<(), String> {
         .ok_or("the release's checksums don't list this download")?;
 
     let partial = dir.join(PARTIAL);
-    let mut out = tokio::fs::File::create(&partial)
+    let mut out = CheckedFile::create(&partial)
         .await
         .map_err(|e| format!("cannot write to {}: {e}", dir.display()))?;
     let response = client
@@ -583,29 +573,15 @@ async fn install(state: &AppState, release: &Release) -> Result<(), String> {
         .await
         .and_then(|r| r.error_for_status())
         .map_err(|e| format!("download failed: {e}"))?;
-    let mut hasher = Sha256::new();
-    let mut written = 0u64;
     let mut stream = response.bytes_stream();
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|e| format!("download broke off: {e}"))?;
-        hasher.update(&chunk);
-        out.write_all(&chunk).await.map_err(|e| e.to_string())?;
-        written += chunk.len() as u64;
+        let written = out.write(&chunk).await?;
         state
             .update
             .update(|s| s.progress = Some((written, asset.size)));
     }
-    out.flush().await.map_err(|e| e.to_string())?;
-    drop(out);
-    let sum: String = hasher
-        .finalize()
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect();
-    if written != asset.size || sum != expected {
-        let _ = tokio::fs::remove_file(&partial).await;
-        return Err("the download came down damaged; try again".into());
-    }
+    out.finish(asset.size, &expected, "the download").await?;
     replace(&exe, &partial).map_err(|e| {
         let _ = std::fs::remove_file(&partial);
         format!("cannot replace {}: {e}", exe.display())

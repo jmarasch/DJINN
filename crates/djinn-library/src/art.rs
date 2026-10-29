@@ -178,7 +178,7 @@ pub fn find_artist_art(dir: &Path, artist: &str) -> Option<PathBuf> {
 }
 
 /// Lowercase letters and digits only, for loose name comparison.
-fn simplify(name: &str) -> String {
+pub(crate) fn simplify(name: &str) -> String {
     name.chars()
         .filter(|c| c.is_alphanumeric())
         .flat_map(char::to_lowercase)

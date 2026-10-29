@@ -21,6 +21,7 @@ use serde::{Deserialize, Serialize};
 use crate::ai::{broadcast, start_download, Fetch};
 use crate::auth::AdminUser;
 use crate::error::{ApiError, ApiResult};
+use crate::settings;
 use crate::state::AppState;
 
 /// Setting key: the AI reader is on.
@@ -189,11 +190,11 @@ pub async fn allowed_for(state: &AppState, user: &djinn_store::User) -> bool {
 }
 
 async fn enabled(state: &AppState) -> ApiResult<bool> {
-    Ok(crate::jukebox::setting(&state.store, AI_READER, 0).await? == 1)
+    Ok(settings::flag(&state.store, AI_READER, false).await?)
 }
 
 async fn gpu_enabled(state: &AppState) -> ApiResult<bool> {
-    Ok(crate::jukebox::setting(&state.store, READER_GPU, 1).await? == 1)
+    Ok(settings::flag(&state.store, READER_GPU, true).await?)
 }
 
 /// Loads the reader again (after a change to where it should run).
@@ -208,10 +209,7 @@ async fn set_gpu(
     State(state): State<AppState>,
     Json(body): Json<Enabled>,
 ) -> ApiResult<StatusCode> {
-    state
-        .store
-        .set_setting(READER_GPU, if body.enabled { "1" } else { "0" })
-        .await?;
+    settings::set_flag(&state.store, READER_GPU, body.enabled).await?;
     reload(&state);
     broadcast(&state).await;
     Ok(StatusCode::NO_CONTENT)
@@ -287,10 +285,7 @@ async fn set_enabled(
     if body.enabled && !models::READER.installed(&state.ai.reader.dir) {
         return Err(ApiError::bad_request("download the model first"));
     }
-    state
-        .store
-        .set_setting(AI_READER, if body.enabled { "1" } else { "0" })
-        .await?;
+    settings::set_flag(&state.store, AI_READER, body.enabled).await?;
     if body.enabled {
         start(&state);
     } else {

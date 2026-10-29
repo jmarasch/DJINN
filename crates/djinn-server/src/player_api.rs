@@ -15,6 +15,7 @@ use crate::client::{self, ClientIp};
 use crate::error::{ApiError, ApiResult};
 use crate::events::{NowPlaying, OutputStatus, PlayerState};
 use crate::jukebox::{self, QueueError};
+use crate::settings;
 use crate::state::AppState;
 
 pub fn router() -> Router<AppState> {
@@ -291,23 +292,23 @@ fn default_true() -> bool {
 async fn settings(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json<Settings>> {
     let store = &state.store;
     Ok(Json(Settings {
-        history_window: jukebox::setting(
+        history_window: settings::number(
             store,
             jukebox::HISTORY_WINDOW,
             jukebox::DEFAULT_HISTORY_WINDOW,
         )
         .await?,
-        per_user_limit: jukebox::setting(
+        per_user_limit: settings::number(
             store,
             jukebox::PER_USER_LIMIT,
             jukebox::DEFAULT_PER_USER_LIMIT,
         )
         .await?,
-        max_queue: jukebox::setting(store, jukebox::MAX_QUEUE, 0).await?,
+        max_queue: settings::number(store, jukebox::MAX_QUEUE, 0).await?,
         guest_mode: state.guest_mode(),
-        online_artist_info: jukebox::setting(store, jukebox::ONLINE_INFO, 0).await? == 1,
+        online_artist_info: settings::flag(store, settings::ONLINE_INFO, false).await?,
         musicbrainz_contact: store
-            .get_setting(jukebox::MUSICBRAINZ_CONTACT)
+            .get_setting(settings::MUSICBRAINZ_CONTACT)
             .await?
             .unwrap_or_default(),
         artist_keep_whole: djinn_library::keep_whole(store)
@@ -315,7 +316,7 @@ async fn settings(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json
             .map_err(anyhow::Error::from)?
             .join("\n"),
         tv_page: crate::tv_api::enabled(&state).await?,
-        skip_votes: jukebox::setting(store, jukebox::SKIP_VOTES, 0).await?,
+        skip_votes: settings::number(store, jukebox::SKIP_VOTES, 0).await?,
         acoustid_key: store
             .get_setting(crate::identify_api::ACOUSTID_KEY)
             .await?
@@ -350,11 +351,11 @@ async fn update_settings(
     }
     let store = &state.store;
     let old_contact = store
-        .get_setting(jukebox::MUSICBRAINZ_CONTACT)
+        .get_setting(settings::MUSICBRAINZ_CONTACT)
         .await?
         .unwrap_or_default();
     store
-        .set_setting(jukebox::MUSICBRAINZ_CONTACT, contact)
+        .set_setting(settings::MUSICBRAINZ_CONTACT, contact)
         .await?;
     store
         .set_setting(jukebox::HISTORY_WINDOW, &body.history_window.to_string())
@@ -365,15 +366,11 @@ async fn update_settings(
     store
         .set_setting(jukebox::MAX_QUEUE, &body.max_queue.to_string())
         .await?;
-    store
-        .set_setting(jukebox::GUEST_MODE, if body.guest_mode { "1" } else { "0" })
-        .await?;
+    settings::set_flag(store, settings::GUEST_MODE, body.guest_mode).await?;
     state
         .guest_mode
         .store(body.guest_mode, std::sync::atomic::Ordering::Relaxed);
-    store
-        .set_setting(crate::tv_api::TV_PAGE, if body.tv_page { "1" } else { "0" })
-        .await?;
+    settings::set_flag(store, crate::tv_api::TV_PAGE, body.tv_page).await?;
     store
         .set_setting(jukebox::SKIP_VOTES, &body.skip_votes.to_string())
         .await?;
@@ -391,13 +388,8 @@ async fn update_settings(
         .lock()
         .await
         .set_skip_votes_needed(u32::try_from(body.skip_votes).unwrap_or(0));
-    let was_online = jukebox::setting(store, jukebox::ONLINE_INFO, 0).await? == 1;
-    store
-        .set_setting(
-            jukebox::ONLINE_INFO,
-            if body.online_artist_info { "1" } else { "0" },
-        )
-        .await?;
+    let was_online = settings::flag(store, settings::ONLINE_INFO, false).await?;
+    settings::set_flag(store, settings::ONLINE_INFO, body.online_artist_info).await?;
     // A changed never-split list means re-reading every file's artists.
     let keep_whole: Vec<&str> = body
         .artist_keep_whole
@@ -441,7 +433,7 @@ async fn request_log(
     axum::extract::Query(query): axum::extract::Query<LogQuery>,
 ) -> ApiResult<Json<Vec<RequestLogEntry>>> {
     let limit = query.limit.unwrap_or(100).clamp(1, 1000);
-    let since = jukebox::setting(&state.store, LOG_CLEARED_AT, 0).await?;
+    let since = settings::number(&state.store, LOG_CLEARED_AT, 0).await?;
     Ok(Json(state.store.request_log(since, limit).await?))
 }
 

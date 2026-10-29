@@ -123,7 +123,7 @@
       <p class="small muted">The model (LAION's CLAP for music, free to use) is a one-time download from Hugging Face.</p>
       <button class="primary" onclick={() => attempt(() => api.downloadAi())}>Download the model</button>
     {:else}
-      <label class="switch big">
+      <label class="switch">
         <input
           type="checkbox"
           checked={ai.enabled}
@@ -215,7 +215,7 @@
       </p>
       <button class="primary" onclick={() => attempt(() => api.downloadReader())}>Download the model</button>
     {:else}
-      <label class="switch big">
+      <label class="switch">
         <input
           type="checkbox"
           checked={reader.enabled}
@@ -337,19 +337,6 @@
     gap: 10px;
     padding-top: 10px;
     border-top: 1px solid var(--line);
-  }
-
-  .switch {
-    flex-direction: row;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .switch input {
-    flex: none;
-    width: 20px;
-    min-height: 20px;
-    accent-color: var(--accent);
   }
 
   .small-button {

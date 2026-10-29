@@ -12,7 +12,7 @@ use serde::Serialize;
 
 use crate::error::{ApiError, ApiResult};
 use crate::events::{NowPlaying, PlayerState};
-use crate::jukebox;
+use crate::settings;
 use crate::state::AppState;
 
 /// Setting key; on unless set to "0".
@@ -26,7 +26,7 @@ pub fn router() -> Router<AppState> {
 }
 
 pub async fn enabled(state: &AppState) -> ApiResult<bool> {
-    Ok(jukebox::setting(&state.store, TV_PAGE, 1).await? != 0)
+    Ok(settings::flag(&state.store, TV_PAGE, true).await?)
 }
 
 pub async fn check_enabled(state: &AppState) -> ApiResult<()> {

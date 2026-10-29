@@ -14,10 +14,9 @@ use std::time::Duration;
 use djinn_ai::Reading;
 use futures_util::StreamExt;
 use serde::Deserialize;
-use sha2::{Digest, Sha256};
-use tokio::io::AsyncWriteExt;
 
 use crate::ai::Fetch;
+use crate::download::CheckedFile;
 
 /// Roughly how much the pack downloads, before the release says exactly.
 pub const PACK_ESTIMATE: u64 = 300_000_000;
@@ -108,7 +107,7 @@ pub async fn download(
             .filter(|n| !n.is_empty() && !n.contains(['/', '\\']) && *n != COMPLETE)
             .ok_or_else(|| format!("unexpected file {name}"))?;
         let packed = dir.join(format!("{file}.zst"));
-        let mut out = tokio::fs::File::create(&packed)
+        let mut out = CheckedFile::create(&packed)
             .await
             .map_err(|e| e.to_string())?;
         let response = client
@@ -118,35 +117,20 @@ pub async fn download(
             .await
             .and_then(|r| r.error_for_status())
             .map_err(|e| format!("cannot download {name}: {e}"))?;
-        let mut hasher = Sha256::new();
-        let mut written = 0u64;
         let mut stream = response.bytes_stream();
         while let Some(chunk) = stream.next().await {
             if fetch.cancelled() {
-                drop(out);
-                let _ = tokio::fs::remove_file(&packed).await;
+                out.discard().await;
                 return Err("stopped".into());
             }
             let chunk = chunk.map_err(|e| format!("download of {name} broke off: {e}"))?;
-            hasher.update(&chunk);
-            out.write_all(&chunk).await.map_err(|e| e.to_string())?;
-            written += chunk.len() as u64;
+            let written = out.write(&chunk).await?;
             fetch.set_progress(Some((done + written, total)));
             if written % (4 << 20) < chunk.len() as u64 {
                 progressed().await;
             }
         }
-        out.flush().await.map_err(|e| e.to_string())?;
-        drop(out);
-        let sum: String = hasher
-            .finalize()
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect();
-        if written != *size || sum != expected {
-            let _ = tokio::fs::remove_file(&packed).await;
-            return Err(format!("{name} came down damaged; try again"));
-        }
+        out.finish(*size, &expected, name).await?;
         let target = dir.join(file);
         let unpacked = packed.clone();
         tokio::task::spawn_blocking(move || unpack(&unpacked, &target))
