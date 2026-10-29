@@ -23,7 +23,9 @@ Each page covers one part of the app.
 9. [Your library](your-library.md): music folders, artist photos and bios,
    correcting tags, and filling in missing ones.
 10. [Updates](updates.md): keeping DJINN up to date.
-11. [Troubleshooting](troubleshooting.md): no sound, phones can't connect, and
+11. [Back up and restore](backup-and-restore.md): save everything DJINN knows
+    to one file, and move it to another computer.
+12. [Troubleshooting](troubleshooting.md): no sound, phones can't connect, and
     other common problems.
 
 Who can do what: **guests** and **users** queue songs. **Admins** (hosts)

@@ -41,17 +41,31 @@ pub async fn call(
 
 /// GETs `path` as the session in `cookie`; returns the status and body.
 pub async fn get_body(state: &AppState, path: &str, cookie: &str) -> (StatusCode, String) {
+    let (status, bytes) = send_bytes(state, Method::GET, path, Vec::new(), cookie).await;
+    (status, String::from_utf8_lossy(&bytes).into_owned())
+}
+
+/// Sends `body` as is to `path` as the session in `cookie`; returns the
+/// status and the response body.
+pub async fn send_bytes(
+    state: &AppState,
+    method: Method,
+    path: &str,
+    body: Vec<u8>,
+    cookie: &str,
+) -> (StatusCode, Vec<u8>) {
     let req = Request::builder()
+        .method(method)
         .uri(path)
         .header(COOKIE, cookie)
-        .body(Body::empty())
+        .body(Body::from(body))
         .unwrap();
     let res = app(state.clone()).oneshot(req).await.unwrap();
     let status = res.status();
     let bytes = axum::body::to_bytes(res.into_body(), usize::MAX)
         .await
         .unwrap();
-    (status, String::from_utf8_lossy(&bytes).into_owned())
+    (status, bytes.to_vec())
 }
 
 /// Creates a user with a live session and returns its cookie.

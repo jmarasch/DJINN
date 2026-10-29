@@ -448,3 +448,53 @@ async fn collaborations_count_for_every_artist() {
     assert_eq!(detail.appears_on.len(), 1, "Zara's single");
     assert_eq!(detail.top_tracks.len(), 2);
 }
+
+#[tokio::test]
+async fn library_moves_to_a_new_folder() {
+    let store = Store::open_in_memory().await.unwrap();
+    store
+        .save_scanned(&[
+            scanned(r"C:\Music\Björk\Jóga.flac", "Jóga", "Björk", "Homogenic"),
+            scanned(r"C:\Musicals\Cats.flac", "Memory", "Cast", "Cats"),
+        ])
+        .await
+        .unwrap();
+
+    let moved = store
+        .move_library(r"C:\Music", "/home/ana/music", '/')
+        .await
+        .unwrap();
+    assert_eq!(moved, 1, "a folder that only starts the same isn't moved");
+    let mut paths: Vec<String> = store
+        .known_files()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|k| k.path)
+        .collect();
+    paths.sort();
+    assert_eq!(
+        paths,
+        ["/home/ana/music/Björk/Jóga.flac", r"C:\Musicals\Cats.flac"]
+    );
+}
+
+#[tokio::test]
+async fn snapshots_open_as_a_database() {
+    let dir = std::env::temp_dir().join(format!("djinn-snapshot-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let store = Store::open(&dir.join("live.db")).await.unwrap();
+    store
+        .save_scanned(&[scanned("/m/a.flac", "A", "B", "C")])
+        .await
+        .unwrap();
+    let copy = dir.join("copy.db");
+    let _ = std::fs::remove_file(&copy);
+    store.snapshot(&copy).await.unwrap();
+
+    let restored = Store::open(&copy).await.unwrap();
+    assert_eq!(restored.library_track_ids().await.unwrap().len(), 1);
+    drop((restored, store));
+    let _ = std::fs::remove_dir_all(dir);
+}

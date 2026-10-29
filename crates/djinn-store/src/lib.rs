@@ -94,6 +94,35 @@ impl Store {
         self.pool.close().await;
     }
 
+    /// Writes a consistent copy of the whole database to `to`, which must
+    /// not exist yet. Safe while DJINN runs. (An in-memory database writes
+    /// nothing.)
+    pub async fn snapshot(&self, to: &Path) -> Result<()> {
+        sqlx::query("VACUUM INTO ?")
+            .bind(to.to_string_lossy().into_owned())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Points songs under the folder `from` at `to` instead, after the
+    /// library moved (a backup restored on another computer). Separators
+    /// change to `sep` when the old path used the other kind.
+    pub async fn move_library(&self, from: &str, to: &str, sep: char) -> Result<u64> {
+        let old_sep = if from.contains('\\') { '\\' } else { '/' };
+        let moved = sqlx::query(
+            "UPDATE tracks SET path = ?1 || replace(substr(path, length(?2) + 1), ?3, ?4) \
+             WHERE substr(path, 1, length(?2)) = ?2 AND substr(path, length(?2) + 1, 1) IN ('/', '\\')",
+        )
+        .bind(to)
+        .bind(from)
+        .bind(old_sep.to_string())
+        .bind(sep.to_string())
+        .execute(&self.pool)
+        .await?;
+        Ok(moved.rows_affected())
+    }
+
     pub async fn get_setting(&self, key: &str) -> Result<Option<String>> {
         let value = sqlx::query_scalar("SELECT value FROM settings WHERE key = ?")
             .bind(key)

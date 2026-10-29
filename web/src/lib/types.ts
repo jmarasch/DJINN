@@ -595,3 +595,12 @@ export interface TrackEdit {
 
 /** Corrections for songs: a field left out stays, null goes back to the file's. */
 export type TagChange = { track_ids: number[] } & { [F in TagField]?: string | number | null }
+
+/** A backup waiting to be restored. */
+export interface UploadedBackup {
+  /** The DJINN that made it. */
+  version: string
+  created_ms: number
+  /** Its music folders; `here` when the same folder exists on this computer. */
+  folders: { from: string; here: boolean }[]
+}

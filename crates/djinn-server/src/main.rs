@@ -8,6 +8,7 @@ mod ai;
 mod api;
 mod audio_api;
 mod auth;
+mod backup;
 mod banner;
 mod cast_api;
 mod client;
@@ -110,20 +111,36 @@ async fn run() -> anyhow::Result<()> {
         ),
     }
 
-    let store = Store::open(&config.database.path)
-        .await
-        .with_context(|| format!("failed to open database {}", config.database.path.display()))?;
-    tracing::info!(path = %config.database.path.display(), "database ready");
-    let removed = store.delete_expired_sessions().await?;
-    if removed > 0 {
-        tracing::debug!(removed, "expired sessions cleaned up");
-    }
-
     let art_dir = config
         .database
         .path
         .parent()
         .map_or_else(|| PathBuf::from("art"), |dir| dir.join("art"));
+
+    // A backup waiting to be restored goes in before the database opens.
+    let restored = backup::put_in_place(&config.database.path, &art_dir);
+    let opened = Store::open(&config.database.path).await;
+    let store = match (opened, &restored) {
+        (Ok(store), _) => store,
+        (Err(e), Some(restored)) => {
+            tracing::error!(error = %e, "the restored database won't open");
+            backup::undo(&config.database.path, restored);
+            Store::open(&config.database.path).await?
+        }
+        (Err(e), None) => {
+            return Err(e).with_context(|| {
+                format!("failed to open database {}", config.database.path.display())
+            })
+        }
+    };
+    if let Some(restored) = &restored {
+        backup::finish(&store, &config.library.roots, restored).await?;
+    }
+    tracing::info!(path = %config.database.path.display(), "database ready");
+    let removed = store.delete_expired_sessions().await?;
+    if removed > 0 {
+        tracing::debug!(removed, "expired sessions cleaned up");
+    }
 
     // The crossfade is a runtime setting; config.toml gives its first value.
     if store.get_setting(jukebox::CROSSFADE).await?.is_none() {

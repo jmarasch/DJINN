@@ -3,6 +3,7 @@
   import FolderPicker from '../lib/FolderPicker.svelte'
   import Icon from '../lib/Icon.svelte'
   import AboutPanel from '../lib/AboutPanel.svelte'
+  import BackupPanel from '../lib/BackupPanel.svelte'
   import AiPanel from '../lib/AiPanel.svelte'
   import IdentifyPanel from '../lib/IdentifyPanel.svelte'
   import CastPanel from '../lib/CastPanel.svelte'
@@ -441,6 +442,7 @@
   </section>
 {:else if tab === 'about'}
   <AboutPanel />
+  <BackupPanel />
 {/if}
 
 <button class="signout" onclick={logout}>Sign out</button>

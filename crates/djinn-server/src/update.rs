@@ -94,6 +94,12 @@ impl UpdateState {
         self.restart.load(Ordering::Acquire)
     }
 
+    /// Shuts DJINN down and starts it again.
+    pub fn restart(&self, shutdown_request: &tokio::sync::Notify) {
+        self.restart.store(true, Ordering::Release);
+        shutdown_request.notify_one();
+    }
+
     pub fn exe(&self) -> Option<&Path> {
         self.exe.as_deref()
     }
@@ -524,8 +530,7 @@ fn start_install(state: &AppState, release: Release) {
         match install(&state, &release).await {
             Ok(()) => {
                 tracing::info!(version = %release.version, "update installed; restarting");
-                state.update.restart.store(true, Ordering::Release);
-                state.shutdown_request.notify_one();
+                state.update.restart(&state.shutdown_request);
             }
             Err(e) => {
                 tracing::error!(error = %e, "installing the update failed");

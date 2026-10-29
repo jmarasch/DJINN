@@ -44,6 +44,7 @@ tokio-stream = { version = "0.1.19", features = ["sync"] }
 tower-http.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+zip = { version = "8.6", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
 [features]
 # The AI reader on a GPU (see djinn-ai); the CPU otherwise.

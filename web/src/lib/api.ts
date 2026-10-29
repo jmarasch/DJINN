@@ -45,6 +45,7 @@ import type {
   SmartPlaySettings,
   StartResponse,
   TagChange,
+  UploadedBackup,
   Track,
   TrackSort,
   TrackEdit,
@@ -163,6 +164,16 @@ export const api = {
   libraryRoots: () => get<LibraryRoot[]>('/library/roots'),
   addLibraryRoot: (path: string) => post<LibraryRoot[]>('/library/roots', { path }),
   removeLibraryRoot: (path: string) => request<LibraryRoot[]>('DELETE', '/library/roots', { path }),
+  /** Checks an uploaded backup and keeps it until the restore starts. */
+  uploadBackup: async (file: File) => {
+    const res = await fetch('/api/backup/restore', { method: 'POST', body: file })
+    const data = await res.json().catch(() => null)
+    if (!res.ok) throw new ApiError(res.status, data?.error ?? `Upload failed (${res.status})`)
+    return data as UploadedBackup
+  },
+  cancelRestore: () => del<void>('/backup/restore'),
+  /** Each of the backup's music folders, with where it is on this computer. */
+  startRestore: (moves: [string, string][]) => post<void>('/backup/restore/start', { moves }),
   browseFolders: (path?: string) =>
     get<FolderListing>(path === undefined ? '/fs/dirs' : `/fs/dirs?path=${encodeURIComponent(path)}`),
   lookUpArtistInfo: (force = false) => post<StartResponse>('/library/artist-info', { force }),
