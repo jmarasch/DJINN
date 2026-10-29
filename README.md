@@ -10,7 +10,8 @@ has asked for anything, it keeps the music going on its own.
 - **Guests queue songs from their phones.** They search or browse the library
   in a browser and tap a song to queue it. Asking for a song that's already
   queued backs it, and songs more people want play first. Hosts can turn on
-  skip votes, limit requests per guest, and approve what the auto mix plays.
+  skip votes, limit requests per guest, and choose what plays when nobody has
+  requested anything.
 - **Sounds right.** Gapless albums, crossfades (also when skipping), ReplayGain
   so songs play at the same loudness, and several speakers at once (sound card,
   HDMI, Bluetooth) kept in sync.
@@ -26,7 +27,8 @@ has asked for anything, it keeps the music going on its own.
   if you turn them on, and are kept in DJINN's own folder.
 - **Updates itself** from signed releases on GitHub.
 
-What's in each release and what's planned next: [ROADMAP.md](ROADMAP.md).
+How to use it: the [DJINN guide](docs/guide/README.md). What's in each release
+and what's planned next: [ROADMAP.md](ROADMAP.md).
 
 ## Install
 
@@ -75,7 +77,7 @@ in `~/.config/djinn/`.
    people pick songs.
 
 Everything else is under **Admin**: speakers, crossfade, rules for guests,
-casting, AI, and updates.
+casting, AI, and updates. The [guide](docs/guide/README.md) explains each part.
 
 ## Build from source
 

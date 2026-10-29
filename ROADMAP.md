@@ -31,9 +31,8 @@ and requests are welcome at DJINN@newterrastudios.com or as an issue.
   play first.
 - When the queue runs dry, DJINN keeps playing from the library or a
   playlist (shuffled without repeats, or in order).
-- Optional rules: requests per guest, skip votes (voting to skip one song
-  means sitting out the vote on the next), and approving what the auto mix
-  plays.
+- Optional rules: requests per guest, a cap on the whole queue, and skip
+  votes (voting to skip one song means sitting out the vote on the next).
 - A now-playing page for a TV.
 - Playlists.
 
