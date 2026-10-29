@@ -581,3 +581,17 @@ export interface Learned {
   artists: Extremes<{ artist: ArtistSummary; weight: number }>
   genres: Extremes<{ name: string; weight: number }>
 }
+
+/** Tags DJINN can correct; the music files aren't changed. */
+export type TagField = 'title' | 'artist' | 'album' | 'album_artist' | 'year' | 'genre'
+
+/** A song's corrections; null keeps the file's value. */
+export type TagEdit = { [F in TagField]: F extends 'year' ? number | null : string | null }
+
+export interface TrackEdit {
+  track: Track
+  edited: TagEdit
+}
+
+/** Corrections for songs: a field left out stays, null goes back to the file's. */
+export type TagChange = { track_ids: number[] } & { [F in TagField]?: string | number | null }

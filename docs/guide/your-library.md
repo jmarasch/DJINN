@@ -42,6 +42,22 @@ whose tags are missing them, by how they sound (AcoustID, then MusicBrainz).
 A match must agree with the title and artist already in the file. What you
 keep is stored in DJINN's database; your files aren't changed.
 
+## Correct tags
+
+Wrong or missing titles, artists, albums, years and genres can be fixed in
+the app (admins only). DJINN keeps the corrections in its own database and
+uses them in place of the file's tags, even after the file is read again;
+the files themselves aren't changed.
+
+- **One song:** open its menu (⋮) and tap **Edit tags**.
+- **A whole album:** on the album's page, tap **Edit album** to change the
+  album name, album artist, year or genre for all its songs at once.
+- An artist like "Björk feat. Thom Yorke" is split into its artists, the
+  same way as tags from the file.
+- A corrected field says **Corrected · use the file's**; tap it to go back
+  to what the file says. Emptying a field does the same, and **Use the
+  file's tags** undoes every correction.
+
 ## Genres
 
 The Library's **Genres** tab lists every genre with its number of songs, as

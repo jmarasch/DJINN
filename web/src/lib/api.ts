@@ -44,8 +44,10 @@ import type {
   SmartPlay,
   SmartPlaySettings,
   StartResponse,
+  TagChange,
   Track,
   TrackSort,
+  TrackEdit,
   TrackTags,
   User,
 } from './types'
@@ -128,6 +130,8 @@ export const api = {
   skipVote: () => post<{ skipped: boolean }>('/player/skip-vote'),
   /** The live stream for Play here; null when the host turned it off. */
   listen: () => get<{ url: string | null }>('/listen'),
+  trackEdit: (id: number) => get<TrackEdit>(`/tracks/${id}/edit`),
+  editTracks: (change: TagChange) => put<void>('/tracks/edit', change),
   removeRequest: (id: number) => del<void>(`/queue/${id}`),
   queueAll: (kind: EntryKind, refId: number) =>
     post<{ added: number }>('/queue/all', { kind, ref_id: refId }),

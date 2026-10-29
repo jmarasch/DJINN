@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::UNIX_EPOCH;
 
-use djinn_store::{ScannedTrack, Store, StoreError};
+use djinn_store::{ScannedTrack, Store, StoreError, TagEdit};
 use serde::Serialize;
 use walkdir::WalkDir;
 
@@ -123,14 +123,14 @@ pub async fn scan(
     progress(&status);
 
     let art_cache = Arc::new(tags::ArtCache::default());
-    let keep_whole = Arc::new(keep_whole(store).await?);
+    let fixes = Arc::new(Fixes::load(store).await?);
     for batch in to_read.chunks(BATCH) {
         let batch = batch.to_vec();
         let art_dir = art_dir.to_path_buf();
         let cache = Arc::clone(&art_cache);
-        let keep = Arc::clone(&keep_whole);
+        let fixes = Arc::clone(&fixes);
         let scanned =
-            tokio::task::spawn_blocking(move || read_batch(&batch, &art_dir, &cache, &keep))
+            tokio::task::spawn_blocking(move || read_batch(&batch, &art_dir, &cache, &fixes))
                 .await
                 .map_err(|e| LibraryError::Task(e.to_string()))?;
         store.save_scanned(&scanned).await?;
@@ -201,10 +201,10 @@ pub async fn reread(
         })
         .collect();
     let art_dir = art_dir.to_path_buf();
-    let keep = keep_whole(store).await?;
+    let fixes = Fixes::load(store).await?;
     let scanned = tokio::task::spawn_blocking(move || {
         let cache = tags::ArtCache::default();
-        read_batch(&files, &art_dir, &cache, &keep)
+        read_batch(&files, &art_dir, &cache, &fixes)
     })
     .await
     .map_err(|e| LibraryError::Task(e.to_string()))?;
@@ -270,16 +270,33 @@ fn is_audio(path: &Path) -> bool {
         .is_some_and(|e| AUDIO_EXTENSIONS.iter().any(|a| a.eq_ignore_ascii_case(e)))
 }
 
+/// What the admin set that changes how files read: artist names never
+/// split, and tag corrections.
+struct Fixes {
+    keep_whole: Vec<String>,
+    edits: HashMap<String, TagEdit>,
+}
+
+impl Fixes {
+    async fn load(store: &Store) -> Result<Self, LibraryError> {
+        Ok(Self {
+            keep_whole: keep_whole(store).await?,
+            edits: store.tag_edits_by_path().await?,
+        })
+    }
+}
+
 fn read_batch(
     batch: &[FoundFile],
     art_dir: &Path,
     cache: &tags::ArtCache,
-    keep_whole: &[String],
+    fixes: &Fixes,
 ) -> Vec<ScannedTrack> {
     let scan = tags::ScanContext {
         art_dir,
         cache,
-        keep_whole,
+        keep_whole: &fixes.keep_whole,
+        edits: &fixes.edits,
     };
     let per_thread = batch.len().div_ceil(READERS).max(1);
     std::thread::scope(|s| {

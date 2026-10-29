@@ -20,8 +20,8 @@ Each page covers one part of the app.
    screen.
 8. [Search and AI](search-and-ai.md): finding songs by name or by
    description, and the optional AI tools.
-9. [Your library](your-library.md): music folders, artist photos and bios, and
-   filling in missing tags.
+9. [Your library](your-library.md): music folders, artist photos and bios,
+   correcting tags, and filling in missing ones.
 10. [Updates](updates.md): keeping DJINN up to date.
 11. [Troubleshooting](troubleshooting.md): no sound, phones can't connect, and
     other common problems.

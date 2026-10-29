@@ -7,6 +7,7 @@ mod outputs;
 mod party;
 mod playlists;
 mod queue;
+mod tag_edits;
 mod users;
 
 pub use identify::*;
@@ -16,6 +17,7 @@ pub use outputs::*;
 pub use party::*;
 pub use playlists::*;
 pub use queue::*;
+pub use tag_edits::*;
 pub use users::*;
 
 use std::path::Path;

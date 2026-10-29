@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use djinn_store::{ReplayGainTags, ScannedTrack};
+use djinn_store::{ReplayGainTags, ScannedTrack, TagEdit};
 use lofty::file::TaggedFile;
 use lofty::picture::PictureType;
 use lofty::prelude::*;
@@ -18,6 +18,8 @@ pub struct ScanContext<'a> {
     pub cache: &'a ArtCache,
     /// Artist names never split.
     pub keep_whole: &'a [String],
+    /// Tag corrections made in the app, by path.
+    pub edits: &'a HashMap<String, TagEdit>,
 }
 
 /// Images already resolved during this scan, so each folder is read once.
@@ -27,6 +29,34 @@ pub struct ArtCache {
     folders: Mutex<HashMap<PathBuf, Option<String>>>,
     /// Artist folder images, by artist folder joined with artist name.
     artists: Mutex<HashMap<PathBuf, Option<String>>>,
+}
+
+fn apply_edit(
+    track: &mut ScannedTrack,
+    edit: &TagEdit,
+    artists: &mut Vec<String>,
+    album_artists: &mut Vec<String>,
+) {
+    if let Some(title) = &edit.title {
+        track.title.clone_from(title);
+    }
+    if let Some(artist) = &edit.artist {
+        track.artist = Some(artist.clone());
+        *artists = vec![artist.clone()];
+    }
+    if let Some(album) = &edit.album {
+        track.album = Some(album.clone());
+    }
+    if let Some(album_artist) = &edit.album_artist {
+        track.album_artist = Some(album_artist.clone());
+        *album_artists = vec![album_artist.clone()];
+    }
+    if edit.year.is_some() {
+        track.year = edit.year;
+    }
+    if let Some(genre) = &edit.genre {
+        track.genre = Some(genre.clone());
+    }
 }
 
 pub fn read(
@@ -41,6 +71,7 @@ pub fn read(
         art_dir,
         cache,
         keep_whole,
+        edits,
     } = *scan;
     let mut track = ScannedTrack {
         path: path_str.to_owned(),
@@ -65,6 +96,11 @@ pub fn read(
             .file_stem()
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_else(|| path_str.to_owned());
+    }
+
+    // Corrections made in the app replace what the tags say.
+    if let Some(edit) = edits.get(path_str) {
+        apply_edit(&mut track, edit, &mut artists, &mut album_artists);
     }
 
     // Split "A & B feat. C" into separate artists.
@@ -243,6 +279,7 @@ mod tests {
             art_dir: &dir,
             cache: &cache,
             keep_whole: &[],
+            edits: &HashMap::new(),
         };
         let t = read(&copy, "rg.flac", 1, 2, None, &scan);
         assert_eq!(
@@ -266,6 +303,7 @@ mod tests {
             art_dir: &art_dir,
             cache: &cache,
             keep_whole: &[],
+            edits: &HashMap::new(),
         };
         let t = read(&fixture, "tagged.flac", 1, 2, None, &scan);
 
@@ -286,6 +324,38 @@ mod tests {
         let bytes = std::fs::read(art::path(&art_dir, &hash).unwrap()).unwrap();
         assert_eq!(art::mime_type(&bytes), "image/jpeg");
         std::fs::remove_dir_all(art_dir).unwrap();
+    }
+
+    #[test]
+    fn corrections_replace_tags_and_artists_still_split() {
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/tagged.flac");
+        let art_dir = std::env::temp_dir().join(format!("djinn-edits-{}", std::process::id()));
+        let cache = ArtCache::default();
+        let edits = HashMap::from([(
+            "tagged.flac".to_owned(),
+            TagEdit {
+                artist: Some("Björk feat. Thom Yorke".into()),
+                year: Some(1998),
+                genre: Some("Art Pop".into()),
+                ..Default::default()
+            },
+        )]);
+        let scan = ScanContext {
+            art_dir: &art_dir,
+            cache: &cache,
+            keep_whole: &[],
+            edits: &edits,
+        };
+        let t = read(&fixture, "tagged.flac", 1, 2, None, &scan);
+
+        assert_eq!(t.title, "Jóga", "fields not corrected keep the tag");
+        assert_eq!(t.artist.as_deref(), Some("Björk feat. Thom Yorke"));
+        assert_eq!(
+            t.credits,
+            [("Björk".to_owned(), false), ("Thom Yorke".to_owned(), true)]
+        );
+        assert_eq!((t.year, t.genre.as_deref()), (Some(1998), Some("Art Pop")));
+        let _ = std::fs::remove_dir_all(art_dir);
     }
 
     #[test]

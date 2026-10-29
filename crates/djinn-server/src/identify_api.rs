@@ -203,12 +203,7 @@ async fn apply(
         .store
         .set_identification_status(&body.track_ids, "applied")
         .await?;
-    let roots = crate::folders::library_roots(&state).await?;
-    djinn_library::reread(&state.store, &roots, &state.art_dir, &paths)
-        .await
-        .map_err(anyhow::Error::from)?;
-    let _ = state.events.send(ServerEvent::LibraryChanged);
-    crate::smart::refresh(&state).await;
+    crate::library_api::reread(&state, &paths).await?;
     broadcast(&state).await;
     Ok(StatusCode::NO_CONTENT)
 }

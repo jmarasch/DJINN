@@ -1,16 +1,17 @@
-//! Browsing the library: search, tracks, albums, artists, art, rescans.
+//! Browsing the library: search, tracks, albums, artists, art, rescans,
+//! and tag corrections.
 
 use std::sync::atomic::Ordering;
 
 use axum::extract::{Path, Query, State};
 use axum::http::{header, StatusCode};
 use axum::response::IntoResponse;
-use axum::routing::{get, post};
+use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use djinn_library::{art, ScanProgress};
 use djinn_store::{
-    Album, AlbumDetail, AlbumSort, ArtistDetail, ArtistSummary, Jump, Page, SearchResults, Track,
-    TrackSort,
+    Album, AlbumDetail, AlbumSort, ArtistDetail, ArtistSummary, Jump, Page, SearchResults,
+    TagChange, TagEdit, Track, TrackSort,
 };
 use serde::{Deserialize, Serialize};
 
@@ -32,6 +33,8 @@ pub fn router() -> Router<AppState> {
         .route("/tracks", get(tracks))
         .route("/tracks/jumps", get(track_jumps))
         .route("/tracks/{id}", get(track))
+        .route("/tracks/{id}/edit", get(track_edit))
+        .route("/tracks/edit", put(edit_tracks))
         .route("/albums", get(albums))
         .route("/albums/jumps", get(album_jumps))
         .route("/albums/{id}", get(album))
@@ -217,6 +220,109 @@ async fn track(
         .await?
         .map(Json)
         .ok_or_else(ApiError::not_found)
+}
+
+#[derive(Serialize)]
+struct TrackEdit {
+    track: Track,
+    /// The fields corrected in the app; the rest come from the file.
+    edited: TagEdit,
+}
+
+async fn track_edit(
+    _: AdminUser,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> ApiResult<Json<TrackEdit>> {
+    let track = state
+        .store
+        .track(id)
+        .await?
+        .ok_or_else(ApiError::not_found)?;
+    let edited = state.store.tag_edit(id).await?;
+    Ok(Json(TrackEdit { track, edited }))
+}
+
+/// Corrections for some songs. A field left out stays as it is, null goes
+/// back to the file's value, and a value replaces it.
+#[derive(Deserialize)]
+struct EditTracks {
+    track_ids: Vec<i64>,
+    #[serde(default, deserialize_with = "present")]
+    title: Option<Option<String>>,
+    #[serde(default, deserialize_with = "present")]
+    artist: Option<Option<String>>,
+    #[serde(default, deserialize_with = "present")]
+    album: Option<Option<String>>,
+    #[serde(default, deserialize_with = "present")]
+    album_artist: Option<Option<String>>,
+    #[serde(default, deserialize_with = "present")]
+    year: Option<Option<i64>>,
+    #[serde(default, deserialize_with = "present")]
+    genre: Option<Option<String>>,
+}
+
+/// Tells a field sent as null (`Some(None)`) from one left out (`None`).
+fn present<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    T::deserialize(deserializer).map(Some)
+}
+
+/// A text correction, trimmed. Empty goes back to the file's value.
+fn text_field(field: Option<Option<String>>, name: &str) -> ApiResult<Option<Option<String>>> {
+    let Some(value) = field else {
+        return Ok(None);
+    };
+    let value = value.map(|v| v.trim().to_owned()).filter(|v| !v.is_empty());
+    if let Some(v) = &value {
+        if v.chars().count() > 300 || v.chars().any(char::is_control) {
+            return Err(ApiError::bad_request(format!(
+                "the {name} should be plain text, at most 300 characters"
+            )));
+        }
+    }
+    Ok(Some(value))
+}
+
+async fn edit_tracks(
+    _: AdminUser,
+    State(state): State<AppState>,
+    Json(body): Json<EditTracks>,
+) -> ApiResult<StatusCode> {
+    if body.track_ids.is_empty() || body.track_ids.len() > 5_000 {
+        return Err(ApiError::bad_request("pick 1 to 5000 songs"));
+    }
+    if let Some(Some(year)) = body.year {
+        if !(1..=9999).contains(&year) {
+            return Err(ApiError::bad_request("the year should be 1 to 9999"));
+        }
+    }
+    let change = TagChange {
+        title: text_field(body.title, "title")?,
+        artist: text_field(body.artist, "artist")?,
+        album: text_field(body.album, "album")?,
+        album_artist: text_field(body.album_artist, "album artist")?,
+        year: body.year,
+        genre: text_field(body.genre, "genre")?,
+    };
+    let paths = state.store.edit_tags(&body.track_ids, &change).await?;
+    reread(&state, &paths).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Reads files again after something changed how they read (a correction,
+/// an identification), and tells everyone.
+pub async fn reread(state: &AppState, paths: &[String]) -> ApiResult<()> {
+    let roots = crate::folders::library_roots(state).await?;
+    djinn_library::reread(&state.store, &roots, &state.art_dir, paths)
+        .await
+        .map_err(anyhow::Error::from)?;
+    let _ = state.events.send(ServerEvent::LibraryChanged);
+    crate::smart::refresh(state).await;
+    Ok(())
 }
 
 async fn album(
@@ -589,5 +695,52 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::OK, "already checking for changes");
+    }
+
+    #[tokio::test]
+    async fn admins_correct_tags() {
+        let state = AppState::for_tests().await;
+        let admin = session(&state, "admin", Role::Admin).await;
+        let user = session(&state, "sam", Role::User).await;
+        state
+            .store
+            .save_scanned(&[djinn_store::ScannedTrack {
+                path: "/gone/a.flac".into(),
+                title: "Untitled".into(),
+                ..Default::default()
+            }])
+            .await
+            .unwrap();
+        let id = state.store.library_track_ids().await.unwrap()[0];
+        let put = |body: String, who: &String| {
+            let (state, who) = (state.clone(), who.clone());
+            async move {
+                call(
+                    &state,
+                    Method::PUT,
+                    "/api/tracks/edit",
+                    Some(&body),
+                    Some(&who),
+                )
+                .await
+                .0
+            }
+        };
+
+        let body = format!(r#"{{"track_ids":[{id}],"title":" Lush Life ","year":2015}}"#);
+        assert_eq!(put(body.clone(), &user).await, StatusCode::FORBIDDEN);
+        assert_eq!(put(body, &admin).await, StatusCode::NO_CONTENT);
+        // Left out stays, null goes back to the file's value.
+        let body = format!(r#"{{"track_ids":[{id}],"year":null,"genre":"Pop"}}"#);
+        assert_eq!(put(body, &admin).await, StatusCode::NO_CONTENT);
+        let edit = state.store.tag_edit(id).await.unwrap();
+        assert_eq!(edit.title.as_deref(), Some("Lush Life"));
+        assert_eq!(edit.year, None);
+        assert_eq!(edit.genre.as_deref(), Some("Pop"));
+
+        let body = format!(r#"{{"track_ids":[{id}],"year":20150}}"#);
+        assert_eq!(put(body, &admin).await, StatusCode::BAD_REQUEST);
+        let body = r#"{"track_ids":[]}"#.to_owned();
+        assert_eq!(put(body, &admin).await, StatusCode::BAD_REQUEST);
     }
 }
