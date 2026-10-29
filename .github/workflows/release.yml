@@ -141,8 +141,48 @@ jobs:
       CUDA_COMPUTE_CAP: 80
     steps:
       - uses: actions/checkout@v4
+        with:
+          # All tags, to compare with the last release.
+          fetch-depth: 0
+
+      # Building the pack takes most of the release (installing CUDA, then
+      # nvcc compiling candle's kernels), and it only changes when what it's
+      # built from does: djinn-ai, the locked dependencies, or this workflow.
+      # When none of those changed since the last release, reuse its pack,
+      # checked against its SHA256SUMS. DJINN's own version number is left
+      # out of the comparison, since the helper doesn't use it.
+      - name: Reuse the last release's pack
+        id: reuse
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          last=$(gh release view --json tagName --jq .tagName) || { echo "No release to reuse: building"; exit 0; }
+          inputs() {
+            git show "$1:Cargo.lock" | sed '/^name = "djinn/{n;d}'
+            git show "$1:Cargo.toml" | grep -v '^version = '
+          }
+          if [ "$(inputs "$last")" != "$(inputs HEAD)" ] ||
+             ! git diff --quiet "$last" HEAD -- crates/djinn-ai .github/workflows/release.yml; then
+            echo "Changed since $last: building"
+            exit 0
+          fi
+          mkdir out
+          gh release download "$last" --dir out --pattern '${{ matrix.prefix }}.*' --pattern SHA256SUMS
+          cd out
+          expected=$(( 1 + $(echo ${{ matrix.libs }} | wc -w) ))
+          if [ "$(ls ${{ matrix.prefix }}.* | wc -l)" -ne "$expected" ] ||
+             ! sha256sum -c --ignore-missing SHA256SUMS; then
+            echo "$last's pack is missing or damaged: building"
+            cd .. && rm -rf out
+            exit 0
+          fi
+          rm SHA256SUMS
+          echo "Reusing the pack from $last"
+          echo "reused=true" >> "$GITHUB_OUTPUT"
 
       - uses: Jimver/cuda-toolkit@v0.2.16
+        if: steps.reuse.outputs.reused != 'true'
         with:
           cuda: '12.4.0'
           method: network
@@ -151,14 +191,18 @@ jobs:
 
       # nvcc compiles with MSVC's cl.exe, which isn't on the PATH by default.
       - uses: ilammy/msvc-dev-cmd@v1
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && steps.reuse.outputs.reused != 'true'
 
       - uses: dtolnay/rust-toolchain@stable
+        if: steps.reuse.outputs.reused != 'true'
       - uses: Swatinem/rust-cache@v2
+        if: steps.reuse.outputs.reused != 'true'
 
       - run: cargo build --release --locked -p djinn-ai --features cuda --bin djinn-gpu
+        if: steps.reuse.outputs.reused != 'true'
 
       - name: Pack
+        if: steps.reuse.outputs.reused != 'true'
         shell: bash
         run: |
           mkdir out
