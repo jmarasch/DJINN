@@ -17,8 +17,9 @@ for a TV or tablet. Open `/tv` on that screen (for example
 
 ## Play here
 
-**Play here:** anyone at the party can play it on their own phone or
-computer, a few seconds behind the speakers. Off by default. See
+**Play here:** a **Tune In** button on the Playing tab lets anyone at the
+party play it on their own phone or computer, a few seconds behind the
+speakers. Off by default. See
 [Play here](casting-and-tv.md#play-here).
 
 ## Online lookups

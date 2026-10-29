@@ -160,17 +160,20 @@
 
   {#if playHere.url}
     <div class="play-here">
+      <button
+        class:on={playHere.on}
+        class:waiting={playHere.on && playHere.waiting}
+        aria-pressed={playHere.on}
+        title={playHere.on ? 'Stop playing on this device' : 'Play the party on this device'}
+        onclick={() => (playHere.on ? stopPlayHere() : startPlayHere())}
+      >
+        <Icon name="headphones" size={18} />
+        Tune In
+      </button>
       {#if playHere.on}
-        <button class="on" onclick={stopPlayHere}>
-          <Icon name="headphones" size={18} />
-          {playHere.waiting ? 'Connecting…' : 'Playing here'} · Stop
-        </button>
-        <p class="small muted">A few seconds behind the speakers. Use this device's volume.</p>
-      {:else}
-        <button onclick={startPlayHere}>
-          <Icon name="headphones" size={18} />
-          Play here
-        </button>
+        <p class="small muted">
+          {playHere.waiting ? 'Connecting… ' : ''}A few seconds behind the speakers. Use this device's volume.
+        </p>
       {/if}
     </div>
   {/if}
@@ -258,6 +261,24 @@
   .play-here button.on {
     background: var(--accent);
     color: var(--accent-text);
+    box-shadow: 0 0 16px var(--accent);
+  }
+
+  .play-here button.waiting {
+    animation: tuning 1.2s ease-in-out infinite alternate;
+  }
+
+  @keyframes tuning {
+    to {
+      box-shadow: 0 0 4px var(--accent);
+      opacity: 0.75;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .play-here button.waiting {
+      animation: none;
+    }
   }
 
   .play-here p {

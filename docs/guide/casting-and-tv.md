@@ -22,13 +22,13 @@ Speaker groups from the Google Home app stay in sync with each other.
 
 ## Play here
 
-**Play here** on the Playing tab plays the party on the phone, tablet or
+**Tune In** on the Playing tab plays the party on the phone, tablet or
 laptop you're using: an extra speaker for another room, or the party on your
 headphones. It's off until the host turns it on under Admin > Rules >
 **Play here**; then anyone at the party can use it, guests included. Each
-person starts out not listening, until they tap the button.
+person starts out not listening; **Tune In** lights up while it plays.
 
-- Tap **Play here** to start and **Stop** to end it. It keeps playing while
+- Tap **Tune In** to start, and again to stop. It keeps playing while
   you browse, and the phone's lock screen shows the song and a pause button.
 - Use the device's own volume; the Playing tab's volume is the main speakers'.
 - Like casting, it runs a few seconds behind the speakers.

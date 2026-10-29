@@ -369,8 +369,8 @@
       </label>
       <label class="switch big">
         <input type="checkbox" bind:checked={settings.play_here} />
-        Play here: anyone can play the party on their own phone or computer, a few seconds behind
-        the speakers
+        Play here: a Tune In button on the Playing tab lets anyone play the party on their own phone
+        or computer, a few seconds behind the speakers
       </label>
       <label class="switch big">
         <input type="checkbox" bind:checked={settings.online_artist_info} />
