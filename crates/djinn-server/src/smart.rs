@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::auth::CurrentUser;
 use crate::error::ApiResult;
+use crate::settings;
 use crate::state::AppState;
 
 const DEFAULT_LIMIT: usize = 30;
@@ -308,9 +309,9 @@ pub async fn refresh(state: &AppState) {
     }
     .await;
     let genre_vectors = state.ai.genre_embeddings();
-    let tag_untagged = crate::jukebox::setting(&state.store, crate::ai::GENRE_TAGS, 1)
+    let tag_untagged = settings::flag(&state.store, crate::ai::GENRE_TAGS, true)
         .await
-        .is_ok_and(|v| v == 1);
+        .unwrap_or(false);
     let (rows, facts, artists, heard, led) = match loaded {
         Ok(loaded) => loaded,
         Err(e) => {

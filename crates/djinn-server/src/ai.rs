@@ -20,6 +20,7 @@ use tokio::io::AsyncWriteExt;
 use crate::auth::AdminUser;
 use crate::error::{ApiError, ApiResult};
 use crate::events::ServerEvent;
+use crate::settings;
 use crate::state::AppState;
 
 /// Setting key: AI listening is on.
@@ -247,7 +248,7 @@ pub async fn options(state: &AppState) -> ApiResult<AiOptions> {
     };
     Ok(AiOptions {
         listen_speed: text(LISTEN_SPEED, "normal").await?,
-        genre_tags: crate::jukebox::setting(&state.store, GENRE_TAGS, 1).await? == 1,
+        genre_tags: settings::flag(&state.store, GENRE_TAGS, true).await?,
         reader_for: text(crate::reader::READER_FOR, "everyone").await?,
     })
 }
@@ -268,10 +269,7 @@ async fn set_options(
         .store
         .set_setting(LISTEN_SPEED, &body.listen_speed)
         .await?;
-    state
-        .store
-        .set_setting(GENRE_TAGS, if body.genre_tags { "1" } else { "0" })
-        .await?;
+    settings::set_flag(&state.store, GENRE_TAGS, body.genre_tags).await?;
     state
         .store
         .set_setting(crate::reader::READER_FOR, &body.reader_for)
@@ -303,7 +301,7 @@ pub async fn ai_status(state: &AppState) -> ApiResult<AiStatus> {
 }
 
 async fn enabled(state: &AppState) -> ApiResult<bool> {
-    Ok(crate::jukebox::setting(&state.store, AI_LISTENING, 0).await? == 1)
+    Ok(settings::flag(&state.store, AI_LISTENING, false).await?)
 }
 
 pub async fn broadcast(state: &AppState) {
@@ -329,10 +327,7 @@ async fn set_enabled(
     if body.enabled && !models::CLAP.installed(&state.ai.dir) {
         return Err(ApiError::bad_request("download the model first"));
     }
-    state
-        .store
-        .set_setting(AI_LISTENING, if body.enabled { "1" } else { "0" })
-        .await?;
+    settings::set_flag(&state.store, AI_LISTENING, body.enabled).await?;
     if body.enabled {
         start(&state);
     } else if let Ok(mut model) = state.ai.model.write() {

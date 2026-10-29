@@ -23,6 +23,7 @@ use tokio::io::AsyncWriteExt;
 use crate::auth::AdminUser;
 use crate::error::{ApiError, ApiResult};
 use crate::events::PlayState;
+use crate::settings;
 use crate::state::AppState;
 
 pub const REPOSITORY: &str = "jmarasch/DJINN";
@@ -176,8 +177,8 @@ async fn about_info(state: &AppState) -> ApiResult<About> {
         commit_date: env!("DJINN_COMMIT_DATE"),
         repository: format!("https://github.com/{REPOSITORY}"),
         contact: CONTACT,
-        check_updates: crate::jukebox::setting(&state.store, CHECK_UPDATES, 1).await? == 1,
-        auto_update: crate::jukebox::setting(&state.store, AUTO_UPDATE, 0).await? == 1,
+        check_updates: settings::flag(&state.store, CHECK_UPDATES, true).await?,
+        auto_update: settings::flag(&state.store, AUTO_UPDATE, false).await?,
         checked_at: checked.at,
         update_available: available.is_some(),
         cannot_install: available.and_then(|r| update.blocker(r)),
@@ -222,15 +223,8 @@ async fn set_settings(
     State(state): State<AppState>,
     Json(body): Json<Settings>,
 ) -> ApiResult<StatusCode> {
-    let flag = |on: bool| if on { "1" } else { "0" };
-    state
-        .store
-        .set_setting(CHECK_UPDATES, flag(body.check_updates))
-        .await?;
-    state
-        .store
-        .set_setting(AUTO_UPDATE, flag(body.auto_update))
-        .await?;
+    settings::set_flag(&state.store, CHECK_UPDATES, body.check_updates).await?;
+    settings::set_flag(&state.store, AUTO_UPDATE, body.auto_update).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -252,7 +246,7 @@ pub fn start(state: &AppState) {
 }
 
 async fn tick(state: &AppState) {
-    let setting = |key, default| crate::jukebox::setting(&state.store, key, default);
+    let setting = |key, default| settings::number(&state.store, key, default);
     if setting(CHECK_UPDATES, 1).await.ok() != Some(1) {
         return;
     }

@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use crate::auth::{AdminUser, CurrentUser};
 use crate::error::{ApiError, ApiResult};
 use crate::events::{LookupStatus, ServerEvent};
+use crate::settings;
 use crate::state::AppState;
 
 const DEFAULT_SEARCH_LIMIT: i64 = 20;
@@ -395,9 +396,9 @@ pub fn lookup_status(state: &AppState) -> LookupStatus {
 /// At startup: finishes lookups that failed last time (a busy service, no
 /// network), without rechecking anything that already worked.
 pub async fn retry_unfinished_lookups(state: &AppState) {
-    let on = crate::jukebox::setting(&state.store, crate::jukebox::ONLINE_INFO, 0)
+    let on = settings::flag(&state.store, settings::ONLINE_INFO, false)
         .await
-        .is_ok_and(|v| v == 1);
+        .unwrap_or(false);
     if !on {
         return;
     }
@@ -426,7 +427,7 @@ pub fn start_artist_lookup(state: &AppState, force: bool) -> bool {
             tracing::info!(force, "looking up artist photos and bios online");
             let contact = state
                 .store
-                .get_setting(crate::jukebox::MUSICBRAINZ_CONTACT)
+                .get_setting(settings::MUSICBRAINZ_CONTACT)
                 .await
                 .ok()
                 .flatten()
@@ -521,9 +522,9 @@ pub fn start_scan(state: &AppState) -> bool {
                     return;
                 }
                 let _ = state.events.send(ServerEvent::LibraryChanged);
-                if crate::jukebox::setting(&state.store, crate::jukebox::ONLINE_INFO, 0)
+                if settings::flag(&state.store, settings::ONLINE_INFO, false)
                     .await
-                    .is_ok_and(|v| v == 1)
+                    .unwrap_or(false)
                 {
                     start_artist_lookup(&state, false);
                 }

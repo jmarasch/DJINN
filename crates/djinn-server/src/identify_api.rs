@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use crate::auth::AdminUser;
 use crate::error::{ApiError, ApiResult};
 use crate::events::ServerEvent;
-use crate::jukebox;
+use crate::settings;
 use crate::state::AppState;
 
 /// Setting key: the AcoustID application key.
@@ -68,7 +68,7 @@ async fn key(state: &AppState) -> ApiResult<String> {
 async fn contact(state: &AppState) -> ApiResult<String> {
     Ok(state
         .store
-        .get_setting(jukebox::MUSICBRAINZ_CONTACT)
+        .get_setting(settings::MUSICBRAINZ_CONTACT)
         .await?
         .unwrap_or_default()
         .trim()

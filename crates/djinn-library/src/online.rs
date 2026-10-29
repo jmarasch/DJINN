@@ -21,7 +21,8 @@ use djinn_store::{ArtistInfo, Store};
 use serde::Deserialize;
 use tokio::time::Instant;
 
-use crate::{art, LibraryError};
+use crate::art::{self, simplify};
+use crate::LibraryError;
 
 const USER_AGENT: &str = concat!(
     "DJINN/",
@@ -841,14 +842,6 @@ fn pick_wikipedia<'a>(pages: &'a [WikiPage], name: &str) -> Option<&'a WikiPage>
         });
         simplify(base) == wanted && about_music
     })
-}
-
-/// Lowercase letters and digits only.
-fn simplify(name: &str) -> String {
-    name.chars()
-        .filter(|c| c.is_alphanumeric())
-        .flat_map(char::to_lowercase)
-        .collect()
 }
 
 /// Percent-encodes a Wikipedia page key for a URL path.

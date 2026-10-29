@@ -32,20 +32,15 @@ pub use self::mix::{Mixer, Radio, RadioSeed};
 use crate::events::{
     Entry, NowPlaying, OutputStatus, PlayState, PlayerState, PlaylistRef, ServerEvent,
 };
+use crate::settings;
 
 pub const HISTORY_WINDOW: &str = "history_window";
 pub const PER_USER_LIMIT: &str = "per_user_limit";
 pub const VOLUME: &str = "volume";
 /// Most requests the whole queue may hold; 0 means no cap.
 pub const MAX_QUEUE: &str = "max_queue";
-/// 1 when guests may join with just a name.
-pub const GUEST_MODE: &str = "guest_mode";
-/// 1 to look up artist photos and bios online.
-pub const ONLINE_INFO: &str = "online_artist_info";
 /// Crossfade between songs, in seconds (0 joins them gaplessly).
 pub const CROSSFADE: &str = "crossfade_secs";
-/// Contact (email or website) sent to MusicBrainz; empty turns it off.
-pub const MUSICBRAINZ_CONTACT: &str = "musicbrainz_contact";
 /// Playlist that plays when nobody has requested anything; 0 or missing
 /// means none.
 pub const ACTIVE_PLAYLIST: &str = "active_playlist";
@@ -170,12 +165,14 @@ impl Jukebox {
         engine: EngineSink,
         events: broadcast::Sender<ServerEvent>,
     ) -> anyhow::Result<Self> {
-        let volume = setting(&store, VOLUME, DEFAULT_VOLUME).await?.clamp(0, 100) as u8;
-        let cursor = setting(&store, PLAYLIST_CURSOR, 0).await?;
-        let crossfade = setting(&store, CROSSFADE, 0)
+        let volume = settings::number(&store, VOLUME, DEFAULT_VOLUME)
+            .await?
+            .clamp(0, 100) as u8;
+        let cursor = settings::number(&store, PLAYLIST_CURSOR, 0).await?;
+        let crossfade = settings::number(&store, CROSSFADE, 0)
             .await?
             .clamp(0, i64::from(djinn_engine::MAX_CROSSFADE_SECS)) as u8;
-        let skip_votes_needed = setting(&store, SKIP_VOTES, 0).await?.clamp(0, 100) as u32;
+        let skip_votes_needed = settings::number(&store, SKIP_VOTES, 0).await?.clamp(0, 100) as u32;
         let replay_gain = ReplayGain {
             mode: ReplayGainMode::parse(
                 store
@@ -290,9 +287,11 @@ impl Jukebox {
         let limits = if user.is_admin() || user.unlimited {
             RequestLimits::default()
         } else {
-            let cap = setting(&self.store, MAX_QUEUE, 0).await?;
+            let cap = settings::number(&self.store, MAX_QUEUE, 0).await?;
             RequestLimits {
-                per_user: Some(setting(&self.store, PER_USER_LIMIT, DEFAULT_PER_USER_LIMIT).await?),
+                per_user: Some(
+                    settings::number(&self.store, PER_USER_LIMIT, DEFAULT_PER_USER_LIMIT).await?,
+                ),
                 queue_cap: (cap > 0).then_some(cap),
             }
         };
@@ -429,7 +428,7 @@ impl Jukebox {
     }
 
     async fn load_active(&mut self) -> anyhow::Result<()> {
-        let id = setting(&self.store, ACTIVE_PLAYLIST, 0).await?;
+        let id = settings::number(&self.store, ACTIVE_PLAYLIST, 0).await?;
         self.radio = None;
         self.active = match id {
             0 => None,
@@ -923,7 +922,7 @@ impl Jukebox {
     /// Songs played recently, newest first, and how many of them count:
     /// those on their way, on top of the configured window of history.
     async fn recent(&self) -> anyhow::Result<(Vec<i64>, usize)> {
-        let window = setting(&self.store, HISTORY_WINDOW, DEFAULT_HISTORY_WINDOW)
+        let window = settings::number(&self.store, HISTORY_WINDOW, DEFAULT_HISTORY_WINDOW)
             .await?
             .max(0);
         let mut recent: Vec<i64> = self
@@ -990,14 +989,6 @@ fn next_in_order(ids: &[i64], anchor: Option<i64>) -> Option<i64> {
 fn gain(volume: u8) -> f32 {
     let v = f32::from(volume.min(100)) / 100.0;
     v * v
-}
-
-pub async fn setting(store: &Store, key: &str, default: i64) -> anyhow::Result<i64> {
-    Ok(store
-        .get_setting(key)
-        .await?
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(default))
 }
 
 #[cfg(test)]

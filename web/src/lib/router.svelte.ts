@@ -17,10 +17,6 @@ window.addEventListener('hashchange', () => {
   requestAnimationFrame(() => requestAnimationFrame(() => window.scrollTo(0, target)))
 })
 
-export function navigate(path: string) {
-  location.hash = path
-}
-
 /** Matches "/album/:id" style patterns; returns the numeric id or null. */
 export function param(prefix: string): number | null {
   const m = route.path.match(new RegExp(`^${prefix}/(\\d+)$`))

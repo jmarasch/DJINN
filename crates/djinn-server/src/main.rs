@@ -24,6 +24,7 @@ mod network;
 mod player_api;
 mod playlist_api;
 mod reader;
+mod settings;
 mod smart;
 mod sse;
 mod state;
@@ -191,7 +192,7 @@ async fn run() -> anyhow::Result<()> {
         .await
         .set_mixer(std::sync::Arc::new(smart::SmartMixer::new(&state)));
 
-    let guest_mode = jukebox::setting(&store, jukebox::GUEST_MODE, 0).await? == 1;
+    let guest_mode = settings::flag(&store, settings::GUEST_MODE, false).await?;
     state
         .guest_mode
         .store(guest_mode, std::sync::atomic::Ordering::Relaxed);
