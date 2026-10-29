@@ -40,6 +40,7 @@
   /** Height of the search box stuck to the top, which jumps land below. */
   const STUCK_PX = 72
   let list = $state<{ jumpTo: (offset: number) => void }>()
+  let lists = $state<HTMLElement>()
   let jumps = $state<Jump[]>([])
   const jumpKey = $derived(tab === 'albums' ? `albums-${albumSort}` : tab === 'songs' ? `songs-${sort}` : tab)
   const byYear = $derived(
@@ -136,10 +137,10 @@
 </div>
 
 {#if indexed}
-  <JumpStrip {jumps} years={byYear} {newestFirst} onjump={(offset) => list?.jumpTo(offset)} />
+  <JumpStrip {jumps} years={byYear} {newestFirst} below={lists} onjump={(offset) => list?.jumpTo(offset)} />
 {/if}
 
-<div class="lists" class:indexed>
+<div class="lists" class:indexed bind:this={lists}>
   {#if tab === 'artists'}
     <InfiniteList
       bind:this={list}
@@ -343,9 +344,12 @@
     height: 100% !important;
   }
 
-  /* Room for the jump strip on the right. */
-  .lists.indexed {
-    padding-right: 18px;
+  /* Room for the jump strip on the right, when it's on the page rather
+     than beside it. */
+  @media (max-width: 720px) {
+    .lists.indexed {
+      padding-right: 18px;
+    }
   }
 
   .sort {

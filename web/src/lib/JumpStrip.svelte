@@ -9,20 +9,27 @@
     jumps,
     years = false,
     newestFirst = false,
+    below,
     onjump,
   }: {
     jumps: Jump[]
     years?: boolean
     /** The list runs from the newest year down. */
     newestFirst?: boolean
+    /** The strip starts no higher than the top of this (the list), so it
+     * doesn't cover what's above the list until that scrolls away. */
+    below?: HTMLElement
     onjump: (offset: number) => void
   } = $props()
 
+  /** Below the search box stuck to the top of the page. */
+  const TOP_PX = 84
   /** Room each label needs, in pixels. */
   const LABEL_PX = 16
   const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('')
 
   let height = $state(0)
+  let top = $state(TOP_PX)
   let strip = $state<HTMLElement>()
   let pressed = $state<number | null>(null)
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -72,6 +79,24 @@
     return picked
   })
 
+  $effect(() => {
+    if (!below) return
+    const el = below
+    let frame = 0
+    const follow = () => {
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() => (top = Math.max(TOP_PX, el.getBoundingClientRect().top)))
+    }
+    follow()
+    addEventListener('scroll', follow, { passive: true })
+    addEventListener('resize', follow)
+    return () => {
+      cancelAnimationFrame(frame)
+      removeEventListener('scroll', follow)
+      removeEventListener('resize', follow)
+    }
+  })
+
   const place = (i: number) => `${((i + 0.5) / entries.length) * 100}%`
 
   function pick(y: number) {
@@ -110,6 +135,7 @@
     aria-label="Jump to"
     bind:this={strip}
     bind:clientHeight={height}
+    style:top="{top}px"
     onpointerdown={down}
     onpointermove={(e) => pressed !== null && pick(e.clientY)}
     onpointerup={up}
@@ -137,9 +163,8 @@
 <style>
   .strip {
     position: fixed;
-    /* The right edge of the page column, or the screen on a phone. */
-    right: max(0px, calc((100vw - 640px) / 2));
-    top: 84px;
+    /* Just outside the page column, or on the screen edge on a phone. */
+    right: max(0px, calc((100vw - 640px) / 2 - 30px));
     bottom: calc(76px + env(safe-area-inset-bottom));
     z-index: 6;
     width: 24px;
