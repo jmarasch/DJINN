@@ -322,10 +322,17 @@ export interface ArtistSummary {
   track_count: number
 }
 
-export type TrackSort = 'title' | 'artist' | 'added' | 'popular'
+/** Year is newest first, oldest is by year oldest first. */
+export type TrackSort = 'title' | 'artist' | 'added' | 'popular' | 'year' | 'oldest'
 
-/** Year is newest first. */
-export type AlbumSort = 'name' | 'year'
+/** Year is newest first, oldest is by year oldest first. */
+export type AlbumSort = 'name' | 'year' | 'oldest'
+
+/** Where a letter or year starts in a sorted list. */
+export interface Jump {
+  label: string
+  offset: number
+}
 
 export interface LookupSummary {
   checked: number

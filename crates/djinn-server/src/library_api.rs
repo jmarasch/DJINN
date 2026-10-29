@@ -9,7 +9,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use djinn_library::{art, ScanProgress};
 use djinn_store::{
-    Album, AlbumDetail, AlbumSort, ArtistDetail, ArtistSummary, Page, SearchResults, Track,
+    Album, AlbumDetail, AlbumSort, ArtistDetail, ArtistSummary, Jump, Page, SearchResults, Track,
     TrackSort,
 };
 use serde::{Deserialize, Serialize};
@@ -29,10 +29,13 @@ pub fn router() -> Router<AppState> {
         .route("/search", get(search))
         .route("/search/ask", get(ask))
         .route("/tracks", get(tracks))
+        .route("/tracks/jumps", get(track_jumps))
         .route("/tracks/{id}", get(track))
         .route("/albums", get(albums))
+        .route("/albums/jumps", get(album_jumps))
         .route("/albums/{id}", get(album))
         .route("/artists", get(artists))
+        .route("/artists/jumps", get(artist_jumps))
         .route("/artists/{id}", get(artist))
         .route("/art/{hash}", get(cover_art))
         .route("/library/rescan", post(rescan))
@@ -148,6 +151,29 @@ async fn albums(
     Ok(Json(
         state.store.albums_page(query.sort, offset, limit).await?,
     ))
+}
+
+/// Where each letter starts in the artist list, for the jump strip.
+async fn artist_jumps(_: CurrentUser, State(state): State<AppState>) -> ApiResult<Json<Vec<Jump>>> {
+    Ok(Json(state.store.artist_jumps().await?))
+}
+
+/// Where each letter or year starts in the album list.
+async fn album_jumps(
+    _: CurrentUser,
+    State(state): State<AppState>,
+    Query(query): Query<AlbumQuery>,
+) -> ApiResult<Json<Vec<Jump>>> {
+    Ok(Json(state.store.album_jumps(query.sort).await?))
+}
+
+/// Where each letter or year starts in the song list.
+async fn track_jumps(
+    _: CurrentUser,
+    State(state): State<AppState>,
+    Query(page): Query<PageQuery>,
+) -> ApiResult<Json<Vec<Jump>>> {
+    Ok(Json(state.store.track_jumps(page.sort).await?))
 }
 
 /// A song in the library's song list, with a genre or two to show.

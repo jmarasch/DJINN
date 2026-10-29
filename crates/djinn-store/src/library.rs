@@ -183,6 +183,8 @@ pub enum AlbumSort {
     Name,
     /// Newest first.
     Year,
+    /// Oldest first.
+    Oldest,
 }
 
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, serde::Deserialize)]
@@ -196,6 +198,57 @@ pub enum TrackSort {
     Added,
     /// Most requested, then most played (as artist pages rank top songs).
     Popular,
+    /// Newest first, then by artist.
+    Year,
+    /// Oldest first, then by artist.
+    Oldest,
+}
+
+/// Where a letter or a year starts in a sorted list, for jumping there.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Jump {
+    pub label: String,
+    pub offset: i64,
+}
+
+/// The first place each label appears in a list's sort keys (in list
+/// order). Names go under their first letter, with digits and other
+/// characters under "#"; years are their own labels; unknown keys have none.
+fn jumps(keys: Vec<Option<String>>, years: bool) -> Vec<Jump> {
+    let mut found: Vec<Jump> = Vec::new();
+    for (offset, key) in keys.into_iter().enumerate() {
+        let Some(key) = key else { continue };
+        let label = if years { key } else { letter(&key) };
+        if !found.iter().any(|j| j.label == label) {
+            found.push(Jump {
+                label,
+                offset: offset as i64,
+            });
+        }
+    }
+    found
+}
+
+/// "A" to "Z" for names starting with a letter (accents dropped), "#" for
+/// everything else.
+fn letter(name: &str) -> String {
+    let first = name.trim_start().chars().next().unwrap_or('#');
+    let plain = match first.to_uppercase().next().unwrap_or(first) {
+        'À' | 'Á' | 'Â' | 'Ã' | 'Ä' | 'Å' => 'A',
+        'Ç' => 'C',
+        'È' | 'É' | 'Ê' | 'Ë' => 'E',
+        'Ì' | 'Í' | 'Î' | 'Ï' => 'I',
+        'Ñ' => 'N',
+        'Ò' | 'Ó' | 'Ô' | 'Õ' | 'Ö' | 'Ø' => 'O',
+        'Ù' | 'Ú' | 'Û' | 'Ü' => 'U',
+        'Ý' => 'Y',
+        c => c,
+    };
+    if plain.is_ascii_uppercase() {
+        plain.to_string()
+    } else {
+        "#".to_owned()
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -300,6 +353,53 @@ macro_rules! available {
 
 /// Every artist with a count of playable tracks they appear on, as track
 /// artist or album artist.
+/// Albums with playable tracks.
+macro_rules! listed_albums {
+    () => {
+        concat!(
+            " FROM albums al JOIN artists ar ON ar.id = al.artist_id
+             WHERE EXISTS (SELECT 1 FROM tracks t WHERE t.album_id = al.id AND ",
+            available!(),
+            ")"
+        )
+    };
+}
+
+/// The order of each album sort.
+macro_rules! album_order {
+    (name) => {
+        concat!(sort_key!("al.title"), ", ", sort_key!("ar.name"))
+    };
+    (newest) => {
+        concat!("al.year IS NULL, al.year DESC, ", sort_key!("al.title"))
+    };
+    (oldest) => {
+        concat!("al.year IS NULL, al.year, ", sort_key!("al.title"))
+    };
+}
+
+/// The order of each song sort.
+macro_rules! track_order {
+    (title) => {
+        "t.title COLLATE NOCASE, t.artist COLLATE NOCASE"
+    };
+    (artist) => {
+        concat!(
+            "coalesce(t.album_artist, t.artist) IS NULL, ",
+            sort_key!("coalesce(t.album_artist, t.artist)"),
+            ", ",
+            sort_key!("t.album"),
+            ", t.disc_no, t.track_no, t.title COLLATE NOCASE"
+        )
+    };
+    (newest) => {
+        concat!("t.year IS NULL, t.year DESC, ", track_order!(artist))
+    };
+    (oldest) => {
+        concat!("t.year IS NULL, t.year, ", track_order!(artist))
+    };
+}
+
 macro_rules! artist_counts {
     () => {
         "SELECT ar.id, ar.name, ar.art_hash, \
@@ -750,23 +850,25 @@ impl Store {
             AlbumSort::Name => concat!(
                 "SELECT ",
                 album_columns!(),
-                " FROM albums al JOIN artists ar ON ar.id = al.artist_id
-                 WHERE EXISTS (SELECT 1 FROM tracks t WHERE t.album_id = al.id AND ",
-                available!(),
-                ") ORDER BY ",
-                sort_key!("al.title"),
-                ", ",
-                sort_key!("ar.name"),
+                listed_albums!(),
+                " ORDER BY ",
+                album_order!(name),
                 " LIMIT ? OFFSET ?"
             ),
             AlbumSort::Year => concat!(
                 "SELECT ",
                 album_columns!(),
-                " FROM albums al JOIN artists ar ON ar.id = al.artist_id
-                 WHERE EXISTS (SELECT 1 FROM tracks t WHERE t.album_id = al.id AND ",
-                available!(),
-                ") ORDER BY al.year IS NULL, al.year DESC, ",
-                sort_key!("al.title"),
+                listed_albums!(),
+                " ORDER BY ",
+                album_order!(newest),
+                " LIMIT ? OFFSET ?"
+            ),
+            AlbumSort::Oldest => concat!(
+                "SELECT ",
+                album_columns!(),
+                listed_albums!(),
+                " ORDER BY ",
+                album_order!(oldest),
                 " LIMIT ? OFFSET ?"
             ),
         };
@@ -775,14 +877,9 @@ impl Store {
             .bind(offset)
             .fetch_all(&self.pool)
             .await?;
-        let total = sqlx::query_scalar(concat!(
-            "SELECT count(*) FROM albums al
-             WHERE EXISTS (SELECT 1 FROM tracks t WHERE t.album_id = al.id AND ",
-            available!(),
-            ")"
-        ))
-        .fetch_one(&self.pool)
-        .await?;
+        let total = sqlx::query_scalar(concat!("SELECT count(*)", listed_albums!()))
+            .fetch_one(&self.pool)
+            .await?;
         Ok(Page { items, total })
     }
 
@@ -799,18 +896,36 @@ impl Store {
                 track_columns!(),
                 " FROM tracks t WHERE ",
                 available!(),
-                " ORDER BY t.title COLLATE NOCASE, t.artist COLLATE NOCASE LIMIT ? OFFSET ?"
+                " ORDER BY ",
+                track_order!(title),
+                " LIMIT ? OFFSET ?"
             ),
             TrackSort::Artist => concat!(
                 "SELECT ",
                 track_columns!(),
                 " FROM tracks t WHERE ",
                 available!(),
-                " ORDER BY coalesce(t.album_artist, t.artist) IS NULL, ",
-                sort_key!("coalesce(t.album_artist, t.artist)"),
-                ", ",
-                sort_key!("t.album"),
-                ", t.disc_no, t.track_no, t.title COLLATE NOCASE LIMIT ? OFFSET ?"
+                " ORDER BY ",
+                track_order!(artist),
+                " LIMIT ? OFFSET ?"
+            ),
+            TrackSort::Year => concat!(
+                "SELECT ",
+                track_columns!(),
+                " FROM tracks t WHERE ",
+                available!(),
+                " ORDER BY ",
+                track_order!(newest),
+                " LIMIT ? OFFSET ?"
+            ),
+            TrackSort::Oldest => concat!(
+                "SELECT ",
+                track_columns!(),
+                " FROM tracks t WHERE ",
+                available!(),
+                " ORDER BY ",
+                track_order!(oldest),
+                " LIMIT ? OFFSET ?"
             ),
             TrackSort::Added => concat!(
                 "SELECT ",
@@ -838,6 +953,87 @@ impl Store {
             items,
             total: self.track_count().await?,
         })
+    }
+
+    /// Where each letter starts in the artist list.
+    pub async fn artist_jumps(&self) -> Result<Vec<Jump>> {
+        let keys = sqlx::query_scalar(concat!(
+            "SELECT ",
+            sort_key!("name"),
+            " FROM (",
+            artist_counts!(),
+            ") WHERE track_count > 0 ORDER BY ",
+            sort_key!("name")
+        ))
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(jumps(keys, false))
+    }
+
+    /// Where each letter (or year) starts in the album list.
+    pub async fn album_jumps(&self, sort: AlbumSort) -> Result<Vec<Jump>> {
+        let sql = match sort {
+            AlbumSort::Name => concat!(
+                "SELECT ",
+                sort_key!("al.title"),
+                listed_albums!(),
+                " ORDER BY ",
+                album_order!(name)
+            ),
+            AlbumSort::Year => concat!(
+                "SELECT CAST(al.year AS TEXT)",
+                listed_albums!(),
+                " ORDER BY ",
+                album_order!(newest)
+            ),
+            AlbumSort::Oldest => concat!(
+                "SELECT CAST(al.year AS TEXT)",
+                listed_albums!(),
+                " ORDER BY ",
+                album_order!(oldest)
+            ),
+        };
+        let keys = sqlx::query_scalar(sql).fetch_all(&self.pool).await?;
+        Ok(jumps(keys, sort != AlbumSort::Name))
+    }
+
+    /// Where each letter (or year) starts in the song list; none for the
+    /// sorts that aren't by name or year.
+    pub async fn track_jumps(&self, sort: TrackSort) -> Result<Vec<Jump>> {
+        let sql = match sort {
+            TrackSort::Title => concat!(
+                "SELECT t.title FROM tracks t WHERE ",
+                available!(),
+                " ORDER BY ",
+                track_order!(title)
+            ),
+            TrackSort::Artist => concat!(
+                "SELECT ",
+                sort_key!("coalesce(t.album_artist, t.artist)"),
+                " FROM tracks t WHERE ",
+                available!(),
+                " ORDER BY ",
+                track_order!(artist)
+            ),
+            TrackSort::Year => concat!(
+                "SELECT CAST(t.year AS TEXT) FROM tracks t WHERE ",
+                available!(),
+                " ORDER BY ",
+                track_order!(newest)
+            ),
+            TrackSort::Oldest => concat!(
+                "SELECT CAST(t.year AS TEXT) FROM tracks t WHERE ",
+                available!(),
+                " ORDER BY ",
+                track_order!(oldest)
+            ),
+            TrackSort::Added | TrackSort::Popular => return Ok(Vec::new()),
+        };
+        let keys = sqlx::query_scalar(sql).fetch_all(&self.pool).await?;
+        Ok(jumps(
+            keys,
+            matches!(sort, TrackSort::Year | TrackSort::Oldest),
+        ))
     }
 
     /// Search-as-you-type over tracks, albums, and artists. Every word must
@@ -1340,6 +1536,98 @@ mod tests {
         store.refresh_artwork().await.unwrap();
         let track = &store.search("one", 5).await.unwrap().tracks[0];
         assert_eq!(track.art_hash.as_deref(), Some("onlinecover"));
+    }
+
+    #[test]
+    fn jumps_mark_where_each_letter_or_year_starts() {
+        let keys = |list: &[Option<&str>]| list.iter().map(|k| k.map(str::to_owned)).collect();
+        let at = |found: Vec<Jump>| -> Vec<(String, i64)> {
+            found.into_iter().map(|j| (j.label, j.offset)).collect()
+        };
+        assert_eq!(
+            at(jumps(
+                keys(&[
+                    Some("99 Problems"),
+                    Some("abba"),
+                    Some("ACDC"),
+                    Some("Été"),
+                    None
+                ]),
+                false
+            )),
+            [("#".into(), 0), ("A".into(), 1), ("E".into(), 3)]
+        );
+        assert_eq!(
+            at(jumps(
+                keys(&[Some("1967"), Some("1967"), Some("1984"), None]),
+                true
+            )),
+            [("1967".into(), 0), ("1984".into(), 2)]
+        );
+    }
+
+    #[tokio::test]
+    async fn jumps_follow_the_list_order() {
+        let store = Store::open_in_memory().await.unwrap();
+        let mut tracks = vec![
+            scanned("/m/1.flac", "Blinding Lights", "The Weeknd", "After Hours"),
+            scanned(
+                "/m/2.flac",
+                "Can I Kick It?",
+                "A Tribe Called Quest",
+                "Low End Theory",
+            ),
+            scanned("/m/3.flac", "Uptown Funk", "Bruno Mars", "Uptown Special"),
+            scanned(
+                "/m/4.flac",
+                "Ballroom Blitz",
+                "Sweet",
+                "Desolation Boulevard",
+            ),
+        ];
+        tracks[0].year = Some(2020);
+        tracks[1].year = Some(1991);
+        tracks[2].year = Some(2015);
+        tracks[3].year = Some(1974);
+        store.save_scanned(&tracks).await.unwrap();
+
+        let labels = |found: Vec<Jump>| -> Vec<(String, i64)> {
+            found.into_iter().map(|j| (j.label, j.offset)).collect()
+        };
+        // Bruno Mars, Sweet, A Tribe Called Quest, The Weeknd.
+        assert_eq!(
+            labels(store.artist_jumps().await.unwrap()),
+            [
+                ("B".into(), 0),
+                ("S".into(), 1),
+                ("T".into(), 2),
+                ("W".into(), 3)
+            ]
+        );
+        assert_eq!(
+            labels(store.album_jumps(AlbumSort::Oldest).await.unwrap()),
+            [
+                ("1974".into(), 0),
+                ("1991".into(), 1),
+                ("2015".into(), 2),
+                ("2020".into(), 3)
+            ]
+        );
+        let newest = store.tracks_page(TrackSort::Year, 0, 10).await.unwrap();
+        assert_eq!(newest.items[0].title, "Blinding Lights");
+        assert_eq!(
+            labels(store.track_jumps(TrackSort::Year).await.unwrap())[0],
+            ("2020".into(), 0)
+        );
+        assert_eq!(
+            labels(store.track_jumps(TrackSort::Title).await.unwrap()),
+            [("B".into(), 0), ("C".into(), 2), ("U".into(), 3)]
+        );
+        assert!(store
+            .track_jumps(TrackSort::Added)
+            .await
+            .unwrap()
+            .is_empty());
     }
 
     #[tokio::test]

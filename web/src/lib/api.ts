@@ -13,6 +13,7 @@ import type {
   EntryKind,
   FolderListing,
   GenreMap,
+  Jump,
   GenrePage,
   GuestSummary,
   IdentificationRow,
@@ -96,6 +97,10 @@ export const api = {
   ask: (q: string) => get<Described | null>(`/search/ask?q=${encodeURIComponent(q)}`),
   artists: (offset: number) => get<Page<ArtistSummary>>(`/artists?offset=${offset}`),
   albums: (sort: AlbumSort, offset: number) => get<Page<Album>>(`/albums?sort=${sort}&offset=${offset}`),
+  /** Where each letter (or year) starts in a list, for the jump strip. */
+  artistJumps: () => get<Jump[]>('/artists/jumps'),
+  albumJumps: (sort: AlbumSort) => get<Jump[]>(`/albums/jumps?sort=${sort}`),
+  trackJumps: (sort: TrackSort) => get<Jump[]>(`/tracks/jumps?sort=${sort}`),
   playWild: () => post<void>('/playlists/wild/play'),
   playRadio: (seed: RadioSeed) => post<void>('/playlists/radio/play', seed),
   trackTags: (id: number) => get<TrackTags>(`/tracks/${id}/tags`),

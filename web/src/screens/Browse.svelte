@@ -5,9 +5,11 @@
   import GenreTags from '../lib/GenreTags.svelte'
   import Icon from '../lib/Icon.svelte'
   import InfiniteList from '../lib/InfiniteList.svelte'
+  import JumpStrip from '../lib/JumpStrip.svelte'
+  import { jumpCache } from '../lib/listCache'
   import TrackRow from '../lib/TrackRow.svelte'
   import TrackTile from '../lib/TrackTile.svelte'
-  import type { AlbumSort, GenreMap, TrackSort } from '../lib/types'
+  import type { AlbumSort, GenreMap, Jump, TrackSort } from '../lib/types'
 
   type Tab = 'artists' | 'albums' | 'songs' | 'genres'
   type View = 'list' | 'grid'
@@ -33,6 +35,34 @@
   $effect(() => sessionStorage.setItem('djinn-browse-album-sort', albumSort))
   $effect(() => store('djinn-browse-view', view))
   $effect(() => store('djinn-genre-view', genreView))
+
+  // The jump strip for the list on show: where each letter or year starts.
+  /** Height of the search box stuck to the top, which jumps land below. */
+  const STUCK_PX = 72
+  let list = $state<{ jumpTo: (offset: number) => void }>()
+  let jumps = $state<Jump[]>([])
+  const jumpKey = $derived(tab === 'albums' ? `albums-${albumSort}` : tab === 'songs' ? `songs-${sort}` : tab)
+  const byYear = $derived(
+    (tab === 'albums' && albumSort !== 'name') || (tab === 'songs' && (sort === 'year' || sort === 'oldest')),
+  )
+  const newestFirst = $derived((tab === 'albums' ? albumSort : sort) === 'year')
+  $effect(() => {
+    const k = jumpKey
+    const cached = jumpCache.get(k)
+    jumps = cached ?? []
+    if (cached || tab === 'genres') return
+    const loading =
+      tab === 'artists' ? api.artistJumps() : tab === 'albums' ? api.albumJumps(albumSort) : api.trackJumps(sort)
+    loading
+      .then((found) => {
+        jumpCache.set(k, found)
+        if (k === jumpKey) jumps = found
+      })
+      .catch(() => {
+        // No strip; the list still scrolls.
+      })
+  })
+  const indexed = $derived(tab !== 'genres' && jumps.length > 1)
 
   // The genres load the first time their tab opens.
   $effect(() => {
@@ -105,113 +135,128 @@
   </div>
 </div>
 
-{#if tab === 'artists'}
-  <InfiniteList
-    cacheKey="artists"
-    load={api.artists}
-    key={(a) => a.id}
-    count={(n) => plural(n, 'artist', 'artists')}
-    {grid}
-    empty="No artists yet. Rescan the library from Admin after adding music."
-  >
-    {#snippet item(artist)}
-      {#if grid}
-        <a class="tile" href="#/artist/{artist.id}">
-          <div class="cover"><Art hash={artist.art_hash} size={160} round={999} letter={initial(artist.name)} /></div>
-          <span class="ellipsis center-text">{artist.name}</span>
-          <span class="muted small center-text">{plural(artist.track_count, 'song', 'songs')}</span>
-        </a>
-      {:else}
-        <a class="row" href="#/artist/{artist.id}">
-          <Art hash={artist.art_hash} size={44} round={999} letter={initial(artist.name)} />
-          <span class="name ellipsis">{artist.name}</span>
-          <span class="muted small">{plural(artist.track_count, 'song', 'songs')}</span>
-        </a>
-      {/if}
-    {/snippet}
-  </InfiniteList>
-{:else if tab === 'genres'}
-  {#if genres === null}
-    <p class="muted small">{genresFailed ? 'Could not load the genres.' : 'Loading genres...'}</p>
-  {:else if genres.genres.length === 0}
-    <p class="muted">
-      No genres yet. They come from your songs' tags, MusicBrainz lookups (Admin > Rules), and AI listening (Admin >
-      AI).
-    </p>
-  {:else}
-    <p class="muted small">
-      {plural(genres.genres.length, 'genre', 'genres')}{genreView === 'cloud'
-        ? ' · bigger means more songs, lines join related genres'
-        : ''}
-    </p>
-    {#if genreView === 'cloud'}
-      <GenreCloud map={genres} />
-    {:else}
-      <GenreTags map={genres} />
-    {/if}
-  {/if}
-{:else if tab === 'albums'}
-  <label class="sort">
-    <span class="muted small">Sort by</span>
-    <select bind:value={albumSort}>
-      <option value="name">Name</option>
-      <option value="year">Year (newest first)</option>
-    </select>
-  </label>
-  <InfiniteList
-    cacheKey="albums-{albumSort}"
-    load={(offset) => api.albums(albumSort, offset)}
-    key={(a) => a.id}
-    count={(n) => plural(n, 'album', 'albums')}
-    {grid}
-    empty="No albums. Songs without an album tag are under Artists and Songs."
-  >
-    {#snippet item(album)}
-      {#if grid}
-        <a class="tile" href="#/album/{album.id}">
-          <div class="cover"><Art hash={album.art_hash} size={160} round={10} /></div>
-          <span class="ellipsis">{album.title}</span>
-          <span class="muted small ellipsis">{album.artist}{albumSort === 'year' && album.year ? ` · ${album.year}` : ''}</span>
-        </a>
-      {:else}
-        <a class="row" href="#/album/{album.id}">
-          <Art hash={album.art_hash} size={52} />
-          <span class="name">
-            <span class="ellipsis block">{album.title}</span>
-            <span class="muted small ellipsis block">
-              {album.artist}{album.year ? ` · ${album.year}` : ''}
-            </span>
-          </span>
-        </a>
-      {/if}
-    {/snippet}
-  </InfiniteList>
-{:else}
-  <label class="sort">
-    <span class="muted small">Sort by</span>
-    <select bind:value={sort}>
-      <option value="title">Title</option>
-      <option value="artist">Artist</option>
-      <option value="added">Recently added</option>
-      <option value="popular">Most popular</option>
-    </select>
-  </label>
-  <InfiniteList
-    cacheKey="songs-{sort}"
-    load={(offset) => api.tracks(sort, offset)}
-    key={(t) => t.id}
-    count={(n) => plural(n, 'song', 'songs')}
-    {grid}
-  >
-    {#snippet item(track)}
-      {#if grid}
-        <TrackTile {track} />
-      {:else}
-        <TrackRow {track} />
-      {/if}
-    {/snippet}
-  </InfiniteList>
+{#if indexed}
+  <JumpStrip {jumps} years={byYear} {newestFirst} onjump={(offset) => list?.jumpTo(offset)} />
 {/if}
+
+<div class="lists" class:indexed>
+  {#if tab === 'artists'}
+    <InfiniteList
+      bind:this={list}
+      inset={STUCK_PX}
+      cacheKey="artists"
+      load={api.artists}
+      key={(a) => a.id}
+      count={(n) => plural(n, 'artist', 'artists')}
+      {grid}
+      empty="No artists yet. Rescan the library from Admin after adding music."
+    >
+      {#snippet item(artist)}
+        {#if grid}
+          <a class="tile" href="#/artist/{artist.id}">
+            <div class="cover"><Art hash={artist.art_hash} size={160} round={999} letter={initial(artist.name)} /></div>
+            <span class="ellipsis center-text">{artist.name}</span>
+            <span class="muted small center-text">{plural(artist.track_count, 'song', 'songs')}</span>
+          </a>
+        {:else}
+          <a class="row" href="#/artist/{artist.id}">
+            <Art hash={artist.art_hash} size={44} round={999} letter={initial(artist.name)} />
+            <span class="name ellipsis">{artist.name}</span>
+            <span class="muted small">{plural(artist.track_count, 'song', 'songs')}</span>
+          </a>
+        {/if}
+      {/snippet}
+    </InfiniteList>
+  {:else if tab === 'genres'}
+    {#if genres === null}
+      <p class="muted small">{genresFailed ? 'Could not load the genres.' : 'Loading genres...'}</p>
+    {:else if genres.genres.length === 0}
+      <p class="muted">
+        No genres yet. They come from your songs' tags, MusicBrainz lookups (Admin > Rules), and AI listening (Admin >
+        AI).
+      </p>
+    {:else}
+      <p class="muted small">
+        {plural(genres.genres.length, 'genre', 'genres')}{genreView === 'cloud'
+          ? ' · bigger means more songs, lines join related genres'
+          : ''}
+      </p>
+      {#if genreView === 'cloud'}
+        <GenreCloud map={genres} />
+      {:else}
+        <GenreTags map={genres} />
+      {/if}
+    {/if}
+  {:else if tab === 'albums'}
+    <label class="sort">
+      <span class="muted small">Sort by</span>
+      <select bind:value={albumSort}>
+        <option value="name">Name</option>
+        <option value="year">Year (newest first)</option>
+        <option value="oldest">Year (oldest first)</option>
+      </select>
+    </label>
+    <InfiniteList
+      bind:this={list}
+      inset={STUCK_PX}
+      cacheKey="albums-{albumSort}"
+      load={(offset) => api.albums(albumSort, offset)}
+      key={(a) => a.id}
+      count={(n) => plural(n, 'album', 'albums')}
+      {grid}
+      empty="No albums. Songs without an album tag are under Artists and Songs."
+    >
+      {#snippet item(album)}
+        {#if grid}
+          <a class="tile" href="#/album/{album.id}">
+            <div class="cover"><Art hash={album.art_hash} size={160} round={10} /></div>
+            <span class="ellipsis">{album.title}</span>
+            <span class="muted small ellipsis">{album.artist}{albumSort !== 'name' && album.year ? ` · ${album.year}` : ''}</span>
+          </a>
+        {:else}
+          <a class="row" href="#/album/{album.id}">
+            <Art hash={album.art_hash} size={52} />
+            <span class="name">
+              <span class="ellipsis block">{album.title}</span>
+              <span class="muted small ellipsis block">
+                {album.artist}{album.year ? ` · ${album.year}` : ''}
+              </span>
+            </span>
+          </a>
+        {/if}
+      {/snippet}
+    </InfiniteList>
+  {:else}
+    <label class="sort">
+      <span class="muted small">Sort by</span>
+      <select bind:value={sort}>
+        <option value="title">Title</option>
+        <option value="artist">Artist</option>
+        <option value="added">Recently added</option>
+        <option value="popular">Most popular</option>
+        <option value="year">Year (newest first)</option>
+        <option value="oldest">Year (oldest first)</option>
+      </select>
+    </label>
+    <InfiniteList
+      bind:this={list}
+      inset={STUCK_PX}
+      cacheKey="songs-{sort}"
+      load={(offset) => api.tracks(sort, offset)}
+      key={(t) => t.id}
+      count={(n) => plural(n, 'song', 'songs')}
+      {grid}
+    >
+      {#snippet item(track)}
+        {#if grid}
+          <TrackTile {track} />
+        {:else}
+          <TrackRow {track} note={byYear && track.year ? String(track.year) : null} />
+        {/if}
+      {/snippet}
+    </InfiniteList>
+  {/if}
+</div>
 
 <style>
   .bar {
@@ -296,6 +341,11 @@
   .cover :global(.art) {
     width: 100% !important;
     height: 100% !important;
+  }
+
+  /* Room for the jump strip on the right. */
+  .lists.indexed {
+    padding-right: 18px;
   }
 
   .sort {
