@@ -66,6 +66,7 @@ fn main() -> ExitCode {
         path: PathBuf::from(file),
         gapless: false,
         gain: 1.0,
+        start_ms: 0,
     };
     let end = Instant::now() + Duration::from_secs(secs.parse().unwrap_or(60));
     while Instant::now() < end {

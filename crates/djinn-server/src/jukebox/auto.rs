@@ -243,6 +243,7 @@ impl Jukebox {
             request_id: None,
             requested_by: None,
             backers: Vec::new(),
+            resume: None,
         }))
     }
 

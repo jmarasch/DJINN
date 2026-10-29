@@ -97,7 +97,7 @@ pub struct RequestLogEntry {
     pub ip: Option<String>,
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, sqlx::Type)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
 #[serde(rename_all = "lowercase")]
 #[sqlx(type_name = "TEXT", rename_all = "lowercase")]
 pub enum PlaySource {

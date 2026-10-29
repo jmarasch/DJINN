@@ -294,6 +294,7 @@ async fn run() -> anyhow::Result<()> {
     update::start(&state);
     network::refresh(&state);
     let update = std::sync::Arc::clone(&state.update);
+    let jukebox = std::sync::Arc::clone(&state.jukebox);
 
     let shutdown = std::sync::Arc::clone(&state.shutdown);
     // Windows is signing out: every shutdown step gets less time.
@@ -327,6 +328,15 @@ async fn run() -> anyhow::Result<()> {
     tokio::select! {
         result = async move { server.await } => result.context("server error")?,
         () = deadline => tracing::warn!("connections still open; shutting down anyway"),
+    }
+
+    // Remember how far the song playing got, to carry on from there.
+    let saved = tokio::time::timeout(QUICK_STOP_WAIT, async {
+        jukebox.lock().await.save_resume().await
+    })
+    .await;
+    if !matches!(saved, Ok(Ok(()))) {
+        tracing::warn!("couldn't save where playback was");
     }
 
     // Stop audio before closing the database. Neither may hold up the end:

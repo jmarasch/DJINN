@@ -11,9 +11,10 @@ use symphonia::core::audio::Channels;
 use symphonia::core::codecs::audio::{AudioDecoder, AudioDecoderOptions};
 use symphonia::core::errors::Error as SymphoniaError;
 use symphonia::core::formats::probe::Hint;
-use symphonia::core::formats::{FormatOptions, FormatReader, TrackType};
+use symphonia::core::formats::{FormatOptions, FormatReader, SeekMode, SeekTo, TrackType};
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
+use symphonia::core::units::Time;
 
 use crate::mixdown::StereoMap;
 use crate::EngineError;
@@ -30,6 +31,9 @@ pub struct TrackDecoder {
     planes: Vec<Vec<f32>>,
     map: Option<(Channels, StereoMap)>,
     consecutive_errors: u32,
+    /// Frames to drop after a seek, which lands on the packet holding the
+    /// wanted time, not on the time itself.
+    skip_frames: u64,
 }
 
 impl TrackDecoder {
@@ -86,7 +90,38 @@ impl TrackDecoder {
             planes: Vec::new(),
             map: None,
             consecutive_errors: 0,
+            skip_frames: 0,
         })
+    }
+
+    /// Moves to `ms` into the track, at or a little before it. Returns
+    /// false (staying at the start) if the file can't seek.
+    pub fn seek_ms(&mut self, ms: u64) -> bool {
+        let Some(time) = Time::try_from_nanos_u128(u128::from(ms) * 1_000_000) else {
+            return false;
+        };
+        let to = SeekTo::Time {
+            time,
+            track_id: Some(self.track_id),
+        };
+        let sought = self.format.seek(SeekMode::Accurate, to);
+        self.decoder.reset();
+        let Ok(sought) = sought else { return false };
+        let early = u64::try_from(sought.required_ts.get() - sought.actual_ts.get()).unwrap_or(0);
+        let time_base = self
+            .format
+            .tracks()
+            .iter()
+            .find(|t| t.id == self.track_id)
+            .and_then(|t| t.time_base);
+        self.skip_frames = match time_base {
+            Some(tb) => {
+                early * u64::from(tb.numer.get()) * u64::from(self.sample_rate)
+                    / u64::from(tb.denom.get())
+            }
+            None => early,
+        };
+        true
     }
 
     pub fn sample_rate(&self) -> u32 {
@@ -149,7 +184,13 @@ impl TrackDecoder {
                 if self.planes.len() < map.input_channels() {
                     continue;
                 }
+                let start = out.len();
                 map.mix(&self.planes, frames, out);
+                if self.skip_frames > 0 {
+                    let drop = (self.skip_frames as usize).min(frames);
+                    out.drain(start..start + drop * 2);
+                    self.skip_frames -= drop as u64;
+                }
             }
             return Ok(true);
         }

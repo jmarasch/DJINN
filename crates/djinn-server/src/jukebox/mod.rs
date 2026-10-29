@@ -4,7 +4,9 @@
 //! Tracks move through three stages: `queued` (sent to the engine as the
 //! next track), `in_flight` (the engine is decoding it, but it isn't audible
 //! yet), and `playing`. A request stays in the request queue until it
-//! becomes audible, so "up next" is always visible.
+//! becomes audible, so "up next" is always visible. The song playing, and
+//! how far it got, is saved as it goes, so after a restart it carries on
+//! where it was.
 
 mod auto;
 mod bag;
@@ -23,6 +25,7 @@ use djinn_store::{
 };
 use rand::rngs::StdRng;
 use rand::SeedableRng;
+use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
 
 pub use self::auto::{SMART_PLAY, SMART_PLAYLISTS, SMART_STRENGTH};
@@ -55,6 +58,11 @@ pub const RADIO: i64 = -2;
 pub const SKIP_VOTES: &str = "skip_votes";
 /// Last song the active playlist played, so in-order playback resumes.
 const PLAYLIST_CURSOR: &str = "playlist_cursor";
+/// The song playing and how far it got (a [`Resume`]), for carrying on
+/// after a restart.
+const RESUME: &str = "resume";
+/// How often the position playing is saved, in seconds.
+const RESUME_EVERY_SECS: u64 = 5;
 pub const DEFAULT_HISTORY_WINDOW: i64 = 25;
 pub const DEFAULT_PER_USER_LIMIT: i64 = 3;
 const DEFAULT_VOLUME: i64 = 80;
@@ -71,6 +79,22 @@ struct Pending {
     requested_by: Option<(i64, String)>,
     /// Others who asked for it too.
     backers: Vec<Backer>,
+    /// Carrying on with a song cut off by a restart: its play and where it
+    /// got to, in milliseconds.
+    resume: Option<(i64, u64)>,
+}
+
+/// What [`RESUME`] holds.
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+struct Resume {
+    track_id: i64,
+    source: PlaySource,
+    requested_by: Option<(i64, String)>,
+    #[serde(default)]
+    backers: Vec<Backer>,
+    play_event: i64,
+    position_ms: u64,
+    paused: bool,
 }
 
 impl Pending {
@@ -89,6 +113,9 @@ struct Playing {
     pending: Pending,
     play_event: i64,
     position_ms: u64,
+    /// Where it started, when it carried on after a restart; the engine
+    /// counts from there.
+    offset_ms: u64,
 }
 
 pub struct Jukebox {
@@ -131,6 +158,10 @@ pub struct Jukebox {
     radio: Option<Radio>,
     /// Each song's party weight, and when it was read.
     party: Option<(Instant, HashMap<i64, f32>)>,
+    /// The song to carry on with after a restart, until it's sent.
+    resuming: Option<Pending>,
+    /// Last position saved for the song playing, in whole seconds.
+    saved_second: Option<u64>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -211,11 +242,73 @@ impl Jukebox {
             mixer: None,
             radio: None,
             party: None,
+            resuming: None,
+            saved_second: None,
         };
         (jukebox.engine)(Command::SetVolume(gain(volume)));
         (jukebox.engine)(Command::SetCrossfade(u32::from(crossfade)));
         jukebox.load_active().await?;
+        jukebox.load_resume().await?;
         Ok(jukebox)
+    }
+
+    /// Picks up the song a restart cut off; it goes to the engine first.
+    async fn load_resume(&mut self) -> anyhow::Result<()> {
+        let saved = self.store.get_setting(RESUME).await?;
+        let Some(resume) = saved.and_then(|s| serde_json::from_str::<Resume>(&s).ok()) else {
+            return Ok(());
+        };
+        let Some(track) = self.store.track(resume.track_id).await? else {
+            return Ok(());
+        };
+        if resume.paused {
+            (self.engine)(Command::Pause);
+        }
+        tracing::info!(
+            track = resume.track_id,
+            position_ms = resume.position_ms,
+            "carrying on where playback was"
+        );
+        self.resuming = Some(Pending {
+            track,
+            source: resume.source,
+            request_id: None,
+            requested_by: resume.requested_by,
+            backers: resume.backers,
+            resume: Some((resume.play_event, resume.position_ms)),
+        });
+        Ok(())
+    }
+
+    /// The song a restart cut off hasn't started again yet.
+    fn carrying_on(&self) -> bool {
+        self.resuming.is_some()
+            || self.queued.as_ref().is_some_and(|q| q.resume.is_some())
+            || self.in_flight.iter().any(|p| p.resume.is_some())
+    }
+
+    /// Saves the song playing and how far it got, or that nothing is.
+    pub async fn save_resume(&mut self) -> anyhow::Result<()> {
+        let resume = self.playing.as_ref().map(|p| Resume {
+            track_id: p.pending.track.id,
+            source: p.pending.source,
+            requested_by: p.pending.requested_by.clone(),
+            backers: p.pending.backers.clone(),
+            play_event: p.play_event,
+            position_ms: p.position_ms,
+            paused: self.state == PlayState::Paused,
+        });
+        match resume {
+            Some(resume) => {
+                self.store
+                    .set_setting(RESUME, &serde_json::to_string(&resume)?)
+                    .await?
+            }
+            // Until it plays again, keep what a restart cut off.
+            None if self.carrying_on() => {}
+            None => self.store.set_setting(RESUME, "").await?,
+        }
+        Ok(())
     }
 
     pub fn now_playing(&self) -> NowPlaying {
@@ -476,6 +569,7 @@ impl Jukebox {
                 ms,
             } => {
                 if let Some(playing) = self.playing.as_mut().filter(|p| p.pending.track.id == id) {
+                    let ms = playing.offset_ms + ms;
                     playing.position_ms = ms;
                     let second = ms / 1000;
                     if self.last_position_second != Some(second) {
@@ -484,6 +578,10 @@ impl Jukebox {
                             track_id: id,
                             position_ms: ms,
                         });
+                    }
+                    if second % RESUME_EVERY_SECS == 0 && self.saved_second != Some(second) {
+                        self.saved_second = Some(second);
+                        self.save_resume().await?;
                     }
                 }
             }
@@ -494,6 +592,7 @@ impl Jukebox {
                     EngineState::Paused => PlayState::Paused,
                 };
                 self.send(ServerEvent::PlayerState(self.player_state()));
+                self.save_resume().await?;
             }
             EngineEvent::Outputs(list) => {
                 self.output = OutputStatus::from_engine(&list);
@@ -522,14 +621,20 @@ impl Jukebox {
                 .set_setting(PLAYLIST_CURSOR, &id.to_string())
                 .await?;
         }
-        let play_event = self
-            .store
-            .start_play_event(
-                id,
-                pending.source,
-                pending.requested_by.as_ref().map(|(id, _)| *id),
-            )
-            .await?;
+        // A song carried on after a restart keeps its play.
+        let (play_event, offset_ms) = match pending.resume {
+            Some(resumed) => resumed,
+            None => (
+                self.store
+                    .start_play_event(
+                        id,
+                        pending.source,
+                        pending.requested_by.as_ref().map(|(id, _)| *id),
+                    )
+                    .await?,
+                0,
+            ),
+        };
         // During a crossfade the previous song is still fading out.
         if let Some(previous) = self.playing.take() {
             self.ending.push(previous);
@@ -537,9 +642,12 @@ impl Jukebox {
         self.playing = Some(Playing {
             pending,
             play_event,
-            position_ms: 0,
+            position_ms: offset_ms,
+            offset_ms,
         });
         self.last_position_second = None;
+        self.saved_second = None;
+        self.save_resume().await?;
         self.broadcast_now_playing();
         self.songs_started += 1;
         let songs = self.songs_started;
@@ -577,11 +685,12 @@ impl Jukebox {
             self.store
                 .finish_play_event(
                     playing.play_event,
-                    i64::try_from(played_ms).unwrap_or(i64::MAX),
+                    i64::try_from(playing.offset_ms + played_ms).unwrap_or(i64::MAX),
                     skipped,
                     skipped_by,
                 )
                 .await?;
+            self.save_resume().await?;
             self.broadcast_now_playing();
         } else if let Some(i) = self.in_flight.iter().position(|p| p.track.id == id) {
             // Skipped before it became audible.
@@ -607,6 +716,17 @@ impl Jukebox {
     /// request not already on its way, otherwise the active playlist's next
     /// song.
     async fn refresh_next(&mut self) -> anyhow::Result<()> {
+        // The song a restart cut off goes first, whatever else is waiting.
+        if self.queued.as_ref().is_some_and(|q| q.resume.is_some()) {
+            return Ok(());
+        }
+        if self.queued.is_none() {
+            if let Some(resumed) = self.resuming.take() {
+                if self.send_next(resumed).await? {
+                    return Ok(());
+                }
+            }
+        }
         for _ in 0..5 {
             let in_flight: Vec<i64> = self.in_flight.iter().filter_map(|p| p.request_id).collect();
             let head = self
@@ -624,6 +744,7 @@ impl Jukebox {
                     request_id: Some(head.id),
                     source: PlaySource::Request,
                     track: head.track,
+                    resume: None,
                 },
                 (None, Some(q)) if q.source == PlaySource::Pool => {
                     // Radio's pool shifts as it goes; what it drew stays.
@@ -648,46 +769,55 @@ impl Jukebox {
                 }
             };
 
-            let Some(path) = self.store.track_path(candidate.track.id).await? else {
-                // The file vanished since the last scan.
-                if let Some(request) = candidate.request_id {
-                    self.store.remove_request(request).await?;
-                }
-                continue;
-            };
-            if let Some(old) = self.queued.take() {
-                if old.source == PlaySource::Pool && candidate.source == PlaySource::Request {
-                    self.bag.put_back(old.track.id);
-                }
-                self.replaced.push_back(old);
-                if self.replaced.len() > MAX_REPLACED {
-                    self.replaced.pop_front();
-                }
+            if self.send_next(candidate).await? {
+                return Ok(());
             }
-            // The song the engine plays before this one.
-            let previous = self
-                .in_flight
-                .back()
-                .or(self.playing.as_ref().map(|p| &p.pending));
-            let gapless = previous.is_some_and(|p| follows_on_album(&p.track, &candidate.track));
-            let gain = match self.replay_gain.mode {
-                ReplayGainMode::Off => 1.0,
-                _ => self
-                    .store
-                    .gain_info(candidate.track.id)
-                    .await?
-                    .map_or(1.0, |info| self.replay_gain.linear(&info)),
-            };
-            (self.engine)(Command::SetNext(Some(djinn_engine::Track {
-                id: TrackId(candidate.track.id),
-                path: PathBuf::from(path),
-                gapless,
-                gain,
-            })));
-            self.queued = Some(candidate);
-            return Ok(());
         }
         Ok(())
+    }
+
+    /// Puts `candidate` in the engine's next slot. Returns false if its file
+    /// has gone (a request for it is dropped).
+    async fn send_next(&mut self, candidate: Pending) -> anyhow::Result<bool> {
+        let Some(path) = self.store.track_path(candidate.track.id).await? else {
+            // The file vanished since the last scan.
+            if let Some(request) = candidate.request_id {
+                self.store.remove_request(request).await?;
+            }
+            return Ok(false);
+        };
+        if let Some(old) = self.queued.take() {
+            if old.source == PlaySource::Pool && candidate.source == PlaySource::Request {
+                self.bag.put_back(old.track.id);
+            }
+            self.replaced.push_back(old);
+            if self.replaced.len() > MAX_REPLACED {
+                self.replaced.pop_front();
+            }
+        }
+        // The song the engine plays before this one.
+        let previous = self
+            .in_flight
+            .back()
+            .or(self.playing.as_ref().map(|p| &p.pending));
+        let gapless = previous.is_some_and(|p| follows_on_album(&p.track, &candidate.track));
+        let gain = match self.replay_gain.mode {
+            ReplayGainMode::Off => 1.0,
+            _ => self
+                .store
+                .gain_info(candidate.track.id)
+                .await?
+                .map_or(1.0, |info| self.replay_gain.linear(&info)),
+        };
+        (self.engine)(Command::SetNext(Some(djinn_engine::Track {
+            id: TrackId(candidate.track.id),
+            path: PathBuf::from(path),
+            gapless: gapless && candidate.resume.is_none(),
+            gain,
+            start_ms: candidate.resume.map_or(0, |(_, ms)| ms),
+        })));
+        self.queued = Some(candidate);
+        Ok(true)
     }
 
     fn clear_next(&mut self) -> anyhow::Result<()> {

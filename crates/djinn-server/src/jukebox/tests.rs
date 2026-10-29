@@ -624,3 +624,83 @@ async fn crossfade_setting_reaches_the_engine() {
     let sent = h.sent.lock().unwrap();
     assert!(sent.iter().any(|c| matches!(c, Command::SetCrossfade(12))));
 }
+
+#[tokio::test]
+async fn a_restart_carries_on_with_the_song_playing() {
+    let mut h = Harness::new(0).await;
+    let user = h.user.clone();
+    for &track in &h.tracks[..2] {
+        h.jukebox
+            .add_request(&user, track, &origin())
+            .await
+            .unwrap();
+    }
+    h.event(EngineEvent::NextNeeded { after: None }).await;
+    let first = h.play_next().await;
+    assert_eq!(first, h.tracks[0]);
+    h.event(EngineEvent::Position {
+        id: TrackId(first),
+        ms: 15_000,
+    })
+    .await;
+
+    // DJINN restarts on the same database.
+    let sent = Arc::new(Mutex::new(Vec::new()));
+    let sink = Arc::clone(&sent);
+    let (events, _) = broadcast::channel(64);
+    let mut jukebox = Jukebox::new(
+        h.store.clone(),
+        Box::new(move |c| sink.lock().unwrap().push(c)),
+        events,
+    )
+    .await
+    .unwrap();
+    jukebox
+        .on_engine_event(EngineEvent::NextNeeded { after: None })
+        .await
+        .unwrap();
+    let next = sent.lock().unwrap().iter().rev().find_map(|c| match c {
+        Command::SetNext(Some(t)) => Some((t.id.0, t.start_ms)),
+        _ => None,
+    });
+    assert_eq!(next, Some((first, 15_000)), "the same song, where it was");
+
+    for event in [
+        EngineEvent::NextNeeded {
+            after: Some(TrackId(first)),
+        },
+        EngineEvent::TrackStarted { id: TrackId(first) },
+        EngineEvent::Position {
+            id: TrackId(first),
+            ms: 1_000,
+        },
+    ] {
+        jukebox.on_engine_event(event).await.unwrap();
+    }
+    let now = jukebox.now_playing();
+    let current = now.current.unwrap();
+    assert_eq!(current.requested_by.as_deref(), Some("guest"));
+    assert_eq!(
+        now.position_ms, 16_000,
+        "counted from the start of the song"
+    );
+    assert_eq!(
+        now.up_next.unwrap().track.id,
+        h.tracks[1],
+        "the queue is still there"
+    );
+
+    jukebox
+        .on_engine_event(EngineEvent::TrackEnded {
+            id: TrackId(first),
+            played_ms: 2_000,
+            reason: EndReason::Finished,
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        h.store.plays_since(0).await.unwrap(),
+        [(first, false)],
+        "one play, finished"
+    );
+}
