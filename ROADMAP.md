@@ -106,10 +106,13 @@ and requests are welcome at DJINN@newterrastudios.com or as an issue.
 
 ### 0.4.0
 
-- **Karaoke mode.**
+- **Visualizers.** A page like the TV page that fills the screen with
+  visuals moving to the music, from a large library of MilkDrop-style
+  presets. Show it on a TV or a spare screen at the party.
 
 ### Later
 
+- **Karaoke mode.**
 - **Personal streaming.** Listen to your library on your own phone, apart
   from the party.
 
