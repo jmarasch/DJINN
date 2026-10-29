@@ -88,6 +88,10 @@ and requests are welcome at DJINN@newterrastudios.com or as an issue.
   genres too, not just songs. Admin > Smart play turns it on or off, sets
   how much it counts, can use it for shuffled playlists, shows what each
   style learned, and clears a style's history.
+- **Play here.** A button that plays the party on the phone, tablet or
+  laptop you're using: an extra speaker for another room, or the party on
+  your headphones. Like casting, it runs a few seconds behind the main
+  speakers.
 - **Edit song tags.** Correct wrong or missing titles, artists, albums,
   years and genres from the app.
 - **Back up and restore.** Save everything DJINN knows (settings, users,
