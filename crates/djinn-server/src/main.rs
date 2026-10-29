@@ -22,6 +22,7 @@ mod identify_api;
 mod jukebox;
 mod library_api;
 mod network;
+mod party_api;
 mod player_api;
 mod playlist_api;
 mod reader;

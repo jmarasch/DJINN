@@ -3,7 +3,9 @@
 //! song weighs after what parties did with it, and weighted draws.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
+use djinn_store::SongHistory;
 use rand::{Rng, RngExt};
 use serde::{Deserialize, Serialize};
 
@@ -31,6 +33,11 @@ pub trait Mixer: Send + Sync {
     /// Songs for `seed`, best first, with weights. `played` and `skipped`
     /// are this radio's songs so far, newest first.
     fn radio(&self, seed: &RadioSeed, played: &[i64], skipped: &[i64]) -> Vec<(i64, f32)>;
+
+    /// Each song's artists and genres, for learning beyond the song.
+    fn links(&self) -> Arc<SongLinks> {
+        Arc::default()
+    }
 }
 
 /// How much a song weighs in wild play and radio after what parties did
@@ -41,6 +48,106 @@ pub fn party_weight(requests: i64, finished: i64, skipped: i64) -> f32 {
     let finished = finished.max(0) as f32;
     let kept = (finished + 2.0) / (finished + 2.0 + 1.5 * skipped.max(0) as f32);
     (asked * kept).clamp(0.15, 5.0)
+}
+
+/// Which artists and genres each song has, so what a party did with one
+/// song carries over to others by the same artists or in the same genres.
+#[derive(Debug, Default)]
+pub struct SongLinks {
+    pub artists: HashMap<i64, Vec<i64>>,
+    /// Normalized genre names.
+    pub genres: HashMap<i64, Vec<String>>,
+}
+
+/// What parties of one style liked: a factor per song, artist and genre
+/// (above 1 favored, below 1 avoided). Artists and genres pool their
+/// songs' history and count for less than a song's own.
+#[derive(Debug, Default)]
+pub struct Learned {
+    pub songs: HashMap<i64, f32>,
+    pub artists: HashMap<i64, f32>,
+    pub genres: HashMap<String, f32>,
+}
+
+/// How much an artist's pooled history counts, as a power of its weight.
+const ARTIST_SHARE: f32 = 0.5;
+/// The same for a genre, which pools far more songs.
+const GENRE_SHARE: f32 = 0.25;
+
+impl Learned {
+    pub fn new(history: &[SongHistory], links: &SongLinks) -> Self {
+        let mut artists: HashMap<i64, (i64, i64, i64)> = HashMap::new();
+        let mut genres: HashMap<&str, (i64, i64, i64)> = HashMap::new();
+        let add = |sum: &mut (i64, i64, i64), h: &SongHistory| {
+            sum.0 += h.requests;
+            sum.1 += h.finished;
+            sum.2 += h.skipped;
+        };
+        for h in history {
+            for artist in links.artists.get(&h.track_id).into_iter().flatten() {
+                add(artists.entry(*artist).or_default(), h);
+            }
+            for genre in links.genres.get(&h.track_id).into_iter().flatten() {
+                add(genres.entry(genre.as_str()).or_default(), h);
+            }
+        }
+        let pooled = |(r, f, s): (i64, i64, i64), share: f32| party_weight(r, f, s).powf(share);
+        Self {
+            songs: history
+                .iter()
+                .map(|h| (h.track_id, party_weight(h.requests, h.finished, h.skipped)))
+                .collect(),
+            artists: artists
+                .into_iter()
+                .map(|(id, sum)| (id, pooled(sum, ARTIST_SHARE)))
+                .collect(),
+            genres: genres
+                .into_iter()
+                .map(|(name, sum)| (name.to_owned(), pooled(sum, GENRE_SHARE)))
+                .collect(),
+        }
+    }
+
+    /// A song's weight: its own factor times its artists' and genres'
+    /// (each averaged when it has several), at `strength` (0 ignores the
+    /// party, 1 is full effect).
+    pub fn weight(&self, id: i64, links: &SongLinks, strength: f32) -> f32 {
+        let song = self.songs.get(&id).copied().unwrap_or(1.0);
+        let artists = mean_of(links.artists.get(&id), |a| self.artists.get(a));
+        let genres = mean_of(links.genres.get(&id), |g| self.genres.get(g));
+        (song * artists * genres)
+            .clamp(0.1, 8.0)
+            .powf(strength.clamp(0.0, 1.0))
+    }
+
+    /// Every song's weight that isn't 1, for the weighted draws.
+    pub fn weights(&self, links: &SongLinks, strength: f32) -> HashMap<i64, f32> {
+        let ids: HashSet<i64> = self
+            .songs
+            .keys()
+            .chain(links.artists.keys())
+            .chain(links.genres.keys())
+            .copied()
+            .collect();
+        ids.into_iter()
+            .map(|id| (id, self.weight(id, links, strength)))
+            .filter(|(_, w)| (w - 1.0).abs() > 1e-3)
+            .collect()
+    }
+}
+
+/// Geometric mean of the factors `factor` finds for `keys` (1 for none).
+fn mean_of<'a, K>(keys: Option<&Vec<K>>, factor: impl Fn(&K) -> Option<&'a f32>) -> f32 {
+    let logs: Vec<f32> = keys
+        .into_iter()
+        .flatten()
+        .map(|k| factor(k).copied().unwrap_or(1.0).ln())
+        .collect();
+    if logs.is_empty() {
+        1.0
+    } else {
+        (logs.iter().sum::<f32>() / logs.len() as f32).exp()
+    }
 }
 
 /// Draws one song from `pool` (id, weight) by weight, leaving out
@@ -122,5 +229,66 @@ mod tests {
             "a small pool never stalls"
         );
         assert_eq!(weighted_draw(&[], &all, &party, &mut rng), None);
+    }
+
+    fn history(track_id: i64, requests: i64, finished: i64, skipped: i64) -> SongHistory {
+        SongHistory {
+            track_id,
+            requests,
+            finished,
+            skipped,
+        }
+    }
+
+    /// Songs 1 and 2 by artist 10 (rock), song 3 by artist 20 (rock, jazz),
+    /// song 4 by artist 30 (polka).
+    fn links() -> SongLinks {
+        SongLinks {
+            artists: [(1, vec![10]), (2, vec![10]), (3, vec![20]), (4, vec![30])]
+                .into_iter()
+                .collect(),
+            genres: [
+                (1, vec!["rock".to_owned()]),
+                (2, vec!["rock".to_owned()]),
+                (3, vec!["rock".to_owned(), "jazz".to_owned()]),
+                (4, vec!["polka".to_owned()]),
+            ]
+            .into_iter()
+            .collect(),
+        }
+    }
+
+    #[test]
+    fn learning_reaches_artists_and_genres() {
+        let links = links();
+        let learned = Learned::new(&[history(1, 4, 4, 0), history(4, 0, 0, 3)], &links);
+
+        let requested = learned.weight(1, &links, 1.0);
+        let same_artist = learned.weight(2, &links, 1.0);
+        let same_genre = learned.weight(3, &links, 1.0);
+        let skipped = learned.weight(4, &links, 1.0);
+        assert!(requested > same_artist, "the song itself counts most");
+        assert!(same_artist > same_genre, "then its artist");
+        assert!(same_genre > 1.0, "then its genre");
+        assert!(skipped < 0.5, "skipped polka sinks");
+    }
+
+    #[test]
+    fn strength_scales_what_was_learned() {
+        let links = links();
+        let learned = Learned::new(&[history(1, 4, 4, 0)], &links);
+        assert!((learned.weight(1, &links, 0.0) - 1.0).abs() < 1e-6, "off");
+        assert!(learned.weight(1, &links, 0.5) < learned.weight(1, &links, 1.0));
+        assert!(learned.weight(1, &links, 0.5) > 1.0);
+    }
+
+    #[test]
+    fn weights_cover_songs_never_played() {
+        let links = links();
+        let learned = Learned::new(&[history(1, 4, 4, 0)], &links);
+        let weights = learned.weights(&links, 1.0);
+        assert!(weights.contains_key(&2), "same artist, never played");
+        assert!(!weights.contains_key(&4), "nothing learned about polka");
+        assert!(Learned::default().weights(&links, 1.0).is_empty());
     }
 }

@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::auth::CurrentUser;
 use crate::error::ApiResult;
+use crate::jukebox::SongLinks;
 use crate::settings;
 use crate::state::AppState;
 
@@ -46,6 +47,8 @@ pub struct Catalog {
     artist_songs: HashMap<i64, Vec<i64>>,
     /// What the AI model heard in each song (when it's on).
     heard: HashMap<i64, Vec<f32>>,
+    /// Each song's artists and genres, for learning from parties.
+    links: std::sync::Arc<SongLinks>,
 }
 
 /// Genres the AI hears in a song with none of its own: the best two, if
@@ -98,6 +101,13 @@ impl SmartMixer {
 }
 
 impl crate::jukebox::Mixer for SmartMixer {
+    fn links(&self) -> std::sync::Arc<SongLinks> {
+        self.catalog
+            .read()
+            .map(|catalog| std::sync::Arc::clone(&catalog.links))
+            .unwrap_or_default()
+    }
+
     fn radio(
         &self,
         seed: &crate::jukebox::RadioSeed,
@@ -452,6 +462,14 @@ pub async fn refresh(state: &AppState) {
                 (song.id, all)
             })
             .collect();
+        let mut song_artists: HashMap<i64, Vec<i64>> = HashMap::new();
+        for (artist, track, _) in &led {
+            song_artists.entry(*track).or_default().push(*artist);
+        }
+        let links = std::sync::Arc::new(SongLinks {
+            artists: song_artists,
+            genres: tags.clone(),
+        });
         (
             SoundIndex::build(rows),
             Catalog {
@@ -463,6 +481,7 @@ pub async fn refresh(state: &AppState) {
                 styles,
                 artist_songs,
                 heard,
+                links,
             },
         )
     })
