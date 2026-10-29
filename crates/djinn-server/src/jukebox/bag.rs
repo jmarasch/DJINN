@@ -1,7 +1,9 @@
 //! Shuffle bag for the auto pool: shuffle everything, play through it in
 //! order, reshuffle when it runs out, and skip anything played recently.
+//! With party weights, each cycle is shuffled so favored songs tend to come
+//! early and avoided ones late, but every song still plays once a cycle.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use rand::seq::SliceRandom;
 use rand::{Rng, RngExt};
@@ -12,6 +14,8 @@ pub struct ShuffleBag {
     remaining: Vec<i64>,
     /// Tracks already drawn this cycle.
     drawn: HashSet<i64>,
+    /// Party weights for the next cycle's order; empty for an even shuffle.
+    weights: HashMap<i64, f32>,
 }
 
 impl ShuffleBag {
@@ -34,6 +38,9 @@ impl ShuffleBag {
         let pool_set: HashSet<i64> = pool.iter().copied().collect();
         self.remaining.retain(|id| pool_set.contains(id));
         self.drawn.retain(|id| pool_set.contains(id));
+        if self.remaining.is_empty() && self.drawn.is_empty() {
+            self.new_cycle(pool, rng);
+        }
         let queued: HashSet<i64> = self.remaining.iter().copied().collect();
         for &id in pool {
             if !queued.contains(&id) && !self.drawn.contains(&id) {
@@ -57,6 +64,11 @@ impl ShuffleBag {
             .or_else(|| self.remaining.pop())
     }
 
+    /// Weights the order of cycles from the next one on.
+    pub fn set_weights(&mut self, weights: HashMap<i64, f32>) {
+        self.weights = weights;
+    }
+
     /// Puts back a drawn track that ended up not playing, so it comes next.
     pub fn put_back(&mut self, id: i64) {
         if self.drawn.remove(&id) {
@@ -67,7 +79,22 @@ impl ShuffleBag {
     fn new_cycle(&mut self, pool: &[i64], rng: &mut impl Rng) {
         self.drawn.clear();
         self.remaining = pool.to_vec();
-        self.remaining.shuffle(rng);
+        if self.weights.is_empty() {
+            self.remaining.shuffle(rng);
+            return;
+        }
+        // Weighted shuffle (Efraimidis-Spirakis): each song's key is
+        // u^(1/weight), and higher keys come first. Draws pop from the end.
+        let mut keyed: Vec<(f32, i64)> = self
+            .remaining
+            .iter()
+            .map(|&id| {
+                let w = self.weights.get(&id).copied().unwrap_or(1.0).max(1e-3);
+                (rng.random::<f32>().powf(1.0 / w), id)
+            })
+            .collect();
+        keyed.sort_by(|a, b| a.0.total_cmp(&b.0));
+        self.remaining = keyed.into_iter().map(|(_, id)| id).collect();
     }
 
     fn take_first_not_in(&mut self, exclude: &HashSet<i64>) -> Option<i64> {
@@ -169,6 +196,30 @@ mod tests {
         rest.sort_unstable();
         assert_eq!(rest, pool);
         assert_eq!(bag.draw(&[], &[], 0, &mut rng), None);
+    }
+
+    #[test]
+    fn weights_order_the_cycle_but_everything_plays() {
+        let pool: Vec<i64> = (1..=10).collect();
+        let mut rng = rng();
+        let mut favored_first = 0;
+        for _ in 0..200 {
+            let mut bag = ShuffleBag::default();
+            bag.set_weights([(1, 5.0), (2, 0.15)].into_iter().collect());
+            let mut cycle: Vec<i64> = (0..10)
+                .map(|_| bag.draw(&pool, &[], 0, &mut rng).unwrap())
+                .collect();
+            let at = |id| cycle.iter().position(|&x| x == id).unwrap();
+            if at(1) < at(2) {
+                favored_first += 1;
+            }
+            cycle.sort_unstable();
+            assert_eq!(cycle, pool, "every song once a cycle");
+        }
+        assert!(
+            favored_first > 180,
+            "favored before avoided: {favored_first}"
+        );
     }
 
     #[test]

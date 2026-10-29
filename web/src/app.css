@@ -204,6 +204,13 @@ label {
   text-decoration: none;
 }
 
+/* A compact button for secondary actions in a card. */
+.small-button {
+  min-height: 36px;
+  padding: 0 12px;
+  font-size: 0.8125rem;
+}
+
 /* A button that's just an icon, such as a song's menu. */
 .icon-only {
   flex: none;

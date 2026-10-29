@@ -25,11 +25,12 @@ use rand::rngs::StdRng;
 use rand::SeedableRng;
 use tokio::sync::broadcast;
 
+pub use self::auto::{SMART_PLAY, SMART_PLAYLISTS, SMART_STRENGTH};
 use self::bag::ShuffleBag;
 pub use self::gain::{
     ReplayGain, ReplayGainMode, MAX_PREAMP_DB, REPLAY_GAIN_MODE, REPLAY_GAIN_PREAMP,
 };
-pub use self::mix::{Mixer, Radio, RadioSeed};
+pub use self::mix::{Learned, Mixer, Radio, RadioSeed, SongLinks};
 use crate::events::{
     Entry, NowPlaying, OutputStatus, PlayState, PlayerState, PlaylistRef, ServerEvent,
 };

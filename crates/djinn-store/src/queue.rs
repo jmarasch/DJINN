@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
 use crate::library::track_columns;
+use crate::party::style_in_use;
 use crate::{now_ms, Result, Store, StoreError, Track};
 
 #[derive(Clone, Debug, PartialEq, Serialize, FromRow)]
@@ -235,9 +236,11 @@ impl Store {
                 }
             }
         };
-        sqlx::query(
-            "INSERT INTO request_events (track_id, user_id, at, name, mac, ip) VALUES (?, ?, ?, ?, ?, ?)",
-        )
+        sqlx::query(concat!(
+            "INSERT INTO request_events (track_id, user_id, at, name, mac, ip, style_id)              VALUES (?, ?, ?, ?, ?, ?, ",
+            style_in_use!(),
+            ")"
+        ))
         .bind(track_id)
         .bind(user_id)
         .bind(now)
@@ -406,22 +409,6 @@ impl Store {
         Ok(ids)
     }
 
-    /// How parties took each song that has any history: (track id, times
-    /// requested, times played to the end, times skipped).
-    pub async fn party_counts(&self) -> Result<Vec<(i64, i64, i64, i64)>> {
-        let rows = sqlx::query_as(
-            "SELECT track_id, sum(requests), sum(finished), sum(skipped) FROM ( \
-                 SELECT track_id, 1 AS requests, 0 AS finished, 0 AS skipped FROM request_events \
-                 UNION ALL \
-                 SELECT track_id, 0, CASE WHEN skipped = 0 AND ended_at IS NOT NULL THEN 1 ELSE 0 END, \
-                        skipped FROM play_events \
-             ) GROUP BY track_id",
-        )
-        .fetch_all(&self.pool)
-        .await?;
-        Ok(rows)
-    }
-
     /// Songs that started since `since` (Unix ms) and have ended, newest
     /// first, with whether each was skipped.
     pub async fn plays_since(&self, since: i64) -> Result<Vec<(i64, bool)>> {
@@ -442,10 +429,11 @@ impl Store {
         source: PlaySource,
         requested_by: Option<i64>,
     ) -> Result<i64> {
-        let id = sqlx::query_scalar(
-            "INSERT INTO play_events (track_id, source, requested_by, started_at)
-             VALUES (?, ?, ?, ?) RETURNING id",
-        )
+        let id = sqlx::query_scalar(concat!(
+            "INSERT INTO play_events (track_id, source, requested_by, started_at, style_id)              VALUES (?, ?, ?, ?, ",
+            style_in_use!(),
+            ") RETURNING id"
+        ))
         .bind(track_id)
         .bind(source)
         .bind(requested_by)

@@ -131,7 +131,5 @@
 
   .small-button {
     min-height: 32px;
-    padding: 0 12px;
-    font-size: 0.8125rem;
   }
 </style>

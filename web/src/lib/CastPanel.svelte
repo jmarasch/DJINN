@@ -201,7 +201,6 @@
   .small-button {
     min-height: 32px;
     padding: 0 10px;
-    font-size: 0.8125rem;
   }
 
   .row-buttons {

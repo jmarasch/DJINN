@@ -11,7 +11,7 @@ use djinn_engine::Command;
 use djinn_store::PlaySource;
 
 use super::bag::ShuffleBag;
-use super::mix::{self, Mixer, Radio, RadioSeed};
+use super::mix::{self, Learned, Mixer, Radio, RadioSeed, SongLinks};
 use super::{
     Jukebox, Pending, ACTIVE_PLAYLIST, DEFAULT_HISTORY_WINDOW, HISTORY_WINDOW, PLAYLIST_CURSOR,
     RADIO, WILD_PLAY,
@@ -27,6 +27,12 @@ const RADIO_POOL: usize = 150;
 const RADIO_MEMORY_MS: i64 = 2 * 60 * 60 * 1000;
 /// How long party weights are reused before being read again.
 const PARTY_REFRESH: Duration = Duration::from_secs(120);
+/// Setting: 1 to weigh wild play and radio by what parties did.
+pub const SMART_PLAY: &str = "smart_play";
+/// Setting: 1 to also order shuffled playlists by it.
+pub const SMART_PLAYLISTS: &str = "smart_playlists";
+/// Setting: how much it counts, 0 to 100 (percent).
+pub const SMART_STRENGTH: &str = "smart_strength";
 
 impl Jukebox {
     /// Call after the active playlist's contents (or the library) change.
@@ -178,25 +184,42 @@ impl Jukebox {
             .is_some_and(|p| p.id == WILD_PLAY || p.id == RADIO)
     }
 
-    /// Each song's weight after what parties did with it, read again every
-    /// couple of minutes.
-    async fn party_weights(&mut self) -> anyhow::Result<HashMap<i64, f32>> {
+    /// Each song's weight after what parties of the style in use did with
+    /// it (and with its artists and genres), read again every couple of
+    /// minutes. Empty with smart play off.
+    pub(super) async fn party_weights(&mut self) -> anyhow::Result<HashMap<i64, f32>> {
         if let Some((at, weights)) = &self.party {
             if at.elapsed() < PARTY_REFRESH {
                 return Ok(weights.clone());
             }
         }
-        let weights: HashMap<i64, f32> = self
-            .store
-            .party_counts()
-            .await?
-            .into_iter()
-            .map(|(id, requests, finished, skipped)| {
-                (id, mix::party_weight(requests, finished, skipped))
-            })
-            .collect();
+        let style = self.store.active_party_style().await?;
+        let weights = match style {
+            Some(style) if settings::flag(&self.store, SMART_PLAY, true).await? => {
+                let strength = settings::number(&self.store, SMART_STRENGTH, 100)
+                    .await?
+                    .clamp(0, 100) as f32
+                    / 100.0;
+                let history = self.store.party_history(style).await?;
+                let links = self.links();
+                Learned::new(&history, &links).weights(&links, strength)
+            }
+            _ => HashMap::new(),
+        };
         self.party = Some((Instant::now(), weights.clone()));
         Ok(weights)
+    }
+
+    /// Each song's artists and genres, from the mixer (none without one).
+    pub fn links(&self) -> Arc<SongLinks> {
+        self.mixer
+            .as_ref()
+            .map_or_else(Arc::default, |mixer| mixer.links())
+    }
+
+    /// Call after the style in use or the smart play settings change.
+    pub fn party_changed(&mut self) {
+        self.party = None;
     }
 
     /// The active playlist's next song: shuffled through the bag, or the
@@ -240,6 +263,12 @@ impl Jukebox {
 
     async fn shuffle_draw(&mut self, pool: &[i64]) -> anyhow::Result<Option<i64>> {
         let (recent, window) = self.recent().await?;
+        let weights = if settings::flag(&self.store, SMART_PLAYLISTS, false).await? {
+            self.party_weights().await?
+        } else {
+            HashMap::new()
+        };
+        self.bag.set_weights(weights);
         Ok(self.bag.draw(pool, &recent, window, &mut self.rng))
     }
 
