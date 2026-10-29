@@ -368,6 +368,11 @@
         </span>
       </label>
       <label class="switch big">
+        <input type="checkbox" bind:checked={settings.play_here} />
+        Play here: anyone can play the party on their own phone or computer, a few seconds behind
+        the speakers
+      </label>
+      <label class="switch big">
         <input type="checkbox" bind:checked={settings.online_artist_info} />
         Look up artist photos and bios (sends artist names to Deezer and Wikipedia)
       </label>

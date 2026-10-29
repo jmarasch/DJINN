@@ -126,6 +126,8 @@ export const api = {
   addRequest: (trackId: number) =>
     post<QueueItem & { outcome: 'added' | 'backed' }>('/queue', { track_id: trackId }),
   skipVote: () => post<{ skipped: boolean }>('/player/skip-vote'),
+  /** The live stream for Play here; null when the host turned it off. */
+  listen: () => get<{ url: string | null }>('/listen'),
   removeRequest: (id: number) => del<void>(`/queue/${id}`),
   queueAll: (kind: EntryKind, refId: number) =>
     post<{ added: number }>('/queue/all', { kind, ref_id: refId }),

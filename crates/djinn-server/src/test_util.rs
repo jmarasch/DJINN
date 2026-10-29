@@ -39,6 +39,21 @@ pub async fn call(
     (res.status(), cookie)
 }
 
+/// GETs `path` as the session in `cookie`; returns the status and body.
+pub async fn get_body(state: &AppState, path: &str, cookie: &str) -> (StatusCode, String) {
+    let req = Request::builder()
+        .uri(path)
+        .header(COOKIE, cookie)
+        .body(Body::empty())
+        .unwrap();
+    let res = app(state.clone()).oneshot(req).await.unwrap();
+    let status = res.status();
+    let bytes = axum::body::to_bytes(res.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    (status, String::from_utf8_lossy(&bytes).into_owned())
+}
+
 /// Creates a user with a live session and returns its cookie.
 pub async fn session(state: &AppState, username: &str, role: Role) -> String {
     let user = state

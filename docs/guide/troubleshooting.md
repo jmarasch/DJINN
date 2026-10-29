@@ -22,7 +22,7 @@
   it shows up under **Add an output**.
 - Check the computer's own volume and the volume on the Playing tab.
 - Casting? Network devices run a few seconds behind; see
-  [Casting and the TV page](casting-and-tv.md).
+  [Casting, Play here and the TV page](casting-and-tv.md).
 
 ## Speakers are out of time
 

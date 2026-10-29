@@ -304,6 +304,8 @@ export interface Settings {
   artist_keep_whole: string
   /** The TV page (/tv) works without signing in. */
   tv_page: boolean
+  /** Anyone signed in can play the party in their own browser. */
+  play_here: boolean
   /** Votes that skip a song; 0 turns skip voting off. */
   skip_votes: number
   /** AcoustID application key, for identifying songs by sound. */

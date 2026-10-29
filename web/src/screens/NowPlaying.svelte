@@ -16,6 +16,7 @@
     signInAsHost,
     toast,
   } from '../lib/state.svelte'
+  import { checkPlayHere, playHere, startPlayHere, stopPlayHere } from '../lib/playHere.svelte'
   import { cycleTheme, theme } from '../lib/theme.svelte'
 
   const current = $derived(app.nowPlaying.current)
@@ -28,6 +29,7 @@
   let volume = $state(app.player.volume)
 
   onMount(() => {
+    void checkPlayHere()
     let frame = 0
     const tick = () => {
       position = Math.min(currentPosition(), total || Infinity)
@@ -156,6 +158,23 @@
     </div>
   {/if}
 
+  {#if playHere.url}
+    <div class="play-here">
+      {#if playHere.on}
+        <button class="on" onclick={stopPlayHere}>
+          <Icon name="headphones" size={18} />
+          {playHere.waiting ? 'Connecting…' : 'Playing here'} · Stop
+        </button>
+        <p class="small muted">A few seconds behind the speakers. Use this device's volume.</p>
+      {:else}
+        <button onclick={startPlayHere}>
+          <Icon name="headphones" size={18} />
+          Play here
+        </button>
+      {/if}
+    </div>
+  {/if}
+
   {#if isAdmin()}
     <div class="controls">
       {#if app.player.state !== 'playing'}
@@ -221,6 +240,30 @@
 </section>
 
 <style>
+  .play-here {
+    margin-top: 12px;
+    text-align: center;
+  }
+
+  .play-here button {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 16px;
+    min-height: 40px;
+    border-radius: 999px;
+    font-size: 0.875rem;
+  }
+
+  .play-here button.on {
+    background: var(--accent);
+    color: var(--accent-text);
+  }
+
+  .play-here p {
+    margin: 6px 0 0;
+  }
+
   .skip-vote {
     display: inline-flex;
     align-items: center;

@@ -15,8 +15,9 @@ Each page covers one part of the app.
    settings under Admin > Rules.
 6. [Speakers and sound](speakers-and-sound.md): several speakers at once,
    delays, crossfade, and even volume.
-7. [Casting and the TV page](casting-and-tv.md): Chromecast, smart TVs and
-   Sonos, and a now-playing screen.
+7. [Casting, Play here and the TV page](casting-and-tv.md): Chromecast,
+   smart TVs and Sonos, the party on your own phone, and a now-playing
+   screen.
 8. [Search and AI](search-and-ai.md): finding songs by name or by
    description, and the optional AI tools.
 9. [Your library](your-library.md): music folders, artist photos and bios, and
