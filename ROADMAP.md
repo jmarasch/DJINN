@@ -31,9 +31,8 @@ and requests are welcome at DJINN@newterrastudios.com or as an issue.
   play first.
 - When the queue runs dry, DJINN keeps playing from the library or a
   playlist (shuffled without repeats, or in order).
-- Optional rules: requests per guest, skip votes (voting to skip one song
-  means sitting out the vote on the next), and approving what the auto mix
-  plays.
+- Optional rules: requests per guest, a cap on the whole queue, and skip
+  votes (voting to skip one song means sitting out the vote on the next).
 - A now-playing page for a TV.
 - Playlists.
 
@@ -89,6 +88,10 @@ and requests are welcome at DJINN@newterrastudios.com or as an issue.
   genres too, not just songs. Admin > Smart play turns it on or off, sets
   how much it counts, can use it for shuffled playlists, shows what each
   style learned, and clears a style's history.
+- **Play here.** A button that plays the party on the phone, tablet or
+  laptop you're using: an extra speaker for another room, or the party on
+  your headphones. Like casting, it runs a few seconds behind the main
+  speakers.
 - **Edit song tags.** Correct wrong or missing titles, artists, albums,
   years and genres from the app.
 - **Back up and restore.** Save everything DJINN knows (settings, users,
