@@ -71,20 +71,6 @@
 {/if}
 
 <style>
-  .chips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-  }
-
-  .chip {
-    padding: 10px 16px;
-    border-radius: 999px;
-    background: var(--surface-2);
-    color: var(--text);
-    text-decoration: none;
-  }
-
   /* The more related, the stronger the outline, like the lines on the
      genre cloud. */
   .related {

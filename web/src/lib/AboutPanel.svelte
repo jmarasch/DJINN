@@ -209,19 +209,6 @@
     border-top: 1px solid var(--line);
   }
 
-  .switch {
-    flex-direction: row;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .switch input {
-    flex: none;
-    width: 20px;
-    min-height: 20px;
-    accent-color: var(--accent);
-  }
-
   .small-button {
     align-self: flex-start;
     min-height: 36px;

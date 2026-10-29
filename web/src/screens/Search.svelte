@@ -301,20 +301,6 @@
     color: var(--text);
   }
 
-  .chips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-  }
-
-  .chip {
-    padding: 10px 16px;
-    border-radius: 999px;
-    background: var(--surface-2);
-    color: var(--text);
-    text-decoration: none;
-  }
-
   .albums {
     display: grid;
     grid-auto-flow: column;

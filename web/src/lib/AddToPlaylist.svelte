@@ -95,15 +95,6 @@
     font-size: 0.875rem;
   }
 
-  .icon-only {
-    flex: none;
-    width: 40px;
-    min-height: 40px;
-    padding: 0;
-    background: transparent;
-    color: var(--muted);
-  }
-
   .row {
     width: 100%;
     justify-content: flex-start;

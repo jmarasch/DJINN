@@ -175,6 +175,45 @@ label {
   gap: 6px;
 }
 
+/* A checkbox with its text beside it, for on/off settings. */
+.switch {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.switch input {
+  flex: none;
+  width: 20px;
+  min-height: 20px;
+  accent-color: var(--accent);
+}
+
+/* A row of rounded links, such as artists in search results. */
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chip {
+  padding: 10px 16px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text);
+  text-decoration: none;
+}
+
+/* A button that's just an icon, such as a song's menu. */
+.icon-only {
+  flex: none;
+  width: 40px;
+  min-height: 40px;
+  padding: 0;
+  background: transparent;
+  color: var(--muted);
+}
+
 .card {
   display: flex;
   flex-direction: column;
