@@ -81,6 +81,13 @@ newer; older cards, Turing (GTX 16xx, RTX 20xx) included, use the
 processor. The GPU job builds on ubuntu-22.04 and windows-2022 because
 CUDA 12.4 doesn't support the newer runners' Ubuntu or Visual Studio.
 
+Building the pack is the slow part of a release (installing CUDA, then
+nvcc compiling candle's kernels), so the job reuses the last release's
+pack when nothing it's built from changed: `crates/djinn-ai`, the locked
+dependencies (`Cargo.lock` and the root `Cargo.toml`, not counting
+DJINN's own version), and the release workflow. A version bump alone
+doesn't rebuild it. To force a rebuild, change any of those.
+
 ## How an install works
 
 The app downloads the binary for its system next to itself, checks size

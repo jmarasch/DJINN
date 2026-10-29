@@ -5,6 +5,17 @@ and requests are welcome at DJINN@newterrastudios.com or as an issue.
 
 ## Released
 
+### 0.2.5 (October 2026)
+
+- **Party styles.** Keep a separate memory for each kind of party
+  ("Halloween", "Family BBQ") and pick the one that fits tonight. The
+  auto mix learns from requests and skips per style, now for artists and
+  genres too, not just songs. Admin > Smart play turns it on or off, sets
+  how much it counts, can use it for shuffled playlists, shows what each
+  style learned, and clears a style's history.
+- **A user guide** to every feature, in [docs/guide](docs/guide/README.md).
+- Each release now starts with "Which file do I download?".
+
 ### 0.2.0 (October 2026)
 
 - **Browse by genre.** A Genres tab in the library lists every genre with
@@ -82,12 +93,6 @@ and requests are welcome at DJINN@newterrastudios.com or as an issue.
 
 ### 0.3.0
 
-- **Party styles.** Keep a separate memory for each kind of party
-  ("Halloween", "Family BBQ") and pick the one that fits tonight. The
-  auto mix learns from requests and skips per style, now for artists and
-  genres too, not just songs. Admin > Smart play turns it on or off, sets
-  how much it counts, can use it for shuffled playlists, shows what each
-  style learned, and clears a style's history.
 - **Play here.** A button that plays the party on the phone, tablet or
   laptop you're using: an extra speaker for another room, or the party on
   your headphones. Like casting, it runs a few seconds behind the main
