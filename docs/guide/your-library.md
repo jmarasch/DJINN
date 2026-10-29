@@ -52,6 +52,11 @@ the files themselves aren't changed.
 - **One song:** open its menu (⋮) and tap **Edit tags**.
 - **A whole album:** on the album's page, tap **Edit album** to change the
   album name, album artist, year or genre for all its songs at once.
+- **An artist:** on the artist's page, tap **Edit artist** to fix their
+  name on every song and album they're on (their photo and bio stay), or
+  set the genres of the songs they lead.
+- Genres are separated by commas. Corrected genres take the place of the
+  ones looked up online for those songs.
 - An artist like "Björk feat. Thom Yorke" is split into its artists, the
   same way as tags from the file.
 - A corrected field says **Corrected · use the file's**; tap it to go back
