@@ -65,14 +65,21 @@ struct Cli {
 }
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    let result = run().await;
-    if let Err(e) = &result {
-        // Started from the Start menu or at sign-in there is no console for
-        // the error to go to, so put it in the log too.
-        tracing::error!(error = %format!("{e:#}"), "DJINN stopped");
-    }
-    result
+async fn main() {
+    let code = match run().await {
+        Ok(()) => 0,
+        Err(e) => {
+            // Started from the Start menu or at sign-in there is no console
+            // for the error to go to, so put it in the log too.
+            tracing::error!(error = %format!("{e:#}"), "DJINN stopped");
+            eprintln!("Error: {e:?}");
+            1
+        }
+    };
+    // Exit now: background jobs on blocking threads (online lookups,
+    // analysis, AI listening) would otherwise keep the process alive after
+    // it has shut down, until they finish.
+    std::process::exit(code)
 }
 
 async fn run() -> anyhow::Result<()> {
