@@ -1,0 +1,105 @@
+# Roadmap
+
+What DJINN can do today, and what's planned next. Plans can change; ideas
+and requests are welcome at DJINN@newterrastudios.com or as an issue.
+
+## Released
+
+### 0.2.0 (October 2026)
+
+- **Browse by genre.** A Genres tab in the library lists every genre with
+  its number of songs, as tags or as a cloud: bigger genres have more songs,
+  and lines join genres that share songs or sound alike. Drag, pinch or
+  scroll to move around and zoom the cloud.
+- **Related genres** on each genre's page, the same ones its lines go to on
+  the cloud.
+- **Jump through long lists.** Artists, albums and songs have an A to Z strip
+  on the side; sorted by year, it runs from your oldest year to your newest.
+- **Sort by year,** oldest or newest first, for albums and songs.
+- Library folders on any drive on Windows, not just C:.
+- A clear button in the search box on every browser.
+- DJINN quits promptly, even with background work running, so restarts and
+  updates aren't held up.
+
+### 0.1.0 (October 2026), the first release
+
+**The party**
+
+- Guests scan a QR code and queue songs from their phones, with no app or
+  account needed. Hosts and regular users can have accounts.
+- Asking for a song that's already queued backs it; songs more people want
+  play first.
+- When the queue runs dry, DJINN keeps playing from the library or a
+  playlist (shuffled without repeats, or in order).
+- Optional rules: requests per guest, skip votes (voting to skip one song
+  means sitting out the vote on the next), and approving what the auto mix
+  plays.
+- A now-playing page for a TV.
+- Playlists.
+
+**Sound**
+
+- Gapless playback, so albums play without breaks.
+- Crossfades between songs, also when skipping.
+- ReplayGain, so songs play at the same loudness (from tags, or measured).
+- Several speakers at once (sound card, HDMI, Bluetooth), kept in sync, with
+  a delay per speaker to line them up.
+
+**Casting**
+
+- Play the party on Chromecast and Google TV, DLNA TVs, receivers and
+  speakers, and Sonos, several at once, with or without local speakers.
+- Show the now-playing page on a TV that plays the music too.
+
+**Smart mixes and AI**
+
+- DJINN listens to your songs to find ones that sound alike: "more like
+  this", similar artists, and radio from a song, artist or genre.
+- The radio and auto mix learn from the party: requested songs come up more,
+  skipped ones less.
+- Search by description, like "80s rock" or "chill house".
+- Genres shown next to each song, with a page per genre.
+- Optional local AI, downloaded on request and run on your own computer:
+  tags songs that have no genre by how they sound, and understands free-form
+  searches like "chill songs for a dinner". Faster with an NVIDIA graphics
+  card.
+
+**Your library**
+
+- Reads MP3, FLAC, AAC/M4A, Ogg Vorbis and WAV, with tags and cover art.
+- Watches your music folders and picks up new songs.
+- Never changes your music files.
+- Optional online lookups: artist photos and bios, album covers and genres
+  from MusicBrainz, and identifying songs with missing tags by how they
+  sound (AcoustID). All kept in DJINN's own folder.
+
+**Running it**
+
+- Windows 10 and 11, and Linux, with installers that need no admin rights.
+- Lives in the system tray and starts with your computer if you like.
+- Updates itself from signed releases.
+
+## Planned
+
+### 0.3.0
+
+- **Edit song tags.** Correct wrong or missing titles, artists, albums,
+  years and genres from the app.
+- **Back up and restore.** Save everything DJINN knows (settings, users,
+  playlists, history, speakers and casts, artwork, analysis) to one file,
+  and restore it, or move it to another computer with your music in a
+  different place. Your music files aren't part of the backup.
+
+### 0.4.0
+
+- **Karaoke mode.**
+
+### Later
+
+- **Personal streaming.** Listen to your library on your own phone, apart
+  from the party.
+
+### Not planned for now
+
+- AirPlay.
+- Streaming services; DJINN plays your own music.

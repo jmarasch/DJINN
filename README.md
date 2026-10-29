@@ -26,6 +26,8 @@ has asked for anything, it keeps the music going on its own.
   if you turn them on, and are kept in DJINN's own folder.
 - **Updates itself** from signed releases on GitHub.
 
+What's in each release and what's planned next: [ROADMAP.md](ROADMAP.md).
+
 ## Install
 
 Downloads are on the [Releases page](https://github.com/jmarasch/DJINN/releases/latest).
