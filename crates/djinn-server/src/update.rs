@@ -295,21 +295,9 @@ pub async fn this_release() -> Result<Option<ReleaseFiles>, String> {
         )
     });
     let client = client()?;
-    let response = client
-        .get(url)
-        .header("accept", "application/vnd.github+json")
-        .send()
-        .await
-        .map_err(|e| format!("cannot reach GitHub: {e}"))?;
-    if response.status() == reqwest::StatusCode::NOT_FOUND {
+    let Some(release) = github_release(&client, url).await? else {
         return Ok(None);
-    }
-    let release: GitHubRelease = response
-        .error_for_status()
-        .map_err(|e| format!("GitHub said: {e}"))?
-        .json()
-        .await
-        .map_err(|e| format!("unexpected answer from GitHub: {e}"))?;
+    };
     let find = |name: &str| {
         release
             .assets
@@ -396,23 +384,32 @@ async fn latest() -> Result<Option<Release>, String> {
     // release key's signature.
     let url = std::env::var("DJINN_RELEASES_URL")
         .unwrap_or_else(|_| format!("https://api.github.com/repos/{REPOSITORY}/releases/latest"));
-    let response = client()?
+    let release = github_release(&client()?, url).await?;
+    Ok(release.map(|release| from_github(release, &asset_name())))
+}
+
+/// A release from GitHub's API; `None` if there isn't one (no releases
+/// yet, or the repository is private).
+async fn github_release(
+    client: &reqwest::Client,
+    url: String,
+) -> Result<Option<GitHubRelease>, String> {
+    let response = client
         .get(url)
         .header("accept", "application/vnd.github+json")
         .send()
         .await
         .map_err(|e| format!("cannot reach GitHub: {e}"))?;
-    // No releases yet, or the repository is private.
     if response.status() == reqwest::StatusCode::NOT_FOUND {
         return Ok(None);
     }
-    let release: GitHubRelease = response
+    let release = response
         .error_for_status()
         .map_err(|e| format!("GitHub said: {e}"))?
         .json()
         .await
         .map_err(|e| format!("unexpected answer from GitHub: {e}"))?;
-    Ok(Some(from_github(release, &asset_name())))
+    Ok(Some(release))
 }
 
 fn from_github(release: GitHubRelease, wanted: &str) -> Release {
