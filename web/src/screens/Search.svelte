@@ -9,6 +9,7 @@
 
   // Remember the last search when coming back from an album or artist.
   let query = $state(sessionStorage.getItem('djinn-search') ?? '')
+  let input = $state<HTMLInputElement>()
   let results = $state<SearchResults | null>(null)
   let loading = $state(false)
   /** The AI reader is reading the query. */
@@ -148,16 +149,31 @@
 
 <div class="search-box">
   <Icon name="search" />
-  <!-- svelte-ignore a11y_autofocus -->
-  <input
-    type="search"
-    placeholder="Search, or describe: 80s rock, chill house..."
-    bind:value={query}
-    autofocus
-    autocomplete="off"
-    autocapitalize="none"
-    enterkeyhint="search"
-  />
+  <div class="field">
+    <!-- svelte-ignore a11y_autofocus -->
+    <input
+      type="search"
+      placeholder="Search, or describe: 80s rock, chill house..."
+      bind:value={query}
+      bind:this={input}
+      autofocus
+      autocomplete="off"
+      autocapitalize="none"
+      enterkeyhint="search"
+    />
+    {#if query}
+      <button
+        class="clear"
+        aria-label="Clear the search"
+        onclick={() => {
+          query = ''
+          input?.focus()
+        }}
+      >
+        <Icon name="close" size={20} />
+      </button>
+    {/if}
+  </div>
 </div>
 
 {#if empty && !loading && !thinking && !described}
@@ -251,9 +267,38 @@
     color: var(--muted);
   }
 
+  .field {
+    position: relative;
+    flex: 1;
+    display: flex;
+  }
+
   .search-box input {
     flex: 1;
+    padding-right: 44px;
     font-size: 1.0625rem;
+  }
+
+  /* Our own clear button instead of the browser's, which not every browser
+     shows. */
+  .search-box input::-webkit-search-cancel-button {
+    appearance: none;
+  }
+
+  .clear {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 44px;
+    min-height: 0;
+    padding: 0;
+    background: transparent;
+    color: var(--muted);
+  }
+
+  .clear:hover {
+    color: var(--text);
   }
 
   .chips {
