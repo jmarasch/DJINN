@@ -430,16 +430,25 @@ fn from_github(release: GitHubRelease, wanted: &str) -> Release {
     Release {
         version: release.tag_name.trim_start_matches('v').to_owned(),
         url: release.html_url,
-        notes: release
-            .body
-            .unwrap_or_default()
-            .chars()
-            .take(4000)
-            .collect(),
+        notes: release_notes(release.body.as_deref().unwrap_or_default()),
         published_at: release.published_at,
         asset,
         sums,
     }
+}
+
+/// Ends the "Which file do I download?" guide at the top of each release
+/// (packaging/release-notes.md), which is for people downloading by hand.
+const GUIDE_END: &str = "<!-- end of the download guide";
+
+/// What a release changed, for Admin > About: its notes after the
+/// download guide, cut to a length the page can show.
+fn release_notes(body: &str) -> String {
+    let changes = match body.find(GUIDE_END) {
+        Some(at) => body[at..].split_once("-->").map_or("", |(_, rest)| rest),
+        None => body,
+    };
+    changes.trim().chars().take(4000).collect()
 }
 
 /// The release file for this computer: `djinn-linux-x86_64`,
@@ -714,5 +723,27 @@ mod tests {
             ..UpdateState::new()
         };
         assert!(dev.blocker(&release).is_some(), "a build folder");
+    }
+
+    #[test]
+    fn notes_leave_out_the_download_guide() {
+        let guide = include_str!("../../../packaging/release-notes.md");
+        let body = format!(
+            "{guide}
+## What's Changed
+* Party styles"
+        );
+        assert_eq!(
+            release_notes(&body),
+            "## What's Changed
+* Party styles"
+        );
+        assert_eq!(
+            release_notes(
+                "Just notes
+"
+            ),
+            "Just notes"
+        );
     }
 }

@@ -35,7 +35,9 @@ Both installs are for your user only and need no admin rights.
 
 ### Windows 10 and 11
 
-Download and run `djinn-setup-windows-x86_64.exe`.
+Download and run `djinn-setup-windows-x86_64.exe`. That's the installer; the
+other `.exe` on the page, `djinn-windows-x86_64.exe`, is the program on its
+own, which DJINN downloads when it updates itself.
 
 - The installer isn't code signed yet, so Windows may say "Windows protected
   your PC". Click **More info**, then **Run anyway**.

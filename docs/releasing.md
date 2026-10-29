@@ -31,8 +31,10 @@ printed public key in `update.rs`.
 3. The Release workflow (`.github/workflows/release.yml`) builds Linux and Windows binaries
    (`djinn-linux-x86_64`, `djinn-windows-x86_64.exe`) and the downloads
    for first installs (below), writes and signs `SHA256SUMS`, and
-   publishes the release with generated notes. Edit the notes on GitHub
-   if you like; the About tab shows them.
+   publishes the release with notes: the "Which file do I download?"
+   guide from `packaging/release-notes.md`, then the changes GitHub
+   generates. Edit the notes on GitHub if you like; Admin > About shows
+   what comes after the guide's closing comment.
 
 ## Installers
 
