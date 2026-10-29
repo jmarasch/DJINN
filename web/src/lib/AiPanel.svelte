@@ -341,8 +341,5 @@
 
   .small-button {
     align-self: flex-start;
-    min-height: 36px;
-    padding: 0 12px;
-    font-size: 0.8125rem;
   }
 </style>

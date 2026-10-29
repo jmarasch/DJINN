@@ -83,6 +83,12 @@ and requests are welcome at DJINN@newterrastudios.com or as an issue.
 
 ### 0.3.0
 
+- **Party styles.** Keep a separate memory for each kind of party
+  ("Halloween", "Family BBQ") and pick the one that fits tonight. The
+  auto mix learns from requests and skips per style, now for artists and
+  genres too, not just songs. Admin > Smart play turns it on or off, sets
+  how much it counts, can use it for shuffled playlists, shows what each
+  style learned, and clears a style's history.
 - **Edit song tags.** Correct wrong or missing titles, artists, albums,
   years and genres from the app.
 - **Back up and restore.** Save everything DJINN knows (settings, users,

@@ -7,6 +7,7 @@
   import { app, connect, isAdmin, refreshMe, refreshMode } from './lib/state.svelte'
   import Toasts from './lib/Toasts.svelte'
   import Admin from './screens/Admin.svelte'
+  import { adminTabFor } from './lib/adminTabs'
   import AlbumView from './screens/AlbumView.svelte'
   import ArtistView from './screens/ArtistView.svelte'
   import GuestJoin from './screens/GuestJoin.svelte'
@@ -50,16 +51,7 @@
   const artistId = $derived(param('/artist'))
   const playlistId = $derived(param('/playlist'))
   const similarId = $derived(param('/similar'))
-  const adminTab = $derived(
-    (route.path.match(/^\/admin\/(library|audio|ai|users|log|rules|about)$/)?.[1] ?? 'library') as
-      | 'library'
-      | 'audio'
-      | 'ai'
-      | 'users'
-      | 'log'
-      | 'rules'
-      | 'about',
-  )
+  const adminTab = $derived(adminTabFor(route.path))
   const tab = $derived(
     route.path.startsWith('/search') || albumId || artistId || similarId || genreName
       ? 'search'

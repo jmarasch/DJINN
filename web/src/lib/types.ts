@@ -535,3 +535,47 @@ export interface IdentificationRow {
   current_album: string | null
   current_year: number | null
 }
+
+/** Smart play's switches (Admin > Smart play). */
+export interface SmartPlaySettings {
+  smart_play: boolean
+  smart_playlists: boolean
+  /** How much what parties did counts, 0 to 100. */
+  strength: number
+}
+
+/** A party style: a separate memory of what one kind of party liked. */
+export interface PartyStyle {
+  id: number
+  name: string
+  requests: number
+  plays: number
+  created_at: number
+}
+
+export interface SmartPlay extends SmartPlaySettings {
+  /** The style in use. */
+  active: number | null
+  styles: PartyStyle[]
+}
+
+/** The most favored and most avoided, strongest first. */
+export interface Extremes<T> {
+  favored: T[]
+  avoided: T[]
+}
+
+export interface LearnedSong {
+  track: Track
+  /** Above 1 favored, below 1 avoided. */
+  weight: number
+  requests: number
+  finished: number
+  skipped: number
+}
+
+export interface Learned {
+  songs: Extremes<LearnedSong>
+  artists: Extremes<{ artist: ArtistSummary; weight: number }>
+  genres: Extremes<{ name: string; weight: number }>
+}

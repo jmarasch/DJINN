@@ -248,10 +248,7 @@
 
   .small-button {
     flex: none;
-    min-height: 36px;
     margin-top: 16px;
-    padding: 0 12px;
-    font-size: 0.8125rem;
   }
 
   .search-box {

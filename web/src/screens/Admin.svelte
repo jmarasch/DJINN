@@ -10,21 +10,13 @@
   import OutputsPanel from '../lib/OutputsPanel.svelte'
   import PublicNetworkNote from '../lib/PublicNetworkNote.svelte'
   import ReplayGainPanel from '../lib/ReplayGainPanel.svelte'
+  import SmartPlayPanel from '../lib/SmartPlayPanel.svelte'
+  import { adminTabRows, type AdminTab } from '../lib/adminTabs'
   import Sheet from '../lib/Sheet.svelte'
   import { app, logout, toast } from '../lib/state.svelte'
   import type { GuestSummary, LibraryRoot, RequestLogEntry, Role, Settings, User } from '../lib/types'
 
-  type Tab = 'library' | 'audio' | 'ai' | 'users' | 'log' | 'rules' | 'about'
-  let { tab = 'library' }: { tab?: Tab } = $props()
-  const tabs: { id: Tab; label: string }[] = [
-    { id: 'library', label: 'Library' },
-    { id: 'audio', label: 'Audio' },
-    { id: 'ai', label: 'AI' },
-    { id: 'users', label: 'Users' },
-    { id: 'log', label: 'Log' },
-    { id: 'rules', label: 'Rules' },
-    { id: 'about', label: 'About' },
-  ]
+  let { tab = 'library' }: { tab?: AdminTab } = $props()
 
   let roots = $state<LibraryRoot[]>([])
   let trackCount = $state(0)
@@ -40,7 +32,7 @@
     load(tab).catch((e) => toast(e.message, true))
   })
 
-  async function load(which: Tab) {
+  async function load(which: AdminTab) {
     if (which === 'library') {
       const [r, status, s, rg] = await Promise.all([
         api.libraryRoots(),
@@ -54,8 +46,8 @@
       artDir = status.art_dir
       settings = s
       if (status.last_scan) app.scan = status.last_scan
-    } else if (which === 'audio') {
-      // The audio panels load their own data.
+    } else if (which === 'audio' || which === 'smart') {
+      // These panels load their own data.
     } else if (which === 'users') {
       ;[users, guests] = await Promise.all([api.users(), api.guests()])
     } else if (which === 'log') {
@@ -170,8 +162,12 @@
 <h1>Admin</h1>
 <PublicNetworkNote />
 <nav class="tabs" aria-label="Admin sections">
-  {#each tabs as t (t.id)}
-    <a href="#/admin/{t.id}" class:active={tab === t.id} aria-current={tab === t.id ? 'page' : undefined}>{t.label}</a>
+  {#each adminTabRows as row, i (i)}
+    <div class="tab-row">
+      {#each row as t (t.id)}
+        <a href="#/admin/{t.id}" class:active={tab === t.id} aria-current={tab === t.id ? 'page' : undefined}>{t.label}</a>
+      {/each}
+    </div>
   {/each}
 </nav>
 
@@ -268,6 +264,8 @@
   <OutputsPanel />
   <CastPanel />
   <ReplayGainPanel />
+{:else if tab === 'smart'}
+  <SmartPlayPanel />
 {:else if tab === 'ai'}
   <AiPanel />
   <IdentifyPanel />
@@ -445,11 +443,17 @@
 <style>
   .tabs {
     display: flex;
+    flex-direction: column;
     gap: 4px;
     margin-bottom: 14px;
     padding: 4px;
     border-radius: 12px;
     background: var(--surface);
+  }
+
+  .tab-row {
+    display: flex;
+    gap: 4px;
   }
 
   .tabs a {
@@ -508,8 +512,6 @@
   }
 
   .small-button {
-    min-height: 36px;
-    padding: 0 12px;
     font-size: 0.875rem;
   }
 
