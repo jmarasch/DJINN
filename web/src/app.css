@@ -211,6 +211,16 @@ label {
   font-size: 0.8125rem;
 }
 
+/* A rounded action under a page's heading, such as Queue all. */
+.pill {
+  min-height: 36px;
+  margin-top: 10px;
+  padding: 0 14px;
+  gap: 6px;
+  border-radius: 999px;
+  font-size: 0.875rem;
+}
+
 /* A button that's just an icon, such as a song's menu. */
 .icon-only {
   flex: none;

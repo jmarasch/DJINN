@@ -22,15 +22,5 @@
 </script>
 
 {#if isAdmin()}
-  <button class="all" disabled={busy} onclick={queueAll}><Icon name="queue" size={18} /> Queue all</button>
+  <button class="pill" disabled={busy} onclick={queueAll}><Icon name="queue" size={18} /> Queue all</button>
 {/if}
-
-<style>
-  .all {
-    min-height: 36px;
-    margin-top: 10px;
-    padding: 0 14px;
-    border-radius: 999px;
-    font-size: 0.875rem;
-  }
-</style>

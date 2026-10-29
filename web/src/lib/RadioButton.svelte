@@ -23,16 +23,5 @@
 </script>
 
 {#if isAdmin()}
-  <button class="radio" disabled={busy} onclick={start}><Icon name="radio" size={18} /> {label}</button>
+  <button class="pill" disabled={busy} onclick={start}><Icon name="radio" size={18} /> {label}</button>
 {/if}
-
-<style>
-  .radio {
-    min-height: 36px;
-    margin-top: 10px;
-    padding: 0 14px;
-    gap: 6px;
-    border-radius: 999px;
-    font-size: 0.875rem;
-  }
-</style>

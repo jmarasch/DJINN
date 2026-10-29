@@ -65,7 +65,7 @@
         <QueueAll kind="album" refId={album.id} />
         <AddToPlaylist kind="album" refId={album.id} label={album.title} />
         {#if isAdmin()}
-          <button onclick={() => (editing = true)}><Icon name="edit" size={18} /> Edit album</button>
+          <button class="pill" onclick={() => (editing = true)}><Icon name="edit" size={18} /> Edit album</button>
         {/if}
       </div>
     </div>

@@ -67,7 +67,7 @@
       <Icon name="playlist" size={20} />
     </button>
   {:else}
-    <button class="add" onclick={show}><Icon name="playlist" size={18} /> Add to playlist</button>
+    <button class="pill" onclick={show}><Icon name="playlist" size={18} /> Add to playlist</button>
   {/if}
   {#if open}
     <Sheet title="Add {label} to..." onclose={() => (open = false)}>
@@ -87,14 +87,6 @@
 {/if}
 
 <style>
-  .add {
-    min-height: 36px;
-    margin-top: 10px;
-    padding: 0 14px;
-    border-radius: 999px;
-    font-size: 0.875rem;
-  }
-
   .row {
     width: 100%;
     justify-content: flex-start;
