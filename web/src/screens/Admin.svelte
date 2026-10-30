@@ -440,9 +440,10 @@
       <button class="primary">Save</button>
     </form>
   </section>
+{:else if tab === 'system'}
+  <BackupPanel />
 {:else if tab === 'about'}
   <AboutPanel />
-  <BackupPanel />
 {/if}
 
 <button class="signout" onclick={logout}>Sign out</button>

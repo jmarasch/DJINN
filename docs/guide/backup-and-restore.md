@@ -1,7 +1,7 @@
 # Back up and restore
 
-Admin > About > **Back up and restore** saves everything DJINN knows to one
-file, and puts it back, on this computer or a new one.
+Admin > **System** > **Back up and restore** saves everything DJINN knows
+to one file, and puts it back, on this computer or a new one.
 
 A backup holds your settings, accounts, playlists, play and request history,
 party styles, speakers and casts, tag corrections, song analysis, and the
