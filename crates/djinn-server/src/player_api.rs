@@ -35,7 +35,7 @@ pub fn router() -> Router<AppState> {
 }
 
 /// Maps queue rule violations to client errors; anything else is a 500.
-fn queue_error(err: QueueError) -> ApiError {
+pub(crate) fn queue_error(err: QueueError) -> ApiError {
     match err {
         QueueError::Add(AddRequestError::NotFound) | QueueError::NotFound => ApiError::not_found(),
         QueueError::Add(

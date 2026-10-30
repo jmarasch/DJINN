@@ -42,6 +42,63 @@ export interface TwoStepSetup {
   qr_svg: string
 }
 
+/** DJINN GO: a song's file links. */
+export interface PlayLinks {
+  url: string
+  download_url: string | null
+  /** The file's type, to check this device can play it. */
+  mime: string
+  /** Volume for even loudness, 1 for unchanged. */
+  gain: number
+}
+
+export interface GoPlaylist {
+  id: number
+  user_id: number
+  owner: string
+  name: string
+  shared: boolean
+  tracks: number
+  updated_at: number
+}
+
+export interface GoPlaylistDetail extends GoPlaylist {
+  songs: Track[]
+}
+
+export interface GoResume {
+  queue: number[]
+  position: number
+  position_ms: number
+  updated_at: number
+  songs: Track[]
+}
+
+export interface GoHome {
+  resume: GoResume | null
+  recent: Track[]
+  playlists: GoPlaylist[]
+  newest: Track[]
+}
+
+export type LikeKind = 'track' | 'album' | 'artist'
+
+export interface LikedIds {
+  tracks: number[]
+  albums: number[]
+  artists: number[]
+}
+
+export interface Liked {
+  tracks: Track[]
+  albums: Album[]
+  artists: ArtistSummary[]
+}
+
+export interface Played extends Track {
+  played_at: number
+}
+
 export interface GoListener {
   username: string
   title: string

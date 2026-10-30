@@ -1,5 +1,14 @@
 import type {
   About,
+  GoHome,
+  GoPlaylist,
+  GoPlaylistDetail,
+  GoResume,
+  LikeKind,
+  Liked,
+  LikedIds,
+  PlayLinks,
+  Played,
   GoStatus,
   NeedsCode,
   SignIn,
@@ -115,7 +124,29 @@ export const api = {
   signOutMyDevice: (id: number) => del<void>(`/me/sessions/${id}`),
   signOutMyOtherDevices: () => del<void>('/me/sessions'),
   /** DJINN GO: a short-lived link to a song's file (GO port only). */
-  playLinks: (trackId: number) => get<{ url: string; download_url: string | null }>(`/go/play/${trackId}`),
+  playLinks: (trackId: number) => get<PlayLinks>(`/go/play/${trackId}`),
+  goHome: () => get<GoHome>('/go/home'),
+  goLiked: () => get<Liked>('/go/likes'),
+  goLikedIds: () => get<LikedIds>('/go/likes/ids'),
+  goLike: (kind: LikeKind, id: number, on: boolean) =>
+    on ? put<void>(`/go/likes/${kind}/${id}`, {}) : del<void>(`/go/likes/${kind}/${id}`),
+  goPlayed: (trackId: number, msPlayed: number) =>
+    post<void>('/go/plays', { track_id: trackId, ms_played: Math.round(msPlayed) }),
+  goHistory: (offset = 0) => get<Played[]>(`/go/history?offset=${offset}`),
+  goResume: () => get<GoResume | null>('/go/resume'),
+  goSaveResume: (queue: number[], position: number, positionMs: number) =>
+    put<void>('/go/resume', { queue, position, position_ms: Math.round(positionMs) }),
+  goPlaylists: () => get<GoPlaylist[]>('/go/playlists'),
+  goPlaylist: (id: number) => get<GoPlaylistDetail>(`/go/playlists/${id}`),
+  goCreatePlaylist: (name: string, songs: number[] = []) =>
+    post<GoPlaylistDetail>('/go/playlists', { name, songs }),
+  goUpdatePlaylist: (id: number, changes: { name?: string; shared?: boolean }) =>
+    patch<void>(`/go/playlists/${id}`, changes),
+  goDeletePlaylist: (id: number) => del<void>(`/go/playlists/${id}`),
+  goAddToPlaylist: (id: number, songs: number[]) => post<void>(`/go/playlists/${id}/songs`, { songs }),
+  goSetPlaylistSongs: (id: number, songs: number[]) => put<void>(`/go/playlists/${id}/songs`, { songs }),
+  goRadio: (trackId: number) => get<Track[]>(`/go/radio/${trackId}`),
+  goSendToParty: (trackId: number) => post<{ outcome: 'added' | 'backed' }>(`/go/party/${trackId}`),
   goStatus: () => get<GoStatus>('/go/status'),
   saveGoSettings: (settings: { enabled: boolean; trusted_proxies: string; admin_two_step: boolean }) =>
     put<GoStatus>('/go/settings', settings),

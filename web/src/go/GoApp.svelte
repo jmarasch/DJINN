@@ -1,30 +1,30 @@
 <script lang="ts">
-  // DJINN GO: your own listening, apart from the party. Sign in, find a
-  // song, and it plays here; the song file comes as it is and this device
-  // plays it. Stage 3 adds your own queue, likes, playlists and history.
+  // DJINN GO: your own listening, apart from the party. The song files
+  // come as they are and this device plays them.
   import { onMount } from 'svelte'
   import AccountPanels from '../lib/AccountPanels.svelte'
   import { api, ApiError } from '../lib/api'
-  import Art from '../lib/Art.svelte'
-  import { duration } from '../lib/format'
+  import Icon from '../lib/Icon.svelte'
+  import { param, route } from '../lib/router.svelte'
   import { app } from '../lib/state.svelte'
   import Toasts from '../lib/Toasts.svelte'
   import TwoStepPanel from '../lib/TwoStepPanel.svelte'
-  import type { Track } from '../lib/types'
   import Login from '../screens/Login.svelte'
   import Signup from '../screens/Signup.svelte'
+  import AddToPlaylist from './AddToPlaylist.svelte'
+  import { loadLikes, player, stop } from './player.svelte'
+  import PlayerBar from './PlayerBar.svelte'
+  import SongMenu from './SongMenu.svelte'
+  import Album from './views/Album.svelte'
+  import Artist from './views/Artist.svelte'
+  import Home from './views/Home.svelte'
+  import Library from './views/Library.svelte'
+  import Playlist from './views/Playlist.svelte'
+  import Search from './views/Search.svelte'
 
   let ready = $state(false)
   let signingUp = $state(location.pathname === '/signup')
-  let view = $state<'music' | 'account'>('music')
-  let query = $state('')
-  let tracks = $state<Track[]>([])
-  let listTitle = $state('Newest songs')
-  let current = $state<Track | null>(null)
-  let downloadUrl = $state<string | null>(null)
   let error = $state('')
-  let audio = $state<HTMLAudioElement | undefined>()
-  let searchTimer: ReturnType<typeof setTimeout> | undefined
 
   onMount(async () => {
     await refresh()
@@ -34,100 +34,48 @@
   async function refresh() {
     try {
       app.me = await api.me()
+      error = ''
     } catch (e) {
       app.me = null
       if (e instanceof ApiError && e.status !== 401) error = e.message
       app.mode = await api.mode().catch(() => null)
     }
-    if (canListen()) await loadNewest()
+    if (canListen()) loadLikes().catch(() => {})
   }
 
   const canListen = () =>
     !!app.me && !!app.me.permissions?.go && !(app.me.two_step_required && !app.me.two_step)
 
   async function signedIn() {
-    error = ''
     signingUp = false
+    if (location.pathname === '/signup') history.replaceState(null, '', '/')
     await refresh()
   }
 
-  async function loadNewest() {
-    try {
-      tracks = (await api.tracks('added', 0)).items
-      listTitle = 'Newest songs'
-    } catch (e) {
-      error = e instanceof Error ? e.message : 'Could not load songs'
-    }
-  }
-
-  function typed() {
-    clearTimeout(searchTimer)
-    searchTimer = setTimeout(async () => {
-      const q = query.trim()
-      if (!q) return loadNewest()
-      try {
-        tracks = (await api.search(q)).tracks
-        listTitle = `Songs matching "${q}"`
-      } catch (e) {
-        error = e instanceof Error ? e.message : 'Search failed'
-      }
-    }, 250)
-  }
-
-  async function play(track: Track) {
-    error = ''
-    try {
-      const links = await api.playLinks(track.id)
-      current = track
-      downloadUrl = links.download_url
-      if (audio) {
-        audio.src = links.url
-        await audio.play()
-      }
-      setMediaSession(track)
-    } catch (e) {
-      error = e instanceof Error ? e.message : 'Could not play that song'
-    }
-  }
-
-  /** Plays the next song in the list when one ends. */
-  function next() {
-    if (!current) return
-    const at = tracks.findIndex((t) => t.id === current!.id)
-    const following = tracks[at + 1]
-    if (following) play(following)
-  }
-
-  function previous() {
-    if (!current) return
-    const at = tracks.findIndex((t) => t.id === current!.id)
-    if (at > 0) play(tracks[at - 1])
-  }
-
-  function setMediaSession(track: Track) {
-    if (!('mediaSession' in navigator)) return
-    navigator.mediaSession.metadata = new MediaMetadata({
-      title: track.title,
-      artist: track.artist ?? '',
-      album: track.album ?? '',
-      artwork: track.art_hash ? [{ src: `/api/art/${track.art_hash}?size=512`, sizes: '512x512' }] : [],
-    })
-    navigator.mediaSession.setActionHandler('nexttrack', next)
-    navigator.mediaSession.setActionHandler('previoustrack', previous)
-  }
-
-  /** The browser couldn't play the file: often a format it doesn't know. */
-  function playbackFailed() {
-    if (current) error = `This device can't play "${current.title}". Try another song.`
-  }
-
   async function signOut() {
-    audio?.pause()
+    stop()
     await api.logout().catch(() => {})
     app.me = null
-    current = null
     app.mode = await api.mode().catch(() => null)
   }
+
+  const albumId = $derived(param('/album'))
+  const artistId = $derived(param('/artist'))
+  const playlistId = $derived(param('/playlist'))
+  const section = $derived(
+    route.path.startsWith('/search')
+      ? 'search'
+      : route.path.startsWith('/library') || playlistId
+        ? 'library'
+        : route.path.startsWith('/account')
+          ? 'account'
+          : albumId || artistId
+            ? 'search'
+            : 'home',
+  )
+  const librarySection = $derived(
+    route.path === '/library/playlists' ? 'playlists' : route.path === '/library/history' ? 'history' : 'liked',
+  )
 </script>
 
 <Toasts />
@@ -161,167 +109,98 @@
     <button class="text-button" onclick={signOut}>Sign out</button>
   </main>
 {:else}
-  <main class="go" class:playing={current}>
-    <header>
-      <h1>DJINN GO</h1>
-      <nav>
-        <button class:active={view === 'music'} onclick={() => (view = 'music')}>Music</button>
-        <button class:active={view === 'account'} onclick={() => (view = 'account')}>Account</button>
-      </nav>
-    </header>
-
-    {#if view === 'account'}
+  <header>
+    <a class="brand" href="#/">DJINN GO</a>
+    <nav>
+      <a href="#/" class:active={section === 'home'} aria-label="Home"><Icon name="home" /><span>Home</span></a>
+      <a href="#/search" class:active={section === 'search'} aria-label="Search"><Icon name="search" /><span>Search</span></a>
+      <a href="#/library" class:active={section === 'library'} aria-label="Your library">
+        <Icon name="heart-outline" /><span>Library</span>
+      </a>
+      <a href="#/account" class:active={section === 'account'} aria-label="Account"><Icon name="settings" /><span>Account</span></a>
+    </nav>
+  </header>
+  <main class="go" class:playing={player.index >= 0}>
+    {#if albumId}
+      <Album id={albumId} />
+    {:else if artistId}
+      <Artist id={artistId} />
+    {:else if playlistId}
+      <Playlist id={playlistId} />
+    {:else if section === 'search'}
+      <Search />
+    {:else if section === 'library'}
+      <Library section={librarySection} />
+    {:else if section === 'account'}
+      <h1>Your account</h1>
       <p class="muted">Signed in as <b>{app.me.username}</b>{#if app.me.role_name} ({app.me.role_name}){/if}.</p>
       <AccountPanels />
       <button class="signout" onclick={signOut}>Sign out</button>
     {:else}
-      <input
-        class="search"
-        type="search"
-        placeholder="Search songs, artists, albums"
-        bind:value={query}
-        oninput={typed}
-        aria-label="Search"
-      />
-      {#if error}<p class="error">{error}</p>{/if}
-      <h2>{listTitle}</h2>
-      {#each tracks as track (track.id)}
-        <button class="track" class:current={current?.id === track.id} onclick={() => play(track)}>
-          <Art hash={track.art_hash} size={44} />
-          <span class="grow">
-            <span class="title">{track.title}</span>
-            <span class="muted small">{[track.artist, track.album].filter(Boolean).join(' · ')}</span>
-          </span>
-          <span class="muted small">{duration(track.duration_ms)}</span>
-        </button>
-      {:else}
-        <p class="muted">No songs found.</p>
-      {/each}
+      <Home />
     {/if}
   </main>
+  <PlayerBar />
+  <SongMenu />
+  <AddToPlaylist />
 {/if}
 
-<div class="player" hidden={!app.me || !current}>
-  {#if current}
-    <div class="now">
-      <Art hash={current.art_hash} size={44} />
-      <div class="grow">
-        <div class="title">{current.title}</div>
-        <div class="muted small">{current.artist ?? ''}</div>
-      </div>
-      {#if downloadUrl}<a class="small" href={downloadUrl} download>Download</a>{/if}
-    </div>
-  {/if}
-  <audio bind:this={audio} controls onended={next} onerror={playbackFailed}></audio>
-</div>
-
 <style>
-  .go {
-    max-width: 720px;
-    margin: 0 auto;
-    padding: 16px 16px 24px;
-  }
-
-  .go.playing {
-    padding-bottom: 150px;
-  }
-
   header {
+    position: sticky;
+    top: 0;
+    z-index: 10;
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    margin-bottom: 12px;
+    max-width: 760px;
+    margin: 0 auto;
+    padding: calc(10px + env(safe-area-inset-top)) 16px 10px;
+    background: var(--bg);
   }
 
-  header h1 {
-    margin: 0;
+  .brand {
+    color: var(--text);
+    font-weight: 700;
+    text-decoration: none;
   }
 
   nav {
     display: flex;
+    gap: 4px;
+  }
+
+  nav a {
+    display: flex;
+    align-items: center;
     gap: 6px;
-  }
-
-  nav button {
-    min-height: 36px;
-    padding: 0 14px;
+    padding: 8px 10px;
     border-radius: 999px;
+    color: var(--muted);
+    text-decoration: none;
   }
 
-  nav button.active {
-    background: var(--accent);
-    color: var(--accent-text);
+  nav a.active {
+    background: var(--surface-2);
+    color: var(--text);
   }
 
-  .search {
-    width: 100%;
+  /* Icons only on narrow phones. */
+  @media (max-width: 520px) {
+    nav a span {
+      display: none;
+    }
   }
 
-  h2 {
-    margin: 18px 0 6px;
-    font-size: 1rem;
-  }
-
-  .track {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    width: 100%;
-    padding: 6px 4px;
-    border-radius: 10px;
-    background: transparent;
-    color: inherit;
-    text-align: left;
-  }
-
-  .track.current .title {
-    color: var(--accent);
-  }
-
-  .grow {
-    display: flex;
-    flex: 1;
-    flex-direction: column;
-    min-width: 0;
-  }
-
-  .title {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .player {
-    position: fixed;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
-    border-top: 1px solid var(--line);
-    background: var(--surface);
-  }
-
-  .player[hidden] {
-    display: none;
-  }
-
-  .now {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    max-width: 720px;
-    width: 100%;
+  .go {
+    max-width: 760px;
     margin: 0 auto;
+    padding: 4px 16px 24px;
   }
 
-  audio {
-    width: 100%;
-    max-width: 720px;
-    margin: 0 auto;
+  .go.playing {
+    padding-bottom: 96px;
   }
 
   .text-button {

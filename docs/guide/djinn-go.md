@@ -27,8 +27,31 @@ Who can use it is set per role under Admin > **Users** (see
 
 Admins can always use GO.
 
-In 0.4.0, GO plays a song, then the next one in the list. Your own queue,
-likes, playlists, history and radio are on the way.
+## Listening
+
+- **Home** carries on where you left off (on this device or another), and
+  shows what you played lately, your playlists, and what's new.
+- **Search** finds songs, albums and artists. Tap a song to play it; the
+  songs after it follow.
+- **The player** along the bottom opens to Now Playing: seek, shuffle,
+  repeat (all, or one song), and **Up next**, where you can jump to a song
+  or take it out. The next song loads before the current one ends, so
+  albums play on with hardly a gap. Lock-screen and headphone buttons work.
+- **A song's menu** (the dots): play next, add to the queue, start radio
+  from it, like it, add it to a playlist, go to its album or artist, send it
+  to the party, or download it if your role allows.
+- **Radio** plays songs that sound like the one you start from, and keeps
+  going. It leaves out songs you heard in the last few hours and puts ones
+  you skipped lately at the end. Without sound analysis, it plays the same
+  artist and genre.
+- **Library:** your liked songs, albums and artists (the heart), your
+  playlists, and your history. Share a playlist with other GO listeners if
+  your role allows it.
+- **Send to the party** requests the song at the party, like the party app
+  does, when you're at home. Your own listening never changes what the
+  party learns.
+- **Even volume:** when ReplayGain is on for the party (Admin > Audio), GO
+  applies the same levels on your device.
 
 ## Formats
 

@@ -254,6 +254,24 @@ const ROUTES: &[(Method, &str, Access)] = &[
     (Method::GET, "/api/genres", Access::Listener),
     (Method::GET, "/api/genres/*", Access::Listener),
     (Method::GET, "/api/go/play/*", Access::Listener),
+    (Method::GET, "/api/go/home", Access::Listener),
+    (Method::GET, "/api/go/likes", Access::Listener),
+    (Method::GET, "/api/go/likes/ids", Access::Listener),
+    (Method::PUT, "/api/go/likes/*/*", Access::Listener),
+    (Method::DELETE, "/api/go/likes/*/*", Access::Listener),
+    (Method::POST, "/api/go/plays", Access::Listener),
+    (Method::GET, "/api/go/history", Access::Listener),
+    (Method::GET, "/api/go/resume", Access::Listener),
+    (Method::PUT, "/api/go/resume", Access::Listener),
+    (Method::GET, "/api/go/playlists", Access::Listener),
+    (Method::POST, "/api/go/playlists", Access::Listener),
+    (Method::GET, "/api/go/playlists/*", Access::Listener),
+    (Method::PATCH, "/api/go/playlists/*", Access::Listener),
+    (Method::DELETE, "/api/go/playlists/*", Access::Listener),
+    (Method::POST, "/api/go/playlists/*/songs", Access::Listener),
+    (Method::PUT, "/api/go/playlists/*/songs", Access::Listener),
+    (Method::GET, "/api/go/radio/*", Access::Listener),
+    (Method::POST, "/api/go/party/*", Access::Listener),
 ];
 
 fn matches(pattern: &str, path: &str) -> bool {
@@ -363,6 +381,29 @@ struct PlayLinks {
     url: String,
     /// Saves the file, when the role allows downloads.
     download_url: Option<String>,
+    /// The file's type, so the player can check it can play it.
+    mime: &'static str,
+    /// Volume for even loudness (ReplayGain, as set for the party), 1 for
+    /// unchanged. The device applies it.
+    gain: f32,
+}
+
+/// The type browsers know a song file by.
+fn mime_for(path: &std::path::Path) -> &'static str {
+    let ext = path
+        .extension()
+        .map(|e| e.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
+    match ext.as_str() {
+        "mp3" => "audio/mpeg",
+        "flac" => "audio/flac",
+        "m4a" | "mp4" | "m4b" | "aac" | "alac" => "audio/mp4",
+        "ogg" | "oga" => "audio/ogg",
+        "opus" => "audio/ogg; codecs=opus",
+        "wav" => "audio/wav",
+        "webm" => "audio/webm",
+        _ => "application/octet-stream",
+    }
 }
 
 /// A short-lived link to one song's file. Only on the GO port.
@@ -386,6 +427,13 @@ async fn play(
         .await?
         .ok_or_else(ApiError::not_found)?;
     let permissions = state.store.permissions(&me.user).await?;
+    let path = PathBuf::from(path);
+    let mime = mime_for(&path);
+    let replay_gain = state.jukebox.lock().await.replay_gain();
+    let gain = match state.store.gain_info(id).await? {
+        Some(info) => replay_gain.linear(&info),
+        None => 1.0,
+    };
     let token = new_token()?;
     let now = Instant::now();
     if let Ok(mut grants) = state.go.grants.lock() {
@@ -400,7 +448,7 @@ async fn play(
                     Some(artist) => format!("{artist} - {}", track.title),
                     None => track.title.clone(),
                 },
-                path: PathBuf::from(path),
+                path,
                 max_streams: permissions.max_streams,
                 downloads: permissions.downloads,
                 expires: now + GRANT_LIFE,
@@ -411,6 +459,8 @@ async fn play(
     Ok(Json(PlayLinks {
         download_url: permissions.downloads.then(|| format!("{url}?download=1")),
         url,
+        mime,
+        gain,
     }))
 }
 
@@ -900,6 +950,108 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn your_own_library_on_go() {
+        let state = AppState::for_tests().await;
+        state.go.enabled.store(true, Ordering::Relaxed);
+        let songs: Vec<djinn_store::ScannedTrack> = (0..4)
+            .map(|i| djinn_store::ScannedTrack {
+                path: format!("/m/{i}.flac"),
+                title: format!("Song {i}"),
+                artist: Some("Band".into()),
+                album: Some("Record".into()),
+                genre: Some("Rock".into()),
+                ..djinn_store::ScannedTrack::default()
+            })
+            .collect();
+        state.store.save_scanned(&songs).await.unwrap();
+        let ids: Vec<i64> = state
+            .store
+            .tracks_page(djinn_store::TrackSort::Title, 0, 10)
+            .await
+            .unwrap()
+            .items
+            .iter()
+            .map(|t| t.id)
+            .collect();
+        let away = djinn_store::Permissions {
+            go: true,
+            go_remote: true,
+            ..djinn_store::Permissions::default()
+        };
+        let role = state.store.create_role("Away", &away).await.unwrap();
+        account(&state, "sam", role.id).await;
+        let (_, _, cookie) = go(
+            &state,
+            Method::POST,
+            "/api/auth/login",
+            Some(&login("sam")),
+            None,
+        )
+        .await;
+        let sam = cookie.unwrap();
+        let call = |method: Method, path: String, body: Option<String>| {
+            let state = state.clone();
+            let sam = sam.clone();
+            async move { go(&state, method, &path, body.as_deref(), Some(&sam)).await }
+        };
+
+        let (status, _, _) =
+            call(Method::PUT, format!("/api/go/likes/track/{}", ids[1]), None).await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        let (_, text, _) = call(Method::GET, "/api/go/likes/ids".into(), None).await;
+        assert_eq!(field(&text, "tracks"), serde_json::json!([ids[1]]));
+
+        let body = format!(r#"{{"name":"Road trip","songs":[{},{}]}}"#, ids[2], ids[0]);
+        let (status, text, _) = call(Method::POST, "/api/go/playlists".into(), Some(body)).await;
+        assert_eq!(status, StatusCode::CREATED, "{text}");
+        let list = field(&text, "id");
+        // This role can't share playlists.
+        let (status, _, _) = call(
+            Method::PATCH,
+            format!("/api/go/playlists/{list}"),
+            Some(r#"{"shared":true}"#.into()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+
+        let report = format!(r#"{{"track_id":{},"ms_played":120000}}"#, ids[0]);
+        let (status, _, _) = call(Method::POST, "/api/go/plays".into(), Some(report)).await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        let resume = format!(
+            r#"{{"queue":[{},{}],"position":1,"position_ms":5000}}"#,
+            ids[0], ids[1]
+        );
+        call(Method::PUT, "/api/go/resume".into(), Some(resume)).await;
+        let (status, text, _) = call(Method::GET, "/api/go/home".into(), None).await;
+        assert_eq!(status, StatusCode::OK, "{text}");
+        let home: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(home["resume"]["position_ms"], 5000);
+        assert_eq!(home["recent"][0]["id"], ids[0]);
+        assert_eq!(home["playlists"][0]["name"], "Road trip");
+
+        // Radio without sound analysis: the seed, then same artist and genre,
+        // leaving out what was just heard.
+        let (status, text, _) = call(Method::GET, format!("/api/go/radio/{}", ids[3]), None).await;
+        assert_eq!(status, StatusCode::OK, "{text}");
+        let radio: Vec<i64> = serde_json::from_str::<Vec<serde_json::Value>>(&text)
+            .unwrap()
+            .iter()
+            .map(|t| t["id"].as_i64().unwrap())
+            .collect();
+        assert_eq!(radio[0], ids[3]);
+        assert!(!radio.contains(&ids[0]), "heard just now");
+        assert!(radio.contains(&ids[1]));
+
+        // Away from home (tests have no address), the party is out of reach.
+        let (status, _, _) = call(Method::POST, format!("/api/go/party/{}", ids[1]), None).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+
+        // These only exist on the GO port.
+        let (status, _) = crate::test_util::get_body(&state, "/api/go/home", &sam).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]

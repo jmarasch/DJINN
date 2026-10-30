@@ -20,6 +20,7 @@ mod error;
 mod events;
 mod folders;
 mod go;
+mod go_library;
 mod gpu;
 mod identify_api;
 mod jukebox;

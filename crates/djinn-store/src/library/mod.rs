@@ -71,6 +71,7 @@ macro_rules! album_columns {
         "al.id, al.title, al.artist_id, ar.name AS artist, al.year, al.art_hash, al.genres"
     };
 }
+pub(crate) use album_columns;
 
 #[derive(Clone, Debug, PartialEq, Serialize, FromRow)]
 pub struct Artist {
