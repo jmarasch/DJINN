@@ -9,8 +9,9 @@ network as DJINN. What happens next depends on
 - **Guest mode on:** they type a name and they're in, no account needed. The
   name shows next to the songs they add. Next time, the same phone is welcomed
   back by name.
-- **Guest mode off:** they sign in with an account you made for them under
-  Admin > Users.
+- **Guest mode off:** they sign in with an account: one you made, one they
+  made from an invite link, or one they signed up for, if you allow that. See
+  [Accounts and roles](accounts-and-roles.md).
 
 Hosts sign in with **Host sign in** at the bottom of the guest screen.
 
@@ -24,8 +25,9 @@ queue. Requests play in order, before anything from the auto mix.
   up arrow next to it on the Queue tab ("Ask for it too"). It uses one of your
   requests, and songs more people want play first.
 - **Limits:** each person can have a few songs queued at once (3 by default)
-  and the whole queue can be capped. See [Rules](rules.md). Admins, and people
-  you mark **No limit** under Admin > Users, aren't limited.
+  and the whole queue can be capped. See [Rules](rules.md). Admins, people
+  you mark **No limit** under Admin > Users, and roles with no request limit
+  aren't limited.
 
 The Playing tab shows who asked for the current song ("Requested by...") and
 what's up next.
@@ -53,8 +55,8 @@ Admin > **Log** lists every request with who made it and from which device.
 
 Under Admin > **Users**:
 
-- **Accounts:** add users or admins, reset passwords, change roles, and give
-  someone **No limit**.
+- **Accounts, roles, invites and sign-ups:** see
+  [Accounts and roles](accounts-and-roles.md).
 - **Guests:** everyone who joined with just a name, by device (recognized by
   its network address), with how many songs they requested. Give a guest **No
   limit**, or remove them (their queued songs go too).

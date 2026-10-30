@@ -3,7 +3,9 @@
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
-use crate::{now_ms, Result, Store, StoreError};
+use sqlx::{Sqlite, Transaction};
+
+use crate::{now_ms, Result, Store, StoreError, LISTENER_ROLE};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
 #[serde(rename_all = "lowercase")]
@@ -13,6 +15,18 @@ pub enum Role {
     User,
     /// Joined with just a name while guest mode was on.
     Guest,
+}
+
+/// Whether an account can sign in.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
+#[serde(rename_all = "lowercase")]
+#[sqlx(type_name = "TEXT", rename_all = "lowercase")]
+pub enum AccountStatus {
+    Active,
+    /// Signed up and waiting for the admin.
+    Pending,
+    /// Turned off by the admin.
+    Disabled,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, FromRow)]
@@ -27,6 +41,9 @@ pub struct User {
     /// A guest device's hardware address, when known.
     pub mac: Option<String>,
     pub created_at: i64,
+    /// The account's role (see `roles`); only used for `Role::User`.
+    pub role_id: i64,
+    pub status: AccountStatus,
 }
 
 impl User {
@@ -42,14 +59,15 @@ impl User {
 
 macro_rules! user_columns {
     () => {
-        "u.id, u.username, u.display_name, u.role, u.unlimited, u.mac, u.created_at"
+        "u.id, u.username, u.display_name, u.role, u.unlimited, u.mac, u.created_at, u.role_id, \
+         u.status"
     };
 }
 
 /// The same columns for RETURNING, which can't take table-qualified names.
 macro_rules! returning_user {
     () => {
-        " RETURNING id, username, display_name, role, unlimited, mac, created_at"
+        " RETURNING id, username, display_name, role, unlimited, mac, created_at, role_id, status"
     };
 }
 
@@ -69,6 +87,27 @@ pub struct GuestSummary {
     pub unlimited: bool,
 }
 
+/// The user behind a session, and which session it is.
+#[derive(Clone, Debug, PartialEq, FromRow)]
+pub struct SessionUser {
+    #[sqlx(flatten)]
+    pub user: User,
+    pub session_id: i64,
+    /// When the session was last used (or started), Unix ms.
+    pub last_seen_at: i64,
+}
+
+/// A signed-in device.
+#[derive(Clone, Debug, PartialEq, Serialize, FromRow)]
+pub struct SessionInfo {
+    pub id: i64,
+    pub created_at: i64,
+    pub last_seen_at: i64,
+    pub expires_at: i64,
+    pub ip: Option<String>,
+    pub user_agent: Option<String>,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum CreateUserError {
     #[error("username is already taken")]
@@ -84,18 +123,31 @@ impl Store {
         password_hash: &str,
         role: Role,
     ) -> Result<User, CreateUserError> {
-        let result = sqlx::query_as(concat!(
-            "INSERT INTO users (username, password_hash, role, created_at) VALUES (?, ?, ?, ?)",
-            returning_user!()
-        ))
-        .bind(username)
-        .bind(password_hash)
-        .bind(role)
-        .bind(now_ms())
-        .fetch_one(&self.pool)
-        .await;
-        match result {
-            Ok(user) => Ok(user),
+        self.create_account(
+            username,
+            password_hash,
+            role,
+            LISTENER_ROLE,
+            AccountStatus::Active,
+        )
+        .await
+    }
+
+    /// Creates an account in a role, active or waiting for approval.
+    pub async fn create_account(
+        &self,
+        username: &str,
+        password_hash: &str,
+        role: Role,
+        role_id: i64,
+        status: AccountStatus,
+    ) -> Result<User, CreateUserError> {
+        let mut tx = self.pool.begin().await.map_err(StoreError::from)?;
+        match insert_account(&mut tx, username, password_hash, role, role_id, status).await {
+            Ok(user) => {
+                tx.commit().await.map_err(StoreError::from)?;
+                Ok(user)
+            }
             Err(sqlx::Error::Database(e)) if e.is_unique_violation() => Err(CreateUserError::Taken),
             Err(e) => Err(StoreError::from(e).into()),
         }
@@ -146,9 +198,11 @@ impl Store {
     }
 
     pub async fn admin_exists(&self) -> Result<bool> {
-        let exists = sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM users WHERE role = 'admin')")
-            .fetch_one(&self.pool)
-            .await?;
+        let exists = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM users WHERE role = 'admin' AND status = 'active')",
+        )
+        .fetch_one(&self.pool)
+        .await?;
         Ok(exists)
     }
 
@@ -158,6 +212,35 @@ impl Store {
             .bind(id)
             .execute(&self.pool)
             .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
+    /// Moves an account to another role (see `roles`).
+    pub async fn set_account_role(&self, id: i64, role_id: i64) -> Result<bool> {
+        let result = sqlx::query("UPDATE users SET role_id = ? WHERE id = ? AND role != 'guest'")
+            .bind(role_id)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
+    /// Approves, turns off or turns back on an account. Anything but active
+    /// signs it out everywhere.
+    pub async fn set_status(&self, id: i64, status: AccountStatus) -> Result<bool> {
+        let mut tx = self.pool.begin().await?;
+        let result = sqlx::query("UPDATE users SET status = ? WHERE id = ? AND role != 'guest'")
+            .bind(status)
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+        if status != AccountStatus::Active {
+            sqlx::query("DELETE FROM sessions WHERE user_id = ?")
+                .bind(id)
+                .execute(&mut *tx)
+                .await?;
+        }
+        tx.commit().await?;
         Ok(result.rows_affected() > 0)
     }
 
@@ -188,9 +271,11 @@ impl Store {
     }
 
     pub async fn admin_count(&self) -> Result<i64> {
-        let count = sqlx::query_scalar("SELECT count(*) FROM users WHERE role = 'admin'")
-            .fetch_one(&self.pool)
-            .await?;
+        let count = sqlx::query_scalar(
+            "SELECT count(*) FROM users WHERE role = 'admin' AND status = 'active'",
+        )
+        .fetch_one(&self.pool)
+        .await?;
         Ok(count)
     }
 
@@ -301,31 +386,112 @@ impl Store {
         token_hash: &[u8],
         expires_at: i64,
     ) -> Result<()> {
+        self.create_session_from(user_id, token_hash, expires_at, None, None)
+            .await
+    }
+
+    /// Starts a session, noting the device it's for.
+    pub async fn create_session_from(
+        &self,
+        user_id: i64,
+        token_hash: &[u8],
+        expires_at: i64,
+        ip: Option<&str>,
+        user_agent: Option<&str>,
+    ) -> Result<()> {
+        let now = now_ms();
         sqlx::query(
-            "INSERT INTO sessions (user_id, token_hash, created_at, expires_at) VALUES (?, ?, ?, ?)",
+            "INSERT INTO sessions (user_id, token_hash, created_at, expires_at, last_seen_at, ip,
+                                   user_agent)
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(user_id)
         .bind(token_hash)
-        .bind(now_ms())
+        .bind(now)
         .bind(expires_at)
+        .bind(now)
+        .bind(ip)
+        .bind(user_agent)
         .execute(&self.pool)
         .await?;
         Ok(())
     }
 
-    /// The user owning an unexpired session.
+    /// The active account owning an unexpired session.
     pub async fn session_user(&self, token_hash: &[u8]) -> Result<Option<User>> {
-        let user = sqlx::query_as(concat!(
+        Ok(self.session(token_hash).await?.map(|s| s.user))
+    }
+
+    /// The active account owning an unexpired session, with the session.
+    pub async fn session(&self, token_hash: &[u8]) -> Result<Option<SessionUser>> {
+        let found = sqlx::query_as(concat!(
             "SELECT ",
             user_columns!(),
-            " FROM sessions s JOIN users u ON u.id = s.user_id
-             WHERE s.token_hash = ? AND s.expires_at > ?"
+            ", s.id AS session_id, coalesce(s.last_seen_at, s.created_at) AS last_seen_at
+             FROM sessions s JOIN users u ON u.id = s.user_id
+             WHERE s.token_hash = ? AND s.expires_at > ? AND u.status = 'active'"
         ))
         .bind(token_hash)
         .bind(now_ms())
         .fetch_optional(&self.pool)
         .await?;
-        Ok(user)
+        Ok(found)
+    }
+
+    /// Notes that a session was just used, and from where.
+    pub async fn touch_session(
+        &self,
+        session_id: i64,
+        ip: Option<&str>,
+        user_agent: Option<&str>,
+    ) -> Result<()> {
+        sqlx::query(
+            "UPDATE sessions SET last_seen_at = ?, ip = coalesce(?, ip),
+                                 user_agent = coalesce(?, user_agent)
+             WHERE id = ?",
+        )
+        .bind(now_ms())
+        .bind(ip)
+        .bind(user_agent)
+        .bind(session_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// An account's signed-in devices, most recently used first.
+    pub async fn user_sessions(&self, user_id: i64) -> Result<Vec<SessionInfo>> {
+        let sessions = sqlx::query_as(
+            "SELECT id, created_at, coalesce(last_seen_at, created_at) AS last_seen_at,
+                    expires_at, ip, user_agent
+             FROM sessions WHERE user_id = ? AND expires_at > ?
+             ORDER BY last_seen_at DESC, id DESC",
+        )
+        .bind(user_id)
+        .bind(now_ms())
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(sessions)
+    }
+
+    /// Signs one device out. False if the account has no such session.
+    pub async fn end_session(&self, user_id: i64, session_id: i64) -> Result<bool> {
+        let result = sqlx::query("DELETE FROM sessions WHERE id = ? AND user_id = ?")
+            .bind(session_id)
+            .bind(user_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
+    /// Signs an account out everywhere except the session `keep`.
+    pub async fn end_other_sessions(&self, user_id: i64, keep: Option<i64>) -> Result<u64> {
+        let result = sqlx::query("DELETE FROM sessions WHERE user_id = ? AND id IS NOT ?")
+            .bind(user_id)
+            .bind(keep)
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected())
     }
 
     pub async fn extend_session(&self, token_hash: &[u8], expires_at: i64) -> Result<()> {
@@ -354,9 +520,71 @@ impl Store {
     }
 }
 
+/// Inserts an account inside a transaction.
+pub(crate) async fn insert_account(
+    tx: &mut Transaction<'_, Sqlite>,
+    username: &str,
+    password_hash: &str,
+    role: Role,
+    role_id: i64,
+    status: AccountStatus,
+) -> std::result::Result<User, sqlx::Error> {
+    sqlx::query_as(concat!(
+        "INSERT INTO users (username, password_hash, role, created_at, role_id, status)
+         VALUES (?, ?, ?, ?, ?, ?)",
+        returning_user!()
+    ))
+    .bind(username)
+    .bind(password_hash)
+    .bind(role)
+    .bind(now_ms())
+    .bind(role_id)
+    .bind(status)
+    .fetch_one(&mut **tx)
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn pending_and_disabled_accounts_cannot_use_sessions() {
+        let store = Store::open_in_memory().await.unwrap();
+        let jo = store
+            .create_account("jo", "h", Role::User, LISTENER_ROLE, AccountStatus::Pending)
+            .await
+            .unwrap();
+        let soon = now_ms() + 60_000;
+        store
+            .create_session_from(jo.id, b"jo", soon, Some("10.0.0.2"), Some("Firefox"))
+            .await
+            .unwrap();
+        assert_eq!(store.session(b"jo").await.unwrap(), None, "pending");
+        assert!(store
+            .set_status(jo.id, AccountStatus::Active)
+            .await
+            .unwrap());
+        store
+            .create_session_from(jo.id, b"jo2", soon, None, None)
+            .await
+            .unwrap();
+        let found = store.session(b"jo2").await.unwrap().unwrap();
+        assert_eq!(found.user.id, jo.id);
+        assert_eq!(store.user_sessions(jo.id).await.unwrap().len(), 2);
+        assert_eq!(
+            store
+                .end_other_sessions(jo.id, Some(found.session_id))
+                .await
+                .unwrap(),
+            1
+        );
+        assert!(store
+            .set_status(jo.id, AccountStatus::Disabled)
+            .await
+            .unwrap());
+        assert!(store.user_sessions(jo.id).await.unwrap().is_empty());
+    }
 
     #[tokio::test]
     async fn users_and_sessions() {

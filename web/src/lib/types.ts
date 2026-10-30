@@ -12,6 +12,67 @@ export interface User {
   unlimited: boolean
   mac: string | null
   created_at: number
+  /** The account's role (see AccountRole); used when role is 'user'. */
+  role_id: number
+  status: AccountStatus
+  /** Only on the signed-in user (/me). */
+  role_name?: string | null
+  permissions?: Permissions
+}
+
+export type AccountStatus = 'active' | 'pending' | 'disabled'
+
+/** What an account may do. */
+export interface Permissions {
+  go: boolean
+  go_remote: boolean
+  /** 0 is no limit. */
+  max_streams: number
+  downloads: boolean
+  share_playlists: boolean
+  submit_music: boolean
+  submit_without_review: boolean
+  unlimited_requests: boolean
+}
+
+export interface AccountRole extends Permissions {
+  id: number
+  name: string
+  /** Listener: editable, never deleted. */
+  builtin: boolean
+  accounts: number
+}
+
+export type SignupMode = 'closed' | 'review' | 'open'
+
+export interface SignupSettings {
+  mode: SignupMode
+  role_id: number
+}
+
+export interface Invite {
+  id: number
+  role_id: number
+  role_name: string
+  note: string
+  /** null: no limit. */
+  uses_left: number | null
+  used: number
+  created_at: number
+  /** null: never. */
+  expires_at: number | null
+}
+
+/** A signed-in device. */
+export interface Device {
+  id: number
+  created_at: number
+  last_seen_at: number
+  expires_at: number
+  ip: string | null
+  user_agent: string | null
+  /** The device asking. */
+  current: boolean
 }
 
 export interface Mode {
@@ -19,6 +80,8 @@ export interface Mode {
   setup_needed: boolean
   /** Name this device used last time, if recognized. */
   welcome_back: string | null
+  /** Whether people can create their own accounts. */
+  signup: SignupMode
 }
 
 export interface GuestSummary {

@@ -1,5 +1,10 @@
 import type {
   About,
+  AccountRole,
+  AccountStatus,
+  Device,
+  Invite,
+  SignupSettings,
   AiOptions,
   AiStatus,
   Album,
@@ -99,6 +104,10 @@ export const api = {
   bootstrapStatus: () => get<{ needed: boolean }>('/auth/bootstrap'),
   mode: () => get<Mode>('/auth/mode'),
   joinAsGuest: (name: string) => post<User>('/auth/guest', { name }),
+  /** A User when signed in right away; { pending: true } when the account waits for approval. */
+  signUp: (username: string, password: string, invite?: string) =>
+    post<User | { pending: true }>('/auth/signup', { username, password, invite }),
+  checkInvite: (token: string) => get<{ role: string }>(`/auth/invite/${encodeURIComponent(token)}`),
   bootstrap: (token: string, username: string, password: string) =>
     post<User>('/auth/bootstrap', { token, username, password }),
 
@@ -186,11 +195,27 @@ export const api = {
   lookUpArtistInfo: (force = false) => post<StartResponse>('/library/artist-info', { force }),
 
   users: () => get<User[]>('/users'),
-  createUser: (username: string, password: string, role: Role) =>
-    post<User>('/users', { username, password, role }),
+  createUser: (username: string, password: string, role: Role, role_id: number) =>
+    post<User>('/users', { username, password, role, role_id }),
   deleteUser: (id: number) => del<void>(`/users/${id}`),
-  updateUser: (id: number, changes: { unlimited?: boolean; role?: Role; password?: string }) =>
-    patch<void>(`/users/${id}`, changes),
+  updateUser: (
+    id: number,
+    changes: { unlimited?: boolean; role?: Role; role_id?: number; status?: AccountStatus; password?: string },
+  ) => patch<void>(`/users/${id}`, changes),
+  roles: () => get<AccountRole[]>('/roles'),
+  createRole: (role: Omit<AccountRole, 'id' | 'builtin' | 'accounts'>) => post<AccountRole>('/roles', role),
+  updateRole: (id: number, role: Omit<AccountRole, 'id' | 'builtin' | 'accounts'>) =>
+    put<AccountRole>(`/roles/${id}`, role),
+  deleteRole: (id: number) => del<void>(`/roles/${id}`),
+  signupSettings: () => get<SignupSettings>('/signup'),
+  saveSignupSettings: (settings: SignupSettings) => put<SignupSettings>('/signup', settings),
+  invites: () => get<Invite[]>('/invites'),
+  createInvite: (invite: { role_id: number; note: string; uses: number | null; days: number | null }) =>
+    post<Invite & { token: string }>('/invites', invite),
+  deleteInvite: (id: number) => del<void>(`/invites/${id}`),
+  userDevices: (id: number) => get<Device[]>(`/users/${id}/sessions`),
+  signOutUserDevice: (id: number, device: number) => del<void>(`/users/${id}/sessions/${device}`),
+  signOutUserEverywhere: (id: number) => del<void>(`/users/${id}/sessions`),
   guests: () => get<GuestSummary[]>('/guests'),
   requestLog: (limit = 100) => get<RequestLogEntry[]>(`/requests/log?limit=${limit}`),
   clearRequestLog: () => del<void>('/requests/log'),

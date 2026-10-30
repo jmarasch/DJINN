@@ -19,20 +19,18 @@
   import SmartPlayPanel from '../lib/SmartPlayPanel.svelte'
   import { adminTabRows, type AdminTab } from '../lib/adminTabs'
   import Sheet from '../lib/Sheet.svelte'
+  import UsersPanel from '../lib/UsersPanel.svelte'
   import { app, logout, toast } from '../lib/state.svelte'
-  import type { GuestSummary, LibraryRoot, RequestLogEntry, Role, Settings, User } from '../lib/types'
+  import type { LibraryRoot, RequestLogEntry, Settings } from '../lib/types'
 
   let { tab = 'library' }: { tab?: AdminTab } = $props()
 
   let roots = $state<LibraryRoot[]>([])
   let trackCount = $state(0)
   let artDir = $state('')
-  let users = $state<User[]>([])
-  let guests = $state<GuestSummary[]>([])
   let log = $state<RequestLogEntry[]>([])
   let settings = $state<Settings | null>(null)
   let picking = $state(false)
-  let newUser = $state({ username: '', password: '', role: 'user' as Role })
 
   $effect(() => {
     load(tab).catch((e) => toast(e.message, true))
@@ -52,10 +50,8 @@
       artDir = status.art_dir
       settings = s
       if (status.last_scan) app.scan = status.last_scan
-    } else if (which === 'audio' || which === 'smart') {
+    } else if (which === 'audio' || which === 'smart' || which === 'users') {
       // These panels load their own data.
-    } else if (which === 'users') {
-      ;[users, guests] = await Promise.all([api.users(), api.guests()])
     } else if (which === 'log') {
       log = await api.requestLog(200)
     } else {
@@ -82,45 +78,6 @@
   async function removeRoot(root: LibraryRoot) {
     if (!confirm(`Remove ${root.path} from the library? Its songs disappear from DJINN (the files stay).`)) return
     await attempt(async () => (roots = await api.removeLibraryRoot(root.path)), 'Folder removed')
-  }
-
-  async function updateUser(user: User, changes: { unlimited?: boolean; role?: Role }) {
-    if (await attempt(() => api.updateUser(user.id, changes))) {
-      users = users.map((u) => (u.id === user.id ? { ...u, ...changes } : u))
-    }
-  }
-
-  async function resetPassword(user: User) {
-    const password = prompt(`New password for ${user.username} (at least 6 characters):`)
-    if (password) await attempt(() => api.updateUser(user.id, { password }), `Password changed for ${user.username}`)
-  }
-
-  async function removeUser(user: User) {
-    if (!confirm(`Delete ${user.username}? Their queued songs are removed too.`)) return
-    if (await attempt(() => api.deleteUser(user.id))) users = users.filter((u) => u.id !== user.id)
-  }
-
-  async function addUser(e: SubmitEvent) {
-    e.preventDefault()
-    const ok = await attempt(
-      () => api.createUser(newUser.username, newUser.password, newUser.role),
-      `Created ${newUser.username}`,
-    )
-    if (ok) {
-      newUser = { username: '', password: '', role: 'user' }
-      users = await api.users()
-    }
-  }
-
-  async function setGuestUnlimited(guest: GuestSummary, unlimited: boolean) {
-    if (await attempt(() => api.updateUser(guest.id, { unlimited }))) {
-      guests = guests.map((g) => (g.id === guest.id ? { ...g, unlimited } : g))
-    }
-  }
-
-  async function removeGuest(guest: GuestSummary) {
-    if (!confirm(`Remove ${guest.name}? Their queued songs are removed too.`)) return
-    if (await attempt(() => api.deleteUser(guest.id))) guests = guests.filter((g) => g.id !== guest.id)
   }
 
   async function lookUp(force: boolean) {
@@ -274,68 +231,7 @@
   <AiPanel />
   <IdentifyPanel />
 {:else if tab === 'users'}
-  <section class="card">
-    <h2>Accounts</h2>
-    {#each users as user (user.id)}
-      <div class="user">
-        <div class="grow">
-          <div>{user.username} {#if user.id === app.me?.id}<span class="muted small">(you)</span>{/if}</div>
-          <div class="user-controls">
-            <select
-              value={user.role}
-              disabled={user.id === app.me?.id}
-              aria-label="Role for {user.username}"
-              onchange={(e) => updateUser(user, { role: e.currentTarget.value as Role })}
-            >
-              <option value="user">User</option>
-              <option value="admin">Admin</option>
-            </select>
-            {#if user.role !== 'admin'}
-              <label class="switch">
-                <input type="checkbox" checked={user.unlimited} onchange={(e) => updateUser(user, { unlimited: e.currentTarget.checked })} />
-                No limit
-              </label>
-            {/if}
-            <button class="small-button" onclick={() => resetPassword(user)}>Reset password</button>
-          </div>
-        </div>
-        {#if user.id !== app.me?.id}
-          <button class="icon" aria-label="Delete {user.username}" onclick={() => removeUser(user)}><Icon name="close" /></button>
-        {/if}
-      </div>
-    {/each}
-    <form class="new-user" onsubmit={addUser}>
-      <input placeholder="Username" bind:value={newUser.username} autocapitalize="none" required />
-      <input placeholder="Password" type="password" bind:value={newUser.password} minlength="6" required />
-      <select bind:value={newUser.role}>
-        <option value="user">User</option>
-        <option value="admin">Admin</option>
-      </select>
-      <button class="primary">Add user</button>
-    </form>
-  </section>
-
-  <section class="card">
-    <h2>Guests</h2>
-    <p class="small muted">People who joined with just a name, by device. A device is recognized by its MAC address on your network.</p>
-    {#each guests as guest (guest.id)}
-      <div class="user">
-        <div class="grow">
-          <div>{guest.name} <span class="muted small">{guest.requests} {guest.requests === 1 ? 'request' : 'requests'}</span></div>
-          <div class="muted small mono">{guest.mac ?? `no MAC (${guest.last_ip ?? 'unknown'})`}</div>
-          {#if guest.names !== guest.name}<div class="muted small">Also went by: {guest.names}</div>{/if}
-          <div class="muted small">Last seen {when(guest.last_seen)}</div>
-        </div>
-        <label class="switch">
-          <input type="checkbox" checked={guest.unlimited} onchange={(e) => setGuestUnlimited(guest, e.currentTarget.checked)} />
-          No limit
-        </label>
-        <button class="icon" aria-label="Remove {guest.name}" onclick={() => removeGuest(guest)}><Icon name="close" /></button>
-      </div>
-    {:else}
-      <p class="muted">No guests yet. Turn on guest mode under <a href="#/admin/rules">Rules</a>.</p>
-    {/each}
-  </section>
+  <UsersPanel />
 {:else if tab === 'log'}
   <section class="card">
     <div class="log-head">
@@ -488,13 +384,6 @@
   }
 
   .item,
-  .user {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 8px 0;
-    border-bottom: 1px solid var(--line);
-  }
 
   .grow {
     flex: 1;
@@ -514,17 +403,7 @@
     color: var(--muted);
   }
 
-  .user-controls {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 8px;
-    margin-top: 6px;
-  }
 
-  .user-controls select {
-    min-height: 36px;
-  }
 
   .small-button {
     font-size: 0.875rem;
@@ -536,16 +415,7 @@
     gap: 8px;
   }
 
-  .new-user {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 8px;
-    margin-top: 6px;
-  }
 
-  .new-user input {
-    min-width: 0;
-  }
 
   .switch {
     gap: 6px;

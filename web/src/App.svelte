@@ -19,12 +19,15 @@
   import Queue from './screens/Queue.svelte'
   import Search from './screens/Search.svelte'
   import Setup from './screens/Setup.svelte'
+  import Signup from './screens/Signup.svelte'
   import Genre from './screens/Genre.svelte'
   import Similar from './screens/Similar.svelte'
   import Tv from './screens/Tv.svelte'
   import SetupLibrary from './screens/SetupLibrary.svelte'
 
   const onSetupPage = $state(location.pathname === '/setup')
+  // Invite links open /signup; the sign-in screen can switch to it too.
+  let signingUp = $state(location.pathname === '/signup')
   // The join page is for guests who haven't signed in yet; the TV page is
   // public and read only.
   const onJoinPage = location.pathname === '/join'
@@ -77,10 +80,15 @@
   <main class="narrow">
     {#if onSetupPage}
       <Setup />
+    {:else if signingUp}
+      <Signup onback={() => (signingUp = false)} />
     {:else if app.mode?.guest_mode && !app.hostLogin}
       <GuestJoin />
     {:else}
       <Login />
+      {#if app.mode && app.mode.signup !== 'closed'}
+        <button class="back-to-guest" onclick={() => (signingUp = true)}>New here? Create an account</button>
+      {/if}
       {#if app.mode?.guest_mode}
         <button class="back-to-guest" onclick={() => (app.hostLogin = false)}>Not the host? Join with a name</button>
       {/if}
