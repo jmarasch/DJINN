@@ -98,23 +98,31 @@ and requests are welcome at DJINN@newterrastudios.com or as an issue.
   your headphones. Like casting, it runs a few seconds behind the main
   speakers.
 - **Edit song tags.** Correct wrong or missing titles, artists, albums,
-  years and genres from the app.
+  years and genres from the app, for one song, a whole album, or an
+  artist (a name fixed everywhere they appear).
 - **Back up and restore.** Save everything DJINN knows (settings, users,
   playlists, history, speakers and casts, artwork, analysis) to one file,
   and restore it, or move it to another computer with your music in a
   different place. Your music files aren't part of the backup.
+- **Picks up where it left off.** After a restart or an update, the song
+  that was playing carries on from where it was.
 
 ### 0.4.0
 
-- **Visualizers.** A page like the TV page that fills the screen with
-  visuals moving to the music, from a large library of MilkDrop-style
-  presets. Show it on a TV or a spare screen at the party.
+- **Personal streaming.** Listen to your library on your own phone, apart
+  from the party.
+
+### 0.5.0
+
+- **Visualizers.** Visuals moving to the music, from a large library of
+  MilkDrop-style presets, drawn by the DJINN computer and sent to TVs as
+  video together with the sound, so picture and music stay in step on
+  every screen. Pick the size (480p, 720p, 1080p), or show them in a
+  window on the DJINN computer itself.
 
 ### Later
 
 - **Karaoke mode.**
-- **Personal streaming.** Listen to your library on your own phone, apart
-  from the party.
 
 ### Not planned for now
 
