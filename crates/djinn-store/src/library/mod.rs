@@ -402,13 +402,37 @@ macro_rules! track_order {
     };
 }
 
+// Ids of an artist's songs, credited or on their albums, found through the
+// indexes. `$artist` is the SQL for the artist's id, like "ar.id". (Testing
+// every song for each artist instead took seconds on 36,000 songs.)
+macro_rules! artist_songs {
+    ($artist:literal) => {
+        concat!(
+            "(SELECT ta.track_id FROM track_artists ta WHERE ta.artist_id = ",
+            $artist,
+            " UNION ALL SELECT t2.id FROM albums al JOIN tracks t2 ON t2.album_id = al.id \
+             WHERE al.artist_id = ",
+            $artist,
+            ")"
+        )
+    };
+}
+
+// Counted in one pass: (artist, song) pairs from credits and from album
+// artists, each pair once. (Counting per artist with an OR over every song
+// took seconds per page on a library of 36,000 songs.)
 macro_rules! artist_counts {
     () => {
-        "SELECT ar.id, ar.name, ar.art_hash, \
-                (SELECT count(*) FROM tracks t LEFT JOIN albums al ON al.id = t.album_id \
-                 WHERE t.removed_at IS NULL AND (EXISTS (SELECT 1 FROM track_artists ta WHERE ta.track_id = t.id AND ta.artist_id = ar.id) OR al.artist_id = ar.id)) \
-                 AS track_count \
-         FROM artists ar"
+        "SELECT ar.id, ar.name, ar.art_hash, coalesce(c.track_count, 0) AS track_count \
+         FROM artists ar LEFT JOIN ( \
+           SELECT artist_id, count(*) AS track_count FROM ( \
+             SELECT ta.artist_id, ta.track_id FROM track_artists ta \
+               JOIN tracks t ON t.id = ta.track_id WHERE t.removed_at IS NULL \
+             UNION \
+             SELECT al.artist_id, t.id FROM tracks t \
+               JOIN albums al ON al.id = t.album_id WHERE t.removed_at IS NULL \
+           ) GROUP BY artist_id \
+         ) c ON c.artist_id = ar.id"
     };
 }
 

@@ -7,23 +7,22 @@ impl Store {
     /// Artists with playable tracks whose online info was never looked up
     /// or was last looked up before `older_than` (Unix ms).
     pub async fn artists_for_info_lookup(&self, older_than: i64) -> Result<Vec<InfoLookupArtist>> {
-        let artists = sqlx::query_as(
+        let artists = sqlx::query_as(concat!(
             "SELECT ar.id, ar.name,
-                    EXISTS (SELECT 1 FROM tracks t LEFT JOIN albums al ON al.id = t.album_id
-                            WHERE t.artist_art IS NOT NULL AND t.removed_at IS NULL
-                              AND (EXISTS (SELECT 1 FROM track_artists ta WHERE ta.track_id = t.id AND ta.artist_id = ar.id) OR al.artist_id = ar.id))
-                        AS has_folder_art,
+                    EXISTS (SELECT 1 FROM tracks t WHERE t.id IN ",
+            artist_songs!("ar.id"),
+            " AND t.artist_art IS NOT NULL AND t.removed_at IS NULL) AS has_folder_art,
                     coalesce((SELECT group_concat(title, char(10)) FROM (
-                        SELECT t.title FROM tracks t
-                        WHERE EXISTS (SELECT 1 FROM track_artists ta WHERE ta.track_id = t.id AND ta.artist_id = ar.id) AND t.removed_at IS NULL
+                        SELECT t.title FROM track_artists ta JOIN tracks t ON t.id = ta.track_id
+                        WHERE ta.artist_id = ar.id AND t.removed_at IS NULL
                         ORDER BY t.id LIMIT 5)), '') AS sample_titles
              FROM artists ar
              WHERE (ar.info_checked_at IS NULL OR ar.info_checked_at < ?)
-               AND EXISTS (SELECT 1 FROM tracks t LEFT JOIN albums al ON al.id = t.album_id
-                           WHERE t.removed_at IS NULL
-                             AND (EXISTS (SELECT 1 FROM track_artists ta WHERE ta.track_id = t.id AND ta.artist_id = ar.id) OR al.artist_id = ar.id))
-             ORDER BY ar.name",
-        )
+               AND EXISTS (SELECT 1 FROM tracks t WHERE t.id IN ",
+            artist_songs!("ar.id"),
+            " AND t.removed_at IS NULL)
+             ORDER BY ar.name"
+        ))
         .bind(older_than)
         .fetch_all(&self.pool)
         .await?;

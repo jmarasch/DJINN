@@ -227,7 +227,7 @@ async fn set_replay_gain(
     replay_gain(admin, State(state)).await
 }
 
-async fn loudness_status(state: &AppState) -> ApiResult<LoudnessStatus> {
+pub async fn loudness_status(state: &AppState) -> ApiResult<LoudnessStatus> {
     Ok(LoudnessStatus {
         progress: state
             .store
@@ -321,6 +321,8 @@ pub async fn start_analysis(state: &AppState) {
         if let Ok(status) = loudness_status(&state).await {
             let _ = state.events.send(ServerEvent::Loudness(status));
         }
+        // Next step: AI listening, if it's on.
+        crate::ai::start(&state);
     });
 }
 

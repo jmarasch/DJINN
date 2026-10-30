@@ -5,6 +5,7 @@ import { clearListCache } from './listCache'
 import type {
   AiStatus,
   IdentifyStatus,
+  Listening,
   CastDevice,
   LoudnessStatus,
   LookupStatus,
@@ -49,6 +50,8 @@ export const app = $state({
   identify: null as IdentifyStatus | null,
   /** AI listening; filled in on the Library tab, kept current by SSE. */
   ai: null as AiStatus | null,
+  /** AI listening's progress, for everyone's library progress bar. */
+  listening: null as Listening | null,
   /** Cast devices; filled in on the Audio tab, kept current by SSE. */
   casts: null as CastDevice[] | null,
   /** Track ids with a request on its way to the server. */
@@ -106,14 +109,27 @@ export function connect() {
   on<OutputStatus>('output_status', (data) => (app.output = data))
   on<ScanProgress>('scan_progress', (data) => {
     app.scan = data
-    if (data.done) clearListCache()
+    if (data.done) {
+      clearListCache()
+      void loadLibraryWork()
+    }
   })
   on('library_changed', () => clearListCache())
   on<LookupStatus>('artist_lookup', (data) => (app.lookup = data))
   on<LoudnessStatus>('loudness', (data) => (app.loudness = data))
   on<CastDevice[]>('cast_status', (data) => (app.casts = data))
-  on<AiStatus>('ai_status', (data) => (app.ai = data))
+  on<AiStatus>('ai_status', (data) => {
+    app.ai = data
+    app.listening = {
+      on: data.enabled && data.installed,
+      running: data.listening,
+      heard: data.heard,
+      waiting: data.waiting,
+    }
+  })
   on<IdentifyStatus>('identify_status', (data) => (app.identify = data))
+
+  void loadLibraryWork()
 
   events.onerror = async () => {
     app.connected = false
@@ -122,6 +138,20 @@ export function connect() {
     if (events?.readyState === EventSource.CLOSED) {
       if (await refreshMe()) setTimeout(connect, 2000)
     }
+  }
+}
+
+/** Where checking and analyzing the library is, for its progress bar;
+ * live events keep it current after this. */
+export async function loadLibraryWork() {
+  try {
+    const status = await api.libraryStatus()
+    if (status.last_scan) app.scan = status.last_scan
+    app.loudness = status.analysis
+    app.listening = status.listening
+    app.lookup = { ...app.lookup, running: status.lookup_running }
+  } catch {
+    // Signed out, or the server restarting; events fill it in.
   }
 }
 
