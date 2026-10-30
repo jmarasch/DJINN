@@ -5,6 +5,30 @@ and requests are welcome at DJINN@newterrastudios.com or as an issue.
 
 ## Released
 
+### 0.3.0 (October 2026)
+
+- **Play here.** A button that plays the party on the phone, tablet or
+  laptop you're using: an extra speaker for another room, or the party on
+  your headphones. Like casting, it runs a few seconds behind the main
+  speakers.
+- **Edit song tags.** Correct wrong or missing titles, artists, albums,
+  years and genres from the app, for one song, a whole album, or an
+  artist (a name fixed everywhere they appear).
+- **Back up and restore.** Save everything DJINN knows (settings, users,
+  playlists, history, speakers and casts, artwork, analysis) to one file,
+  and restore it, or move it to another computer with your music in a
+  different place. Your music files aren't part of the backup.
+- **Picks up where it left off.** After a restart or an update, the song
+  that was playing carries on from where it was.
+- **System tools.** An Admin > System tab with DJINN's status (including
+  the addresses phones should open), updates, backups, a log viewer,
+  restart and quit, and tools to clear the queue, history, analysis, tag
+  corrections or settings, or reset DJINN completely (your music is never
+  touched).
+- Album pages show their genres as tags you can tap, and genres you
+  correct take the place of the ones looked up online.
+- The log shows this computer's time instead of UTC.
+
 ### 0.2.5 (October 2026)
 
 - **Party styles.** Keep a separate memory for each kind of party
@@ -90,27 +114,6 @@ and requests are welcome at DJINN@newterrastudios.com or as an issue.
 - Updates itself from signed releases.
 
 ## Planned
-
-### 0.3.0
-
-- **Play here.** A button that plays the party on the phone, tablet or
-  laptop you're using: an extra speaker for another room, or the party on
-  your headphones. Like casting, it runs a few seconds behind the main
-  speakers.
-- **Edit song tags.** Correct wrong or missing titles, artists, albums,
-  years and genres from the app, for one song, a whole album, or an
-  artist (a name fixed everywhere they appear).
-- **Back up and restore.** Save everything DJINN knows (settings, users,
-  playlists, history, speakers and casts, artwork, analysis) to one file,
-  and restore it, or move it to another computer with your music in a
-  different place. Your music files aren't part of the backup.
-- **Picks up where it left off.** After a restart or an update, the song
-  that was playing carries on from where it was.
-- **System tools.** An Admin > System tab with DJINN's status (including
-  the addresses phones should open), updates, backups, a log viewer,
-  restart and quit, and tools to clear the queue, history, analysis, tag
-  corrections or settings, or reset DJINN completely (your music is never
-  touched).
 
 ### 0.4.0
 
