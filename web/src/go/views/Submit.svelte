@@ -83,7 +83,7 @@
   <p class="muted">Your account can't submit music. Ask the host if you'd like to.</p>
 {:else}
   <p class="muted">
-    Send song files for the library: MP3, FLAC, M4A, Ogg, Opus or WAV.
+    Send song files for the library: MP3, FLAC, M4A (AAC), Ogg Vorbis or WAV.
     {app.me.permissions.submit_without_review
       ? 'They go straight in, unless they look like a song the library has already.'
       : 'The host reviews each one first.'}
@@ -91,7 +91,7 @@
   </p>
   <label class="button primary pick">
     Choose songs
-    <input bind:this={input} type="file" accept="audio/*,.flac,.m4a,.opus,.ogg" multiple onchange={chosen} hidden />
+    <input bind:this={input} type="file" accept=".mp3,.flac,.m4a,.mp4,.aac,.ogg,.oga,.wav" multiple onchange={chosen} hidden />
   </label>
 
   {#each sending as item, i (i)}

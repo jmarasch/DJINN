@@ -58,6 +58,9 @@ Admins can always use GO.
 
 ## On your phone
 
+**Getting there:** in GO on a computer, **Account > Open on your phone**
+shows a QR code for GO's address; scan it with the phone's camera.
+
 **Install it as an app:** open GO in your phone's browser, then use
 **Add to Home Screen** (Safari: the Share button; Chrome: the menu). It
 opens full screen with its own icon, and keeps playing with the screen off.
@@ -82,7 +85,7 @@ for.
 ## Submitting music
 
 Roles with **Submit music** see **Submit music** under Your music in GO. Pick
-song files (MP3, FLAC, M4A, Ogg, Opus or WAV) and they upload one by one.
+song files (MP3, FLAC, M4A with AAC, Ogg Vorbis or WAV: the formats DJINN plays) and they upload one by one.
 
 - DJINN checks each one is audio it can play, reads its tags, and refuses
   a file that was sent before.

@@ -40,9 +40,8 @@ const DEFAULT_MAX_MB: i64 = 200;
 /// Uploads one person can have waiting at once.
 const MAX_WAITING: i64 = 200;
 const HOLDING_DIR: &str = "uploads";
-const EXTENSIONS: &[&str] = &[
-    "mp3", "flac", "m4a", "mp4", "aac", "ogg", "oga", "opus", "wav",
-];
+/// What DJINN can decode (djinn-engine's symphonia features).
+const EXTENSIONS: &[&str] = &["mp3", "flac", "m4a", "mp4", "aac", "ogg", "oga", "wav"];
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -113,7 +112,7 @@ async fn upload(
         .unwrap_or_default();
     if !EXTENSIONS.contains(&ext.as_str()) {
         return Err(ApiError::bad_request(
-            "send MP3, FLAC, M4A (AAC or ALAC), Ogg, Opus or WAV files",
+            "send MP3, FLAC, M4A (AAC), Ogg Vorbis or WAV files",
         ));
     }
     let dir = holding_dir(&state);

@@ -13,6 +13,7 @@
   import Signup from '../screens/Signup.svelte'
   import AddToPlaylist from './AddToPlaylist.svelte'
   import { loadLikes, player, setSaveData, stop } from './player.svelte'
+  import OpenOnPhone from './OpenOnPhone.svelte'
   import PhoneApps from './PhoneApps.svelte'
   import PlayerBar from './PlayerBar.svelte'
   import SongMenu from './SongMenu.svelte'
@@ -154,6 +155,7 @@
           </label>
         </section>
       {/if}
+      <OpenOnPhone />
       <AccountPanels />
       <PhoneApps />
       <button class="signout" onclick={signOut}>Sign out</button>

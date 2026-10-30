@@ -215,6 +215,7 @@ pub fn api_router() -> Router<AppState> {
         .route("/go/settings", put(save_settings))
         .route("/go/sign-ins", get(sign_ins))
         .route("/go/play/{id}", get(play))
+        .route("/go/address", get(address))
 }
 
 /// Which API routes GO answers, and who for.
@@ -267,6 +268,7 @@ const ROUTES: &[(Method, &str, Access)] = &[
     (Method::GET, "/api/genres/*", Access::Listener),
     (Method::GET, "/api/go/play/*", Access::Listener),
     (Method::GET, "/api/go/home", Access::Listener),
+    (Method::GET, "/api/go/address", Access::Setup),
     (Method::GET, "/api/go/likes", Access::Listener),
     (Method::GET, "/api/go/likes/ids", Access::Listener),
     (Method::PUT, "/api/go/likes/*/*", Access::Listener),
@@ -710,6 +712,61 @@ async fn status_of(state: &AppState) -> anyhow::Result<Status> {
         listening,
         mbps,
     })
+}
+
+#[derive(Deserialize)]
+struct HereQuery {
+    /// The address the browser has GO open at.
+    #[serde(default)]
+    here: String,
+}
+
+#[derive(Serialize)]
+struct Address {
+    /// What phones should open: the address in use, unless that's this
+    /// computer's own name, then the home network one.
+    url: String,
+    qr_svg: String,
+    /// Other ways in (home network, Tailscale).
+    others: Vec<String>,
+}
+
+/// GO's address and a QR code for it, for opening GO on a phone.
+async fn address(
+    _: CurrentSession,
+    State(state): State<AppState>,
+    device: Device,
+    Query(query): Query<HereQuery>,
+) -> ApiResult<Json<Address>> {
+    if !device.go {
+        return Err(ApiError::not_found());
+    }
+    let port = state.go.listen.port();
+    let mut urls = crate::banner::urls(state.go.listen);
+    if let Some(ip) = tailscale_ip() {
+        urls.push(format!("http://{}", SocketAddr::new(ip, port)));
+    }
+    let here = query.here.trim().trim_end_matches('/');
+    let local =
+        here.contains("://localhost") || here.contains("://127.") || here.contains("://[::1]");
+    let valid = (here.starts_with("http://") || here.starts_with("https://")) && here.len() < 300;
+    if valid && !local {
+        urls.retain(|u| u != here);
+        urls.insert(0, here.to_owned());
+    }
+    let url = urls.first().cloned().ok_or_else(ApiError::not_found)?;
+    let qr_svg = qrcode::QrCode::new(url.as_bytes())
+        .map_err(anyhow::Error::from)?
+        .render::<qrcode::render::svg::Color>()
+        .min_dimensions(240, 240)
+        .dark_color(qrcode::render::svg::Color("#14111f"))
+        .light_color(qrcode::render::svg::Color("#ffffff"))
+        .build();
+    Ok(Json(Address {
+        url,
+        qr_svg,
+        others: urls.into_iter().skip(1).collect(),
+    }))
 }
 
 /// This computer's address on Tailscale (100.64.0.0/10), if it has one.
