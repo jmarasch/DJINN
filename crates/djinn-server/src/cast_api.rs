@@ -18,13 +18,17 @@ use djinn_cast::{CastError, CastMedia, CastStatus, Metadata};
 use djinn_store::Store;
 use serde::{Deserialize, Serialize};
 
-use crate::auth::AdminUser;
+use crate::auth::{AdminUser, CurrentUser};
 use crate::error::{ApiError, ApiResult};
 use crate::events::ServerEvent;
+use crate::settings;
 use crate::state::AppState;
 
 /// Setting key holding the stream token.
 const CAST_TOKEN: &str = "cast_token";
+/// Setting key: anyone signed in can play the party in their own browser
+/// (Play here). Off unless set to "1".
+pub const PLAY_HERE: &str = "play_here";
 /// Setting key: devices being cast to, so casts resume after a restart.
 const CAST_TARGETS: &str = "cast_targets";
 /// How long to listen for devices.
@@ -37,15 +41,34 @@ pub fn stream_router() -> Router<AppState> {
         .route("/cast/{token}/join.png", get(join_png))
 }
 
-/// Admin routes under /api.
+/// Routes under /api: Play here for everyone signed in, the rest for admins.
 pub fn router() -> Router<AppState> {
     Router::new()
+        .route("/listen", get(listen))
         .route("/cast", get(list))
         .route("/cast/discover", post(discover))
         .route("/cast/stop-all", post(stop_all))
         .route("/cast/{id}/start", post(start))
         .route("/cast/{id}/stop", post(stop))
         .route("/cast/{id}/volume", put(volume))
+}
+
+#[derive(Serialize)]
+struct Listen {
+    /// The live stream, or none when the host turned Play here off.
+    url: Option<String>,
+}
+
+/// Where Play here listens: the same stream casts play.
+async fn listen(_: CurrentUser, State(state): State<AppState>) -> ApiResult<Json<Listen>> {
+    let on = settings::flag(&state.store, PLAY_HERE, false).await?;
+    Ok(Json(Listen {
+        url: state
+            .stream
+            .as_ref()
+            .filter(|_| on)
+            .map(|_| stream_path(&state.cast_token)),
+    }))
 }
 
 #[derive(Serialize)]
@@ -470,5 +493,36 @@ mod tests {
         // Quotes would end the field early.
         let quoted = icy_block(Some("Don't Stop"));
         assert!(String::from_utf8_lossy(&quoted).contains("'Dont Stop';"));
+    }
+
+    #[tokio::test]
+    async fn play_here_hands_out_the_stream_once_turned_on() {
+        use crate::test_util::{call, get_body, session};
+        use axum::http::Method;
+        use djinn_store::Role;
+
+        let (_tap, reader) = djinn_engine::stream_tap(1.0, 48_000);
+        let stream = LiveStream::start(reader, 48_000).unwrap();
+        let state = AppState::for_tests()
+            .await
+            .with_stream(stream, "secret".into());
+        state
+            .guest_mode
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        let guest = session(&state, "gus", Role::Guest).await;
+
+        let (status, _) = call(&state, Method::GET, "/api/listen", None, None).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            get_body(&state, "/api/listen", &guest).await,
+            (StatusCode::OK, r#"{"url":null}"#.into()),
+            "off until the host turns it on"
+        );
+
+        state.store.set_setting(PLAY_HERE, "1").await.unwrap();
+        assert_eq!(
+            get_body(&state, "/api/listen", &guest).await,
+            (StatusCode::OK, r#"{"url":"/cast/secret/live.mp3"}"#.into())
+        );
     }
 }

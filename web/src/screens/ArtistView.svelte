@@ -7,14 +7,17 @@
   import Art from '../lib/Art.svelte'
   import Icon from '../lib/Icon.svelte'
   import SortChoice from '../lib/SortChoice.svelte'
+  import TagEditor from '../lib/TagEditor.svelte'
   import TrackRow from '../lib/TrackRow.svelte'
   import { byName } from '../lib/format'
-  import type { Album, ArtistDetail, ArtistSummary } from '../lib/types'
+  import { isAdmin } from '../lib/state.svelte'
+  import type { Album, ArtistDetail, ArtistSummary, TagFields } from '../lib/types'
 
   let { id }: { id: number } = $props()
   let artist = $state<ArtistDetail | null>(null)
   let error = $state('')
   let bioOpen = $state(false)
+  let editing = $state(false)
 
   let similar = $state<ArtistSummary[]>([])
 
@@ -31,6 +34,17 @@
       .then((list) => (similar = list))
       .catch(() => {})
   })
+
+  /** A new name can make them a different artist: follow it. */
+  async function saveArtist(change: TagFields) {
+    const { id: now } = await api.editArtist(id, {
+      name: change.artist as string | null | undefined,
+      genre: change.genre as string | null | undefined,
+    })
+    editing = false
+    if (now !== id) location.replace(`#/artist/${now}`)
+    else artist = await api.artist(id)
+  }
 
   /** Top songs earn the title once anyone has requested or played them. */
   const ranked = $derived(artist?.top_tracks.some((t) => t.requests || t.plays) ?? false)
@@ -67,6 +81,9 @@
         <RadioButton seed={{ kind: 'artist', id: artist.id }} />
         <QueueAll kind="artist" refId={artist.id} />
         <AddToPlaylist kind="artist" refId={artist.id} label={artist.name} />
+        {#if isAdmin()}
+          <button class="pill" onclick={() => (editing = true)}><Icon name="edit" size={18} /> Edit artist</button>
+        {/if}
       </div>
     </div>
   </header>
@@ -144,6 +161,17 @@
         </a>
       {/each}
     </div>
+  {/if}
+  {#if editing}
+    <TagEditor
+      title="Edit artist"
+      save={saveArtist}
+      applies="A new name goes on every song and album they're on; genres go on the songs they lead."
+      fields={['artist', 'genre']}
+      initial={{ artist: artist.name, genre: artist.genres ?? '' }}
+      onclose={() => (editing = false)}
+      onsaved={() => (editing = false)}
+    />
   {/if}
 {/if}
 

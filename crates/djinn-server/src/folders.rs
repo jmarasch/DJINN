@@ -51,6 +51,24 @@ async fn save_app_roots(store: &Store, roots: &[PathBuf]) -> anyhow::Result<()> 
     Ok(())
 }
 
+/// After a restore: library folders now live elsewhere. Each moved folder
+/// replaces its old self in the app's list, or joins it unless config.toml
+/// already lists it.
+pub async fn move_roots(
+    store: &Store,
+    config_roots: &[PathBuf],
+    moves: &[(PathBuf, PathBuf)],
+) -> anyhow::Result<()> {
+    let mut roots = app_roots(store).await?;
+    for (from, to) in moves {
+        roots.retain(|r| r != from && r != to);
+        if !config_roots.contains(to) {
+            roots.push(to.clone());
+        }
+    }
+    save_app_roots(store, &roots).await
+}
+
 /// Adds a library folder directly, for tests.
 #[cfg(test)]
 pub async fn add_root_for_tests(state: &AppState, path: &Path) {

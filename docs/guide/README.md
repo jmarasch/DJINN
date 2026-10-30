@@ -15,14 +15,19 @@ Each page covers one part of the app.
    settings under Admin > Rules.
 6. [Speakers and sound](speakers-and-sound.md): several speakers at once,
    delays, crossfade, and even volume.
-7. [Casting and the TV page](casting-and-tv.md): Chromecast, smart TVs and
-   Sonos, and a now-playing screen.
+7. [Casting, Play here and the TV page](casting-and-tv.md): Chromecast,
+   smart TVs and Sonos, the party on your own phone, and a now-playing
+   screen.
 8. [Search and AI](search-and-ai.md): finding songs by name or by
    description, and the optional AI tools.
-9. [Your library](your-library.md): music folders, artist photos and bios, and
-   filling in missing tags.
+9. [Your library](your-library.md): music folders, artist photos and bios,
+   correcting tags, and filling in missing ones.
 10. [Updates](updates.md): keeping DJINN up to date.
-11. [Troubleshooting](troubleshooting.md): no sound, phones can't connect, and
+11. [Back up and restore](backup-and-restore.md): save everything DJINN knows
+    to one file, and move it to another computer.
+12. [System tools](system.md): status, restarting, the log, and clearing
+    things out.
+13. [Troubleshooting](troubleshooting.md): no sound, phones can't connect, and
     other common problems.
 
 Who can do what: **guests** and **users** queue songs. **Admins** (hosts)

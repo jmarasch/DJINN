@@ -304,6 +304,8 @@ export interface Settings {
   artist_keep_whole: string
   /** The TV page (/tv) works without signing in. */
   tv_page: boolean
+  /** Anyone signed in can play the party in their own browser. */
+  play_here: boolean
   /** Votes that skip a song; 0 turns skip voting off. */
   skip_votes: number
   /** AcoustID application key, for identifying songs by sound. */
@@ -579,3 +581,56 @@ export interface Learned {
   artists: Extremes<{ artist: ArtistSummary; weight: number }>
   genres: Extremes<{ name: string; weight: number }>
 }
+
+/** Tags DJINN can correct; the music files aren't changed. */
+export type TagField = 'title' | 'artist' | 'album' | 'album_artist' | 'year' | 'genre'
+
+/** A song's corrections; null keeps the file's value. */
+export type TagEdit = { [F in TagField]: F extends 'year' ? number | null : string | null }
+
+export interface TrackEdit {
+  track: Track
+  edited: TagEdit
+}
+
+/** Changed fields: one left out stays, null goes back to the file's. */
+export type TagFields = { [F in TagField]?: string | number | null }
+
+/** Corrections for songs. */
+export type TagChange = { track_ids: number[] } & TagFields
+
+/** A backup waiting to be restored. */
+export interface UploadedBackup {
+  /** The DJINN that made it. */
+  version: string
+  created_ms: number
+  /** Its music folders; `here` when the same folder exists on this computer. */
+  folders: { from: string; here: boolean }[]
+}
+
+/** Admin > System: how DJINN is doing. */
+export interface SystemStatus {
+  version: string
+  started_ms: number | null
+  /** Where phones reach DJINN. */
+  addresses: string[]
+  /** Windows has the network set to Public, which blocks phones. */
+  public_network: boolean
+  songs: number
+  library_folders: number
+  scanning: boolean
+  last_scan: { found: number; to_read: number; read: number; removed: number; done: boolean } | null
+  state: PlayState
+  outputs: OutputStatus
+  casts: { name: string; playing: boolean; error: string | null }[]
+  ai_listening: boolean
+  ai_reader: boolean
+  data_dir: string | null
+  database_bytes: number
+  art_bytes: number
+  models_bytes: number
+  log_file: string | null
+}
+
+/** What Admin > System can clear out. */
+export type SystemReset = 'queue' | 'tag_edits' | 'analysis' | 'listening' | 'history' | 'settings' | 'everything'

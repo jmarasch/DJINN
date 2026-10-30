@@ -206,14 +206,20 @@ impl Store {
         Ok(counts)
     }
 
-    /// Facts about every playable song, for descriptive search.
+    /// Facts about every playable song, for descriptive search. Genres come
+    /// from tags and MusicBrainz, or only the song's own once corrected in
+    /// the app.
     pub async fn track_facts(&self) -> Result<Vec<TrackFacts>> {
         let rows = sqlx::query_as(
             "SELECT t.id, coalesce(t.year, al.year) AS year, \
-                    lower(coalesce(t.genre, '') || ',' || coalesce(al.genres, '') || ',' || \
-                      coalesce((SELECT group_concat(ar.genres, ',') FROM track_artists ta \
-                                JOIN artists ar ON ar.id = ta.artist_id \
-                                WHERE ta.track_id = t.id AND ar.genres IS NOT NULL), '')) AS genres, \
+                    lower(CASE WHEN EXISTS (SELECT 1 FROM tag_edits e \
+                                            WHERE e.track_id = t.id AND e.genre IS NOT NULL) \
+                      THEN t.genre \
+                      ELSE coalesce(t.genre, '') || ',' || coalesce(al.genres, '') || ',' || \
+                        coalesce((SELECT group_concat(ar.genres, ',') FROM track_artists ta \
+                                  JOIN artists ar ON ar.id = ta.artist_id \
+                                  WHERE ta.track_id = t.id AND ar.genres IS NOT NULL), '') \
+                      END) AS genres, \
                     (SELECT count(*) FROM request_events r WHERE r.track_id = t.id) + \
                     (SELECT count(*) FROM play_events p WHERE p.track_id = t.id) AS popularity \
              FROM tracks t LEFT JOIN albums al ON al.id = t.album_id \
@@ -237,10 +243,24 @@ impl Store {
         Ok(rows)
     }
 
-    /// Every artist with playable songs and their genres.
+    /// Every artist with playable songs and their genres: from MusicBrainz,
+    /// with genres corrected on songs they lead in place of those for the
+    /// corrected songs.
     pub async fn artist_genres(&self) -> Result<Vec<ArtistGenres>> {
         let rows = sqlx::query_as(
-            "SELECT ar.id, ar.name, lower(coalesce(ar.genres, '')) AS genres FROM artists ar \
+            "SELECT ar.id, ar.name, lower(CASE \
+                WHEN EXISTS (SELECT 1 FROM track_artists ta JOIN tag_edits e ON e.track_id = ta.track_id \
+                             WHERE ta.artist_id = ar.id AND NOT ta.featured AND e.genre IS NOT NULL) \
+                THEN coalesce((SELECT group_concat(t.genre, ',') FROM track_artists ta \
+                               JOIN tracks t ON t.id = ta.track_id JOIN tag_edits e ON e.track_id = t.id \
+                               WHERE ta.artist_id = ar.id AND NOT ta.featured AND e.genre IS NOT NULL \
+                                 AND t.removed_at IS NULL), '') || ',' || \
+                  CASE WHEN EXISTS (SELECT 1 FROM track_artists ta JOIN tracks t ON t.id = ta.track_id \
+                                    WHERE ta.artist_id = ar.id AND NOT ta.featured AND t.removed_at IS NULL \
+                                      AND NOT EXISTS (SELECT 1 FROM tag_edits e \
+                                                      WHERE e.track_id = t.id AND e.genre IS NOT NULL)) \
+                       THEN coalesce(ar.genres, '') ELSE '' END \
+                ELSE coalesce(ar.genres, '') END) AS genres FROM artists ar \
              WHERE EXISTS (SELECT 1 FROM track_artists ta JOIN tracks t ON t.id = ta.track_id \
                            WHERE ta.artist_id = ar.id AND t.removed_at IS NULL)",
         )

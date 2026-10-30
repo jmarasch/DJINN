@@ -5,13 +5,26 @@
   import GenreChips from './GenreChips.svelte'
   import Icon from './Icon.svelte'
   import Sheet from './Sheet.svelte'
+  import TagEditor from './TagEditor.svelte'
   import { isAdmin, toast } from './state.svelte'
-  import type { Track, TrackTags } from './types'
+  import type { TagField, Track, TrackEdit, TrackTags } from './types'
 
   let { track }: { track: Track } = $props()
   let menu = $state(false)
   let playlist = $state(false)
   let tags = $state<TrackTags | null>(null)
+  let editing = $state<TrackEdit | null>(null)
+
+  async function editTags() {
+    menu = false
+    try {
+      editing = await api.trackEdit(track.id)
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not open the tags', true)
+    }
+  }
+
+  const songFields: TagField[] = ['title', 'artist', 'album', 'album_artist', 'year', 'genre']
 
   // The song's genres and styles, once the menu opens.
   $effect(() => {
@@ -65,8 +78,28 @@
           playlist = true
         }}><Icon name="playlist" /> Add to playlist</button
       >
+      <button class="item" onclick={editTags}><Icon name="edit" /> Edit tags</button>
     {/if}
   </Sheet>
+{/if}
+{#if editing}
+  {@const t = editing.track}
+  <TagEditor
+    title="Edit tags"
+    trackIds={[t.id]}
+    fields={songFields}
+    initial={{
+      title: t.title,
+      artist: t.artist ?? '',
+      album: t.album ?? '',
+      album_artist: t.album_artist ?? '',
+      year: t.year?.toString() ?? '',
+      genre: t.genre ?? tags?.genres.join(', ') ?? '',
+    }}
+    edited={songFields.filter((f) => editing?.edited[f] != null)}
+    onclose={() => (editing = null)}
+    onsaved={() => (editing = null)}
+  />
 {/if}
 <AddToPlaylist kind="track" refId={track.id} label={track.title} trigger={false} bind:open={playlist} />
 

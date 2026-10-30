@@ -448,3 +448,126 @@ async fn collaborations_count_for_every_artist() {
     assert_eq!(detail.appears_on.len(), 1, "Zara's single");
     assert_eq!(detail.top_tracks.len(), 2);
 }
+
+#[tokio::test]
+async fn library_moves_to_a_new_folder() {
+    let store = Store::open_in_memory().await.unwrap();
+    store
+        .save_scanned(&[
+            scanned(r"C:\Music\Björk\Jóga.flac", "Jóga", "Björk", "Homogenic"),
+            scanned(r"C:\Musicals\Cats.flac", "Memory", "Cast", "Cats"),
+        ])
+        .await
+        .unwrap();
+
+    let moved = store
+        .move_library(r"C:\Music", "/home/ana/music", '/')
+        .await
+        .unwrap();
+    assert_eq!(moved, 1, "a folder that only starts the same isn't moved");
+    let mut paths: Vec<String> = store
+        .known_files()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|k| k.path)
+        .collect();
+    paths.sort();
+    assert_eq!(
+        paths,
+        ["/home/ana/music/Björk/Jóga.flac", r"C:\Musicals\Cats.flac"]
+    );
+}
+
+#[tokio::test]
+async fn snapshots_open_as_a_database() {
+    let dir = std::env::temp_dir().join(format!("djinn-snapshot-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let store = Store::open(&dir.join("live.db")).await.unwrap();
+    store
+        .save_scanned(&[scanned("/m/a.flac", "A", "B", "C")])
+        .await
+        .unwrap();
+    let copy = dir.join("copy.db");
+    let _ = std::fs::remove_file(&copy);
+    store.snapshot(&copy).await.unwrap();
+
+    let restored = Store::open(&copy).await.unwrap();
+    assert_eq!(restored.library_track_ids().await.unwrap().len(), 1);
+    drop((restored, store));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn corrected_genres_replace_looked_up_ones() {
+    let store = Store::open_in_memory().await.unwrap();
+    store
+        .save_scanned(&[ScannedTrack {
+            path: "/m/a.flac".into(),
+            title: "Open Wound".into(),
+            artist: Some("Kream".into()),
+            album: Some("Ours".into()),
+            credits: vec![("Kream".into(), false)],
+            ..Default::default()
+        }])
+        .await
+        .unwrap();
+    sqlx::query("UPDATE albums SET genres = 'ebm, electro'")
+        .execute(&store.pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE artists SET genres = 'ebm'")
+        .execute(&store.pool)
+        .await
+        .unwrap();
+    let id = store.library_track_ids().await.unwrap()[0];
+    let track = store.track(id).await.unwrap().unwrap();
+    let (album, artist) = (track.album_id.unwrap(), track.artist_id.unwrap());
+    let genres = |store: Store| async move {
+        (
+            store.album(album).await.unwrap().unwrap().album.genres,
+            store.artist(artist).await.unwrap().unwrap().genres,
+            store.artist_genres().await.unwrap()[0]
+                .genres
+                .split(',')
+                .filter(|g| !g.is_empty())
+                .collect::<Vec<_>>()
+                .join(","),
+        )
+    };
+    assert_eq!(
+        genres(store.clone()).await,
+        (
+            Some("ebm, electro".into()),
+            Some("ebm".into()),
+            "ebm".into()
+        )
+    );
+
+    store
+        .edit_tags(
+            &[id],
+            &crate::TagChange {
+                genre: Some(Some("Darkwave, Synth-pop".into())),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    // As the scanner reads it with the correction applied.
+    sqlx::query("UPDATE tracks SET genre = 'Darkwave, Synth-pop'")
+        .execute(&store.pool)
+        .await
+        .unwrap();
+    let corrected = Some("Darkwave, Synth-pop".to_owned());
+    assert_eq!(
+        genres(store.clone()).await,
+        (corrected.clone(), corrected, "darkwave, synth-pop".into())
+    );
+    let facts = store.track_facts().await.unwrap();
+    assert_eq!(
+        facts[0].genres, "darkwave, synth-pop",
+        "not the album's or artist's"
+    );
+}

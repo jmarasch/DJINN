@@ -44,8 +44,13 @@ import type {
   SmartPlay,
   SmartPlaySettings,
   StartResponse,
+  SystemReset,
+  SystemStatus,
+  TagChange,
+  UploadedBackup,
   Track,
   TrackSort,
+  TrackEdit,
   TrackTags,
   User,
 } from './types'
@@ -126,6 +131,14 @@ export const api = {
   addRequest: (trackId: number) =>
     post<QueueItem & { outcome: 'added' | 'backed' }>('/queue', { track_id: trackId }),
   skipVote: () => post<{ skipped: boolean }>('/player/skip-vote'),
+  /** The live stream for Play here; null when the host turned it off. */
+  listen: () => get<{ url: string | null }>('/listen'),
+  trackEdit: (id: number) => get<TrackEdit>(`/tracks/${id}/edit`),
+  editTracks: (change: TagChange) => put<void>('/tracks/edit', change),
+  /** Renames an artist on all their songs and sets the genres of the songs
+   * they lead; answers where the artist is now. */
+  editArtist: (id: number, change: { name?: string | null; genre?: string | null }) =>
+    put<{ id: number }>(`/artists/${id}/edit`, change),
   removeRequest: (id: number) => del<void>(`/queue/${id}`),
   queueAll: (kind: EntryKind, refId: number) =>
     post<{ added: number }>('/queue/all', { kind, ref_id: refId }),
@@ -157,6 +170,16 @@ export const api = {
   libraryRoots: () => get<LibraryRoot[]>('/library/roots'),
   addLibraryRoot: (path: string) => post<LibraryRoot[]>('/library/roots', { path }),
   removeLibraryRoot: (path: string) => request<LibraryRoot[]>('DELETE', '/library/roots', { path }),
+  /** Checks an uploaded backup and keeps it until the restore starts. */
+  uploadBackup: async (file: File) => {
+    const res = await fetch('/api/backup/restore', { method: 'POST', body: file })
+    const data = await res.json().catch(() => null)
+    if (!res.ok) throw new ApiError(res.status, data?.error ?? `Upload failed (${res.status})`)
+    return data as UploadedBackup
+  },
+  cancelRestore: () => del<void>('/backup/restore'),
+  /** Each of the backup's music folders, with where it is on this computer. */
+  startRestore: (moves: [string, string][]) => post<void>('/backup/restore/start', { moves }),
   browseFolders: (path?: string) =>
     get<FolderListing>(path === undefined ? '/fs/dirs' : `/fs/dirs?path=${encodeURIComponent(path)}`),
   lookUpArtistInfo: (force = false) => post<StartResponse>('/library/artist-info', { force }),
@@ -197,6 +220,12 @@ export const api = {
   startIdentify: () => post<void>('/identify/start'),
   stopIdentify: () => post<void>('/identify/stop'),
   about: () => get<About>('/about'),
+  systemStatus: () => get<SystemStatus>('/system/status'),
+  systemLog: (level: string, q: string) =>
+    get<{ lines: string[] }>(`/system/log?level=${level}&q=${encodeURIComponent(q)}`),
+  restart: () => post<void>('/system/restart'),
+  quit: () => post<void>('/system/quit'),
+  systemReset: (what: SystemReset) => post<{ restarting: boolean }>('/system/reset', { what }),
   checkForUpdate: () => post<About>('/update/check'),
   installUpdate: () => post<void>('/update/install'),
   setUpdateSettings: (s: { check_updates: boolean; auto_update: boolean }) => put<void>('/update/settings', s),

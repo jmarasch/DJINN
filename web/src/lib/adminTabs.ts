@@ -11,6 +11,7 @@ export const adminTabRows = [
     { id: 'library', label: 'Library' },
     { id: 'audio', label: 'Audio' },
     { id: 'ai', label: 'AI' },
+    { id: 'system', label: 'System' },
     { id: 'about', label: 'About' },
   ],
 ] as const

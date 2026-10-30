@@ -16,6 +16,7 @@
     signInAsHost,
     toast,
   } from '../lib/state.svelte'
+  import { checkPlayHere, playHere, startPlayHere, stopPlayHere } from '../lib/playHere.svelte'
   import { cycleTheme, theme } from '../lib/theme.svelte'
 
   const current = $derived(app.nowPlaying.current)
@@ -28,6 +29,7 @@
   let volume = $state(app.player.volume)
 
   onMount(() => {
+    void checkPlayHere()
     let frame = 0
     const tick = () => {
       position = Math.min(currentPosition(), total || Infinity)
@@ -156,6 +158,26 @@
     </div>
   {/if}
 
+  {#if playHere.url}
+    <div class="play-here">
+      <button
+        class:on={playHere.on}
+        class:waiting={playHere.on && playHere.waiting}
+        aria-pressed={playHere.on}
+        title={playHere.on ? 'Stop playing on this device' : 'Play the party on this device'}
+        onclick={() => (playHere.on ? stopPlayHere() : startPlayHere())}
+      >
+        <Icon name="headphones" size={18} />
+        Tune In
+      </button>
+      {#if playHere.on}
+        <p class="small muted">
+          {playHere.waiting ? 'Connecting… ' : ''}A few seconds behind the speakers. Use this device's volume.
+        </p>
+      {/if}
+    </div>
+  {/if}
+
   {#if isAdmin()}
     <div class="controls">
       {#if app.player.state !== 'playing'}
@@ -221,6 +243,48 @@
 </section>
 
 <style>
+  .play-here {
+    margin-top: 12px;
+    text-align: center;
+  }
+
+  .play-here button {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 16px;
+    min-height: 40px;
+    border-radius: 999px;
+    font-size: 0.875rem;
+  }
+
+  .play-here button.on {
+    background: var(--accent);
+    color: var(--accent-text);
+    box-shadow: 0 0 16px var(--accent);
+  }
+
+  .play-here button.waiting {
+    animation: tuning 1.2s ease-in-out infinite alternate;
+  }
+
+  @keyframes tuning {
+    to {
+      box-shadow: 0 0 4px var(--accent);
+      opacity: 0.75;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .play-here button.waiting {
+      animation: none;
+    }
+  }
+
+  .play-here p {
+    margin: 6px 0 0;
+  }
+
   .skip-vote {
     display: inline-flex;
     align-items: center;

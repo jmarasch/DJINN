@@ -277,6 +277,9 @@ struct Settings {
     /// The TV page (/tv) works without signing in.
     #[serde(default = "default_true")]
     tv_page: bool,
+    /// Anyone signed in can play the party in their own browser.
+    #[serde(default)]
+    play_here: bool,
     /// Votes that skip a song; 0 turns skip voting off.
     #[serde(default)]
     skip_votes: i64,
@@ -316,6 +319,7 @@ async fn settings(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json
             .map_err(anyhow::Error::from)?
             .join("\n"),
         tv_page: crate::tv_api::enabled(&state).await?,
+        play_here: settings::flag(store, crate::cast_api::PLAY_HERE, false).await?,
         skip_votes: settings::number(store, jukebox::SKIP_VOTES, 0).await?,
         acoustid_key: store
             .get_setting(crate::identify_api::ACOUSTID_KEY)
@@ -371,6 +375,7 @@ async fn update_settings(
         .guest_mode
         .store(body.guest_mode, std::sync::atomic::Ordering::Relaxed);
     settings::set_flag(store, crate::tv_api::TV_PAGE, body.tv_page).await?;
+    settings::set_flag(store, crate::cast_api::PLAY_HERE, body.play_here).await?;
     store
         .set_setting(jukebox::SKIP_VOTES, &body.skip_votes.to_string())
         .await?;

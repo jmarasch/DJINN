@@ -8,6 +8,7 @@ mod ai;
 mod api;
 mod audio_api;
 mod auth;
+mod backup;
 mod banner;
 mod cast_api;
 mod client;
@@ -21,6 +22,7 @@ mod gpu;
 mod identify_api;
 mod jukebox;
 mod library_api;
+mod logs;
 mod network;
 mod party_api;
 mod player_api;
@@ -30,6 +32,7 @@ mod settings;
 mod smart;
 mod sse;
 mod state;
+mod system_api;
 #[cfg(test)]
 mod test_util;
 mod tv_api;
@@ -110,20 +113,38 @@ async fn run() -> anyhow::Result<()> {
         ),
     }
 
-    let store = Store::open(&config.database.path)
-        .await
-        .with_context(|| format!("failed to open database {}", config.database.path.display()))?;
-    tracing::info!(path = %config.database.path.display(), "database ready");
-    let removed = store.delete_expired_sessions().await?;
-    if removed > 0 {
-        tracing::debug!(removed, "expired sessions cleaned up");
-    }
-
     let art_dir = config
         .database
         .path
         .parent()
         .map_or_else(|| PathBuf::from("art"), |dir| dir.join("art"));
+
+    // A full reset, or a backup waiting to be restored, happens before the
+    // database opens.
+    system_api::reset_if_asked(&config.database.path, &art_dir);
+    let restored = backup::put_in_place(&config.database.path, &art_dir);
+    let opened = Store::open(&config.database.path).await;
+    let store = match (opened, &restored) {
+        (Ok(store), _) => store,
+        (Err(e), Some(restored)) => {
+            tracing::error!(error = %e, "the restored database won't open");
+            backup::undo(&config.database.path, restored);
+            Store::open(&config.database.path).await?
+        }
+        (Err(e), None) => {
+            return Err(e).with_context(|| {
+                format!("failed to open database {}", config.database.path.display())
+            })
+        }
+    };
+    if let Some(restored) = &restored {
+        backup::finish(&store, &config.library.roots, restored).await?;
+    }
+    tracing::info!(path = %config.database.path.display(), "database ready");
+    let removed = store.delete_expired_sessions().await?;
+    if removed > 0 {
+        tracing::debug!(removed, "expired sessions cleaned up");
+    }
 
     // The crossfade is a runtime setting; config.toml gives its first value.
     if store.get_setting(jukebox::CROSSFADE).await?.is_none() {
@@ -163,6 +184,7 @@ async fn run() -> anyhow::Result<()> {
     )
     .await?;
     let urls = banner::urls(config.server.listen);
+    system_api::started(&config.database.path, urls.clone());
     let base_url = urls.first().cloned().unwrap_or_default();
     // Older cache files had no extension; give them one so the folder is
     // easy to browse. Once is enough.
@@ -277,6 +299,7 @@ async fn run() -> anyhow::Result<()> {
     update::start(&state);
     network::refresh(&state);
     let update = std::sync::Arc::clone(&state.update);
+    let jukebox = std::sync::Arc::clone(&state.jukebox);
 
     let shutdown = std::sync::Arc::clone(&state.shutdown);
     // Windows is signing out: every shutdown step gets less time.
@@ -310,6 +333,15 @@ async fn run() -> anyhow::Result<()> {
     tokio::select! {
         result = async move { server.await } => result.context("server error")?,
         () = deadline => tracing::warn!("connections still open; shutting down anyway"),
+    }
+
+    // Remember how far the song playing got, to carry on from there.
+    let saved = tokio::time::timeout(QUICK_STOP_WAIT, async {
+        jukebox.lock().await.save_resume().await
+    })
+    .await;
+    if !matches!(saved, Ok(Ok(()))) {
+        tracing::warn!("couldn't save where playback was");
     }
 
     // Stop audio before closing the database. Neither may hold up the end:
@@ -363,9 +395,12 @@ async fn bind(addr: std::net::SocketAddr) -> std::io::Result<tokio::net::TcpList
 }
 
 fn init_logging(file: Option<&std::path::Path>) -> anyhow::Result<()> {
+    use tracing_subscriber::fmt::time::ChronoLocal;
+    use tracing_subscriber::prelude::*;
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(LOG_DEFAULT));
-    let builder = tracing_subscriber::fmt().with_env_filter(filter);
-    match file {
+    // Times in this computer's time zone, with the offset.
+    let local = ChronoLocal::rfc_3339;
+    let out = match file {
         Some(path) => {
             if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
                 std::fs::create_dir_all(dir)?;
@@ -375,13 +410,25 @@ fn init_logging(file: Option<&std::path::Path>) -> anyhow::Result<()> {
                 .append(true)
                 .open(path)
                 .with_context(|| format!("cannot open log file {}", path.display()))?;
-            builder
+            logs::set_file(path);
+            tracing_subscriber::fmt::layer()
+                .with_timer(local())
                 .with_ansi(false)
                 .with_writer(std::sync::Mutex::new(file))
-                .init();
+                .boxed()
         }
-        None => builder.init(),
-    }
+        None => tracing_subscriber::fmt::layer().with_timer(local()).boxed(),
+    };
+    // The latest lines also stay in memory, for Admin > System.
+    let recent = tracing_subscriber::fmt::layer()
+        .with_timer(local())
+        .with_ansi(false)
+        .with_writer(|| logs::Recent);
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(out)
+        .with(recent)
+        .init();
     Ok(())
 }
 

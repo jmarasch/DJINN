@@ -49,6 +49,9 @@ pub struct Track {
     pub gapless: bool,
     /// Linear gain for this track (ReplayGain), 1.0 for none.
     pub gain: f32,
+    /// Start this far in, in milliseconds (carrying on after a restart).
+    /// Positions and played time still count from where it started.
+    pub start_ms: u64,
 }
 
 /// Longest per-output delay, in milliseconds.

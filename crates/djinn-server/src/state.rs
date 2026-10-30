@@ -126,6 +126,18 @@ impl AppState {
     pub async fn for_tests() -> Self {
         let store = Store::open_in_memory().await.unwrap();
         let art_dir = std::env::temp_dir().join(format!("djinn-test-art-{}", std::process::id()));
+        Self::for_tests_with(store, art_dir).await
+    }
+
+    /// Test state with its database file and art cache in `dir`.
+    #[cfg(test)]
+    pub async fn for_tests_in(dir: &std::path::Path) -> Self {
+        let store = Store::open(&dir.join("djinn.db")).await.unwrap();
+        Self::for_tests_with(store, dir.join("art")).await
+    }
+
+    #[cfg(test)]
+    async fn for_tests_with(store: Store, art_dir: PathBuf) -> Self {
         let (events, _) = broadcast::channel(64);
         let jukebox = Jukebox::new(store.clone(), Box::new(|_| {}), events.clone())
             .await

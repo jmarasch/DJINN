@@ -61,7 +61,8 @@ pub struct Album {
     pub artist: String,
     pub year: Option<i64>,
     pub art_hash: Option<String>,
-    /// Comma separated, from MusicBrainz.
+    /// Comma separated, from MusicBrainz, or from its songs once their
+    /// genres are corrected in the app (album pages only).
     pub genres: Option<String>,
 }
 
@@ -266,7 +267,8 @@ pub struct ArtistDetail {
     pub bio: Option<String>,
     /// Where the bio came from.
     pub bio_url: Option<String>,
-    /// Comma separated, from MusicBrainz.
+    /// Comma separated, from MusicBrainz, plus or instead of genres
+    /// corrected in the app on songs they lead.
     pub genres: Option<String>,
     /// Credit for a free-licensed photo ("Name (CC BY-SA 4.0)").
     pub photo_credit: Option<String>,
@@ -494,8 +496,10 @@ impl Store {
         .bind(id)
         .fetch_optional(&self.pool)
         .await?;
-        let Some(album) = album else { return Ok(None) };
-        let tracks = sqlx::query_as(concat!(
+        let Some(mut album) = album else {
+            return Ok(None);
+        };
+        let tracks: Vec<Track> = sqlx::query_as(concat!(
             "SELECT ",
             track_columns!(),
             " FROM tracks t WHERE t.album_id = ? AND ",
@@ -506,6 +510,19 @@ impl Store {
         .bind(id)
         .fetch_all(&self.pool)
         .await?;
+        // Genres corrected in the app replace the ones looked up online.
+        let corrected: bool = sqlx::query_scalar(concat!(
+            "SELECT EXISTS (SELECT 1 FROM tag_edits e JOIN tracks t ON t.id = e.track_id
+                            WHERE t.album_id = ? AND e.genre IS NOT NULL AND ",
+            available!(),
+            ")"
+        ))
+        .bind(id)
+        .fetch_one(&self.pool)
+        .await?;
+        if corrected {
+            album.genres = genre_list(tracks.iter().filter_map(|t| t.genre.as_deref()));
+        }
         Ok(Some(AlbumDetail { album, tracks }))
     }
 
@@ -531,13 +548,33 @@ impl Store {
             artist,
             bio,
             bio_url,
-            genres,
+            mut genres,
             photo_credit,
             photo_credit_url,
         }) = row
         else {
             return Ok(None);
         };
+        // Genres corrected on songs they lead go in place of the ones looked
+        // up online, which still stand for the songs not corrected.
+        let led: Vec<(Option<String>, bool)> = sqlx::query_as(concat!(
+            "SELECT t.genre, EXISTS (SELECT 1 FROM tag_edits e
+                                     WHERE e.track_id = t.id AND e.genre IS NOT NULL)
+             FROM tracks t JOIN track_artists ta ON ta.track_id = t.id
+             WHERE ta.artist_id = ? AND NOT ta.featured AND ",
+            available!()
+        ))
+        .bind(id)
+        .fetch_all(&self.pool)
+        .await?;
+        if led.iter().any(|(_, corrected)| *corrected) {
+            let looked_up = led.iter().any(|(_, corrected)| !corrected);
+            let corrected = led
+                .iter()
+                .filter(|(_, c)| *c)
+                .filter_map(|(g, _)| g.as_deref());
+            genres = genre_list(corrected.chain(genres.as_deref().filter(|_| looked_up)));
+        }
         let top_tracks = self.artist_top_tracks(id, 10).await?;
         let albums = sqlx::query_as(concat!(
             "SELECT ",
@@ -595,6 +632,18 @@ impl Store {
             other_tracks,
         }))
     }
+}
+
+/// Genres from several songs, each once, as "a, b, c"; `None` if there are
+/// none.
+fn genre_list<'a>(genres: impl Iterator<Item = &'a str>) -> Option<String> {
+    let mut seen: Vec<&str> = Vec::new();
+    for genre in genres.flat_map(|g| g.split(',')).map(str::trim) {
+        if !genre.is_empty() && !seen.iter().any(|s| s.eq_ignore_ascii_case(genre)) {
+            seen.push(genre);
+        }
+    }
+    (!seen.is_empty()).then(|| seen.join(", "))
 }
 
 /// Ids as a JSON array, for `json_each(?)`: one static query for any

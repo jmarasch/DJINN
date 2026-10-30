@@ -177,7 +177,13 @@ impl Player {
         self.next = None;
         let Some(track) = track else { return };
         match TrackDecoder::open(&track.path) {
-            Ok(decoder) => self.next = Some(Deck { track, decoder }),
+            Ok(mut decoder) => {
+                // A file that can't seek plays from the top instead.
+                if track.start_ms > 0 {
+                    decoder.seek_ms(track.start_ms);
+                }
+                self.next = Some(Deck { track, decoder });
+            }
             Err(e) => {
                 self.events.push(Event::TrackError {
                     id: track.id,
@@ -664,6 +670,7 @@ pub(crate) mod tests {
             path: path.to_path_buf(),
             gapless: false,
             gain: 1.0,
+            start_ms: 0,
         }
     }
 
@@ -891,6 +898,41 @@ pub(crate) mod tests {
         // again after the flush.
         assert_eq!(sink.written - after_skip, 4_000);
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Frames one track plays, started `start_ms` in.
+    fn frames_from(path: &Path, start_ms: u64) -> usize {
+        let mut player = Player::new(48_000);
+        let mut sink = VecSink::default();
+        player.set_next(Some(Track {
+            start_ms,
+            ..track(0, path)
+        }));
+        while player.is_active() {
+            sink.budget = 4096;
+            player.fill(&mut sink);
+            player.update(sink.consumed_frames());
+            let _ = player.take_events().count();
+            if sink.budget > 0 && !player.is_active() {
+                break;
+            }
+        }
+        sink.out.len() / 2
+    }
+
+    #[test]
+    fn a_track_can_start_partway_in() {
+        for ext in ["flac", "mp3"] {
+            let path = fixture(&format!("gapless_a.{ext}"));
+            let whole = frames_from(&path, 0);
+            let rest = frames_from(&path, 100);
+            // A tenth of a second (4800 frames) less, give or take a packet.
+            let skipped = whole - rest;
+            assert!(
+                (3_000..=4_900).contains(&skipped),
+                "{ext}: skipped {skipped} of {whole} frames"
+            );
+        }
     }
 
     fn fixture(name: &str) -> PathBuf {

@@ -13,7 +13,14 @@ an account (Admin > Users). See [Guests and requests](guests-and-requests.md).
 **TV page:** a screen showing what's playing, what's next and the join code,
 for a TV or tablet. Open `/tv` on that screen (for example
 `http://192.168.1.20:8066/tv`); no sign-in needed. See
-[Casting and the TV page](casting-and-tv.md).
+[Casting, Play here and the TV page](casting-and-tv.md).
+
+## Play here
+
+**Play here:** a **Tune In** button on the Playing tab lets anyone at the
+party play it on their own phone or computer, a few seconds behind the
+speakers. Off by default. See
+[Play here](casting-and-tv.md#play-here).
 
 ## Online lookups
 

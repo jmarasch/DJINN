@@ -3,6 +3,11 @@
   import FolderPicker from '../lib/FolderPicker.svelte'
   import Icon from '../lib/Icon.svelte'
   import AboutPanel from '../lib/AboutPanel.svelte'
+  import BackupPanel from '../lib/BackupPanel.svelte'
+  import LogViewer from '../lib/LogViewer.svelte'
+  import ResetPanel from '../lib/ResetPanel.svelte'
+  import SystemStatus from '../lib/SystemStatus.svelte'
+  import UpdatePanel from '../lib/UpdatePanel.svelte'
   import AiPanel from '../lib/AiPanel.svelte'
   import IdentifyPanel from '../lib/IdentifyPanel.svelte'
   import CastPanel from '../lib/CastPanel.svelte'
@@ -368,6 +373,11 @@
         </span>
       </label>
       <label class="switch big">
+        <input type="checkbox" bind:checked={settings.play_here} />
+        Play here: a Tune In button on the Playing tab lets anyone play the party on their own phone
+        or computer, a few seconds behind the speakers
+      </label>
+      <label class="switch big">
         <input type="checkbox" bind:checked={settings.online_artist_info} />
         Look up artist photos and bios (sends artist names to Deezer and Wikipedia)
       </label>
@@ -434,6 +444,12 @@
       <button class="primary">Save</button>
     </form>
   </section>
+{:else if tab === 'system'}
+  <SystemStatus />
+  <UpdatePanel />
+  <BackupPanel />
+  <LogViewer />
+  <ResetPanel />
 {:else if tab === 'about'}
   <AboutPanel />
 {/if}

@@ -147,10 +147,11 @@ jobs:
 
       # Building the pack takes most of the release (installing CUDA, then
       # nvcc compiling candle's kernels), and it only changes when what it's
-      # built from does: djinn-ai, the locked dependencies, or this workflow.
-      # When none of those changed since the last release, reuse its pack,
-      # checked against its SHA256SUMS. DJINN's own version number is left
-      # out of the comparison, since the helper doesn't use it.
+      # built from does. .github/scripts/gpu-inputs.py lists that: djinn-ai's
+      # files, the packages and features Cargo uses for this build (not
+      # test-only ones, nor other crates'), the build profiles, and this
+      # job's other steps. When the list is the same for the last release,
+      # reuse its pack, checked against its SHA256SUMS.
       - name: Reuse the last release's pack
         id: reuse
         shell: bash
@@ -158,13 +159,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           last=$(gh release view --json tagName --jq .tagName) || { echo "No release to reuse: building"; exit 0; }
-          inputs() {
-            git show "$1:Cargo.lock" | sed '/^name = "djinn/{n;d}'
-            git show "$1:Cargo.toml" | grep -v '^version = '
-          }
-          if [ "$(inputs "$last")" != "$(inputs HEAD)" ] ||
-             ! git diff --quiet "$last" HEAD -- crates/djinn-ai .github/workflows/release.yml; then
+          py=python3
+          if [ "$RUNNER_OS" = Windows ]; then py=python; fi
+          git worktree add -q ../last "$last"
+          if ! now=$("$py" .github/scripts/gpu-inputs.py .) ||
+             ! then=$("$py" .github/scripts/gpu-inputs.py ../last); then
+            echo "Couldn't compare with $last: building"
+            exit 0
+          fi
+          if [ "$now" != "$then" ]; then
             echo "Changed since $last: building"
+            diff <(echo "$then") <(echo "$now") | head -40 || true
             exit 0
           fi
           mkdir out
