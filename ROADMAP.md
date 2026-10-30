@@ -127,10 +127,36 @@ and requests are welcome at DJINN@newterrastudios.com or as an issue.
 
 ## Planned
 
-### 0.4.0
+### 0.4.0: DJINN GO
 
-- **Personal streaming.** Listen to your library on your own phone, apart
-  from the party.
+- **DJINN GO.** Your music library for yourself, apart from the party:
+  a web player with your own queue, likes, playlists, history and
+  personal radio, picking up where you left off on another device.
+  Runs on its own port so you can reach it from away from home.
+- **Roles.** Make your own roles and choose what each can do: use GO,
+  use it away from home, downloads (off unless you turn
+  them on), and more.
+- **Sign-ups.** Let people sign up on their own, with your approval, or
+  only by invite or by you adding them.
+- **Security for the internet.** Login lockouts, optional two-step
+  sign-in, a sign-in log, and guides for safe access from away with
+  Tailscale or Cloudflare Tunnel.
+
+### 0.4.1
+
+- **Submit music.** People you allow can add songs. Uploads are checked
+  for duplicates and tags, then wait for your review or go straight in.
+
+### 0.4.2
+
+- **GO on phones.** Use popular Subsonic apps on iPhone and Android, or
+  install the GO web player as an app.
+
+### 0.4.3
+
+- **Converting.** Optionally convert songs on the DJINN computer for
+  phones that can't play a format, or to use less mobile data. Off
+  unless you turn it on, with limits so the party never suffers.
 
 ### 0.5.0
 
