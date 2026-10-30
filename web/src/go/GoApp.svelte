@@ -12,7 +12,7 @@
   import Login from '../screens/Login.svelte'
   import Signup from '../screens/Signup.svelte'
   import AddToPlaylist from './AddToPlaylist.svelte'
-  import { loadLikes, player, stop } from './player.svelte'
+  import { loadLikes, player, setSaveData, stop } from './player.svelte'
   import PhoneApps from './PhoneApps.svelte'
   import PlayerBar from './PlayerBar.svelte'
   import SongMenu from './SongMenu.svelte'
@@ -138,6 +138,15 @@
     {:else if section === 'account'}
       <h1>Your account</h1>
       <p class="muted">Signed in as <b>{app.me.username}</b>{#if app.me.role_name} ({app.me.role_name}){/if}.</p>
+      {#if player.canConvert}
+        <section class="card">
+          <h2>This device</h2>
+          <label class="switch">
+            <input type="checkbox" checked={player.saveData} onchange={(e) => setSaveData(e.currentTarget.checked)} />
+            Save data: play smaller MP3 copies on this device
+          </label>
+        </section>
+      {/if}
       <AccountPanels />
       <PhoneApps />
       <button class="signout" onclick={signOut}>Sign out</button>

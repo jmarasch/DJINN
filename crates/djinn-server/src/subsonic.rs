@@ -1370,7 +1370,9 @@ async fn user_info(state: &AppState, user: &User, params: &Params) -> Answer {
     )
 }
 
-/// The original file, whatever bit rate or format the app asks for.
+/// The original file; or, when converting is on for this account and the
+/// app asks for MP3 or a bit rate lower than the file's, an MP3 at the
+/// nearest offered rate at or under it. Downloads are always the original.
 async fn stream(
     state: &AppState,
     user: &User,
@@ -1417,9 +1419,54 @@ async fn stream(
         },
         max_streams: permissions.max_streams,
     };
+    let original = std::path::PathBuf::from(&path);
+    let kbps = if download {
+        None
+    } else {
+        conversion(state, user, params, &original, track.duration_ms).await?
+    };
+    let path = match kbps {
+        Some(kbps) => crate::convert::converted(state, &original, kbps).await?,
+        None => original,
+    };
     Ok(Reply::Raw(
-        send_song(state, &who, std::path::Path::new(&path), download, request).await,
+        send_song(state, &who, &path, download, request).await,
     ))
+}
+
+/// The bit rate to convert at, if the app wants one this account may have.
+async fn conversion(
+    state: &AppState,
+    user: &User,
+    params: &Params,
+    path: &std::path::Path,
+    duration_ms: Option<i64>,
+) -> Result<Option<u32>, Failure> {
+    let Some(allowed) = crate::convert::available(state, user).await? else {
+        return Ok(None);
+    };
+    let format = params.get("format").unwrap_or("");
+    if format == "raw" {
+        return Ok(None);
+    }
+    let asked = params
+        .int("maxBitRate")
+        .and_then(|k| u32::try_from(k).ok())
+        .filter(|k| *k > 0);
+    let is_mp3 = suffix(&path.to_string_lossy()) == "mp3";
+    // The file's own rate, from its size and length.
+    let own = match (tokio::fs::metadata(path).await, duration_ms) {
+        (Ok(meta), Some(ms)) if ms > 0 => {
+            u32::try_from(meta.len() * 8 / u64::try_from(ms).unwrap_or(1)).ok()
+        }
+        _ => None,
+    };
+    let wanted = match asked {
+        Some(k) if own.is_none_or(|own| k < own) => Some(k),
+        _ if format == "mp3" && !is_mp3 => Some(allowed),
+        _ => None,
+    };
+    Ok(wanted.map(|k| crate::convert::snap(k.min(allowed))))
 }
 
 async fn cover_art(state: &AppState, params: &Params) -> Answer {
@@ -1568,7 +1615,10 @@ mod tests {
     async fn phone_apps_browse_and_play() {
         use djinn_store::{Permissions, Role, ScannedTrack};
 
-        let state = AppState::for_tests().await;
+        let dir = std::env::temp_dir().join(format!("djinn-subsonic-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("art")).unwrap();
+        let state = AppState::for_tests_in(&dir).await;
         state.go.enable_for_tests();
         let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../djinn-library/tests/fixtures/tagged.flac")
@@ -1688,6 +1738,17 @@ mod tests {
             rest(&state, &format!("stream?{auth}&id={song}&maxBitRate=128")).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(kind, "audio/flac");
+        // With converting on, asking for MP3 gets one. (Asking for a lower
+        // bit rate does too, but this test file is already below any.)
+        crate::settings::set_flag(&state.store, crate::convert::CONVERT_ENABLED, true)
+            .await
+            .unwrap();
+        let (_, kind, _) = rest(&state, &format!("stream?{auth}&id={song}&maxBitRate=128")).await;
+        assert_eq!(kind, "audio/flac", "already smaller than asked");
+        let (status, kind, _) = rest(&state, &format!("stream?{auth}&id={song}&format=mp3")).await;
+        assert_eq!((status, kind.as_str()), (StatusCode::OK, "audio/mpeg"));
+        let (_, kind, _) = rest(&state, &format!("stream?{auth}&id={song}&format=raw")).await;
+        assert_eq!(kind, "audio/flac", "raw is always the original");
         let (_, _, body) = rest(&state, &format!("download?{auth}&id={song}&f=json")).await;
         assert!(
             body.contains("\"code\":50"),
@@ -1723,5 +1784,6 @@ mod tests {
             .unwrap();
         let (_, _, body) = rest(&state, &format!("ping?{auth}&f=json")).await;
         assert!(body.contains("\"code\":50"), "{body}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

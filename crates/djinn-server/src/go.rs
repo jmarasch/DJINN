@@ -81,6 +81,8 @@ struct Grant {
     path: PathBuf,
     max_streams: i64,
     downloads: bool,
+    /// Play an MP3 at this bit rate instead of the original.
+    convert_kbps: Option<u32>,
     expires: Instant,
 }
 
@@ -403,6 +405,19 @@ struct PlayLinks {
     /// Volume for even loudness (ReplayGain, as set for the party), 1 for
     /// unchanged. The device applies it.
     gain: f32,
+    /// `url` plays an MP3 converted from the original.
+    converted: bool,
+    /// Asking again with `?convert=1` would get an MP3 (converting is on
+    /// and the role allows it).
+    can_convert: bool,
+}
+
+#[derive(Deserialize)]
+struct PlayQuery {
+    /// Converted to MP3, when converting is available; the original
+    /// otherwise.
+    #[serde(default)]
+    convert: bool,
 }
 
 /// The type browsers know a song file by.
@@ -429,10 +444,13 @@ async fn play(
     State(state): State<AppState>,
     device: Device,
     Path(id): Path<i64>,
+    Query(query): Query<PlayQuery>,
 ) -> ApiResult<Json<PlayLinks>> {
     if !device.go {
         return Err(ApiError::not_found());
     }
+    let convert_kbps = crate::convert::available(&state, &me.user).await?;
+    let convert = query.convert && convert_kbps.is_some();
     let track = state
         .store
         .track(id)
@@ -445,7 +463,11 @@ async fn play(
         .ok_or_else(ApiError::not_found)?;
     let permissions = state.store.permissions(&me.user).await?;
     let path = PathBuf::from(path);
-    let mime = mime_for(&path);
+    let mime = if convert {
+        "audio/mpeg"
+    } else {
+        mime_for(&path)
+    };
     let replay_gain = state.jukebox.lock().await.replay_gain();
     let gain = match state.store.gain_info(id).await? {
         Some(info) => replay_gain.linear(&info),
@@ -468,6 +490,7 @@ async fn play(
                 path,
                 max_streams: permissions.max_streams,
                 downloads: permissions.downloads,
+                convert_kbps: convert_kbps.filter(|_| convert),
                 expires: now + GRANT_LIFE,
             },
         );
@@ -478,6 +501,8 @@ async fn play(
         url,
         mime,
         gain,
+        converted: convert,
+        can_convert: convert_kbps.is_some(),
     }))
 }
 
@@ -509,6 +534,14 @@ async fn stream(
     if query.download && !grant.downloads {
         return ApiError::forbidden().into_response();
     }
+    // Downloads are always the original file.
+    let path = match grant.convert_kbps.filter(|_| !query.download) {
+        Some(kbps) => match crate::convert::converted(&state, &grant.path, kbps).await {
+            Ok(path) => path,
+            Err(e) => return e.into_response(),
+        },
+        None => grant.path.clone(),
+    };
     send_song(
         &state,
         &Listening {
@@ -518,7 +551,7 @@ async fn stream(
             title: grant.title,
             max_streams: grant.max_streams,
         },
-        &grant.path,
+        &path,
         query.download,
         request,
     )

@@ -21,6 +21,8 @@ What a role can allow:
 - **Must use two-step sign-in for GO:** a code from an authenticator app
   after the password. See [DJINN GO](djinn-go.md#two-step-sign-in).
 - **Download songs:** save song files to a device. Off unless you turn it on.
+- **Have songs converted:** MP3 copies when their device needs them, once
+  you turn converting on. See [DJINN GO](djinn-go.md#converting).
 - **Share playlists:** let other people see and play their playlists.
 - **Submit music:** upload songs for the library from DJINN GO, and
   whether they go **straight in** or wait for you to review them. See

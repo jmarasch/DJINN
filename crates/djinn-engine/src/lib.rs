@@ -29,7 +29,8 @@ pub use devices::{output_devices, DeviceInfo};
 pub use engine::{Engine, EngineConfig};
 pub use error::EngineError;
 pub use features::{
-    analyze, decode_mono, describe, Analysis, Features, FEATURES_VERSION, FEATURE_COUNT,
+    analyze, decode_mono, decode_stereo, describe, Analysis, Features, FEATURES_VERSION,
+    FEATURE_COUNT,
 };
 pub use fingerprint::fingerprint;
 pub use loudness::{measure_loudness, Loudness, REFERENCE_LUFS};

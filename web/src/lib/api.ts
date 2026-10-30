@@ -1,5 +1,6 @@
 import type {
   About,
+  ConvertSettings,
   Submission,
   UploadSettings,
   GoHome,
@@ -129,7 +130,10 @@ export const api = {
   signOutMyDevice: (id: number) => del<void>(`/me/sessions/${id}`),
   signOutMyOtherDevices: () => del<void>('/me/sessions'),
   /** DJINN GO: a short-lived link to a song's file (GO port only). */
-  playLinks: (trackId: number) => get<PlayLinks>(`/go/play/${trackId}`),
+  playLinks: (trackId: number, convert = false) =>
+    get<PlayLinks>(`/go/play/${trackId}${convert ? '?convert=1' : ''}`),
+  convertSettings: () => get<ConvertSettings & { cache_used_mb: number }>('/go/convert'),
+  saveConvertSettings: (s: ConvertSettings) => put<ConvertSettings & { cache_used_mb: number }>('/go/convert', s),
   goHome: () => get<GoHome>('/go/home'),
   goLiked: () => get<Liked>('/go/likes'),
   goLikedIds: () => get<LikedIds>('/go/likes/ids'),

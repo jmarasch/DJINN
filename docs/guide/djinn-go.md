@@ -103,6 +103,22 @@ Devices play the files as they are. MP3, AAC (M4A), FLAC and WAV play in
 every current browser. Ogg files may not play on older iPhones, and ALAC
 only on Apple devices. GO tells you when your device can't play a song.
 
+## Converting
+
+Off unless you turn it on, under Admin > GO > **Converting**. Then DJINN
+makes MP3 copies:
+
+- for a device that can't play a song's format (GO asks for one by itself);
+- for people who turn on **Save data** under Account in GO, to use less
+  mobile data;
+- for phone apps that ask for a lower quality (or for MP3).
+
+Downloads are always the original file. Pick the quality (192 kbit/s is
+good), how many songs convert at once (1 keeps the party smooth on most
+computers), and how much space the copies may use; the oldest go first.
+Each song is converted once and kept, so only the first play waits a few
+seconds. Roles choose who can use it with **Have songs converted**.
+
 ## Two-step sign-in
 
 With two-step sign-in, signing in asks for a 6-digit code from an

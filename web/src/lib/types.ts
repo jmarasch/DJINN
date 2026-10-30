@@ -50,6 +50,17 @@ export interface PlayLinks {
   mime: string
   /** Volume for even loudness, 1 for unchanged. */
   gain: number
+  /** `url` plays an MP3 converted from the original. */
+  converted: boolean
+  /** Converting is on for this account (ask with convert). */
+  can_convert: boolean
+}
+
+export interface ConvertSettings {
+  enabled: boolean
+  kbps: number
+  jobs: number
+  cache_mb: number
 }
 
 export interface GoPlaylist {
@@ -169,6 +180,8 @@ export interface Permissions {
   unlimited_requests: boolean
   /** Must use two-step sign-in for DJINN GO. */
   require_two_step: boolean
+  /** May have songs converted, when converting is on. */
+  convert: boolean
 }
 
 export interface AccountRole extends Permissions {

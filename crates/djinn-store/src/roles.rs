@@ -28,6 +28,8 @@ pub struct Permissions {
     pub unlimited_requests: bool,
     /// Must use two-step sign-in for DJINN GO.
     pub require_two_step: bool,
+    /// May have songs converted, when converting is on.
+    pub convert: bool,
 }
 
 impl Default for Permissions {
@@ -42,6 +44,7 @@ impl Default for Permissions {
             submit_without_review: false,
             unlimited_requests: false,
             require_two_step: false,
+            convert: true,
         }
     }
 }
@@ -59,6 +62,7 @@ impl Permissions {
             unlimited_requests: true,
             // Admins' requirement is the `admin_two_step` setting.
             require_two_step: false,
+            convert: true,
         }
     }
 }
@@ -97,7 +101,7 @@ impl From<sqlx::Error> for RoleError {
 macro_rules! permission_columns {
     () => {
         "r.go, r.go_remote, r.max_streams, r.downloads, r.share_playlists, r.submit_music, \
-         r.submit_without_review, r.unlimited_requests, r.require_two_step"
+         r.submit_without_review, r.unlimited_requests, r.require_two_step, r.convert"
     };
 }
 
@@ -198,8 +202,8 @@ impl Store {
         let id: i64 = sqlx::query_scalar(
             "INSERT INTO roles (name, go, go_remote, max_streams, downloads, share_playlists,
                                 submit_music, submit_without_review, unlimited_requests,
-                                require_two_step, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+                                require_two_step, convert, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
         )
         .bind(name)
         .bind(p.go)
@@ -211,6 +215,7 @@ impl Store {
         .bind(p.submit_without_review)
         .bind(p.unlimited_requests)
         .bind(p.require_two_step)
+        .bind(p.convert)
         .bind(now_ms())
         .fetch_one(&self.pool)
         .await?;
@@ -234,7 +239,7 @@ impl Store {
         let result = sqlx::query(
             "UPDATE roles SET name = ?, go = ?, go_remote = ?, max_streams = ?, downloads = ?,
                               share_playlists = ?, submit_music = ?, submit_without_review = ?,
-                              unlimited_requests = ?, require_two_step = ?
+                              unlimited_requests = ?, require_two_step = ?, convert = ?
              WHERE id = ?",
         )
         .bind(name)
@@ -247,6 +252,7 @@ impl Store {
         .bind(p.submit_without_review)
         .bind(p.unlimited_requests)
         .bind(p.require_two_step)
+        .bind(p.convert)
         .bind(id)
         .execute(&self.pool)
         .await?;

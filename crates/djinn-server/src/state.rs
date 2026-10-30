@@ -59,6 +59,8 @@ pub struct AppState {
     pub limiter: Arc<crate::security::Limiter>,
     /// Sign-ins waiting for their two-step code.
     pub tickets: Arc<crate::two_step::Tickets>,
+    /// DJINN GO's optional converting.
+    pub converter: Arc<crate::convert::Converter>,
 }
 
 #[derive(Default)]
@@ -112,6 +114,7 @@ impl AppState {
             go: Arc::default(),
             limiter: Arc::default(),
             tickets: Arc::default(),
+            converter: Arc::default(),
         }
     }
 

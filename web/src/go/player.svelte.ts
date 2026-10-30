@@ -23,7 +23,41 @@ export const player = $state({
   radio: false,
   downloadUrl: null as string | null,
   loading: false,
+  /** Converting is on for this account (learned from play links). */
+  canConvert: false,
+  /** This device asks for converted MP3s to use less data. */
+  saveData: readSaveData(),
 })
+
+function readSaveData(): boolean {
+  try {
+    return localStorage.getItem('go-save-data') === '1'
+  } catch {
+    return false
+  }
+}
+
+export function setSaveData(on: boolean) {
+  player.saveData = on
+  try {
+    localStorage.setItem('go-save-data', on ? '1' : '0')
+  } catch {
+    // Private browsing: it lasts until the page closes.
+  }
+  preloaded = null
+  preloadNext()
+}
+
+/** Links for a song: converted when saving data, or when this device
+ * can't play the original and converting is available. */
+async function linksFor(trackId: number): Promise<PlayLinks> {
+  const links = await api.playLinks(trackId, player.saveData)
+  player.canConvert = links.can_convert
+  if (!links.converted && links.can_convert && !canPlay(links.mime)) {
+    return api.playLinks(trackId, true)
+  }
+  return links
+}
 
 /** What you like, for the hearts. */
 export const likes = {
@@ -132,7 +166,7 @@ async function start(index: number, autoplay = true) {
       decks[active].pause()
       active = 1 - active
     } else {
-      links = await api.playLinks(song.id)
+      links = await linksFor(song.id)
       if (mine !== generation) return
       decks[active].pause()
       decks[active].src = links.url
@@ -174,7 +208,7 @@ async function preloadNext() {
   const song = player.queue[at]
   if (!song || at === player.index) return
   try {
-    const links = await api.playLinks(song.id)
+    const links = await linksFor(song.id)
     if (player.queue[after(player.index)]?.id !== song.id || !canPlay(links.mime)) return
     const other = decks[1 - active]
     other.src = links.url

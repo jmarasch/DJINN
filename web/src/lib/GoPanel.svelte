@@ -5,6 +5,7 @@
   import { api } from './api'
   import { deviceName } from './format'
   import { app, toast } from './state.svelte'
+  import ConvertPanel from './ConvertPanel.svelte'
   import SubmissionsPanel from './SubmissionsPanel.svelte'
   import type { GoStatus, SignIn } from './types'
 
@@ -104,6 +105,8 @@
   {/if}
 
   <SubmissionsPanel />
+
+  <ConvertPanel />
 
   <section class="card">
     <h2>Safety</h2>

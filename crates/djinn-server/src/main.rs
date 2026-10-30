@@ -14,6 +14,7 @@ mod banner;
 mod cast_api;
 mod client;
 mod config;
+mod convert;
 mod desktop;
 mod download;
 mod error;
@@ -305,6 +306,9 @@ async fn run() -> anyhow::Result<()> {
     }
     watcher::start(state.clone());
     update::start(&state);
+    if let Err(e) = convert::apply(&state).await {
+        tracing::error!(error = %format!("{e:#}"), "couldn't read the converting settings");
+    }
     if let Err(e) = go::apply(&state).await {
         tracing::error!(error = %format!("{e:#}"), "couldn't start DJINN GO");
     }

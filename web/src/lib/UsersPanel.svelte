@@ -197,6 +197,7 @@
           submit_without_review: false,
           unlimited_requests: false,
           require_two_step: false,
+          convert: true,
         }
   }
 
@@ -241,6 +242,7 @@
     ['go_remote', 'Use GO away from home', 'Otherwise GO only works on your home network.'],
     ['require_two_step', 'Must use two-step sign-in for GO', 'A code from an authenticator app after the password.'],
     ['downloads', 'Download songs', 'Save song files to their device.'],
+    ['convert', 'Have songs converted', 'MP3 copies when their device needs them, if converting is on (Admin > GO).'],
     ['share_playlists', 'Share playlists', 'Let other people see and play their playlists.'],
     ['submit_music', 'Submit music', 'Upload songs for the library from DJINN GO.'],
     ['submit_without_review', 'Submitted music goes straight in', 'Otherwise you review each upload.'],
