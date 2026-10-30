@@ -18,12 +18,15 @@
   let {
     song,
     songTile,
+    like,
     progress = true,
   }: {
     /** A song in the list view; the party's request row by default. */
     song?: Snippet<[Track]>
     /** A song in the grid view. */
     songTile?: Snippet<[Track]>
+    /** A button beside each artist and album (DJINN GO's heart). */
+    like?: Snippet<['artist' | 'album', number, string]>
     /** Show the library check's progress at the top. */
     progress?: boolean
   } = $props()
@@ -173,17 +176,23 @@
     >
       {#snippet item(artist)}
         {#if grid}
-          <a class="tile" href="#/artist/{artist.id}">
-            <div class="cover"><Art hash={artist.art_hash} size={160} round={999} letter={initial(artist.name)} /></div>
-            <span class="ellipsis center-text">{artist.name}</span>
-            <span class="muted small center-text">{plural(artist.track_count, 'song', 'songs')}</span>
-          </a>
+          <div class="with-like">
+            <a class="tile" href="#/artist/{artist.id}">
+              <div class="cover"><Art hash={artist.art_hash} size={160} round={999} letter={initial(artist.name)} /></div>
+              <span class="ellipsis center-text">{artist.name}</span>
+              <span class="muted small center-text">{plural(artist.track_count, 'song', 'songs')}</span>
+            </a>
+            {#if like}<div class="tile-like">{@render like('artist', artist.id, artist.name)}</div>{/if}
+          </div>
         {:else}
-          <a class="row" href="#/artist/{artist.id}">
-            <Art hash={artist.art_hash} size={44} round={999} letter={initial(artist.name)} />
-            <span class="name ellipsis">{artist.name}</span>
-            <span class="muted small">{plural(artist.track_count, 'song', 'songs')}</span>
-          </a>
+          <div class="row-with-like">
+            <a class="row" href="#/artist/{artist.id}">
+              <Art hash={artist.art_hash} size={44} round={999} letter={initial(artist.name)} />
+              <span class="name ellipsis">{artist.name}</span>
+              <span class="muted small">{plural(artist.track_count, 'song', 'songs')}</span>
+            </a>
+            {#if like}{@render like('artist', artist.id, artist.name)}{/if}
+          </div>
         {/if}
       {/snippet}
     </InfiniteList>
@@ -228,21 +237,27 @@
     >
       {#snippet item(album)}
         {#if grid}
-          <a class="tile" href="#/album/{album.id}">
-            <div class="cover"><Art hash={album.art_hash} size={160} round={10} /></div>
-            <span class="ellipsis">{album.title}</span>
-            <span class="muted small ellipsis">{album.artist}{albumSort !== 'name' && album.year ? ` · ${album.year}` : ''}</span>
-          </a>
+          <div class="with-like">
+            <a class="tile" href="#/album/{album.id}">
+              <div class="cover"><Art hash={album.art_hash} size={160} round={10} /></div>
+              <span class="ellipsis">{album.title}</span>
+              <span class="muted small ellipsis">{album.artist}{albumSort !== 'name' && album.year ? ` · ${album.year}` : ''}</span>
+            </a>
+            {#if like}<div class="tile-like">{@render like('album', album.id, album.title)}</div>{/if}
+          </div>
         {:else}
-          <a class="row" href="#/album/{album.id}">
-            <Art hash={album.art_hash} size={52} />
-            <span class="name">
-              <span class="ellipsis block">{album.title}</span>
-              <span class="muted small ellipsis block">
-                {album.artist}{album.year ? ` · ${album.year}` : ''}
+          <div class="row-with-like">
+            <a class="row" href="#/album/{album.id}">
+              <Art hash={album.art_hash} size={52} />
+              <span class="name">
+                <span class="ellipsis block">{album.title}</span>
+                <span class="muted small ellipsis block">
+                  {album.artist}{album.year ? ` · ${album.year}` : ''}
+                </span>
               </span>
-            </span>
-          </a>
+            </a>
+            {#if like}{@render like('album', album.id, album.title)}{/if}
+          </div>
         {/if}
       {/snippet}
     </InfiniteList>
@@ -346,6 +361,36 @@
   .name {
     flex: 1;
     min-width: 0;
+  }
+
+  .row-with-like {
+    display: flex;
+    align-items: center;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .row-with-like .row {
+    flex: 1;
+    min-width: 0;
+    border-bottom: none;
+  }
+
+  .with-like {
+    position: relative;
+    min-width: 0;
+  }
+
+  /* The heart sits on the cover's corner. */
+  .tile-like {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    border-radius: 999px;
+    background: rgb(0 0 0 / 0.45);
+  }
+
+  .tile-like :global(button:not(.liked)) {
+    color: #fff;
   }
 
   .block {

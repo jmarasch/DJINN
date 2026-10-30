@@ -9,6 +9,7 @@
   import { startRadio } from '../player.svelte'
   import SongList from '../SongList.svelte'
   import SongRow from '../SongRow.svelte'
+  import LikeButton from '../LikeButton.svelte'
   import SongTile from '../SongTile.svelte'
 
   let query = $state(remembered())
@@ -62,16 +63,22 @@
     {#snippet songTile(track)}
       <SongTile {track} onplay={() => play(track)} />
     {/snippet}
+    {#snippet like(kind, id, name)}
+      <LikeButton {kind} {id} {name} />
+    {/snippet}
   </Browse>
 {:else if results}
   {#if results.artists.length}
     <h2>Artists</h2>
     <div class="tiles">
       {#each results.artists as artist (artist.id)}
-        <a class="tile" href="#/artist/{artist.id}">
-          <Art hash={artist.art_hash} size={88} round={999} letter={artist.name[0]} />
-          <span class="small">{artist.name}</span>
-        </a>
+        <div class="tile-wrap">
+          <a class="tile" href="#/artist/{artist.id}">
+            <Art hash={artist.art_hash} size={88} round={999} letter={artist.name[0]} />
+            <span class="small">{artist.name}</span>
+          </a>
+          <div class="corner"><LikeButton kind="artist" id={artist.id} name={artist.name} size={18} /></div>
+        </div>
       {/each}
     </div>
   {/if}
@@ -79,11 +86,14 @@
     <h2>Albums</h2>
     <div class="tiles">
       {#each results.albums as album (album.id)}
-        <a class="tile" href="#/album/{album.id}">
-          <Art hash={album.art_hash} size={88} />
-          <span class="small">{album.title}</span>
-          <span class="muted small">{album.artist}</span>
-        </a>
+        <div class="tile-wrap">
+          <a class="tile" href="#/album/{album.id}">
+            <Art hash={album.art_hash} size={88} />
+            <span class="small">{album.title}</span>
+            <span class="muted small">{album.artist}</span>
+          </a>
+          <div class="corner"><LikeButton kind="album" id={album.id} name={album.title} size={18} /></div>
+        </div>
       {/each}
     </div>
   {/if}
@@ -128,6 +138,24 @@
     width: 88px;
     color: inherit;
     text-decoration: none;
+  }
+
+  .tile-wrap {
+    position: relative;
+    flex: none;
+  }
+
+  /* The heart sits on the picture's corner. */
+  .corner {
+    position: absolute;
+    top: 0;
+    right: 0;
+    border-radius: 999px;
+    background: rgb(0 0 0 / 0.45);
+  }
+
+  .corner :global(button:not(.liked)) {
+    color: #fff;
   }
 
   .tile span {

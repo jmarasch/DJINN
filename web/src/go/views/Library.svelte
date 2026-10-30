@@ -6,6 +6,7 @@
   import type { GoPlaylist, Liked, Played } from '../../lib/types'
   import { playList } from '../player.svelte'
   import SongList from '../SongList.svelte'
+  import LikeButton from '../LikeButton.svelte'
   import SongRow from '../SongRow.svelte'
 
   let { section = 'liked' }: { section?: 'liked' | 'playlists' | 'history' } = $props()
@@ -62,10 +63,13 @@
     <h2>Artists</h2>
     <div class="tiles">
       {#each liked.artists as artist (artist.id)}
-        <a class="tile" href="#/artist/{artist.id}">
-          <Art hash={artist.art_hash} size={88} round={999} letter={artist.name[0]} />
-          <span class="small">{artist.name}</span>
-        </a>
+        <div class="tile-wrap">
+          <a class="tile" href="#/artist/{artist.id}">
+            <Art hash={artist.art_hash} size={88} round={999} letter={artist.name[0]} />
+            <span class="small">{artist.name}</span>
+          </a>
+          <div class="corner"><LikeButton kind="artist" id={artist.id} name={artist.name} size={18} /></div>
+        </div>
       {/each}
     </div>
   {/if}
@@ -73,11 +77,14 @@
     <h2>Albums</h2>
     <div class="tiles">
       {#each liked.albums as album (album.id)}
-        <a class="tile" href="#/album/{album.id}">
-          <Art hash={album.art_hash} size={88} />
-          <span class="small">{album.title}</span>
-          <span class="muted small">{album.artist}</span>
-        </a>
+        <div class="tile-wrap">
+          <a class="tile" href="#/album/{album.id}">
+            <Art hash={album.art_hash} size={88} />
+            <span class="small">{album.title}</span>
+            <span class="muted small">{album.artist}</span>
+          </a>
+          <div class="corner"><LikeButton kind="album" id={album.id} name={album.title} size={18} /></div>
+        </div>
       {/each}
     </div>
   {/if}
@@ -163,6 +170,24 @@
     width: 88px;
     color: inherit;
     text-decoration: none;
+  }
+
+  .tile-wrap {
+    position: relative;
+    flex: none;
+  }
+
+  /* The heart sits on the picture's corner. */
+  .corner {
+    position: absolute;
+    top: 0;
+    right: 0;
+    border-radius: 999px;
+    background: rgb(0 0 0 / 0.45);
+  }
+
+  .corner :global(button:not(.liked)) {
+    color: #fff;
   }
 
   .tile span {
