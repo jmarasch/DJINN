@@ -393,8 +393,11 @@ async fn bind(addr: std::net::SocketAddr) -> std::io::Result<tokio::net::TcpList
 }
 
 fn init_logging(file: Option<&std::path::Path>) -> anyhow::Result<()> {
+    use tracing_subscriber::fmt::time::ChronoLocal;
     use tracing_subscriber::prelude::*;
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(LOG_DEFAULT));
+    // Times in this computer's time zone, with the offset.
+    let local = ChronoLocal::rfc_3339;
     let out = match file {
         Some(path) => {
             if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
@@ -407,14 +410,16 @@ fn init_logging(file: Option<&std::path::Path>) -> anyhow::Result<()> {
                 .with_context(|| format!("cannot open log file {}", path.display()))?;
             logs::set_file(path);
             tracing_subscriber::fmt::layer()
+                .with_timer(local())
                 .with_ansi(false)
                 .with_writer(std::sync::Mutex::new(file))
                 .boxed()
         }
-        None => tracing_subscriber::fmt::layer().boxed(),
+        None => tracing_subscriber::fmt::layer().with_timer(local()).boxed(),
     };
     // The latest lines also stay in memory, for Admin > System.
     let recent = tracing_subscriber::fmt::layer()
+        .with_timer(local())
         .with_ansi(false)
         .with_writer(|| logs::Recent);
     tracing_subscriber::registry()

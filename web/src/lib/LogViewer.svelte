@@ -15,8 +15,10 @@
   let follow = $state(true)
   let box = $state<HTMLElement>()
 
-  /** "2026-10-30T01:23:09.760235Z" shows as "01:23:09" (in UTC, as written). */
-  const short = (line: string) => line.replace(/^\d{4}-\d\d-\d\dT(\d\d:\d\d:\d\d)\.\d+Z/, '$1')
+  /** "2026-10-29T20:23:09.760235-05:00" shows as "20:23:09", the DJINN
+   * computer's time. */
+  const short = (line: string) =>
+    line.replace(/^\d{4}-\d\d-\d\dT(\d\d:\d\d:\d\d)\.\d+(?:Z|[+-]\d\d:\d\d)/, '$1')
 
   async function load() {
     try {
@@ -68,8 +70,8 @@
     <a class="button small-button" href="/api/system/log/file" download>Download the log</a>
   </div>
   <p class="small muted">
-    The latest lines since DJINN started, with times in UTC. Attach the download to a problem report; it can
-    include song names and the addresses of devices on your network.
+    The latest lines since DJINN started, with times as the DJINN computer's clock shows them. Attach the
+    download to a problem report; it can include song names and the addresses of devices on your network.
   </p>
 </section>
 

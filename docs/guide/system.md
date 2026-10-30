@@ -27,10 +27,10 @@ Saving everything DJINN knows to one file; see
 ## Log
 
 The latest lines DJINN has written since it started, newest at the bottom,
-with times in UTC. Show only errors, warnings and errors, or everything, and
-search for a word. **Download the log** saves the log file to attach to a
-problem report; it can include song names and the addresses of devices on
-your network.
+with times as the DJINN computer's clock shows them. Show only errors,
+warnings and errors, or everything, and search for a word. **Download the
+log** saves the log file to attach to a problem report; it can include song
+names and the addresses of devices on your network.
 
 ## Clear and reset
 
