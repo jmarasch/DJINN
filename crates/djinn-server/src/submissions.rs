@@ -36,7 +36,9 @@ use crate::{folders, library_api, settings};
 pub const UPLOAD_FOLDER: &str = "upload_folder";
 /// Largest upload, in megabytes.
 pub const UPLOAD_MAX_MB: &str = "upload_max_mb";
-const DEFAULT_MAX_MB: i64 = 200;
+/// Room for a long song as a high-quality MP3 (about 12 MB for five minutes
+/// at 320 kbps); admins raise it for lossless files.
+const DEFAULT_MAX_MB: i64 = 15;
 /// Uploads one person can have waiting at once.
 const MAX_WAITING: i64 = 200;
 const HOLDING_DIR: &str = "uploads";
@@ -74,7 +76,7 @@ pub async fn upload_folder(state: &AppState) -> anyhow::Result<PathBuf> {
 
 async fn max_bytes(state: &AppState) -> anyhow::Result<u64> {
     let mb = settings::number(&state.store, UPLOAD_MAX_MB, DEFAULT_MAX_MB).await?;
-    Ok(u64::try_from(mb.clamp(1, 4096)).unwrap_or(200) * 1024 * 1024)
+    Ok(u64::try_from(mb.clamp(1, 4096)).unwrap_or(DEFAULT_MAX_MB as u64) * 1024 * 1024)
 }
 
 #[derive(Deserialize)]

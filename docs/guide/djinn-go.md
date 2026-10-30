@@ -101,7 +101,9 @@ song files (MP3, FLAC, M4A with AAC, Ogg Vorbis or WAV: the formats DJINN plays)
   (`Uploaded music` next to DJINN's database, or a folder you pick), sorted
   into Artist/Album folders. It becomes a library folder the first time.
   DJINN never writes to your other music folders.
-- **Size:** files up to 200 MB by default; change it under Submitted music.
+- **Size:** files up to 15 MB by default, enough for a long song as a
+  high-quality MP3. Lossless files (FLAC, WAV) are often bigger; raise the
+  limit under Submitted music to allow them.
 
 ## Formats
 
