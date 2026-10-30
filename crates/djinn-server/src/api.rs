@@ -14,7 +14,7 @@ use crate::error::ApiResult;
 use crate::state::AppState;
 use crate::{
     ai, audio_api, auth, backup, cast_api, folders, identify_api, library_api, party_api,
-    player_api, playlist_api, smart, sse, tv_api, update,
+    player_api, playlist_api, smart, sse, system_api, tv_api, update,
 };
 
 pub fn router() -> Router<AppState> {
@@ -37,6 +37,7 @@ pub fn router() -> Router<AppState> {
         .merge(update::router())
         .merge(folders::router())
         .merge(backup::router())
+        .merge(system_api::router())
         // Without this, unknown API paths would fall through to the SPA.
         .fallback(not_found)
 }

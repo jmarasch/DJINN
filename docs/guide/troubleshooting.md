@@ -10,8 +10,11 @@
   internet, and allow DJINN on private networks if Windows asks.
 - **VPN:** a VPN on the DJINN computer can hide it from the network. Turn it
   off or allow local network access.
+- **VPN on the phone:** a VPN app on the phone can keep it from reaching
+  devices at home. Turn it off while at the party.
 - **The address:** the join QR code and the address under it point at this
-  computer. If it changed (a new network), reopen the QR code.
+  computer. If it changed (a new network), reopen the QR code. Admin >
+  System > **Status** lists every address phones can use.
 
 ## No sound
 
@@ -50,6 +53,8 @@ Another admin can reset it under Admin > Users > **Reset password**.
 
 ## Still stuck
 
-Admin > About > **Report a problem** opens an issue on GitHub. DJINN's log
-(`djinn.log`) helps: on Windows it's next to `djinn.exe` in
-`%LOCALAPPDATA%\Programs\DJINN`, on Linux in `~/.config/djinn/`.
+Admin > System > **Log** shows what DJINN has been doing; pick **Errors** to
+see what went wrong. Admin > About > **Report a problem** opens an issue on
+GitHub; attach the log from **Download the log**. The log file itself
+(`djinn.log`) is next to `djinn.exe` in `%LOCALAPPDATA%\Programs\DJINN` on
+Windows, and in `~/.config/djinn/` on Linux.

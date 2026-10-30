@@ -3,6 +3,7 @@
 mod identify;
 mod library;
 mod loudness;
+mod maintenance;
 mod outputs;
 mod party;
 mod playlists;

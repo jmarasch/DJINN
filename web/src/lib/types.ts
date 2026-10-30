@@ -607,3 +607,30 @@ export interface UploadedBackup {
   /** Its music folders; `here` when the same folder exists on this computer. */
   folders: { from: string; here: boolean }[]
 }
+
+/** Admin > System: how DJINN is doing. */
+export interface SystemStatus {
+  version: string
+  started_ms: number | null
+  /** Where phones reach DJINN. */
+  addresses: string[]
+  /** Windows has the network set to Public, which blocks phones. */
+  public_network: boolean
+  songs: number
+  library_folders: number
+  scanning: boolean
+  last_scan: { found: number; to_read: number; read: number; removed: number; done: boolean } | null
+  state: PlayState
+  outputs: OutputStatus
+  casts: { name: string; playing: boolean; error: string | null }[]
+  ai_listening: boolean
+  ai_reader: boolean
+  data_dir: string | null
+  database_bytes: number
+  art_bytes: number
+  models_bytes: number
+  log_file: string | null
+}
+
+/** What Admin > System can clear out. */
+export type SystemReset = 'queue' | 'tag_edits' | 'analysis' | 'listening' | 'history' | 'settings'

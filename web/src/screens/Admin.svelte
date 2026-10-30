@@ -4,6 +4,10 @@
   import Icon from '../lib/Icon.svelte'
   import AboutPanel from '../lib/AboutPanel.svelte'
   import BackupPanel from '../lib/BackupPanel.svelte'
+  import LogViewer from '../lib/LogViewer.svelte'
+  import ResetPanel from '../lib/ResetPanel.svelte'
+  import SystemStatus from '../lib/SystemStatus.svelte'
+  import UpdatePanel from '../lib/UpdatePanel.svelte'
   import AiPanel from '../lib/AiPanel.svelte'
   import IdentifyPanel from '../lib/IdentifyPanel.svelte'
   import CastPanel from '../lib/CastPanel.svelte'
@@ -441,7 +445,11 @@
     </form>
   </section>
 {:else if tab === 'system'}
+  <SystemStatus />
+  <UpdatePanel />
   <BackupPanel />
+  <LogViewer />
+  <ResetPanel />
 {:else if tab === 'about'}
   <AboutPanel />
 {/if}

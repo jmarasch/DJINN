@@ -3,6 +3,7 @@
   // file, or put a backup back, here or on another computer with the music
   // in a different place.
   import { api } from './api'
+  import { reloadAfterRestart } from './restart'
   import FolderPicker from './FolderPicker.svelte'
   import { toast } from './state.svelte'
   import type { UploadedBackup } from './types'
@@ -55,17 +56,7 @@
   // Wait for DJINN to go away and come back, then load the page again
   // (signing in with an account from the backup).
   $effect(() => {
-    if (!restarting) return
-    let away = false
-    const timer = setInterval(async () => {
-      try {
-        const res = await fetch('/api/health')
-        if (res.ok && away) location.reload()
-      } catch {
-        away = true
-      }
-    }, 1500)
-    return () => clearInterval(timer)
+    if (restarting) return reloadAfterRestart()
   })
 </script>
 

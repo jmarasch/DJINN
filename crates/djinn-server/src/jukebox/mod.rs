@@ -446,6 +446,12 @@ impl Jukebox {
         Ok(())
     }
 
+    /// Empties the request queue (Admin > System).
+    pub async fn clear_queue(&mut self) -> anyhow::Result<()> {
+        self.store.clear_queue().await?;
+        self.queue_changed().await
+    }
+
     pub fn play(&self) {
         (self.engine)(Command::Play);
     }

@@ -106,6 +106,10 @@ and requests are welcome at DJINN@newterrastudios.com or as an issue.
   different place. Your music files aren't part of the backup.
 - **Picks up where it left off.** After a restart or an update, the song
   that was playing carries on from where it was.
+- **System tools.** An Admin > System tab with DJINN's status (including
+  the addresses phones should open), updates, backups, a log viewer,
+  restart and quit, and tools to clear the queue, history, analysis, tag
+  corrections or settings.
 
 ### 0.4.0
 
