@@ -83,10 +83,16 @@ CUDA 12.4 doesn't support the newer runners' Ubuntu or Visual Studio.
 
 Building the pack is the slow part of a release (installing CUDA, then
 nvcc compiling candle's kernels), so the job reuses the last release's
-pack when nothing it's built from changed: `crates/djinn-ai`, the locked
-dependencies (`Cargo.lock` and the root `Cargo.toml`, not counting
-DJINN's own version), and the release workflow. A version bump alone
-doesn't rebuild it. To force a rebuild, change any of those.
+pack when nothing it's built from changed. `.github/scripts/gpu-inputs.py`
+lists what it's built from, for the release being made and for the last
+one: the files in `crates/djinn-ai`, every package and feature Cargo uses
+for `-p djinn-ai --features cuda` (test-only dependencies, and other
+crates' dependencies and features, don't count), the root `Cargo.toml`'s
+edition and build profiles, and the GPU job's steps (not its comments or
+the reuse step). DJINN's version number isn't in the list, so a version
+bump alone, or a dependency only the rest of DJINN uses, doesn't rebuild
+it. The job log says what changed when it does build. To see the list:
+`python3 .github/scripts/gpu-inputs.py .`
 
 ## How an install works
 
