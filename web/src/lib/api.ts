@@ -1,5 +1,10 @@
 import type {
   About,
+  GoStatus,
+  NeedsCode,
+  SignIn,
+  TwoStepSetup,
+  TwoStepStatus,
   AccountRole,
   AccountStatus,
   Device,
@@ -99,7 +104,23 @@ const del = <T>(path: string) => request<T>('DELETE', path)
 
 export const api = {
   me: () => get<User>('/me'),
-  login: (username: string, password: string) => post<User>('/auth/login', { username, password }),
+  login: (username: string, password: string) => post<User | NeedsCode>('/auth/login', { username, password }),
+  finishTwoStep: (ticket: string, code: string) => post<User>('/auth/two-step', { ticket, code }),
+  changePassword: (current: string, next: string) => post<void>('/me/password', { current, new: next }),
+  twoStep: () => get<TwoStepStatus>('/me/two-step'),
+  startTwoStep: () => post<TwoStepSetup>('/me/two-step/start'),
+  confirmTwoStep: (code: string) => post<{ recovery_codes: string[] }>('/me/two-step/confirm', { code }),
+  turnOffTwoStep: (password: string) => post<void>('/me/two-step/off', { password }),
+  myDevices: () => get<Device[]>('/me/sessions'),
+  signOutMyDevice: (id: number) => del<void>(`/me/sessions/${id}`),
+  signOutMyOtherDevices: () => del<void>('/me/sessions'),
+  /** DJINN GO: a short-lived link to a song's file (GO port only). */
+  playLinks: (trackId: number) => get<{ url: string; download_url: string | null }>(`/go/play/${trackId}`),
+  goStatus: () => get<GoStatus>('/go/status'),
+  saveGoSettings: (settings: { enabled: boolean; trusted_proxies: string; admin_two_step: boolean }) =>
+    put<GoStatus>('/go/settings', settings),
+  signIns: (limit = 200) => get<SignIn[]>(`/go/sign-ins?limit=${limit}`),
+  turnOffUserTwoStep: (id: number) => del<void>(`/users/${id}/two-step`),
   logout: () => post<void>('/auth/logout'),
   bootstrapStatus: () => get<{ needed: boolean }>('/auth/bootstrap'),
   mode: () => get<Mode>('/auth/mode'),

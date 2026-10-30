@@ -13,8 +13,22 @@ use rust_embed::RustEmbed;
 struct Assets;
 
 pub async fn static_handler(uri: Uri) -> Response {
+    spa(&uri, "index.html")
+}
+
+/// The DJINN GO page and its files, on the GO port.
+pub async fn go_handler(uri: Uri) -> Response {
+    spa(&uri, "go.html")
+}
+
+/// A file from the build, or the app's page (`index`) for its routes.
+fn spa(uri: &Uri, index: &str) -> Response {
     let path = uri.path().trim_start_matches('/');
-    let path = if path.is_empty() { "index.html" } else { path };
+    let path = if path.is_empty() || path == "index.html" {
+        index
+    } else {
+        path
+    };
 
     if let Some(response) = asset(path) {
         return response;
@@ -28,7 +42,7 @@ pub async fn static_handler(uri: Uri) -> Response {
     {
         return StatusCode::NOT_FOUND.into_response();
     }
-    asset("index.html").unwrap_or_else(|| {
+    asset(index).unwrap_or_else(|| {
         (
             StatusCode::SERVICE_UNAVAILABLE,
             "DJINN web UI is not built. Run `npm ci && npm run build` in web/ and rebuild.",

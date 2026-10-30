@@ -304,7 +304,7 @@ Personal listening, apart from the party, on the same library and database. Same
 **Security (0.4.0)**
 - The GO listener serves only GO: no Admin API, no bootstrap, no guest join.
 - Login slows down and then locks out per address and per account. Minimum password length, common passwords refused.
-- Optional two-step sign-in (TOTP); admin can require it per role.
+- Optional two-step sign-in (TOTP) with one-time recovery codes; admin can require it for GO per role and for admins. Once an account has it on, every sign-in asks for a code, on either port.
 - Remote access is a role permission; without it, GO only accepts addresses on the home network (private ranges, Tailscale).
 - `trusted_proxies` setting so lockouts and remote checks see the real client address behind Cloudflare Tunnel or a reverse proxy.
 - Session cookie `Secure` when reached over HTTPS; idle expiry; per-device sign-out.

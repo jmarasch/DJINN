@@ -53,6 +53,12 @@ pub struct AppState {
     pub ai: Arc<crate::ai::AiState>,
     /// Version checks and self-updates.
     pub update: Arc<crate::update::UpdateState>,
+    /// DJINN GO, personal listening on its own port.
+    pub go: Arc<crate::go::GoState>,
+    /// Slows password guessing.
+    pub limiter: Arc<crate::security::Limiter>,
+    /// Sign-ins waiting for their two-step code.
+    pub tickets: Arc<crate::two_step::Tickets>,
 }
 
 #[derive(Default)]
@@ -103,12 +109,21 @@ impl AppState {
             catalog: Arc::default(),
             ai: Arc::new(crate::ai::AiState::new(&art_dir_for_models)),
             update: Arc::default(),
+            go: Arc::default(),
+            limiter: Arc::default(),
+            tickets: Arc::default(),
         }
     }
 
     pub fn with_stream(mut self, stream: djinn_cast::stream::LiveStream, token: String) -> Self {
         self.stream = Some(stream);
         self.cast_token = Arc::new(token);
+        self
+    }
+
+    /// Where DJINN GO listens when it's on.
+    pub fn with_go_listen(mut self, listen: std::net::SocketAddr) -> Self {
+        self.go = Arc::new(crate::go::GoState::new(listen));
         self
     }
 

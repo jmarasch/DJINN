@@ -15,9 +15,61 @@ export interface User {
   /** The account's role (see AccountRole); used when role is 'user'. */
   role_id: number
   status: AccountStatus
+  /** Two-step sign-in is on. */
+  two_step: boolean
   /** Only on the signed-in user (/me). */
   role_name?: string | null
   permissions?: Permissions
+  /** DJINN GO asks this account for two-step sign-in. Only on /me. */
+  two_step_required?: boolean
+}
+
+/** Login's answer when the password was right but a code is needed. */
+export interface NeedsCode {
+  two_step: true
+  ticket: string
+}
+
+export interface TwoStepStatus {
+  on: boolean
+  required: boolean
+  recovery_codes_left: number
+}
+
+export interface TwoStepSetup {
+  secret: string
+  uri: string
+  qr_svg: string
+}
+
+export interface GoListener {
+  username: string
+  title: string
+  seconds_ago: number
+}
+
+export interface GoStatus {
+  enabled: boolean
+  running: boolean
+  error: string | null
+  port: number
+  addresses: string[]
+  tailscale: string | null
+  trusted_proxies: string
+  admin_two_step: boolean
+  listening: GoListener[]
+  mbps: number
+}
+
+export interface SignIn {
+  id: number
+  at: number
+  user_id: number | null
+  username: string
+  ip: string | null
+  user_agent: string | null
+  via: 'party' | 'go'
+  outcome: string
 }
 
 export type AccountStatus = 'active' | 'pending' | 'disabled'
@@ -33,6 +85,8 @@ export interface Permissions {
   submit_music: boolean
   submit_without_review: boolean
   unlimited_requests: boolean
+  /** Must use two-step sign-in for DJINN GO. */
+  require_two_step: boolean
 }
 
 export interface AccountRole extends Permissions {

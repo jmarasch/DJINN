@@ -19,6 +19,7 @@ mod download;
 mod error;
 mod events;
 mod folders;
+mod go;
 mod gpu;
 mod identify_api;
 mod jukebox;
@@ -29,6 +30,7 @@ mod party_api;
 mod player_api;
 mod playlist_api;
 mod reader;
+mod security;
 mod settings;
 mod smart;
 mod sse;
@@ -37,6 +39,7 @@ mod system_api;
 #[cfg(test)]
 mod test_util;
 mod tv_api;
+mod two_step;
 mod update;
 mod watcher;
 mod web;
@@ -209,7 +212,8 @@ async fn run() -> anyhow::Result<()> {
         events,
     )
     .with_join_url(base_url.clone())
-    .with_stream(stream, cast_api::token(&store).await?);
+    .with_stream(stream, cast_api::token(&store).await?)
+    .with_go_listen(config.go.listen);
 
     state
         .jukebox
@@ -298,6 +302,9 @@ async fn run() -> anyhow::Result<()> {
     }
     watcher::start(state.clone());
     update::start(&state);
+    if let Err(e) = go::apply(&state).await {
+        tracing::error!(error = %format!("{e:#}"), "couldn't start DJINN GO");
+    }
     network::refresh(&state);
     let update = std::sync::Arc::clone(&state.update);
     let jukebox = std::sync::Arc::clone(&state.jukebox);

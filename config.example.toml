@@ -30,3 +30,8 @@ path = "djinn.db"
 master_rate = 48000
 # Startup default, 0 (gapless) to 12. Adjustable at runtime from the admin page.
 crossfade_secs = 0
+
+[go]
+# DJINN GO, personal listening. Turned on and off in Admin > GO; this is
+# only where it listens.
+listen = "0.0.0.0:8067"

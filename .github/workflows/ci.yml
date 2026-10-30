@@ -17,6 +17,18 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  audit:
+    name: Dependency advisories
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+      # Known vulnerabilities in dependencies fail the build; reviewed
+      # exceptions are in .cargo/audit.toml.
+      - run: cargo audit
+
   check:
     name: ${{ matrix.os }}
     strategy:

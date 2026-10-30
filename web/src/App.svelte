@@ -8,6 +8,7 @@
   import Toasts from './lib/Toasts.svelte'
   import Admin from './screens/Admin.svelte'
   import { adminTabFor } from './lib/adminTabs'
+  import Account from './screens/Account.svelte'
   import AlbumView from './screens/AlbumView.svelte'
   import ArtistView from './screens/ArtistView.svelte'
   import GuestJoin from './screens/GuestJoin.svelte'
@@ -117,6 +118,8 @@
       <Playlists />
     {:else if tab === 'admin' && isAdmin()}
       <Admin tab={adminTab} />
+    {:else if route.path === '/account' && app.me.role !== 'guest'}
+      <Account />
     {:else}
       <NowPlaying />
     {/if}

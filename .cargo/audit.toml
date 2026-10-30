@@ -1,0 +1,11 @@
+# cargo audit (run in CI). Advisories listed here were reviewed.
+[advisories]
+ignore = [
+    # zip 8.6, still pulled in by candle-core 0.11 (the AI reader). All three
+    # are in ZipArchive::extract and ZipStreamReader::extract. candle only
+    # reads .npz entries with it (DJINN loads GGUF models), and DJINN's own
+    # backups use zip 9. Drop these once candle moves to zip 9.
+    "RUSTSEC-2026-0367",
+    "RUSTSEC-2026-0368",
+    "RUSTSEC-2026-0369",
+]

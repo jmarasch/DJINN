@@ -20,6 +20,7 @@
   import { adminTabRows, type AdminTab } from '../lib/adminTabs'
   import Sheet from '../lib/Sheet.svelte'
   import UsersPanel from '../lib/UsersPanel.svelte'
+  import GoPanel from '../lib/GoPanel.svelte'
   import { app, logout, toast } from '../lib/state.svelte'
   import type { LibraryRoot, RequestLogEntry, Settings } from '../lib/types'
 
@@ -50,7 +51,7 @@
       artDir = status.art_dir
       settings = s
       if (status.last_scan) app.scan = status.last_scan
-    } else if (which === 'audio' || which === 'smart' || which === 'users') {
+    } else if (which === 'audio' || which === 'smart' || which === 'users' || which === 'go') {
       // These panels load their own data.
     } else if (which === 'log') {
       log = await api.requestLog(200)
@@ -232,6 +233,8 @@
   <IdentifyPanel />
 {:else if tab === 'users'}
   <UsersPanel />
+{:else if tab === 'go'}
+  <GoPanel />
 {:else if tab === 'log'}
   <section class="card">
     <div class="log-head">
@@ -349,6 +352,7 @@
   <AboutPanel />
 {/if}
 
+<a class="button account-link" href="#/account">Your account (password, two-step sign-in)</a>
 <button class="signout" onclick={logout}>Sign out</button>
 
 <style>
@@ -473,6 +477,11 @@
 
   .settings input[type='number'] {
     width: 100px;
+  }
+
+  .account-link {
+    width: 100%;
+    margin-top: 8px;
   }
 
   .signout {

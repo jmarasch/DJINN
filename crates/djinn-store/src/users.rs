@@ -44,6 +44,8 @@ pub struct User {
     /// The account's role (see `roles`); only used for `Role::User`.
     pub role_id: i64,
     pub status: AccountStatus,
+    /// Two-step sign-in is on.
+    pub two_step: bool,
 }
 
 impl User {
@@ -57,17 +59,20 @@ impl User {
     }
 }
 
+/// Account sessions end after this long unused.
+const SESSION_IDLE_MS: i64 = 30 * 24 * 60 * 60 * 1000;
+
 macro_rules! user_columns {
     () => {
         "u.id, u.username, u.display_name, u.role, u.unlimited, u.mac, u.created_at, u.role_id, \
-         u.status"
+         u.status, u.totp_secret IS NOT NULL AS two_step"
     };
 }
 
 /// The same columns for RETURNING, which can't take table-qualified names.
 macro_rules! returning_user {
     () => {
-        " RETURNING id, username, display_name, role, unlimited, mac, created_at, role_id, status"
+        " RETURNING id, username, display_name, role, unlimited, mac, created_at, role_id, status, \n         totp_secret IS NOT NULL AS two_step"
     };
 }
 
@@ -438,7 +443,8 @@ impl Store {
         Ok(found)
     }
 
-    /// Notes that a session was just used, and from where.
+    /// Notes that a session was just used, and from where. Account sessions
+    /// last 30 days from their last use.
     pub async fn touch_session(
         &self,
         session_id: i64,
@@ -447,12 +453,14 @@ impl Store {
     ) -> Result<()> {
         sqlx::query(
             "UPDATE sessions SET last_seen_at = ?, ip = coalesce(?, ip),
-                                 user_agent = coalesce(?, user_agent)
+                                 user_agent = coalesce(?, user_agent),
+                                 expires_at = max(expires_at, ?)
              WHERE id = ?",
         )
         .bind(now_ms())
         .bind(ip)
         .bind(user_agent)
+        .bind(now_ms() + SESSION_IDLE_MS)
         .bind(session_id)
         .execute(&self.pool)
         .await?;
