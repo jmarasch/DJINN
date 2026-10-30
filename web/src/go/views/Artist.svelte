@@ -2,20 +2,26 @@
   import { api } from '../../lib/api'
   import Art from '../../lib/Art.svelte'
   import Icon from '../../lib/Icon.svelte'
-  import type { ArtistDetail } from '../../lib/types'
+  import type { ArtistDetail, ArtistSummary } from '../../lib/types'
   import { likes, playList, startRadio, toggleLike } from '../player.svelte'
   import SongList from '../SongList.svelte'
 
   let { id }: { id: number } = $props()
   let artist = $state<ArtistDetail | null>(null)
+  let similar = $state<ArtistSummary[]>([])
   let error = $state('')
 
   $effect(() => {
     artist = null
+    similar = []
     api
       .artist(id)
       .then((a) => (artist = a))
       .catch((e) => (error = e.message))
+    api
+      .similarArtists(id)
+      .then((list) => (similar = list))
+      .catch(() => {})
   })
 
   /** Every song by the artist: top ones, then the rest. */
@@ -68,6 +74,17 @@
       {/each}
     </div>
   {/if}
+  {#if similar.length}
+    <h2>Similar artists</h2>
+    <div class="similar">
+      {#each similar as other (other.id)}
+        <a class="other" href="#/artist/{other.id}">
+          <Art hash={other.art_hash} size={96} round={999} letter={other.name.charAt(0).toUpperCase()} />
+          <span class="small">{other.name}</span>
+        </a>
+      {/each}
+    </div>
+  {/if}
   {#if artist.bio}<p class="bio muted">{artist.bio}</p>{/if}
 {/if}
 
@@ -113,6 +130,33 @@
   }
 
   .tile span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .similar {
+    display: flex;
+    gap: 14px;
+    overflow-x: auto;
+    padding-bottom: 6px;
+    scrollbar-width: none;
+  }
+
+  .other {
+    flex: none;
+    width: 96px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    color: inherit;
+    text-align: center;
+    text-decoration: none;
+  }
+
+  .other span {
+    max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
