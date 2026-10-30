@@ -537,6 +537,11 @@ struct LibraryStatus {
     scanning: bool,
     last_scan: Option<ScanProgress>,
     tracks: i64,
+    /// The background work after a check, for the progress bar: sound
+    /// analysis, then AI listening; artist lookups alongside.
+    analysis: crate::events::LoudnessStatus,
+    listening: crate::ai::Listening,
+    lookup_running: bool,
     /// Where cover art and artist photos are cached.
     art_dir: String,
 }
@@ -546,6 +551,9 @@ async fn status(_: CurrentUser, State(state): State<AppState>) -> ApiResult<Json
         scanning: state.scan.running.load(Ordering::Relaxed),
         last_scan: state.scan.last.lock().ok().and_then(|l| l.clone()),
         tracks: state.store.track_count().await?,
+        analysis: crate::audio_api::loudness_status(&state).await?,
+        listening: crate::ai::listening(&state).await?,
+        lookup_running: state.scan.lookup_running.load(Ordering::Acquire),
         art_dir: state.art_dir.display().to_string(),
     }))
 }

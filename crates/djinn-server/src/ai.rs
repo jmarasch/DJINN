@@ -299,6 +299,26 @@ pub async fn ai_status(state: &AppState) -> ApiResult<AiStatus> {
     })
 }
 
+/// AI listening, for the library's progress bar.
+#[derive(Clone, Copy, Debug, Serialize)]
+pub struct Listening {
+    /// Switched on with the model installed.
+    on: bool,
+    running: bool,
+    heard: i64,
+    waiting: i64,
+}
+
+pub async fn listening(state: &AppState) -> ApiResult<Listening> {
+    let (heard, waiting) = state.store.heard_progress(models::VERSION).await?;
+    Ok(Listening {
+        on: enabled(state).await? && models::CLAP.installed(&state.ai.dir),
+        running: state.ai.listening.load(Ordering::Acquire),
+        heard,
+        waiting,
+    })
+}
+
 async fn enabled(state: &AppState) -> ApiResult<bool> {
     Ok(settings::flag(&state.store, AI_LISTENING, false).await?)
 }
@@ -391,6 +411,11 @@ pub fn start(state: &AppState) {
 
 /// Listens to songs not heard yet, a few at a time.
 async fn listen(state: &AppState) {
+    // One at a time: both decode every song. The analysis starts listening
+    // when it finishes.
+    if state.scan.loudness_running.load(Ordering::Acquire) {
+        return;
+    }
     if state.ai.listening.swap(true, Ordering::AcqRel) {
         return;
     }

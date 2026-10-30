@@ -1,4 +1,5 @@
 <script lang="ts">
+  import LibraryProgress from '../lib/LibraryProgress.svelte'
   import { api } from '../lib/api'
   import Art from '../lib/Art.svelte'
   import GenreCloud from '../lib/GenreCloud.svelte'
@@ -98,6 +99,8 @@
   const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
   const initial = (name: string) => name.charAt(0).toUpperCase()
 </script>
+
+<LibraryProgress />
 
 <div class="bar">
   <div class="tabs" role="tablist">

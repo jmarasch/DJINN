@@ -265,11 +265,11 @@ impl Store {
         let artists = sqlx::query_as(concat!(
             "SELECT ar.id, ar.name, ar.art_hash FROM artists_fts f JOIN artists ar ON ar.id = f.rowid
              WHERE artists_fts MATCH ?
-               AND EXISTS (
-                 SELECT 1 FROM tracks t LEFT JOIN albums al ON al.id = t.album_id
-                 WHERE ",
+               AND EXISTS (SELECT 1 FROM tracks t WHERE t.id IN ",
+            artist_songs!("ar.id"),
+            " AND ",
             available!(),
-            " AND (EXISTS (SELECT 1 FROM track_artists ta WHERE ta.track_id = t.id AND ta.artist_id = ar.id) OR al.artist_id = ar.id))
+            ")
              ORDER BY bm25(artists_fts)
              LIMIT ?"
         ))

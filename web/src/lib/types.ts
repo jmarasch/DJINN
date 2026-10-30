@@ -235,7 +235,11 @@ export interface AudioDevice {
   added: boolean
 }
 
+/** The steps of a library check, in order. */
+export type ScanPhase = 'finding' | 'reading' | 'sorting' | 'done'
+
 export interface ScanProgress {
+  phase: ScanPhase
   found: number
   to_read: number
   read: number
@@ -356,6 +360,26 @@ export interface StartResponse {
 }
 
 export type ReplayGainMode = 'off' | 'track' | 'album'
+
+/** AI listening, for the library's progress bar. */
+export interface Listening {
+  /** Switched on with the model installed. */
+  on: boolean
+  running: boolean
+  heard: number
+  waiting: number
+}
+
+export interface LibraryStatus {
+  scanning: boolean
+  last_scan: ScanProgress | null
+  tracks: number
+  art_dir: string
+  /** Sound analysis, then AI listening; artist lookups alongside. */
+  analysis: LoudnessStatus
+  listening: Listening
+  lookup_running: boolean
+}
 
 export interface LoudnessStatus {
   /** Songs whose loudness is known (tags or measured). */

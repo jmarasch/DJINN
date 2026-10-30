@@ -4,6 +4,7 @@
   import Icon from '../lib/Icon.svelte'
   import AboutPanel from '../lib/AboutPanel.svelte'
   import BackupPanel from '../lib/BackupPanel.svelte'
+  import LibraryProgress from '../lib/LibraryProgress.svelte'
   import LogViewer from '../lib/LogViewer.svelte'
   import ResetPanel from '../lib/ResetPanel.svelte'
   import SystemStatus from '../lib/SystemStatus.svelte'
@@ -200,10 +201,8 @@
   <section class="card">
     <h2>Library</h2>
     <p class="muted">{trackCount} songs</p>
-    {#if scanning && app.scan}
-      <p class="small">Scanning: {app.scan.read} of {app.scan.to_read} files read</p>
-      <progress max={app.scan.to_read || 1} value={app.scan.read}></progress>
-    {:else if app.scan}
+    <LibraryProgress />
+    {#if app.scan && !scanning}
       <p class="small muted">Last check found {app.scan.found} files, read {app.scan.read}, removed {app.scan.removed}.</p>
     {/if}
     {#if app.loudness}
@@ -604,10 +603,6 @@
 
   .settings input[type='number'] {
     width: 100px;
-  }
-
-  progress {
-    width: 100%;
   }
 
   .signout {

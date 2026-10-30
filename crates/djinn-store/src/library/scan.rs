@@ -49,20 +49,21 @@ impl Store {
         .await?;
         // Artists: an image in the artist's folder, then a photo looked up
         // online, then their first album's cover, then any song's artwork.
-        sqlx::query(
+        sqlx::query(concat!(
             "UPDATE artists SET art_hash = coalesce(
-               (SELECT t.artist_art FROM tracks t LEFT JOIN albums al ON al.id = t.album_id
-                WHERE t.removed_at IS NULL AND t.artist_art IS NOT NULL
-                  AND (al.artist_id = artists.id OR EXISTS (SELECT 1 FROM track_artists ta WHERE ta.track_id = t.id AND ta.artist_id = artists.id))
+               (SELECT t.artist_art FROM tracks t
+                WHERE t.id IN ",
+            artist_songs!("artists.id"),
+            " AND t.removed_at IS NULL AND t.artist_art IS NOT NULL
                 ORDER BY t.path LIMIT 1),
                artists.online_art_hash,
                (SELECT al.art_hash FROM albums al
                 WHERE al.artist_id = artists.id AND al.art_hash IS NOT NULL
                 ORDER BY al.year IS NULL, al.year, al.title LIMIT 1),
-               (SELECT t.art_hash FROM tracks t
-                WHERE EXISTS (SELECT 1 FROM track_artists ta WHERE ta.track_id = t.id AND ta.artist_id = artists.id) AND t.removed_at IS NULL AND t.art_hash IS NOT NULL
-                ORDER BY t.path LIMIT 1))",
-        )
+               (SELECT t.art_hash FROM track_artists ta JOIN tracks t ON t.id = ta.track_id
+                WHERE ta.artist_id = artists.id AND t.removed_at IS NULL AND t.art_hash IS NOT NULL
+                ORDER BY t.path LIMIT 1))"
+        ))
         .execute(&mut *tx)
         .await?;
         sqlx::query(

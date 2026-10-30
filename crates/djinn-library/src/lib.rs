@@ -58,8 +58,23 @@ pub enum LibraryError {
     Task(String),
 }
 
+/// The steps of a library check, in order.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ScanPhase {
+    /// Walking the music folders for audio files.
+    #[default]
+    Finding,
+    /// Reading the tags of new and changed files.
+    Reading,
+    /// Marking missing files and choosing album and artist pictures.
+    Sorting,
+    Done,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct ScanProgress {
+    pub phase: ScanPhase,
     /// Audio files found on disk.
     pub found: usize,
     /// New or changed files to read.
@@ -92,6 +107,7 @@ pub async fn scan(
     art_dir: &Path,
     mut progress: impl FnMut(&ScanProgress),
 ) -> Result<ScanProgress, LibraryError> {
+    progress(&ScanProgress::default());
     let walk_roots = roots.to_vec();
     let (found, available_roots) = tokio::task::spawn_blocking(move || walk(&walk_roots))
         .await
@@ -116,6 +132,7 @@ pub async fn scan(
         .collect();
 
     let mut status = ScanProgress {
+        phase: ScanPhase::Reading,
         found: found.len(),
         to_read: to_read.len(),
         ..Default::default()
@@ -138,6 +155,8 @@ pub async fn scan(
         progress(&status);
     }
 
+    status.phase = ScanPhase::Sorting;
+    progress(&status);
     let present: HashSet<&str> = found.iter().map(|f| f.path_str.as_str()).collect();
     let vanished: Vec<i64> = known
         .iter()
@@ -160,6 +179,7 @@ pub async fn scan(
         .set_setting(SCAN_VERSION_KEY, &SCAN_VERSION.to_string())
         .await?;
     status.removed = vanished.len();
+    status.phase = ScanPhase::Done;
     status.done = true;
     progress(&status);
     Ok(status)

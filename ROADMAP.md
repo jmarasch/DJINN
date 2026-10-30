@@ -5,6 +5,18 @@ and requests are welcome at DJINN@newterrastudios.com or as an issue.
 
 ## Released
 
+### 0.3.1 (October 2026)
+
+- **Big libraries stay responsive.** With tens of thousands of songs the
+  artist list loads in a fraction of a second instead of half a minute,
+  and the library no longer vanishes or Admin pages time out while a
+  library check runs. Checks finish about twice as fast.
+- **Library progress.** The top of the Library tab shows what DJINN is
+  doing, step by step: finding music, reading songs, sorting albums and
+  artists, analyzing sound and AI listening, with how far along it is.
+- AI listening now waits for sound analysis to finish instead of both
+  decoding every song at once.
+
 ### 0.3.0 (October 2026)
 
 - **Play here.** A button that plays the party on the phone, tablet or

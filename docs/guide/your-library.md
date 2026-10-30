@@ -13,6 +13,10 @@ Admin > **Library** lists your music folders.
 - **Remove a folder** (×): its songs disappear from DJINN. The files stay.
 - DJINN watches your folders and picks up new music by itself. To look for
   changes now, use **Check for changes**.
+- While DJINN works through new music, the top of the Library tab shows
+  each step: finding music, reading songs, sorting albums and artists,
+  analyzing the sound, and AI listening when it's on. Songs can be played as
+  soon as they've been read; the later steps carry on in the background.
 
 ## Artist photos, bios and album details
 

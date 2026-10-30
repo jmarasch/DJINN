@@ -19,6 +19,7 @@ import type {
   IdentificationRow,
   IdentifyStatus,
   Learned,
+  LibraryStatus,
   LibraryRoot,
   Mode,
   NowPlaying,
@@ -257,10 +258,7 @@ export const api = {
   saveReplayGain: (mode: ReplayGainMode, preamp_db: number) =>
     put<ReplayGainSettings>('/audio/replaygain', { mode, preamp_db }),
 
-  libraryStatus: () =>
-    get<{ scanning: boolean; last_scan: ScanProgress | null; tracks: number; art_dir: string }>(
-      '/library/status',
-    ),
+  libraryStatus: () => get<LibraryStatus>('/library/status'),
   openArtFolder: () => post<void>('/library/open-art-folder'),
   rescan: () => post<StartResponse>('/library/rescan'),
 }
