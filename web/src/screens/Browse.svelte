@@ -83,6 +83,8 @@
         // No strip; the list still scrolls.
       })
   })
+  /** The jump strip had no room beside the list and sits over its edge. */
+  let stripInside = $state(false)
   const indexed = $derived(tab !== 'genres' && jumps.length > 1)
 
   // The genres load the first time their tab opens.
@@ -159,10 +161,17 @@
 </div>
 
 {#if indexed}
-  <JumpStrip {jumps} years={byYear} {newestFirst} below={lists} onjump={(offset) => list?.jumpTo(offset)} />
+  <JumpStrip
+    {jumps}
+    years={byYear}
+    {newestFirst}
+    below={lists}
+    bind:inside={stripInside}
+    onjump={(offset) => list?.jumpTo(offset)}
+  />
 {/if}
 
-<div class="lists" class:indexed bind:this={lists}>
+<div class="lists" class:crowded={indexed && stripInside} bind:this={lists}>
   {#if tab === 'artists'}
     <InfiniteList
       bind:this={list}
@@ -419,12 +428,10 @@
     height: 100% !important;
   }
 
-  /* Room for the jump strip on the right, when it's on the page rather
+  /* Room for the jump strip on the right, when it's over the list rather
      than beside it. */
-  @media (max-width: 720px) {
-    .lists.indexed {
-      padding-right: 18px;
-    }
+  .lists.crowded {
+    padding-right: 18px;
   }
 
   .sort {
