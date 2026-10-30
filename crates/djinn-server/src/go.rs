@@ -198,6 +198,7 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .nest("/api", api::router())
         .route("/go/stream/{token}", get(stream))
+        .merge(crate::subsonic::router())
         .fallback(web::go_handler)
         .layer(middleware::from_fn_with_state(state.clone(), guard))
         .layer(middleware::from_fn_with_state(state.clone(), headers))
@@ -243,6 +244,9 @@ const ROUTES: &[(Method, &str, Access)] = &[
     (Method::GET, "/api/me/sessions", Access::Setup),
     (Method::DELETE, "/api/me/sessions", Access::Setup),
     (Method::DELETE, "/api/me/sessions/*", Access::Setup),
+    (Method::GET, "/api/me/app-password", Access::Listener),
+    (Method::POST, "/api/me/app-password", Access::Listener),
+    (Method::DELETE, "/api/me/app-password", Access::Listener),
     (Method::GET, "/api/search", Access::Listener),
     (Method::GET, "/api/tracks", Access::Listener),
     (Method::GET, "/api/tracks/jumps", Access::Listener),
@@ -322,6 +326,10 @@ async fn check(state: &AppState, request: Request) -> ApiResult<Request> {
     let (mut parts, body) = request.into_parts();
     parts.extensions.insert(GoRequest);
     let path = parts.uri.path().to_owned();
+    if path.starts_with("/rest/") {
+        // Subsonic apps: each call carries its own sign-in (see subsonic.rs).
+        return Ok(Request::from_parts(parts, body));
+    }
     if !path.starts_with("/api/") && path != "/api" {
         // The page, its files, and song links (which carry their own key).
         if parts.method != Method::GET && parts.method != Method::HEAD {
@@ -501,15 +509,50 @@ async fn stream(
     if query.download && !grant.downloads {
         return ApiError::forbidden().into_response();
     }
+    send_song(
+        &state,
+        &Listening {
+            user_id: grant.user_id,
+            username: grant.username,
+            session_id: grant.session_id,
+            title: grant.title,
+            max_streams: grant.max_streams,
+        },
+        &grant.path,
+        query.download,
+        request,
+    )
+    .await
+}
+
+/// Who's playing a song, for the "streams at once" limit and Admin > GO.
+pub struct Listening {
+    pub user_id: i64,
+    pub username: String,
+    /// The device: a session, or an app.
+    pub session_id: i64,
+    pub title: String,
+    pub max_streams: i64,
+}
+
+/// Sends a song's file as it is (with ranges, for seeking), unless the
+/// account is already playing on as many other devices as its role
+/// allows. `download` asks the browser to save it.
+pub async fn send_song(
+    state: &AppState,
+    who: &Listening,
+    path: &std::path::Path,
+    download: bool,
+    request: Request,
+) -> Response {
+    let now = Instant::now();
     if let Ok(mut playing) = state.go.playing.lock() {
         playing.retain(|_, p| now.duration_since(p.at) < ACTIVE_FOR);
         let elsewhere = playing
             .iter()
-            .filter(|(session, p)| p.user_id == grant.user_id && **session != grant.session_id)
+            .filter(|(session, p)| p.user_id == who.user_id && **session != who.session_id)
             .count();
-        if grant.max_streams > 0
-            && i64::try_from(elsewhere).unwrap_or(i64::MAX) >= grant.max_streams
-        {
+        if who.max_streams > 0 && i64::try_from(elsewhere).unwrap_or(i64::MAX) >= who.max_streams {
             return ApiError::new(
                 StatusCode::TOO_MANY_REQUESTS,
                 format!(
@@ -520,16 +563,16 @@ async fn stream(
             .into_response();
         }
         playing.insert(
-            grant.session_id,
+            who.session_id,
             Playing {
-                user_id: grant.user_id,
-                username: grant.username.clone(),
-                title: grant.title.clone(),
+                user_id: who.user_id,
+                username: who.username.clone(),
+                title: who.title.clone(),
                 at: now,
             },
         );
     }
-    let mut response = match ServeFile::new(&grant.path).oneshot(request).await {
+    let mut response = match ServeFile::new(path).oneshot(request).await {
         Ok(response) => response.map(Body::new),
         Err(e) => match e {},
     };
@@ -549,9 +592,8 @@ async fn stream(
         header::CACHE_CONTROL,
         HeaderValue::from_static("private, max-age=14400"),
     );
-    if query.download {
-        let name = grant
-            .path
+    if download {
+        let name = path
             .file_name()
             .map(|n| n.to_string_lossy().replace(['"', '\\'], ""))
             .unwrap_or_else(|| "song".to_owned());

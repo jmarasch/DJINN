@@ -289,7 +289,7 @@ pub async fn me_for(state: &AppState, user: User) -> ApiResult<Me> {
 }
 
 /// Records a sign-in attempt in the log.
-async fn log_sign_in(
+pub(crate) async fn log_sign_in(
     state: &AppState,
     device: &Device,
     username: &str,

@@ -53,6 +53,29 @@ Admins can always use GO.
 - **Even volume:** when ReplayGain is on for the party (Admin > Audio), GO
   applies the same levels on your device.
 
+## On your phone
+
+**Install it as an app:** open GO in your phone's browser, then use
+**Add to Home Screen** (Safari: the Share button; Chrome: the menu). It
+opens full screen with its own icon, and keeps playing with the screen off.
+
+**Or use a Subsonic app.** GO speaks the Subsonic API, so many music apps
+work with it, with offline downloads (when your role allows downloads),
+CarPlay and Android Auto:
+
+- Android: Symfonium, DSub, Ultrasonic, Tempo
+- iPhone: play:Sub, Amperfy, Substreamer
+- Computers: Feishin, Sonixd
+
+In GO, **Account > Phone apps > Make an app password**. In the app, add a
+Subsonic (or OpenSubsonic) server with GO's address, your username, and
+that app password. The app password only works in these apps, never to sign
+in to DJINN, and it skips two-step sign-in, so keep it to your own devices;
+make a new one (or remove it) any time and apps using the old one stop
+working. Likes, playlists, history and "carry on" are shared between the
+apps and GO's page. Apps get the original files, whatever quality they ask
+for.
+
 ## Submitting music
 
 Roles with **Submit music** see **Submit music** under Library in GO. Pick

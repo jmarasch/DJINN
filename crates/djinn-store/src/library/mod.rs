@@ -436,6 +436,7 @@ macro_rules! artist_counts {
          ) c ON c.artist_id = ar.id"
     };
 }
+pub(crate) use artist_counts;
 
 impl Store {
     pub async fn track_count(&self) -> Result<i64> {

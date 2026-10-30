@@ -123,6 +123,9 @@ export const api = {
   confirmTwoStep: (code: string) => post<{ recovery_codes: string[] }>('/me/two-step/confirm', { code }),
   turnOffTwoStep: (password: string) => post<void>('/me/two-step/off', { password }),
   myDevices: () => get<Device[]>('/me/sessions'),
+  appPassword: () => get<{ password: string | null }>('/me/app-password'),
+  newAppPassword: () => post<{ password: string | null }>('/me/app-password'),
+  removeAppPassword: () => del<void>('/me/app-password'),
   signOutMyDevice: (id: number) => del<void>(`/me/sessions/${id}`),
   signOutMyOtherDevices: () => del<void>('/me/sessions'),
   /** DJINN GO: a short-lived link to a song's file (GO port only). */

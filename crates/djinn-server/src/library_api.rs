@@ -491,7 +491,7 @@ async fn artist(
 #[derive(Deserialize)]
 pub struct ArtQuery {
     /// Thumbnail size in pixels (128 or 512); omit for the original.
-    size: Option<u32>,
+    pub size: Option<u32>,
 }
 
 /// Cover art by content hash, optionally as a thumbnail.

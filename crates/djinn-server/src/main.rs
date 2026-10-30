@@ -37,6 +37,7 @@ mod smart;
 mod sse;
 mod state;
 mod submissions;
+mod subsonic;
 mod system_api;
 #[cfg(test)]
 mod test_util;

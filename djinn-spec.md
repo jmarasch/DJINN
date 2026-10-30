@@ -332,7 +332,7 @@ Personal listening, apart from the party, on the same library and database. Same
 - Approved songs move into a dedicated, writable Uploads library folder. Other music folders stay read-only.
 
 **Phones (0.4.2)**
-- Subsonic/OpenSubsonic API on the GO listener so existing apps (Symfonium, DSub, play:Sub, Substreamer, Feishin) work, including their offline downloads where the role allows downloads.
+- Subsonic/OpenSubsonic API (`/rest/*`, XML or JSON, formPost and apiKeyAuthentication extensions) on the GO listener so existing apps (Symfonium, DSub, play:Sub, Substreamer, Feishin) work, including their offline downloads where the role allows downloads. Apps sign in with a per-account app password (Subsonic's token sign-in needs the server to know the password, so account passwords, which are hashed, are never used). Same role, home-network and two-step checks as the rest of GO. Likes, playlists, play queue and history are shared with GO's page.
 - The web player installs as an app (PWA).
 
 **Converting (0.4.3)**

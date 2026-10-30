@@ -13,6 +13,7 @@
   import Signup from '../screens/Signup.svelte'
   import AddToPlaylist from './AddToPlaylist.svelte'
   import { loadLikes, player, stop } from './player.svelte'
+  import PhoneApps from './PhoneApps.svelte'
   import PlayerBar from './PlayerBar.svelte'
   import SongMenu from './SongMenu.svelte'
   import Album from './views/Album.svelte'
@@ -138,6 +139,7 @@
       <h1>Your account</h1>
       <p class="muted">Signed in as <b>{app.me.username}</b>{#if app.me.role_name} ({app.me.role_name}){/if}.</p>
       <AccountPanels />
+      <PhoneApps />
       <button class="signout" onclick={signOut}>Sign out</button>
     {:else}
       <Home />
