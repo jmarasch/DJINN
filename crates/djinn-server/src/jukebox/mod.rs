@@ -363,15 +363,18 @@ impl Jukebox {
         (self.engine)(Command::SetOutputs(outputs));
     }
 
-    /// Queues a request. Admins and users marked unlimited skip the
-    /// per-person limit and the queue cap.
+    /// Queues a request. Admins, users marked unlimited, and roles with
+    /// unlimited requests skip the per-person limit and the queue cap.
     pub async fn add_request(
         &mut self,
         user: &User,
         track_id: i64,
         origin: &RequestOrigin,
     ) -> Result<(QueueItem, RequestOutcome), QueueError> {
-        let limits = if user.is_admin() || user.unlimited {
+        let unlimited = user.is_admin()
+            || user.unlimited
+            || self.store.permissions(user).await?.unlimited_requests;
+        let limits = if unlimited {
             RequestLimits::default()
         } else {
             let cap = settings::number(&self.store, MAX_QUEUE, 0).await?;

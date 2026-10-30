@@ -58,7 +58,7 @@
     </label>
     <label>
       Password
-      <input type="password" bind:value={password} autocomplete="new-password" minlength="6" required />
+      <input type="password" bind:value={password} autocomplete="new-password" minlength="8" required />
     </label>
     <label>
       Confirm password

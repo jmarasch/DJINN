@@ -10,18 +10,22 @@ use argon2::password_hash::phc::PasswordHash;
 use argon2::password_hash::{PasswordHasher, PasswordVerifier};
 use argon2::Argon2;
 use axum::extract::{FromRequestParts, Path, State};
-use axum::http::header::{COOKIE, SET_COOKIE};
+use axum::http::header::{COOKIE, SET_COOKIE, USER_AGENT};
 use axum::http::request::Parts;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
-use axum::response::{AppendHeaders, IntoResponse};
+use axum::response::{AppendHeaders, IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
-use djinn_store::{now_ms, CreateUserError, GuestSummary, Role, User};
+use djinn_store::{
+    now_ms, AccountStatus, CreateUserError, GuestSummary, Permissions, Role, SignupError, Store,
+    User, LISTENER_ROLE,
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::client::{self, ClientIp};
 use crate::error::{ApiError, ApiResult};
+use crate::settings;
 use crate::state::AppState;
 
 const COOKIE_NAME: &str = "djinn_session";
@@ -29,9 +33,108 @@ const SESSION_DAYS: i64 = 30;
 /// Guests stay signed in for a year (renewed whenever they open the app),
 /// so they're recognized at the next party.
 const GUEST_SESSION_DAYS: i64 = 365;
-const MIN_PASSWORD: usize = 6;
+const MIN_PASSWORD: usize = 8;
 const MAX_PASSWORD: usize = 256;
 const MAX_USERNAME: usize = 32;
+/// How stale a session's "last used" may get before it's updated, so
+/// requests don't each write to the database.
+const TOUCH_AFTER_MS: i64 = 5 * 60 * 1000;
+/// Passwords too easy to guess, refused whatever their length.
+const COMMON_PASSWORDS: &[&str] = &[
+    "password",
+    "password1",
+    "password12",
+    "password123",
+    "passw0rd",
+    "12345678",
+    "123456789",
+    "1234567890",
+    "0123456789",
+    "87654321",
+    "11111111",
+    "00000000",
+    "12341234",
+    "11223344",
+    "qwertyui",
+    "qwerty12",
+    "qwerty123",
+    "qwertyuiop",
+    "1q2w3e4r",
+    "1qaz2wsx",
+    "asdfghjk",
+    "zxcvbnm1",
+    "abcd1234",
+    "abc12345",
+    "abcdefgh",
+    "iloveyou",
+    "iloveyou1",
+    "sunshine",
+    "princess",
+    "football",
+    "baseball",
+    "superman",
+    "starwars",
+    "whatever",
+    "trustno1",
+    "letmein1",
+    "welcome1",
+    "welcome123",
+    "changeme",
+    "admin123",
+    "administrator",
+    "monkey123",
+    "dragon12",
+    "master12",
+    "computer",
+    "internet",
+    "jukebox1",
+    "djinn123",
+    "music123",
+];
+
+/// Who may create an account without an invite.
+pub const SIGNUP_MODE: &str = "signup_mode";
+/// The role new sign-ups get.
+pub const SIGNUP_ROLE: &str = "signup_role";
+
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SignupMode {
+    /// Only invites, or the admin adding people.
+    #[default]
+    Closed,
+    /// Anyone can sign up; the admin approves each account.
+    Review,
+    /// Anyone can sign up and start right away.
+    Open,
+}
+
+impl SignupMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Closed => "closed",
+            Self::Review => "review",
+            Self::Open => "open",
+        }
+    }
+}
+
+pub async fn signup_mode(store: &Store) -> anyhow::Result<SignupMode> {
+    Ok(match store.get_setting(SIGNUP_MODE).await?.as_deref() {
+        Some("review") => SignupMode::Review,
+        Some("open") => SignupMode::Open,
+        _ => SignupMode::Closed,
+    })
+}
+
+/// The role sign-ups go into: the chosen one while it exists, else Listener.
+pub async fn signup_role(store: &Store) -> anyhow::Result<i64> {
+    let id = settings::number(store, SIGNUP_ROLE, LISTENER_ROLE).await?;
+    Ok(match store.role(id).await? {
+        Some(_) => id,
+        None => LISTENER_ROLE,
+    })
+}
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -40,10 +143,19 @@ pub fn router() -> Router<AppState> {
         .route("/auth/bootstrap", get(bootstrap_status).post(bootstrap))
         .route("/auth/mode", get(mode))
         .route("/auth/guest", post(join_as_guest))
+        .route("/auth/signup", post(sign_up))
+        .route("/auth/invite/{token}", get(check_invite))
         .route("/me", get(me))
         .route("/users", get(list_users).post(create_user))
         .route("/users/{id}", delete(delete_user).patch(update_user))
         .route("/guests", get(list_guests))
+}
+
+/// The logged-in user and their session. Rejects with 401 when there is no
+/// valid session.
+pub struct CurrentSession {
+    pub user: User,
+    pub session_id: i64,
 }
 
 /// The logged-in user. Rejects with 401 when there is no valid session.
@@ -52,22 +164,94 @@ pub struct CurrentUser(pub User);
 /// A logged-in admin. Rejects with 401 or 403.
 pub struct AdminUser(pub User);
 
-impl FromRequestParts<AppState> for CurrentUser {
+impl FromRequestParts<AppState> for CurrentSession {
     type Rejection = ApiError;
 
     async fn from_request_parts(parts: &mut Parts, state: &AppState) -> ApiResult<Self> {
         let token = session_token(&parts.headers).ok_or_else(ApiError::unauthorized)?;
-        let user = state
+        let found = state
             .store
-            .session_user(&hash_token(&token))
+            .session(&hash_token(&token))
             .await?
             .ok_or_else(ApiError::unauthorized)?;
         // Turning guest mode off signs guests out.
-        if user.role == Role::Guest && !state.guest_mode() {
+        if found.user.role == Role::Guest && !state.guest_mode() {
             return Err(ApiError::unauthorized());
         }
-        Ok(Self(user))
+        if now_ms() - found.last_seen_at > TOUCH_AFTER_MS {
+            let Ok(device) = Device::from_request_parts(parts, state).await;
+            state
+                .store
+                .touch_session(
+                    found.session_id,
+                    device.ip.as_deref(),
+                    device.agent.as_deref(),
+                )
+                .await?;
+        }
+        Ok(Self {
+            user: found.user,
+            session_id: found.session_id,
+        })
     }
+}
+
+impl FromRequestParts<AppState> for CurrentUser {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &AppState) -> ApiResult<Self> {
+        let session = CurrentSession::from_request_parts(parts, state).await?;
+        Ok(Self(session.user))
+    }
+}
+
+/// Where a request came from, noted on the sessions it starts.
+pub struct Device {
+    pub ip: Option<String>,
+    pub agent: Option<String>,
+}
+
+impl<S: Send + Sync> FromRequestParts<S> for Device {
+    type Rejection = std::convert::Infallible;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &S,
+    ) -> Result<Self, std::convert::Infallible> {
+        let Ok(ClientIp(ip)) = ClientIp::from_request_parts(parts, state).await;
+        let agent = parts
+            .headers
+            .get(USER_AGENT)
+            .and_then(|v| v.to_str().ok())
+            .map(|v| v.chars().take(300).collect());
+        Ok(Self {
+            ip: ip.map(|ip| ip.to_string()),
+            agent,
+        })
+    }
+}
+
+/// The signed-in user as the app sees it: the account, its role's name,
+/// and what it may do.
+#[derive(Serialize)]
+pub struct Me {
+    #[serde(flatten)]
+    pub user: User,
+    pub role_name: Option<String>,
+    pub permissions: Permissions,
+}
+
+pub async fn me_for(state: &AppState, user: User) -> ApiResult<Me> {
+    let permissions = state.store.permissions(&user).await?;
+    let role_name = match user.role {
+        Role::User => state.store.role(user.role_id).await?.map(|r| r.name),
+        Role::Admin | Role::Guest => None,
+    };
+    Ok(Me {
+        user,
+        role_name,
+        permissions,
+    })
 }
 
 impl FromRequestParts<AppState> for AdminUser {
@@ -90,6 +274,7 @@ struct Credentials {
 
 async fn login(
     State(state): State<AppState>,
+    device: Device,
     Json(body): Json<Credentials>,
 ) -> ApiResult<impl IntoResponse> {
     let found = state.store.user_credentials(body.username.trim()).await?;
@@ -103,8 +288,27 @@ async fn login(
     let user = user
         .filter(|_| valid)
         .ok_or_else(|| ApiError::new(StatusCode::UNAUTHORIZED, "wrong username or password"))?;
-    let cookie = start_session(&state, user.id, SESSION_DAYS).await?;
-    Ok((AppendHeaders([(SET_COOKIE, cookie)]), Json(user)))
+    // Only said once the password is right, so it reveals nothing.
+    match user.status {
+        AccountStatus::Active => {}
+        AccountStatus::Pending => {
+            return Err(ApiError::new(
+                StatusCode::FORBIDDEN,
+                "your account is waiting for the host to approve it",
+            ))
+        }
+        AccountStatus::Disabled => {
+            return Err(ApiError::new(
+                StatusCode::FORBIDDEN,
+                "this account has been turned off",
+            ))
+        }
+    }
+    let cookie = start_session(&state, user.id, SESSION_DAYS, &device).await?;
+    Ok((
+        AppendHeaders([(SET_COOKIE, cookie)]),
+        Json(me_for(&state, user).await?),
+    ))
 }
 
 async fn logout(State(state): State<AppState>, headers: HeaderMap) -> ApiResult<impl IntoResponse> {
@@ -134,7 +338,10 @@ async fn me(
             renewed = Some(session_cookie(&token, max_age)?);
         }
     }
-    Ok((AppendHeaders(renewed.map(|c| (SET_COOKIE, c))), Json(user)))
+    Ok((
+        AppendHeaders(renewed.map(|c| (SET_COOKIE, c))),
+        Json(me_for(&state, user).await?),
+    ))
 }
 
 #[derive(Serialize)]
@@ -143,6 +350,8 @@ struct Mode {
     setup_needed: bool,
     /// Name this device used last time, so it can rejoin with one tap.
     welcome_back: Option<String>,
+    /// Whether people can create their own accounts.
+    signup: SignupMode,
 }
 
 /// How people get in. Public, for the sign-in screen.
@@ -163,6 +372,113 @@ async fn mode(State(state): State<AppState>, ClientIp(ip): ClientIp) -> ApiResul
         guest_mode,
         setup_needed: !state.store.admin_exists().await?,
         welcome_back,
+        signup: signup_mode(&state.store).await?,
+    }))
+}
+
+#[derive(Deserialize)]
+struct SignUp {
+    username: String,
+    password: String,
+    /// The token from an invite link.
+    #[serde(default)]
+    invite: Option<String>,
+}
+
+#[derive(Serialize)]
+struct Pending {
+    pending: bool,
+}
+
+/// Creates an account from the sign-in screen: through an invite link
+/// (signed in right away, in the invite's role), or as sign-ups allow.
+/// Accounts waiting for approval get 202 and no session.
+async fn sign_up(
+    State(state): State<AppState>,
+    device: Device,
+    Json(body): Json<SignUp>,
+) -> ApiResult<Response> {
+    if !state.store.admin_exists().await? {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "DJINN isn't set up yet",
+        ));
+    }
+    let username = validate_username(&body.username)?;
+    validate_password(&body.password, &username)?;
+    let invite = body.invite.filter(|t| !t.is_empty());
+    let mode = signup_mode(&state.store).await?;
+    if invite.is_none() && mode == SignupMode::Closed {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "sign-ups are closed; ask the host for an invite link",
+        ));
+    }
+    let hash = hash_password(body.password).await?;
+    let user = match invite {
+        Some(token) => state
+            .store
+            .sign_up_with_invite(&username, &hash, &hash_token(&token))
+            .await
+            .map_err(|e| match e {
+                SignupError::Taken => ApiError::conflict("username is already taken"),
+                SignupError::BadInvite => ApiError::new(StatusCode::FORBIDDEN, e.to_string()),
+                SignupError::Store(e) => e.into(),
+            })?,
+        None => {
+            let status = match mode {
+                SignupMode::Review => AccountStatus::Pending,
+                SignupMode::Open | SignupMode::Closed => AccountStatus::Active,
+            };
+            let role_id = signup_role(&state.store).await?;
+            match state
+                .store
+                .create_account(&username, &hash, Role::User, role_id, status)
+                .await
+            {
+                Ok(user) => user,
+                Err(CreateUserError::Taken) => {
+                    return Err(ApiError::conflict("username is already taken"))
+                }
+                Err(CreateUserError::Store(e)) => return Err(e.into()),
+            }
+        }
+    };
+    tracing::info!(username = %user.username, status = ?user.status, "account signed up");
+    if user.status == AccountStatus::Pending {
+        return Ok((StatusCode::ACCEPTED, Json(Pending { pending: true })).into_response());
+    }
+    let cookie = start_session(&state, user.id, SESSION_DAYS, &device).await?;
+    Ok((
+        StatusCode::CREATED,
+        AppendHeaders([(SET_COOKIE, cookie)]),
+        Json(me_for(&state, user).await?),
+    )
+        .into_response())
+}
+
+#[derive(Serialize)]
+struct InviteCheck {
+    role: String,
+}
+
+/// Whether an invite link still works, for the sign-up page. Public.
+async fn check_invite(
+    State(state): State<AppState>,
+    Path(token): Path<String>,
+) -> ApiResult<Json<InviteCheck>> {
+    let invite = state
+        .store
+        .invite_by_token(&hash_token(&token))
+        .await?
+        .ok_or_else(|| {
+            ApiError::new(
+                StatusCode::NOT_FOUND,
+                "this invite link has expired or been used up",
+            )
+        })?;
+    Ok(Json(InviteCheck {
+        role: invite.role_name,
     }))
 }
 
@@ -176,6 +492,7 @@ struct GuestJoin {
 async fn join_as_guest(
     State(state): State<AppState>,
     ClientIp(ip): ClientIp,
+    device: Device,
     Json(body): Json<GuestJoin>,
 ) -> ApiResult<impl IntoResponse> {
     if !state.guest_mode() {
@@ -192,11 +509,11 @@ async fn join_as_guest(
         .join_as_guest(&name, mac.as_deref(), ip.as_deref())
         .await?;
     tracing::info!(name = %name, mac = ?mac, ip = ?ip, "guest joined");
-    let cookie = start_session(&state, user.id, GUEST_SESSION_DAYS).await?;
+    let cookie = start_session(&state, user.id, GUEST_SESSION_DAYS, &device).await?;
     Ok((
         StatusCode::CREATED,
         AppendHeaders([(SET_COOKIE, cookie)]),
-        Json(user),
+        Json(me_for(&state, user).await?),
     ))
 }
 
@@ -221,6 +538,7 @@ struct BootstrapRequest {
 /// Creates the first admin using the one-time token printed at startup.
 async fn bootstrap(
     State(state): State<AppState>,
+    device: Device,
     Json(body): Json<BootstrapRequest>,
 ) -> ApiResult<impl IntoResponse> {
     let expected = state
@@ -237,16 +555,23 @@ async fn bootstrap(
             "setup link is invalid or already used",
         ));
     }
-    let user = new_user(&state, &body.username, body.password, Role::Admin).await?;
+    let user = new_user(
+        &state,
+        &body.username,
+        body.password,
+        Role::Admin,
+        LISTENER_ROLE,
+    )
+    .await?;
     if let Ok(mut token) = state.bootstrap_token.lock() {
         *token = None;
     }
     tracing::info!(username = %user.username, "admin account created");
-    let cookie = start_session(&state, user.id, SESSION_DAYS).await?;
+    let cookie = start_session(&state, user.id, SESSION_DAYS, &device).await?;
     Ok((
         StatusCode::CREATED,
         AppendHeaders([(SET_COOKIE, cookie)]),
-        Json(user),
+        Json(me_for(&state, user).await?),
     ))
 }
 
@@ -260,10 +585,17 @@ struct NewUser {
     password: String,
     #[serde(default = "default_role")]
     role: Role,
+    /// The account's role (see `roles`).
+    #[serde(default = "default_role_id")]
+    role_id: i64,
 }
 
 fn default_role() -> Role {
     Role::User
+}
+
+fn default_role_id() -> i64 {
+    LISTENER_ROLE
 }
 
 async fn create_user(
@@ -276,7 +608,17 @@ async fn create_user(
             "guest accounts are not available yet",
         ));
     }
-    let user = new_user(&state, &body.username, body.password, body.role).await?;
+    if state.store.role(body.role_id).await?.is_none() {
+        return Err(ApiError::bad_request("that role doesn't exist"));
+    }
+    let user = new_user(
+        &state,
+        &body.username,
+        body.password,
+        body.role,
+        body.role_id,
+    )
+    .await?;
     Ok((StatusCode::CREATED, Json(user)))
 }
 
@@ -305,12 +647,16 @@ async fn list_guests(
 struct UserUpdate {
     unlimited: Option<bool>,
     role: Option<Role>,
+    /// Moves the account to another role (see `roles`).
+    role_id: Option<i64>,
+    /// Approves (active), turns off (disabled) or back on an account.
+    status: Option<AccountStatus>,
     /// New password; signs the user out everywhere.
     password: Option<String>,
 }
 
-/// Edits a user: request limit exemption, role, or password. Guests only
-/// have the exemption.
+/// Edits a user: request limit exemption, admin or not, role, approval,
+/// turning off, or password. Guests only have the exemption.
 async fn update_user(
     AdminUser(admin): AdminUser,
     State(state): State<AppState>,
@@ -336,11 +682,41 @@ async fn update_user(
         }
         state.store.set_role(id, role).await?;
     }
+    if let Some(role_id) = body.role_id.filter(|&r| r != user.role_id) {
+        if user.role == Role::Guest {
+            return Err(ApiError::bad_request("guests don't have roles"));
+        }
+        if state.store.role(role_id).await?.is_none() {
+            return Err(ApiError::bad_request("that role doesn't exist"));
+        }
+        state.store.set_account_role(id, role_id).await?;
+    }
+    if let Some(status) = body.status.filter(|&s| s != user.status) {
+        if user.role == Role::Guest {
+            return Err(ApiError::bad_request(
+                "guests can't be turned off; remove them instead",
+            ));
+        }
+        if status == AccountStatus::Pending {
+            return Err(ApiError::bad_request("an account can't go back to waiting"));
+        }
+        if id == admin.id {
+            return Err(ApiError::bad_request("you can't turn off your own account"));
+        }
+        if user.role == Role::Admin
+            && status == AccountStatus::Disabled
+            && state.store.admin_count().await? <= 1
+        {
+            return Err(ApiError::bad_request("there must be at least one admin"));
+        }
+        state.store.set_status(id, status).await?;
+        tracing::info!(username = %user.username, status = ?status, "account status changed");
+    }
     if let Some(password) = body.password {
         if user.role == Role::Guest {
             return Err(ApiError::bad_request("guests don't have passwords"));
         }
-        validate_password(&password)?;
+        validate_password(&password, &user.username)?;
         let hash = hash_password(password).await?;
         state.store.set_password(id, &hash).await?;
     }
@@ -350,7 +726,9 @@ async fn update_user(
     Ok(StatusCode::NO_CONTENT)
 }
 
-fn validate_password(password: &str) -> ApiResult<()> {
+/// New passwords: long enough, not the username, not a common one, and
+/// not one character over and over.
+fn validate_password(password: &str, username: &str) -> ApiResult<()> {
     let length = password.chars().count();
     if length < MIN_PASSWORD {
         return Err(ApiError::bad_request(format!(
@@ -360,6 +738,17 @@ fn validate_password(password: &str) -> ApiResult<()> {
     if length > MAX_PASSWORD {
         return Err(ApiError::bad_request("password is too long"));
     }
+    let lower = password.to_lowercase();
+    let mut chars = lower.chars();
+    let first = chars.next();
+    if lower == username.trim().to_lowercase()
+        || COMMON_PASSWORDS.contains(&lower.as_str())
+        || chars.all(|c| Some(c) == first)
+    {
+        return Err(ApiError::bad_request(
+            "that password is too easy to guess; try a few words together",
+        ));
+    }
     Ok(())
 }
 
@@ -368,11 +757,16 @@ async fn new_user(
     username: &str,
     password: String,
     role: Role,
+    role_id: i64,
 ) -> ApiResult<User> {
     let username = validate_username(username)?;
-    validate_password(&password)?;
+    validate_password(&password, &username)?;
     let hash = hash_password(password).await?;
-    match state.store.create_user(&username, &hash, role).await {
+    match state
+        .store
+        .create_account(&username, &hash, role, role_id, AccountStatus::Active)
+        .await
+    {
         Ok(user) => Ok(user),
         Err(CreateUserError::Taken) => Err(ApiError::conflict("username is already taken")),
         Err(CreateUserError::Store(e)) => Err(e.into()),
@@ -405,12 +799,23 @@ fn validate_display_name(name: &str) -> ApiResult<String> {
 }
 
 /// Creates a session and returns its Set-Cookie value.
-async fn start_session(state: &AppState, user_id: i64, days: i64) -> ApiResult<HeaderValue> {
+async fn start_session(
+    state: &AppState,
+    user_id: i64,
+    days: i64,
+    device: &Device,
+) -> ApiResult<HeaderValue> {
     let token = new_token()?;
     let max_age = days * 24 * 60 * 60;
     state
         .store
-        .create_session(user_id, &hash_token(&token), now_ms() + max_age * 1000)
+        .create_session_from(
+            user_id,
+            &hash_token(&token),
+            now_ms() + max_age * 1000,
+            device.ip.as_deref(),
+            device.agent.as_deref(),
+        )
         .await?;
     session_cookie(&token, max_age)
 }
@@ -440,7 +845,7 @@ pub fn new_token() -> anyhow::Result<String> {
     Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
 }
 
-fn hash_token(token: &str) -> Vec<u8> {
+pub(crate) fn hash_token(token: &str) -> Vec<u8> {
     Sha256::digest(token.as_bytes()).to_vec()
 }
 

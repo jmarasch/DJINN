@@ -23,8 +23,7 @@ This file is the source of truth for the project. Read it fully before writing c
 ## 2. Non-goals (for now)
 
 - Streaming services (Spotify, Apple Music, etc.). Local files only.
-- Native mobile apps. The web UI is a PWA.
-- Streaming audio to phones for personal listening. Planned later, not in early phases.
+- Native mobile apps. Phones use the web player or existing Subsonic apps (Phase 7).
 - Transcoding. Not needed while audio plays on the host.
 
 ## 3. Platforms
@@ -292,9 +291,56 @@ Runtime-tunable settings live in the `settings` table, not the config file.
 - Identify songs with missing or wrong tags by audio fingerprint (AcoustID, then MusicBrainz), opt-in like other online lookups; corrections are stored in DJINN, not written to files.
 - Browse by genre: Library > Genres shows every genre as tags, or as a cloud where bigger genres have more songs and lines join related genres (shared songs, similar sound); each opens its genre page.
 
-### Phase 7: Personal streaming
-- Stream tracks to a phone for personal listening (HTTP range requests, optional ffmpeg transcode).
-- Comes last. Likely its own listener on a separate port, sharing the database and library with the jukebox.
+### Phase 7: DJINN GO (personal streaming)
+
+Personal listening, apart from the party, on the same library and database. Same binary and process; its own listener (default port 8067, `[go]` in the config, off until the admin turns it on) so it can be reached from away from home without exposing the party or Admin. Released in steps: 0.4.0, 0.4.1, 0.4.2, 0.4.3.
+
+**Accounts and roles (0.4.0)**
+- One set of users for the party and GO. Built-in roles `admin` and `guest` stay; every other role is admin-defined, with permissions. Existing `user` accounts move to a built-in, editable "Listener" role.
+- Permissions include: use GO, use GO from outside the home network, streams at once, download songs (off by default), share playlists, submit music, submitted music added without review (0.4.1), party request limits.
+- Sign-up modes: closed (admin adds people), needs admin review, or open, each into a chosen role. Invite links can name a role.
+- Admin can add, approve, disable and delete accounts, reset passwords, and see each account's signed-in devices.
+
+**Security (0.4.0)**
+- The GO listener serves only GO: no Admin API, no bootstrap, no guest join.
+- Login slows down and then locks out per address and per account. Minimum password length, common passwords refused.
+- Optional two-step sign-in (TOTP); admin can require it per role.
+- Remote access is a role permission; without it, GO only accepts addresses on the home network (private ranges, Tailscale).
+- `trusted_proxies` setting so lockouts and remote checks see the real client address behind Cloudflare Tunnel or a reverse proxy.
+- Session cookie `Secure` when reached over HTTPS; idle expiry; per-device sign-out.
+- Stream URLs carry short-lived signed tokens.
+- Security headers (CSP, frame-ancestors, HSTS over HTTPS).
+- Sign-in log in Admin (successes, failures, lockouts, address).
+- CI runs `cargo audit`.
+
+**Listening (0.4.0)**
+- Web player: browse and search (shared with the party UI), your own queue with shuffle and repeat, next song preloaded for near-gapless albums, Media Session controls.
+- **The device does the work, not the server.** GO sends the original file (HTTP range requests, ETag and caching headers) and the browser or app decodes and plays it. The server never decodes or transcodes for GO, so many listeners cost only disk reads and upload bandwidth.
+- The player checks `canPlayType` for each song's format; songs the device can't play are marked and skipped rather than converted.
+- ReplayGain is applied on the device (Web Audio gain from the track's gain, sent with the song).
+- Admin > GO shows what streaming uses, so the admin can see when the home upload speed, not the server, is the limit.
+- Playback position follows you across devices.
+- Likes (songs, albums, artists), your own playlists (private or shared), history, "continue listening", personal radio (the smart mixer, learning from your likes and skips).
+- Personal listening doesn't feed party learning. "Send to the party" requests a song.
+
+**Remote access (0.4.0 guides, 0.4.x button)**
+- Admin > Remote access explains three ways in: Tailscale (recommended; DJINN shows its Tailscale address and QR), Cloudflare Tunnel (public HTTPS, no port forwarding), or port forwarding.
+- 0.4.x: an "Open it for me" button maps the port with UPnP-IGD, detects carrier-grade NAT, and only opens with HTTPS: DJINN gets and renews a Let's Encrypt certificate for a dynamic DNS name.
+
+**Submitting music (0.4.1)**
+- Users with the permission upload songs. Uploads wait in `<db dir>/uploads/` (size limit, audio formats only, checked by decoding), get fingerprinted for duplicates and checked with identify, then go to admin review or straight in, per role.
+- Approved songs move into a dedicated, writable Uploads library folder. Other music folders stay read-only.
+
+**Phones (0.4.2)**
+- Subsonic/OpenSubsonic API on the GO listener so existing apps (Symfonium, DSub, play:Sub, Substreamer, Feishin) work, including their offline downloads where the role allows downloads.
+- The web player installs as an app (PWA).
+
+**Converting (0.4.3)**
+- Optional and off by default: the admin can let GO convert songs for devices that can't play the original, or to save data on phones. Settings choose which formats get converted, the target (MP3 with the encoder casting already uses), the bitrate, and how many conversions run at once so the party never stutters. Roles choose who may ask for it.
+- Converted copies are cached on disk (size-capped, oldest removed first) so a popular song is only converted once.
+- Subsonic apps that ask for a lower bitrate get it from here when allowed, the original otherwise.
+
+**Later:** lyrics, ListenBrainz/Last.fm scrobbling, expiring share links.
 
 ### Phase 8: Library backup and import
 - Back up everything DJINN knows (settings, users, playlists, request history, outputs, casts, artwork cache, analysis) to one file, and restore or import it on another machine, remapping music folder paths. The music files themselves are not part of it.

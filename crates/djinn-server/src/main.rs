@@ -4,6 +4,7 @@
 // the interface); see `djinn_platform::console`.
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
+mod accounts;
 mod ai;
 mod api;
 mod audio_api;
