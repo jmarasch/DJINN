@@ -119,7 +119,9 @@ async fn run() -> anyhow::Result<()> {
         .parent()
         .map_or_else(|| PathBuf::from("art"), |dir| dir.join("art"));
 
-    // A backup waiting to be restored goes in before the database opens.
+    // A full reset, or a backup waiting to be restored, happens before the
+    // database opens.
+    system_api::reset_if_asked(&config.database.path, &art_dir);
     let restored = backup::put_in_place(&config.database.path, &art_dir);
     let opened = Store::open(&config.database.path).await;
     let store = match (opened, &restored) {

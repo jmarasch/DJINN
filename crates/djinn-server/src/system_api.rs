@@ -48,6 +48,9 @@ const RESET_SETTINGS: &[&str] = &[
     "volume",
 ];
 
+/// Next to the database: DJINN starts over from scratch at the next start.
+const RESET_MARKER: &str = "djinn.reset";
+
 /// Most log lines one request returns.
 const LOG_LINES: usize = 1000;
 /// Most of the log file a download sends, from its end.
@@ -69,6 +72,30 @@ pub fn started(database: &Path, addresses: Vec<String>) {
         database: database.to_path_buf(),
         addresses,
     });
+}
+
+/// At start, before the database opens: if a full reset is waiting,
+/// deletes the database (and any copy kept from before a restore), the
+/// artwork cache and a waiting restore, so DJINN starts as if just
+/// installed. The music, the AI models and the log stay.
+pub fn reset_if_asked(db: &Path, art_dir: &Path) {
+    let Some(dir) = db.parent() else { return };
+    let marker = dir.join(RESET_MARKER);
+    if !marker.exists() {
+        return;
+    }
+    let name = db.file_name().unwrap_or_default().to_string_lossy();
+    for copy in [String::new(), ".before-restore".to_owned()] {
+        for suffix in ["", "-wal", "-shm"] {
+            let _ = std::fs::remove_file(dir.join(format!("{name}{copy}{suffix}")));
+        }
+    }
+    let _ = std::fs::remove_dir_all(art_dir);
+    let _ = std::fs::remove_dir_all(dir.join(crate::backup::RESTORE_DIR));
+    match std::fs::remove_file(&marker) {
+        Ok(()) => tracing::warn!("DJINN was reset: starting over from scratch"),
+        Err(e) => tracing::error!(error = %e, "couldn't remove the reset marker"),
+    }
 }
 
 pub fn router() -> Router<AppState> {
@@ -269,6 +296,8 @@ enum Reset {
     Listening,
     History,
     Settings,
+    /// Everything DJINN knows, as if just installed.
+    Everything,
 }
 
 #[derive(Deserialize)]
@@ -318,6 +347,15 @@ async fn reset(
             state.store.reset_settings(RESET_SETTINGS).await?;
             true
         }
+        // Done at the next start, before the database opens.
+        Reset::Everything => {
+            let dir = STARTUP
+                .get()
+                .and_then(|s| s.database.parent().map(Path::to_path_buf))
+                .ok_or_else(|| anyhow::anyhow!("DJINN's data folder is unknown"))?;
+            tokio::fs::write(dir.join(RESET_MARKER), b"").await?;
+            true
+        }
     };
     if restarting {
         state.update.restart(&state.shutdown_request);
@@ -327,6 +365,8 @@ async fn reset(
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use axum::http::{Method, StatusCode};
     use djinn_store::Role;
 
@@ -368,12 +408,44 @@ mod tests {
             StatusCode::OK
         );
         assert!(
-            post(r#"{"what":"everything"}"#, admin.clone())
+            post(r#"{"what":"music"}"#, admin.clone())
                 .await
                 .is_client_error(),
-            "unknown resets are refused"
+            "unknown resets are refused; the music is never one"
         );
         let (status, _) = get_body(&state, "/api/system/log?level=warn", &admin).await;
         assert_eq!(status, StatusCode::OK);
+    }
+
+    #[test]
+    fn a_full_reset_clears_djinns_data_and_nothing_else() {
+        let dir = std::env::temp_dir().join(format!("djinn-reset-{}", std::process::id()));
+        let art = dir.join("art");
+        std::fs::create_dir_all(&art).unwrap();
+        std::fs::create_dir_all(dir.join("models")).unwrap();
+        let db = dir.join("djinn.db");
+        for file in [
+            "djinn.db",
+            "djinn.db-wal",
+            "djinn.db.before-restore",
+            "djinn.log",
+        ] {
+            std::fs::write(dir.join(file), b"x").unwrap();
+        }
+        std::fs::write(art.join("cover.jpg"), b"x").unwrap();
+
+        super::reset_if_asked(&db, &art);
+        assert!(db.exists(), "nothing happens without the marker");
+
+        std::fs::write(dir.join(super::RESET_MARKER), b"").unwrap();
+        super::reset_if_asked(&db, &art);
+        let left = |p: &str| Path::new(&dir).join(p).exists();
+        assert!(!left("djinn.db") && !left("djinn.db-wal") && !left("djinn.db.before-restore"));
+        assert!(!left("art") && !left(super::RESET_MARKER));
+        assert!(
+            left("models") && left("djinn.log"),
+            "models and the log stay"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

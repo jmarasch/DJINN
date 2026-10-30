@@ -46,21 +46,36 @@
         'Puts the rules, sound, smart play, AI and update options back to their defaults. Accounts, music folders, playlists, speakers, casts and online service details stay.',
       confirm: 'Put every setting back to its default? DJINN restarts.',
     },
+    {
+      what: 'everything',
+      label: 'Reset DJINN completely',
+      about:
+        'Puts DJINN back the way it was when first installed: accounts, settings, playlists, history, speakers, casts, tag corrections, artwork and analysis all go. Your music files stay as they are, and downloaded AI models stay so they don\'t download again. Afterwards, create the admin account again on the DJINN computer.',
+      confirm: 'Reset DJINN completely? Everything it knows goes, and it starts over as if just installed.',
+    },
   ]
 
   let busy = $state<SystemReset | null>(null)
   let restarting = $state(false)
+  /** Reset completely: there's no account to come back to on this device. */
+  let wiped = $state(false)
 
   $effect(() => {
-    if (restarting) return reloadAfterRestart()
+    if (restarting && !wiped) return reloadAfterRestart()
   })
 
   async function run(reset: (typeof resets)[number]) {
-    if (!confirm(`${reset.confirm}\n\nThis can't be undone. Download a backup first if you might want it back.`))
+    const warning = `${reset.confirm}\n\nThis can't be undone. Download a backup first if you might want it back.`
+    if (reset.what === 'everything') {
+      const typed = prompt(`${warning}\n\nType RESET to go ahead.`)
+      if (typed?.trim().toUpperCase() !== 'RESET') return
+    } else if (!confirm(warning)) {
       return
+    }
     busy = reset.what
     try {
       const done = await api.systemReset(reset.what)
+      wiped = reset.what === 'everything'
       if (done.restarting) restarting = true
       else toast('Done')
     } catch (e) {
@@ -73,7 +88,11 @@
 
 <section class="card">
   <h2>Clear and reset</h2>
-  {#if restarting}
+  {#if wiped}
+    <p class="small">
+      DJINN is starting over. Its setup page opens on the DJINN computer to create the admin account again.
+    </p>
+  {:else if restarting}
     <p class="small"><span class="spinner" aria-hidden="true"></span> Done. DJINN is restarting; this page reloads when it's back.</p>
   {:else}
     {#each resets as reset (reset.what)}

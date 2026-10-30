@@ -633,4 +633,4 @@ export interface SystemStatus {
 }
 
 /** What Admin > System can clear out. */
-export type SystemReset = 'queue' | 'tag_edits' | 'analysis' | 'listening' | 'history' | 'settings'
+export type SystemReset = 'queue' | 'tag_edits' | 'analysis' | 'listening' | 'history' | 'settings' | 'everything'

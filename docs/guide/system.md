@@ -49,5 +49,13 @@ using one (there's a link under each button).
   options back to their defaults. Accounts, music folders, playlists,
   speakers, casts and online service details stay.
 
-The last four restart DJINN when they're done; the music carries on where it
-was.
+- **Reset DJINN completely:** puts DJINN back the way it was when first
+  installed. Accounts, settings, playlists, history, speakers, casts, tag
+  corrections, artwork and analysis all go; your music files stay as they
+  are, and downloaded AI models stay so they don't download again. It asks
+  you to type RESET first. Afterwards DJINN opens its setup page on its
+  computer to create the admin account again (the setup link is also in the
+  log).
+
+The last five restart DJINN when they're done; apart from the complete
+reset, the music carries on where it was.

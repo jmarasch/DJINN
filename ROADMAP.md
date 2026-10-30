@@ -109,7 +109,8 @@ and requests are welcome at DJINN@newterrastudios.com or as an issue.
 - **System tools.** An Admin > System tab with DJINN's status (including
   the addresses phones should open), updates, backups, a log viewer,
   restart and quit, and tools to clear the queue, history, analysis, tag
-  corrections or settings.
+  corrections or settings, or reset DJINN completely (your music is never
+  touched).
 
 ### 0.4.0
 

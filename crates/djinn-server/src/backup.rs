@@ -37,7 +37,7 @@ const MANIFEST: &str = "manifest.json";
 const DB_ENTRY: &str = "djinn.db";
 const ART_PREFIX: &str = "art/";
 /// Where an uploaded backup waits, under the database's folder.
-const RESTORE_DIR: &str = "restore";
+pub const RESTORE_DIR: &str = "restore";
 const UPLOAD: &str = "backup.zip";
 const PLAN: &str = "plan.json";
 
