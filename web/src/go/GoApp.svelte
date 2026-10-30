@@ -17,6 +17,7 @@
   import PlayerBar from './PlayerBar.svelte'
   import SongMenu from './SongMenu.svelte'
   import Album from './views/Album.svelte'
+  import Genre from './views/Genre.svelte'
   import Artist from './views/Artist.svelte'
   import Home from './views/Home.svelte'
   import Library from './views/Library.svelte'
@@ -64,6 +65,10 @@
   const albumId = $derived(param('/album'))
   const artistId = $derived(param('/artist'))
   const playlistId = $derived(param('/playlist'))
+  const genreName = $derived.by(() => {
+    const m = route.path.match(/^\/genre\/(.+)$/)
+    return m ? decodeURIComponent(m[1]) : null
+  })
   const section = $derived(
     route.path.startsWith('/search')
       ? 'search'
@@ -71,7 +76,7 @@
         ? 'library'
         : route.path.startsWith('/account')
           ? 'account'
-          : albumId || artistId
+          : albumId || artistId || genreName
             ? 'search'
             : 'home',
   )
@@ -115,15 +120,17 @@
     <a class="brand" href="#/">DJINN GO</a>
     <nav>
       <a href="#/" class:active={section === 'home'} aria-label="Home"><Icon name="home" /><span>Home</span></a>
-      <a href="#/search" class:active={section === 'search'} aria-label="Search"><Icon name="search" /><span>Search</span></a>
-      <a href="#/library" class:active={section === 'library'} aria-label="Your library">
-        <Icon name="heart-outline" /><span>Library</span>
+      <a href="#/search" class:active={section === 'search'} aria-label="Library"><Icon name="search" /><span>Library</span></a>
+      <a href="#/library" class:active={section === 'library'} aria-label="Your music">
+        <Icon name="heart-outline" /><span>Your music</span>
       </a>
       <a href="#/account" class:active={section === 'account'} aria-label="Account"><Icon name="settings" /><span>Account</span></a>
     </nav>
   </header>
   <main class="go" class:playing={player.index >= 0}>
-    {#if albumId}
+    {#if genreName}
+      <Genre name={genreName} />
+    {:else if albumId}
       <Album id={albumId} />
     {:else if artistId}
       <Artist id={artistId} />

@@ -1,16 +1,22 @@
 <script lang="ts">
-  // Search songs, albums and artists as you type.
+  // The whole library: search as you type, or browse by artist, album,
+  // song or genre (the same browser as the party app). Tapping a song in
+  // the big lists plays it, then songs like it.
   import { api } from '../../lib/api'
   import Art from '../../lib/Art.svelte'
-  import type { SearchResults } from '../../lib/types'
+  import type { SearchResults, Track } from '../../lib/types'
+  import Browse from '../../screens/Browse.svelte'
+  import { startRadio } from '../player.svelte'
   import SongList from '../SongList.svelte'
+  import SongRow from '../SongRow.svelte'
+  import SongTile from '../SongTile.svelte'
 
-  let query = $state(sessionStorageGet())
+  let query = $state(remembered())
   let results = $state<SearchResults | null>(null)
   let error = $state('')
   let timer: ReturnType<typeof setTimeout> | undefined
 
-  function sessionStorageGet(): string {
+  function remembered(): string {
     try {
       return sessionStorage.getItem('go-search') ?? ''
     } catch {
@@ -39,12 +45,25 @@
       }
     }, 250)
   })
+
+  const play = (track: Track) => startRadio(track)
 </script>
 
-<!-- svelte-ignore a11y_autofocus -->
-<input class="search" type="search" placeholder="Songs, artists, albums" bind:value={query} aria-label="Search" autofocus />
+<div class="search-bar">
+  <input class="search" type="search" placeholder="Search songs, artists, albums" bind:value={query} aria-label="Search" />
+</div>
 {#if error}<p class="error">{error}</p>{/if}
-{#if results}
+
+{#if !query.trim()}
+  <Browse progress={false}>
+    {#snippet song(track)}
+      <SongRow {track} onplay={() => play(track)} />
+    {/snippet}
+    {#snippet songTile(track)}
+      <SongTile {track} onplay={() => play(track)} />
+    {/snippet}
+  </Browse>
+{:else if results}
   {#if results.artists.length}
     <h2>Artists</h2>
     <div class="tiles">
@@ -77,6 +96,14 @@
 {/if}
 
 <style>
+  .search-bar {
+    position: sticky;
+    top: 60px;
+    z-index: 5;
+    padding: 4px 0 8px;
+    background: var(--bg);
+  }
+
   .search {
     width: 100%;
   }

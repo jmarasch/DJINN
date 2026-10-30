@@ -1,4 +1,7 @@
 <script lang="ts">
+  // The library by artist, album, song or genre. The party app's songs
+  // queue at the party; DJINN GO passes its own `song` and `songTile`.
+  import type { Snippet } from 'svelte'
   import LibraryProgress from '../lib/LibraryProgress.svelte'
   import { api } from '../lib/api'
   import Art from '../lib/Art.svelte'
@@ -10,7 +13,20 @@
   import { jumpCache } from '../lib/listCache'
   import TrackRow from '../lib/TrackRow.svelte'
   import TrackTile from '../lib/TrackTile.svelte'
-  import type { AlbumSort, GenreMap, Jump, TrackSort } from '../lib/types'
+  import type { AlbumSort, GenreMap, Jump, Track, TrackSort } from '../lib/types'
+
+  let {
+    song,
+    songTile,
+    progress = true,
+  }: {
+    /** A song in the list view; the party's request row by default. */
+    song?: Snippet<[Track]>
+    /** A song in the grid view. */
+    songTile?: Snippet<[Track]>
+    /** Show the library check's progress at the top. */
+    progress?: boolean
+  } = $props()
 
   type Tab = 'artists' | 'albums' | 'songs' | 'genres'
   type View = 'list' | 'grid'
@@ -100,7 +116,7 @@
   const initial = (name: string) => name.charAt(0).toUpperCase()
 </script>
 
-<LibraryProgress />
+{#if progress}<LibraryProgress />{/if}
 
 <div class="bar">
   <div class="tabs" role="tablist">
@@ -253,7 +269,9 @@
     >
       {#snippet item(track)}
         {#if grid}
-          <TrackTile {track} />
+          {#if songTile}{@render songTile(track)}{:else}<TrackTile {track} />{/if}
+        {:else if song}
+          {@render song(track)}
         {:else}
           <TrackRow {track} note={byYear && track.year ? String(track.year) : null} />
         {/if}

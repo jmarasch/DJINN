@@ -31,8 +31,11 @@ Admins can always use GO.
 
 - **Home** carries on where you left off (on this device or another), and
   shows what you played lately, your playlists, and what's new.
-- **Search** finds songs, albums and artists. Tap a song to play it; the
-  songs after it follow.
+- **Library** is the whole library, like the party app's: browse by
+  artist, album, song or genre (as a list or a grid, with the A to Z strip
+  and sorting), or type to search. Tapping a song in the big lists plays it,
+  then songs like it; in search results, an album or a playlist, the songs
+  after it follow.
 - **The player** along the bottom opens to Now Playing: seek, shuffle,
   repeat (all, or one song), and **Up next**, where you can jump to a song
   or take it out. The next song loads before the current one ends, so
@@ -44,7 +47,7 @@ Admins can always use GO.
   going. It leaves out songs you heard in the last few hours and puts ones
   you skipped lately at the end. Without sound analysis, it plays the same
   artist and genre.
-- **Library:** your liked songs, albums and artists (the heart), your
+- **Your music:** your liked songs, albums and artists (the heart), your
   playlists, and your history. Share a playlist with other GO listeners if
   your role allows it.
 - **Send to the party** requests the song at the party, like the party app
@@ -78,7 +81,7 @@ for.
 
 ## Submitting music
 
-Roles with **Submit music** see **Submit music** under Library in GO. Pick
+Roles with **Submit music** see **Submit music** under Your music in GO. Pick
 song files (MP3, FLAC, M4A, Ogg, Opus or WAV) and they upload one by one.
 
 - DJINN checks each one is audio it can play, reads its tags, and refuses
