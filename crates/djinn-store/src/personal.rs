@@ -82,6 +82,24 @@ macro_rules! go_playlist_columns {
 /// A play counts as skipped when less than this much was heard.
 pub const SKIP_BEFORE_MS: i64 = 30_000;
 
+/// What tapping a song in GO does.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
+#[serde(rename_all = "lowercase")]
+#[sqlx(type_name = "TEXT", rename_all = "lowercase")]
+pub enum TapAction {
+    /// Play it now, in place of what's playing.
+    #[default]
+    Play,
+    /// Add it to the queue, after what you added before.
+    Queue,
+}
+
+/// Someone's DJINN GO preferences.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, FromRow)]
+pub struct GoPrefs {
+    pub tap: TapAction,
+}
+
 impl Store {
     pub async fn set_like(&self, user_id: i64, kind: LikeKind, id: i64, on: bool) -> Result<()> {
         if on {
@@ -223,6 +241,27 @@ impl Store {
         .bind(resume.position)
         .bind(resume.position_ms)
         .bind(now_ms())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Someone's GO preferences; the defaults if they haven't set any.
+    pub async fn go_prefs(&self, user_id: i64) -> Result<GoPrefs> {
+        let prefs = sqlx::query_as("SELECT tap FROM go_prefs WHERE user_id = ?")
+            .bind(user_id)
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(prefs.unwrap_or_default())
+    }
+
+    pub async fn set_go_prefs(&self, user_id: i64, prefs: &GoPrefs) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO go_prefs (user_id, tap) VALUES (?, ?) \
+             ON CONFLICT (user_id) DO UPDATE SET tap = excluded.tap",
+        )
+        .bind(user_id)
+        .bind(prefs.tap)
         .execute(&self.pool)
         .await?;
         Ok(())

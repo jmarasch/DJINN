@@ -8,6 +8,7 @@
   import {
     current,
     cycleRepeat,
+    isAdded,
     jumpTo,
     likes,
     next,
@@ -102,12 +103,12 @@
       </div>
     </div>
 
-    <h2>Up next{#if player.radio} <span class="muted small">(radio)</span>{/if}</h2>
+    <h2>Up next{#if player.radio}{' '}<span class="muted small">(radio)</span>{/if}</h2>
     {#each upNext as track, i (`${track.id}-${player.index + 1 + i}`)}
       <div class="queued">
         <button class="queued-song" onclick={() => jumpTo(player.index + 1 + i)}>
           <span class="title">{track.title}</span>
-          <span class="muted small">{track.artist ?? ''}</span>
+          <span class="muted small">{track.artist ?? ''}{#if isAdded(track)}{' · '}<span class="added">Added by you</span>{/if}</span>
         </button>
         <button class="icon" aria-label="Remove {track.title} from the queue" onclick={() => removeAt(player.index + 1 + i)}>
           <Icon name="close" size={18} />
@@ -239,6 +240,10 @@
   .queued {
     display: flex;
     align-items: center;
+  }
+
+  .added {
+    color: var(--accent);
   }
 
   .queued-song {

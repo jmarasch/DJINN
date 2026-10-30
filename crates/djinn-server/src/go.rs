@@ -277,6 +277,8 @@ const ROUTES: &[(Method, &str, Access)] = &[
     (Method::GET, "/api/go/history", Access::Listener),
     (Method::GET, "/api/go/resume", Access::Listener),
     (Method::PUT, "/api/go/resume", Access::Listener),
+    (Method::GET, "/api/go/prefs", Access::Listener),
+    (Method::PUT, "/api/go/prefs", Access::Listener),
     (Method::GET, "/api/go/playlists", Access::Listener),
     (Method::POST, "/api/go/playlists", Access::Listener),
     (Method::GET, "/api/go/playlists/*", Access::Listener),
@@ -1144,6 +1146,18 @@ mod tests {
         assert_eq!(status, StatusCode::NO_CONTENT);
         let (_, text, _) = call(Method::GET, "/api/go/likes/ids".into(), None).await;
         assert_eq!(field(&text, "tracks"), serde_json::json!([ids[1]]));
+
+        // What tapping a song does: play it now until changed.
+        let (_, text, _) = call(Method::GET, "/api/go/prefs".into(), None).await;
+        assert_eq!(field(&text, "tap"), "play");
+        let queue = r#"{"tap":"queue"}"#.to_owned();
+        let (status, _, _) = call(Method::PUT, "/api/go/prefs".into(), Some(queue)).await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        let (_, text, _) = call(Method::GET, "/api/go/prefs".into(), None).await;
+        assert_eq!(field(&text, "tap"), "queue");
+        let odd = r#"{"tap":"shout"}"#.to_owned();
+        let (status, _, _) = call(Method::PUT, "/api/go/prefs".into(), Some(odd)).await;
+        assert!(status.is_client_error());
 
         let body = format!(r#"{{"name":"Road trip","songs":[{},{}]}}"#, ids[2], ids[0]);
         let (status, text, _) = call(Method::POST, "/api/go/playlists".into(), Some(body)).await;

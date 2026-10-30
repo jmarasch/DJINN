@@ -6,6 +6,7 @@ import type {
   GoHome,
   GoPlaylist,
   GoPlaylistDetail,
+  GoPrefs,
   GoResume,
   LikeKind,
   Liked,
@@ -145,6 +146,8 @@ export const api = {
     post<void>('/go/plays', { track_id: trackId, ms_played: Math.round(msPlayed) }),
   goHistory: (offset = 0) => get<Played[]>(`/go/history?offset=${offset}`),
   goResume: () => get<GoResume | null>('/go/resume'),
+  goPrefs: () => get<GoPrefs>('/go/prefs'),
+  setGoPrefs: (prefs: GoPrefs) => put<void>('/go/prefs', prefs),
   goSaveResume: (queue: number[], position: number, positionMs: number) =>
     put<void>('/go/resume', { queue, position, position_ms: Math.round(positionMs) }),
   goPlaylists: () => get<GoPlaylist[]>('/go/playlists'),

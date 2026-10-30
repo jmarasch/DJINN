@@ -12,7 +12,7 @@
   import Login from '../screens/Login.svelte'
   import Signup from '../screens/Signup.svelte'
   import AddToPlaylist from './AddToPlaylist.svelte'
-  import { loadLikes, player, setSaveData, stop } from './player.svelte'
+  import { loadLikes, loadPrefs, player, prefs, setSaveData, setTap, stop } from './player.svelte'
   import OpenOnPhone from './OpenOnPhone.svelte'
   import PhoneApps from './PhoneApps.svelte'
   import PlayerBar from './PlayerBar.svelte'
@@ -44,7 +44,10 @@
       if (e instanceof ApiError && e.status !== 401) error = e.message
       app.mode = await api.mode().catch(() => null)
     }
-    if (canListen()) loadLikes().catch(() => {})
+    if (canListen()) {
+      loadLikes().catch(() => {})
+      loadPrefs().catch(() => {})
+    }
   }
 
   const canListen = () =>
@@ -146,6 +149,23 @@
     {:else if section === 'account'}
       <h1>Your account</h1>
       <p class="muted">Signed in as <b>{app.me.username}</b>{#if app.me.role_name} ({app.me.role_name}){/if}.</p>
+      <section class="card">
+        <h2>Playing</h2>
+        <p class="small">When you tap a song:</p>
+        <label class="switch">
+          <input type="radio" name="tap" checked={prefs.tap === 'play'} onchange={() => setTap('play')} />
+          Play it now
+        </label>
+        <label class="switch">
+          <input type="radio" name="tap" checked={prefs.tap === 'queue'} onchange={() => setTap('queue')} />
+          Add it to the queue
+        </label>
+        <p class="small muted">
+          Songs you add play after the one playing and any you added before, ahead of the rest of the album, playlist or
+          radio. Starting a radio keeps the song playing and lines the radio up after it. This goes for every device
+          you use GO on.
+        </p>
+      </section>
       {#if player.canConvert}
         <section class="card">
           <h2>This device</h2>

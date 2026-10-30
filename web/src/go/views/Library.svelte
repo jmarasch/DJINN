@@ -4,7 +4,7 @@
   import Art from '../../lib/Art.svelte'
   import { app, toast } from '../../lib/state.svelte'
   import type { GoPlaylist, Liked, Played } from '../../lib/types'
-  import { playList } from '../player.svelte'
+  import { playList, tapSong } from '../player.svelte'
   import SongList from '../SongList.svelte'
   import LikeButton from '../LikeButton.svelte'
   import SongRow from '../SongRow.svelte'
@@ -115,7 +115,7 @@
 {:else if section === 'history'}
   {#each history as played, i (`${played.id}-${played.played_at}-${i}`)}
     <div class="played">
-      <SongRow track={played} onplay={() => playList(history, i)} />
+      <SongRow track={played} onplay={() => tapSong(played, () => playList(history, i))} />
       <span class="muted small at">{when(played.played_at)}</span>
     </div>
   {:else}

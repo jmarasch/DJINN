@@ -1,11 +1,16 @@
 // DJINN GO's player. Songs come as their original files and this device
 // plays them. Two audio elements take turns: while one plays, the next
 // song loads in the other, so albums run on with hardly a gap.
+//
+// Songs you add (Add to queue, Play next, or a tap when taps add) wait
+// right after the song playing, ahead of the rest of the queue: the album,
+// playlist or radio carries on after them, the way requests go before the
+// party's auto mix.
 
 import { SvelteSet } from 'svelte/reactivity'
 import { api } from '../lib/api'
 import { toast } from '../lib/state.svelte'
-import type { LikeKind, PlayLinks, Track } from '../lib/types'
+import type { GoPrefs, LikeKind, PlayLinks, Track } from '../lib/types'
 
 export type Repeat = 'off' | 'all' | 'one'
 
@@ -96,8 +101,40 @@ const decks = [new Audio(), new Audio()]
 let active = 0
 /** The next song, already loading in the other deck. */
 let preloaded: { trackId: number; links: PlayLinks } | null = null
-/** Play order before shuffling, to put back. */
+/** Play order before shuffling, to put back (without songs you added). */
 let unshuffled: Track[] = []
+/** Songs you added that haven't played yet. Each is its own copy, so the
+ * same song elsewhere in the queue isn't mistaken for it. */
+const added = new SvelteSet<Track>()
+
+/** You added this song and it hasn't played yet. */
+export const isAdded = (track: Track) => added.has(track)
+
+/** Where the next song you add goes: after the song playing and the ones
+ * you added before. */
+function addSpot(): number {
+  let at = player.index + 1
+  while (at < player.queue.length && added.has(player.queue[at])) at++
+  return at
+}
+
+/** Your GO preferences, from your account. */
+export const prefs = $state<GoPrefs>({ tap: 'play' })
+
+export async function loadPrefs() {
+  Object.assign(prefs, await api.goPrefs())
+}
+
+export async function setTap(tap: GoPrefs['tap']) {
+  const before = prefs.tap
+  prefs.tap = tap
+  try {
+    await api.setGoPrefs({ ...prefs })
+  } catch (e) {
+    prefs.tap = before
+    toast(e instanceof Error ? e.message : 'Could not save that', true)
+  }
+}
 /** How far the current song got, for history. */
 let heardMs = 0
 let lastSave = 0
@@ -156,6 +193,7 @@ function report() {
 async function start(index: number, autoplay = true) {
   const song = player.queue[index]
   if (!song) return
+  added.delete(song)
   const mine = ++generation
   player.loading = true
   try {
@@ -247,6 +285,7 @@ export function playList(tracks: Track[], from = 0, options: { radio?: boolean }
   if (!tracks.length) return
   report()
   preloaded = null
+  added.clear()
   player.radio = options.radio ?? false
   unshuffled = [...tracks]
   if (player.shuffle) {
@@ -260,21 +299,40 @@ export function playList(tracks: Track[], from = 0, options: { radio?: boolean }
   }
 }
 
-export function playNext(track: Track) {
-  if (player.index < 0) return playList([track])
-  player.queue.splice(player.index + 1, 0, track)
-  unshuffled.push(track)
+/** Nothing is loaded, or the queue played to its end. */
+const idle = () => player.index < 0 || (!player.playing && decks[active].ended)
+
+/** Puts copies of `tracks` in the queue at `at`, as songs you added. */
+function insertAdded(tracks: Track[], at: number) {
+  player.queue.splice(at, 0, ...tracks.map((t) => ({ ...t })))
+  // The queue holds its own (reactive) copies: remember those.
+  for (let i = at; i < at + tracks.length; i++) added.add(player.queue[i])
   preloaded = null
   preloadNext()
+}
+
+/** Right after the song playing, ahead of everything else. */
+export function playNext(track: Track) {
+  if (idle()) return playList([track])
+  insertAdded([track], player.index + 1)
   toast(`"${track.title}" plays next`)
 }
 
+/** After the song playing and what you added before, ahead of the rest of
+ * the album, playlist or radio. */
 export function addToQueue(tracks: Track[]) {
-  if (player.index < 0) return playList(tracks)
-  player.queue.push(...tracks)
-  unshuffled.push(...tracks)
-  if (after(player.index) === player.queue.length - tracks.length) preloadNext()
-  toast(tracks.length === 1 ? `Added "${tracks[0].title}" to the queue` : `Added ${tracks.length} songs to the queue`)
+  if (idle()) return playList(tracks)
+  const ahead = addSpot() - player.index - 1
+  insertAdded(tracks, addSpot())
+  const what = tracks.length === 1 ? `"${tracks[0].title}"` : `${tracks.length} songs`
+  toast(ahead ? `Added ${what}; plays after the ${ahead} you added before` : `Added ${what}; plays next`)
+}
+
+/** A tap on a song: plays it now, or adds it to the queue, as chosen on
+ * your account page. With nothing playing, it plays. */
+export function tapSong(track: Track, playNow: () => void) {
+  if (prefs.tap === 'queue' && !idle()) addToQueue([track])
+  else playNow()
 }
 
 export function jumpTo(index: number) {
@@ -285,6 +343,7 @@ export function jumpTo(index: number) {
 export function removeAt(index: number) {
   if (index === player.index) return
   const [gone] = player.queue.splice(index, 1)
+  added.delete(gone)
   if (index < player.index) player.index--
   const at = unshuffled.findIndex((t) => t.id === gone.id)
   if (at >= 0) unshuffled.splice(at, 1)
@@ -326,13 +385,18 @@ export function setShuffle(on: boolean) {
   player.shuffle = on
   const song = current()
   if (!song) return
+  // Songs you added stay right after the song playing either way.
+  const picks = player.queue.slice(player.index + 1).filter((t) => added.has(t))
   if (on) {
-    const rest = shuffled(player.queue.filter((_, i) => i !== player.index))
-    player.queue = [song, ...rest]
+    const rest = shuffled(player.queue.filter((t, i) => i !== player.index && !added.has(t)))
+    player.queue = [song, ...picks, ...rest]
     player.index = 0
   } else {
-    player.queue = [...unshuffled]
-    player.index = Math.max(0, player.queue.findIndex((t) => t.id === song.id))
+    let at = unshuffled.indexOf(song)
+    if (at < 0) at = unshuffled.findIndex((t) => t.id === song.id)
+    player.queue =
+      at < 0 ? [song, ...picks, ...unshuffled] : [...unshuffled.slice(0, at + 1), ...picks, ...unshuffled.slice(at + 1)]
+    player.index = Math.max(0, at)
   }
   preloaded = null
   preloadNext()
@@ -344,13 +408,36 @@ export function cycleRepeat() {
   preloadNext()
 }
 
+/** Radio from a song: it and songs like it. The song playing carries on,
+ * and so do songs you added; the radio takes over after them. */
 export async function startRadio(track: Track) {
   try {
     const songs = await api.goRadio(track.id)
-    playList(songs, 0, { radio: true })
-    toast(`Radio from "${track.title}"`)
+    if (idle()) {
+      playList(songs, 0, { radio: true })
+      toast(`Radio from "${track.title}"`)
+      return
+    }
+    const keep = player.queue.slice(0, addSpot())
+    // From the song playing: it isn't played twice.
+    if (songs[0]?.id === current()?.id) songs.shift()
+    player.queue = [...keep, ...songs]
+    unshuffled = [...keep.filter((t) => !added.has(t)), ...songs]
+    player.radio = true
+    preloaded = null
+    preloadNext()
+    toast(`Radio from "${track.title}" comes after this song`)
   } catch (e) {
     toast(e instanceof Error ? e.message : 'Could not start radio', true)
+  }
+}
+
+/** Plays a song now, then songs like it. */
+export async function playRadio(track: Track) {
+  try {
+    playList(await api.goRadio(track.id), 0, { radio: true })
+  } catch (e) {
+    toast(e instanceof Error ? e.message : 'Could not play that song', true)
   }
 }
 
@@ -378,6 +465,7 @@ export function carryOn(songs: Track[], order: number[], position: number, posit
   if (!queue.length) return
   report()
   preloaded = null
+  added.clear()
   player.radio = false
   player.shuffle = false
   unshuffled = [...queue]

@@ -4,7 +4,7 @@
   import Icon from '../../lib/Icon.svelte'
   import { app, toast } from '../../lib/state.svelte'
   import type { GoPlaylistDetail } from '../../lib/types'
-  import { addToQueue, playList } from '../player.svelte'
+  import { addToQueue, playList, tapSong } from '../player.svelte'
   import SongRow from '../SongRow.svelte'
 
   let { id }: { id: number } = $props()
@@ -127,7 +127,7 @@
     {/each}
   {:else}
     {#each list.songs as track, i (`${track.id}-${i}`)}
-      <SongRow {track} onplay={() => list && playList(list.songs, i)} />
+      <SongRow {track} onplay={() => tapSong(track, () => list && playList(list.songs, i))} />
     {:else}
       <p class="muted">No songs yet. Add some from a song's menu.</p>
     {/each}

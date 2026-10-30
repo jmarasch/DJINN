@@ -10,8 +10,8 @@ use axum::http::StatusCode;
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use djinn_store::{
-    GoPlaylist, GoPlaylistDetail, LikeKind, Liked, LikedIds, Played, RequestOrigin, Resume, Track,
-    User,
+    GoPlaylist, GoPlaylistDetail, GoPrefs, LikeKind, Liked, LikedIds, Played, RequestOrigin,
+    Resume, Track, User,
 };
 use serde::{Deserialize, Serialize};
 
@@ -37,6 +37,7 @@ pub fn router() -> Router<AppState> {
         .route("/go/plays", post(played))
         .route("/go/history", get(history))
         .route("/go/resume", get(resume).put(save_resume))
+        .route("/go/prefs", get(prefs).put(set_prefs))
         .route("/go/playlists", get(playlists).post(create_playlist))
         .route(
             "/go/playlists/{id}",
@@ -186,6 +187,19 @@ async fn save_resume(
 ) -> ApiResult<StatusCode> {
     body.queue.truncate(MAX_PLAYLIST_SONGS);
     state.store.save_resume(me.user.id, &body).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn prefs(me: GoUser, State(state): State<AppState>) -> ApiResult<Json<GoPrefs>> {
+    Ok(Json(state.store.go_prefs(me.user.id).await?))
+}
+
+async fn set_prefs(
+    me: GoUser,
+    State(state): State<AppState>,
+    Json(body): Json<GoPrefs>,
+) -> ApiResult<StatusCode> {
+    state.store.set_go_prefs(me.user.id, &body).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

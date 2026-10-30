@@ -6,7 +6,7 @@
   import Art from '../../lib/Art.svelte'
   import type { SearchResults, Track } from '../../lib/types'
   import Browse from '../../screens/Browse.svelte'
-  import { startRadio } from '../player.svelte'
+  import { playRadio, tapSong } from '../player.svelte'
   import SongList from '../SongList.svelte'
   import SongRow from '../SongRow.svelte'
   import LikeButton from '../LikeButton.svelte'
@@ -47,7 +47,9 @@
     }, 250)
   })
 
-  const play = (track: Track) => startRadio(track)
+  /** A tap in the big lists: the song, then songs like it (or into the
+   * queue, if that's what taps do). */
+  const play = (track: Track) => tapSong(track, () => playRadio(track))
 </script>
 
 <div class="search-bar">
