@@ -8,6 +8,7 @@ pub mod online;
 pub mod radio;
 pub mod sound;
 mod tags;
+pub use tags::{basics, Basics};
 pub mod vibe;
 
 use std::collections::{HashMap, HashSet};

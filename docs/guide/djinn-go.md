@@ -53,6 +53,27 @@ Admins can always use GO.
 - **Even volume:** when ReplayGain is on for the party (Admin > Audio), GO
   applies the same levels on your device.
 
+## Submitting music
+
+Roles with **Submit music** see **Submit music** under Library in GO. Pick
+song files (MP3, FLAC, M4A, Ogg, Opus or WAV) and they upload one by one.
+
+- DJINN checks each one is audio it can play, reads its tags, and refuses
+  a file that was sent before.
+- A song that looks like one the library already has (same title, artist
+  and length) is marked as a likely duplicate.
+- With **Submitted music goes straight in**, songs join the library at once,
+  except likely duplicates, which wait for you. Otherwise each one waits.
+- **Reviewing:** Admin > GO > **Submitted music** lists what's waiting, with
+  its tags and a player. **Add to library** or **Turn down** (with a note
+  for the sender; the file is deleted). Senders see what happened to each
+  song under Submit music, and can take back one still waiting.
+- **Where they go:** approved songs move into one folder just for uploads
+  (`Uploaded music` next to DJINN's database, or a folder you pick), sorted
+  into Artist/Album folders. It becomes a library folder the first time.
+  DJINN never writes to your other music folders.
+- **Size:** files up to 200 MB by default; change it under Submitted music.
+
 ## Formats
 
 Devices play the files as they are. MP3, AAC (M4A), FLAC and WAV play in

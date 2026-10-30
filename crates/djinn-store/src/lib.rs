@@ -11,6 +11,7 @@ mod playlists;
 mod queue;
 mod roles;
 mod security;
+mod submissions;
 mod tag_edits;
 mod users;
 
@@ -24,6 +25,7 @@ pub use playlists::*;
 pub use queue::*;
 pub use roles::*;
 pub use security::*;
+pub use submissions::*;
 pub use tag_edits::*;
 pub use users::*;
 

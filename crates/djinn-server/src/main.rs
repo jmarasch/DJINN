@@ -36,6 +36,7 @@ mod settings;
 mod smart;
 mod sse;
 mod state;
+mod submissions;
 mod system_api;
 #[cfg(test)]
 mod test_util;

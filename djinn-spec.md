@@ -328,7 +328,7 @@ Personal listening, apart from the party, on the same library and database. Same
 - 0.4.x: an "Open it for me" button maps the port with UPnP-IGD, detects carrier-grade NAT, and only opens with HTTPS: DJINN gets and renews a Let's Encrypt certificate for a dynamic DNS name.
 
 **Submitting music (0.4.1)**
-- Users with the permission upload songs. Uploads wait in `<db dir>/uploads/` (size limit, audio formats only, checked by decoding), get fingerprinted for duplicates and checked with identify, then go to admin review or straight in, per role.
+- Users with the permission upload songs. Uploads wait in `<db dir>/uploads/` (size limit, audio formats only, checked by decoding). A file sent before (same SHA-256) is refused; one matching a library song's title, artist and length (within 3 s) is flagged as a likely duplicate. Then it goes to admin review, or straight in when the role allows and it isn't a likely duplicate. (Identify-based tag checks are left for later.)
 - Approved songs move into a dedicated, writable Uploads library folder. Other music folders stay read-only.
 
 **Phones (0.4.2)**

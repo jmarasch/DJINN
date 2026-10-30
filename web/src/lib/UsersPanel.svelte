@@ -242,7 +242,7 @@
     ['require_two_step', 'Must use two-step sign-in for GO', 'A code from an authenticator app after the password.'],
     ['downloads', 'Download songs', 'Save song files to their device.'],
     ['share_playlists', 'Share playlists', 'Let other people see and play their playlists.'],
-    ['submit_music', 'Submit music', 'Upload songs for the library (coming in 0.4.1).'],
+    ['submit_music', 'Submit music', 'Upload songs for the library from DJINN GO.'],
     ['submit_without_review', 'Submitted music goes straight in', 'Otherwise you review each upload.'],
     ['unlimited_requests', 'No party request limit', 'Skip the per-person limit and the queue cap.'],
   ]

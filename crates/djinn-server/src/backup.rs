@@ -71,7 +71,7 @@ pub fn router() -> Router<AppState> {
 }
 
 /// The folder holding the database (and the art cache).
-fn data_dir(state: &AppState) -> PathBuf {
+pub fn data_dir(state: &AppState) -> PathBuf {
     state
         .art_dir
         .parent()

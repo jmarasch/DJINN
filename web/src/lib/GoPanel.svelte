@@ -5,6 +5,7 @@
   import { api } from './api'
   import { deviceName } from './format'
   import { app, toast } from './state.svelte'
+  import SubmissionsPanel from './SubmissionsPanel.svelte'
   import type { GoStatus, SignIn } from './types'
 
   let status = $state<GoStatus | null>(null)
@@ -101,6 +102,8 @@
       </p>
     </section>
   {/if}
+
+  <SubmissionsPanel />
 
   <section class="card">
     <h2>Safety</h2>

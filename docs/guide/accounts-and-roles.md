@@ -22,8 +22,9 @@ What a role can allow:
   after the password. See [DJINN GO](djinn-go.md#two-step-sign-in).
 - **Download songs:** save song files to a device. Off unless you turn it on.
 - **Share playlists:** let other people see and play their playlists.
-- **Submit music:** upload songs for the library (coming in 0.4.1), and
-  whether they go **straight in** or wait for you to review them.
+- **Submit music:** upload songs for the library from DJINN GO, and
+  whether they go **straight in** or wait for you to review them. See
+  [DJINN GO](djinn-go.md#submitting-music).
 - **No party request limit:** skip the per-person limit and the queue cap,
   like marking each of them **No limit**.
 

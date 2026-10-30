@@ -99,6 +99,31 @@ export interface Played extends Track {
   played_at: number
 }
 
+export interface Submission {
+  id: number
+  user_id: number | null
+  uploader: string | null
+  file_name: string
+  size: number
+  title: string | null
+  artist: string | null
+  album: string | null
+  duration_ms: number | null
+  duplicate_of: number | null
+  /** "Artist - Title" of the library song it looks like. */
+  duplicate_title: string | null
+  status: 'waiting' | 'approved' | 'declined'
+  /** Why it was turned down. */
+  note: string | null
+  created_at: number
+  decided_at: number | null
+}
+
+export interface UploadSettings {
+  folder: string
+  max_mb: number
+}
+
 export interface GoListener {
   username: string
   title: string

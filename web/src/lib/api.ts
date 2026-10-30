@@ -1,5 +1,7 @@
 import type {
   About,
+  Submission,
+  UploadSettings,
   GoHome,
   GoPlaylist,
   GoPlaylistDetail,
@@ -146,6 +148,13 @@ export const api = {
   goAddToPlaylist: (id: number, songs: number[]) => post<void>(`/go/playlists/${id}/songs`, { songs }),
   goSetPlaylistSongs: (id: number, songs: number[]) => put<void>(`/go/playlists/${id}/songs`, { songs }),
   goRadio: (trackId: number) => get<Track[]>(`/go/radio/${trackId}`),
+  mySubmissions: () => get<Submission[]>('/go/submissions'),
+  withdrawSubmission: (id: number) => del<void>(`/go/submissions/${id}`),
+  waitingSubmissions: () => get<Submission[]>('/submissions'),
+  approveSubmission: (id: number) => post<void>(`/submissions/${id}/approve`),
+  declineSubmission: (id: number, note: string) => post<void>(`/submissions/${id}/decline`, { note }),
+  uploadSettings: () => get<UploadSettings>('/submissions/settings'),
+  saveUploadSettings: (s: UploadSettings) => put<UploadSettings>('/submissions/settings', s),
   goSendToParty: (trackId: number) => post<{ outcome: 'added' | 'backed' }>(`/go/party/${trackId}`),
   goStatus: () => get<GoStatus>('/go/status'),
   saveGoSettings: (settings: { enabled: boolean; trusted_proxies: string; admin_two_step: boolean }) =>

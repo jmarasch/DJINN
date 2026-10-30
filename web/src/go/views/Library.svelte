@@ -54,6 +54,7 @@
   <a href="#/library" class:active={section === 'liked'}>Liked</a>
   <a href="#/library/playlists" class:active={section === 'playlists'}>Playlists</a>
   <a href="#/library/history" class:active={section === 'history'}>History</a>
+  {#if app.me?.permissions?.submit_music}<a href="#/submit">Submit music</a>{/if}
 </nav>
 
 {#if section === 'liked' && liked}

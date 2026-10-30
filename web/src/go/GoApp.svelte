@@ -21,6 +21,7 @@
   import Library from './views/Library.svelte'
   import Playlist from './views/Playlist.svelte'
   import Search from './views/Search.svelte'
+  import Submit from './views/Submit.svelte'
 
   let ready = $state(false)
   let signingUp = $state(location.pathname === '/signup')
@@ -65,7 +66,7 @@
   const section = $derived(
     route.path.startsWith('/search')
       ? 'search'
-      : route.path.startsWith('/library') || playlistId
+      : route.path.startsWith('/library') || route.path === '/submit' || playlistId
         ? 'library'
         : route.path.startsWith('/account')
           ? 'account'
@@ -127,6 +128,8 @@
       <Artist id={artistId} />
     {:else if playlistId}
       <Playlist id={playlistId} />
+    {:else if route.path === '/submit'}
+      <Submit />
     {:else if section === 'search'}
       <Search />
     {:else if section === 'library'}

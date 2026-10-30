@@ -119,6 +119,12 @@ impl GoState {
     fn enabled(&self) -> bool {
         self.enabled.load(Ordering::Relaxed)
     }
+
+    /// Turns GO on without a listener, for tests of its router.
+    #[cfg(test)]
+    pub fn enable_for_tests(&self) {
+        self.enabled.store(true, Ordering::Relaxed);
+    }
 }
 
 /// Reads GO's settings and starts it if it's on. At startup and after the
@@ -272,6 +278,9 @@ const ROUTES: &[(Method, &str, Access)] = &[
     (Method::PUT, "/api/go/playlists/*/songs", Access::Listener),
     (Method::GET, "/api/go/radio/*", Access::Listener),
     (Method::POST, "/api/go/party/*", Access::Listener),
+    (Method::GET, "/api/go/submissions", Access::Listener),
+    (Method::POST, "/api/go/submissions", Access::Listener),
+    (Method::DELETE, "/api/go/submissions/*", Access::Listener),
 ];
 
 fn matches(pattern: &str, path: &str) -> bool {
