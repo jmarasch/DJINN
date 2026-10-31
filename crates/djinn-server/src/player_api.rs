@@ -277,6 +277,9 @@ struct Settings {
     /// Analyze every song's sound after library checks.
     #[serde(default)]
     sound_analysis: bool,
+    /// Slideshows of more artist pictures (Wikimedia Commons).
+    #[serde(default)]
+    artist_pictures: bool,
     /// When sound analysis and AI listening may run.
     #[serde(default)]
     background: crate::background::Schedule,
@@ -325,6 +328,7 @@ async fn settings(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json
             .unwrap_or_default(),
         musicbrainz: settings::musicbrainz(store).await?.is_some(),
         sound_analysis: crate::audio_api::analysis_on(&state).await,
+        artist_pictures: settings::flag(store, crate::library_api::ARTIST_PICTURES, false).await?,
         background: crate::background::Schedule::load(store).await?,
         artist_keep_whole: djinn_library::keep_whole(store)
             .await
@@ -377,6 +381,13 @@ async fn update_settings(
         .await?;
     settings::set_flag(store, settings::MUSICBRAINZ, body.musicbrainz).await?;
     let was_analyzing = crate::audio_api::analysis_on(&state).await;
+    let had_pictures = settings::flag(store, crate::library_api::ARTIST_PICTURES, false).await?;
+    settings::set_flag(
+        store,
+        crate::library_api::ARTIST_PICTURES,
+        body.artist_pictures,
+    )
+    .await?;
     settings::set_flag(store, crate::audio_api::SOUND_ANALYSIS, body.sound_analysis).await?;
     body.background.save(store).await?;
     store
@@ -435,10 +446,14 @@ async fn update_settings(
     // Turning a lookup on looks up every artist now: MusicBrainz adds
     // covers and genres to artists already checked, and photos and bios
     // need artists checked by MusicBrainz alone.
+    // Pictures need each artist's Commons category, which lookups before
+    // this existed didn't keep.
     let added_photos = body.online_artist_info && !was_online;
     let added_musicbrainz = body.musicbrainz && !had_musicbrainz;
-    if added_photos || added_musicbrainz {
-        let force = added_musicbrainz || (added_photos && had_musicbrainz);
+    let added_pictures =
+        body.artist_pictures && !had_pictures && body.online_artist_info && body.musicbrainz;
+    if added_photos || added_musicbrainz || added_pictures {
+        let force = added_musicbrainz || added_pictures || (added_photos && had_musicbrainz);
         crate::library_api::start_artist_lookup(&state, force);
     }
     if body.sound_analysis && !was_analyzing {

@@ -4,6 +4,7 @@
   import QueueAll from '../lib/QueueAll.svelte'
   import RadioButton from '../lib/RadioButton.svelte'
   import { api } from '../lib/api'
+  import ArtistSlideshow from '../lib/ArtistSlideshow.svelte'
   import Art from '../lib/Art.svelte'
   import Icon from '../lib/Icon.svelte'
   import SortChoice from '../lib/SortChoice.svelte'
@@ -11,7 +12,7 @@
   import TrackRow from '../lib/TrackRow.svelte'
   import { byName } from '../lib/format'
   import { isAdmin } from '../lib/state.svelte'
-  import type { Album, ArtistDetail, ArtistSummary, TagFields } from '../lib/types'
+  import type { Album, ArtistDetail, ArtistPicture, ArtistSummary, TagFields } from '../lib/types'
 
   let { id }: { id: number } = $props()
   let artist = $state<ArtistDetail | null>(null)
@@ -20,10 +21,12 @@
   let editing = $state(false)
 
   let similar = $state<ArtistSummary[]>([])
+  let pictures = $state<ArtistPicture[]>([])
 
   $effect(() => {
     artist = null
     similar = []
+    pictures = []
     bioOpen = false
     api
       .artist(id)
@@ -32,6 +35,14 @@
     api
       .similarArtists(id)
       .then((list) => (similar = list))
+      .catch(() => {})
+    // The first visit fetches them, so they can arrive a little later.
+    const asked = id
+    api
+      .artistPictures(id)
+      .then((list) => {
+        if (asked === id) pictures = list
+      })
       .catch(() => {})
   })
 
@@ -70,6 +81,9 @@
 {#if error}
   <p class="error">{error}</p>
 {:else if artist}
+  {#if pictures.length}
+    <div class="banner"><ArtistSlideshow {pictures} src={(hash) => api.artUrl(hash)} /></div>
+  {/if}
   <header>
     <Art hash={artist.art_hash} size={140} round={999} letter={artist.name.charAt(0).toUpperCase()} />
     <div class="heading">
@@ -176,6 +190,14 @@
 {/if}
 
 <style>
+  .banner {
+    height: clamp(180px, 42vw, 340px);
+    margin: 0 0 16px;
+    overflow: hidden;
+    border-radius: 16px;
+    background: var(--surface-2);
+  }
+
   .admin-actions {
     display: flex;
     flex-wrap: wrap;

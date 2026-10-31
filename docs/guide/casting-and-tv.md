@@ -43,3 +43,5 @@ code for joining ("Scan the code to start the music"). It needs no sign-in.
   `http://192.168.1.20:8066/tv`, or use tray icon > **Open TV page** on this
   computer.
 - On a Chromecast or Google TV, use **Show on TV** above instead.
+- With [artist slideshows](your-library.md#artist-photos-and-bios) on, the
+  background shows pictures of the artist playing, with credits.

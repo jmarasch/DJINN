@@ -55,6 +55,14 @@ From Deezer, Wikimedia Commons (with credit) and Wikipedia: sends artist
 names to them after a library check that finds new artists. Pictures in your
 own folders always win.
 
+**More pictures** adds a slideshow to artist pages, and to the TV page while
+their songs play: up to eight photos from the artist's Wikimedia Commons
+category, each with its photographer and license. It needs MusicBrainz too
+(below), which is how DJINN finds the right artist; switching it on rechecks
+your artists once. Each artist's pictures are fetched the first time they're
+shown, so the first visit takes a few seconds. Not every artist has pictures
+on Commons; those pages look as before.
+
 ### MusicBrainz
 
 Album covers from the Cover Art Archive, album and artist genres, and exact

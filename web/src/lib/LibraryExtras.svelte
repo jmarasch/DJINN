@@ -126,6 +126,21 @@
     Sends artist names to Deezer, Wikipedia and Wikimedia Commons, after each library check that finds new artists.
     Pictures in your own folders always win.
   </p>
+  <label class="switch sub">
+    <input
+      type="checkbox"
+      bind:checked={settings.artist_pictures}
+      disabled={!settings.online_artist_info || (!settings.artist_pictures && !settings.musicbrainz)}
+      onchange={() => save()}
+    />
+    <span>
+      More pictures, as a slideshow on artist pages and on the TV page while their songs play
+      <span class="small muted">
+        (from Wikimedia Commons, with credits; needs MusicBrainz below to find the right artist. Each artist's
+        pictures are fetched the first time they're shown.)
+      </span>
+    </span>
+  </label>
 </section>
 
 <section class="card">
@@ -230,6 +245,10 @@
 
   h3 {
     margin: 0 0 6px;
+  }
+
+  .sub {
+    margin: 4px 0 0 28px;
   }
 
   .choices {

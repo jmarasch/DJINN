@@ -29,6 +29,7 @@ import type {
   AlbumDetail,
   AlbumSort,
   ArtistDetail,
+  ArtistPicture,
   ArtistSummary,
   AudioDevice,
   CastList,
@@ -212,6 +213,8 @@ export const api = {
   album: (id: number) => get<AlbumDetail>(`/albums/${id}`),
   artist: (id: number) => get<ArtistDetail>(`/artists/${id}`),
   /** Cover art; `size` (pixels) asks for a thumbnail. */
+  /** Slideshow pictures; the first request for an artist fetches them, which takes a few seconds. */
+  artistPictures: (id: number) => get<ArtistPicture[]>(`/artists/${id}/pictures`),
   artUrl: (hash: string, size?: number) => `/api/art/${hash}${size ? `?size=${size}` : ''}`,
 
   queue: () => get<QueueItem[]>('/queue'),

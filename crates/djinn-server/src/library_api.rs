@@ -42,6 +42,7 @@ pub fn router() -> Router<AppState> {
         .route("/artists", get(artists))
         .route("/artists/jumps", get(artist_jumps))
         .route("/artists/{id}", get(artist))
+        .route("/artists/{id}/pictures", get(artist_pictures))
         .route("/artists/{id}/edit", put(edit_artist))
         .route("/art/{hash}", get(cover_art))
         .route("/library/rescan", post(rescan))
@@ -633,6 +634,55 @@ pub fn lookup_status(state: &AppState) -> LookupStatus {
         running: state.scan.lookup_running.load(Ordering::Acquire),
         finished_at: last.as_ref().map(|(_, at)| *at),
         last: last.map(|(summary, _)| summary),
+    }
+}
+
+/// Setting key: 1 to show slideshows of more artist pictures, from
+/// Wikimedia Commons (with artist photos and bios, and MusicBrainz).
+pub const ARTIST_PICTURES: &str = "artist_pictures";
+
+async fn artist_pictures(
+    _: CurrentUser,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> ApiResult<Json<Vec<djinn_store::ArtistPicture>>> {
+    Ok(Json(pictures_for(&state, id).await?))
+}
+
+/// An artist's slideshow pictures: fetched from Commons the first time
+/// they're wanted, then from the image cache. Empty while switched off.
+pub async fn pictures_for(state: &AppState, id: i64) -> ApiResult<Vec<djinn_store::ArtistPicture>> {
+    let store = &state.store;
+    let on = settings::flag(store, ARTIST_PICTURES, false).await?
+        && settings::flag(store, settings::ONLINE_INFO, false).await?;
+    if !on {
+        return Ok(Vec::new());
+    }
+    let source = store
+        .picture_source(id)
+        .await?
+        .ok_or_else(ApiError::not_found)?;
+    if source.checked {
+        return Ok(store.artist_pictures(id).await?);
+    }
+    let Some(category) = source.commons_category else {
+        return Ok(Vec::new());
+    };
+    let _turn = state.scan.pictures.lock().await;
+    // Fetched by someone else while this waited.
+    if store.picture_source(id).await?.is_some_and(|s| s.checked) {
+        return Ok(store.artist_pictures(id).await?);
+    }
+    match djinn_library::online::artist_pictures(&category, &state.art_dir).await {
+        Ok(Some(pictures)) => {
+            store.save_artist_pictures(id, &pictures).await?;
+            Ok(pictures)
+        }
+        Ok(None) => Ok(Vec::new()),
+        Err(e) => {
+            tracing::warn!(error = %e, "fetching artist pictures failed");
+            Ok(Vec::new())
+        }
     }
 }
 

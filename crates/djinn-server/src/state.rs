@@ -76,6 +76,9 @@ pub struct ScanState {
     pub loudness_running: AtomicBool,
     /// What sound analysis or AI listening is waiting for, if anything.
     pub held: Mutex<Option<crate::background::Held>>,
+    /// Held while fetching an artist's slideshow pictures: one at a time,
+    /// so Commons isn't flooded and no artist is fetched twice.
+    pub pictures: tokio::sync::Mutex<()>,
     pub last: Mutex<Option<ScanProgress>>,
 }
 

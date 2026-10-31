@@ -526,6 +526,8 @@ export interface Settings {
   musicbrainz: boolean
   /** Analyze every song's sound after library checks. */
   sound_analysis: boolean
+  /** Slideshows of more artist pictures (Wikimedia Commons). */
+  artist_pictures: boolean
   /** When sound analysis and AI listening may run. */
   background: Schedule
   /** Artist names never split, one per line. */
@@ -897,3 +899,12 @@ export interface SystemStatus {
 
 /** What Admin > System can clear out. */
 export type SystemReset = 'queue' | 'tag_edits' | 'analysis' | 'listening' | 'history' | 'settings' | 'everything'
+
+/** A picture of an artist for slideshows. */
+export interface ArtistPicture {
+  art_hash: string
+  /** "Author (License)". */
+  credit: string
+  /** Its page on Wikimedia Commons. */
+  credit_url: string
+}

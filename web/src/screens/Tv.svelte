@@ -1,9 +1,10 @@
 <script lang="ts">
   // Full-screen now playing for a TV or spare tablet: no sign-in, read only.
   import { onMount } from 'svelte'
+  import ArtistSlideshow from '../lib/ArtistSlideshow.svelte'
   import { duration } from '../lib/format'
   import { reloadIfUpdated } from '../lib/state.svelte'
-  import type { NowPlaying, PlayerState, QueueItem, Track } from '../lib/types'
+  import type { ArtistPicture, NowPlaying, PlayerState, QueueItem, Track } from '../lib/types'
 
   const UP_NEXT = 6
   /** Opened by a cast (Chromecast, Google TV): play sound at once, no
@@ -161,6 +162,22 @@
   })
 
   const current = $derived(nowPlaying.current)
+
+  // Pictures of the artist playing, when the host has slideshows on.
+  let pictures = $state<ArtistPicture[]>([])
+  let pictureShown = $state(0)
+  const artistId = $derived(current?.track.artist_id ?? null)
+  $effect(() => {
+    const id = artistId
+    pictures = []
+    if (id === null) return
+    fetch('/api/tv/pictures')
+      .then((res) => (res.ok ? res.json() : []))
+      .then((list: ArtistPicture[]) => {
+        if (artistId === id) pictures = list
+      })
+      .catch(() => {})
+  })
   const total = $derived(current?.track.duration_ms ?? 0)
   const shown = $derived(Math.min(position, total || position))
   const upNext = $derived(queue.slice(0, UP_NEXT))
@@ -171,7 +188,14 @@
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="tv" class:idle-cursor={idleCursor} onmousemove={showCursor}>
-  {#if current?.track.art_hash}
+  {#if pictures.length}
+    <div class="pictures">
+      <ArtistSlideshow {pictures} src={(hash) => art(hash) ?? ''} seconds={10} credit={false} bind:shown={pictureShown} />
+    </div>
+    {#if pictures[pictureShown]}
+      <div class="picture-credit">Photo: {pictures[pictureShown].credit}, Wikimedia Commons</div>
+    {/if}
+  {:else if current?.track.art_hash}
     <div class="backdrop" style:background-image="url({art(current.track.art_hash, 512)})"></div>
   {/if}
   <div class="shade"></div>
@@ -319,6 +343,23 @@
     background-position: center;
     filter: blur(60px) saturate(1.3);
     opacity: 0.55;
+  }
+
+  .pictures {
+    position: absolute;
+    inset: 0;
+  }
+
+  .picture-credit {
+    position: absolute;
+    left: 1.5vw;
+    bottom: 1.2vh;
+    max-width: 45vw;
+    overflow: hidden;
+    color: rgb(255 255 255 / 0.6);
+    font-size: 0.75em;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .shade {

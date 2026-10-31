@@ -571,3 +571,55 @@ async fn corrected_genres_replace_looked_up_ones() {
         "not the album's or artist's"
     );
 }
+
+#[tokio::test]
+async fn artist_pictures_come_from_their_category() {
+    let store = Store::open_in_memory().await.unwrap();
+    store
+        .save_scanned(&[scanned("/m/1.flac", "Opener", "Band", "Debut")])
+        .await
+        .unwrap();
+    let id = store.search("band", 10).await.unwrap().artists[0].id;
+    assert_eq!(
+        store.picture_source(id).await.unwrap(),
+        Some(PictureSource {
+            commons_category: None,
+            checked: false
+        })
+    );
+    assert_eq!(store.picture_source(9999).await.unwrap(), None);
+
+    // A lookup that finds the category keeps it; a later one without keeps it too.
+    let found = ArtistInfo {
+        commons_category: Some("Band (band)".to_owned()),
+        checked: true,
+        ..Default::default()
+    };
+    store.save_artist_info(id, &found).await.unwrap();
+    store
+        .save_artist_info(id, &ArtistInfo::default())
+        .await
+        .unwrap();
+    let source = store.picture_source(id).await.unwrap().unwrap();
+    assert_eq!(source.commons_category.as_deref(), Some("Band (band)"));
+
+    let picture = |hash: &str| ArtistPicture {
+        art_hash: hash.to_owned(),
+        credit: "Someone (CC BY-SA 4.0)".to_owned(),
+        credit_url: format!("https://commons.wikimedia.org/wiki/File:{hash}.jpg"),
+    };
+    store
+        .save_artist_pictures(id, &[picture("a"), picture("b")])
+        .await
+        .unwrap();
+    assert!(store.picture_source(id).await.unwrap().unwrap().checked);
+    store
+        .save_artist_pictures(id, &[picture("c")])
+        .await
+        .unwrap();
+    assert_eq!(
+        store.artist_pictures(id).await.unwrap(),
+        [picture("c")],
+        "replaced, not added"
+    );
+}

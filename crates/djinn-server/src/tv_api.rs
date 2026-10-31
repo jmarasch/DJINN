@@ -23,6 +23,7 @@ pub fn router() -> Router<AppState> {
         .route("/tv", get(snapshot))
         .route("/tv/events", get(crate::sse::tv_events))
         .route("/tv/art/{hash}", get(art))
+        .route("/tv/pictures", get(pictures))
 }
 
 pub async fn enabled(state: &AppState) -> ApiResult<bool> {
@@ -68,6 +69,24 @@ async fn snapshot(State(state): State<AppState>) -> ApiResult<Json<TvSnapshot>> 
             .stream
             .as_ref()
             .map(|_| crate::cast_api::stream_path(&state.cast_token)),
+    }))
+}
+
+/// Slideshow pictures of the artist playing now (empty when off).
+async fn pictures(
+    State(state): State<AppState>,
+) -> ApiResult<Json<Vec<djinn_store::ArtistPicture>>> {
+    check_enabled(&state).await?;
+    let artist = state
+        .jukebox
+        .lock()
+        .await
+        .now_playing()
+        .current
+        .and_then(|entry| entry.track.artist_id);
+    Ok(Json(match artist {
+        Some(id) => crate::library_api::pictures_for(&state, id).await?,
+        None => Vec::new(),
     }))
 }
 

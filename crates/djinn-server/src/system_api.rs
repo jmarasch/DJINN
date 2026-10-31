@@ -27,6 +27,7 @@ const RESET_SETTINGS: &[&str] = &[
     "ai_genre_tags",
     "ai_listen_speed",
     "ai_reader_for",
+    "artist_pictures",
     "background_from",
     "background_until",
     "background_when",

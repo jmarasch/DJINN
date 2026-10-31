@@ -113,7 +113,27 @@ pub struct ArtistInfo {
     pub bio_url: Option<String>,
     pub mbid: Option<String>,
     pub genres: Option<String>,
+    /// The artist's Wikimedia Commons category, for slideshow pictures.
+    pub commons_category: Option<String>,
     /// Both services answered; don't look again until the periodic recheck.
+    pub checked: bool,
+}
+
+/// A picture of an artist for slideshows, kept in the image cache.
+#[derive(Clone, Debug, PartialEq, Serialize, FromRow)]
+pub struct ArtistPicture {
+    pub art_hash: String,
+    /// "Author (License)".
+    pub credit: String,
+    /// Where it came from (its page on Wikimedia Commons).
+    pub credit_url: String,
+}
+
+/// Where an artist's slideshow pictures come from, and whether they were
+/// fetched already.
+#[derive(Clone, Debug, PartialEq, FromRow)]
+pub struct PictureSource {
+    pub commons_category: Option<String>,
     pub checked: bool,
 }
 
