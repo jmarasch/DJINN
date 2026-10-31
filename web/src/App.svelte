@@ -2,7 +2,7 @@
   import { onMount } from 'svelte'
   import Icon from './lib/Icon.svelte'
   import JoinCard from './lib/JoinCard.svelte'
-  import { param, route } from './lib/router.svelte'
+  import { goBack, navigation, param, route } from './lib/router.svelte'
   import Sheet from './lib/Sheet.svelte'
   import { app, connect, isAdmin, refreshMe, refreshMode } from './lib/state.svelte'
   import Toasts from './lib/Toasts.svelte'
@@ -96,10 +96,26 @@
     {/if}
   </main>
 {:else}
+  <nav class:admin={isAdmin()} aria-label="Main navigation">
+    <button class="back" disabled={!navigation.canGoBack} onclick={goBack} aria-label="Back" title="Back">
+      <Icon name="back" size={28} /><span>Back</span>
+    </button>
+    <a href="#/" class:active={tab === 'now'}><Icon name="disc" /><span>Playing</span></a>
+    <a href="#/search" class:active={tab === 'search'}><Icon name="search" /><span>Library</span></a>
+    <a href="#/queue" class:active={tab === 'queue'}>
+      <Icon name="queue" />
+      <span>Queue{app.queue.length ? ` (${app.queue.length})` : ''}</span>
+    </a>
+    <button class:active={showJoin} onclick={() => (showJoin = true)}><Icon name="qr" /><span>Join</span></button>
+    {#if isAdmin()}
+      <a href="#/playlists" class:active={tab === 'playlists'}><Icon name="playlist" /><span>Playlists</span></a>
+      <a href="#/admin" class:active={tab === 'admin'}><Icon name="settings" /><span>Admin</span></a>
+    {/if}
+  </nav>
   {#if !app.connected}
     <div class="offline">Reconnecting to the jukebox...</div>
   {/if}
-  <main>
+  <main class:playing={route.path === '/'}>
     {#if similarId}
       <Similar id={similarId} />
     {:else if genreName}
@@ -125,20 +141,6 @@
     {/if}
   </main>
 
-  <nav class:admin={isAdmin()}>
-    <a href="#/" class:active={tab === 'now'}><Icon name="disc" /><span>Playing</span></a>
-    <a href="#/search" class:active={tab === 'search'}><Icon name="search" /><span>Library</span></a>
-    <a href="#/queue" class:active={tab === 'queue'}>
-      <Icon name="queue" />
-      <span>Queue{app.queue.length ? ` (${app.queue.length})` : ''}</span>
-    </a>
-    <button class:active={showJoin} onclick={() => (showJoin = true)}><Icon name="qr" /><span>Join</span></button>
-    {#if isAdmin()}
-      <a href="#/playlists" class:active={tab === 'playlists'}><Icon name="playlist" /><span>Playlists</span></a>
-      <a href="#/admin" class:active={tab === 'admin'}><Icon name="settings" /><span>Admin</span></a>
-    {/if}
-  </nav>
-
   {#if showJoin}
     <Sheet title="Help a friend join" onclose={() => (showJoin = false)}>
       <JoinCard />
@@ -152,7 +154,7 @@
   main {
     max-width: 640px;
     margin: 0 auto;
-    padding: 8px 16px calc(84px + env(safe-area-inset-bottom));
+    padding: calc(80px + env(safe-area-inset-top)) 16px 32px;
   }
 
   main.narrow {
@@ -160,24 +162,29 @@
     padding-top: 10vh;
   }
 
+  main.playing {
+    max-width: 1300px;
+  }
+
   nav {
     position: fixed;
     left: 0;
     right: 0;
-    bottom: 0;
+    top: 0;
     z-index: 10;
     display: flex;
     justify-content: center;
-    padding-bottom: env(safe-area-inset-bottom);
+    padding: calc(6px + env(safe-area-inset-top)) 4px 6px;
     background: color-mix(in srgb, var(--surface) 92%, transparent);
     backdrop-filter: blur(12px);
-    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
   }
 
   nav a,
   nav button {
     flex: 1;
     max-width: 140px;
+    min-width: 0;
     min-height: 0;
     display: flex;
     flex-direction: column;
@@ -201,6 +208,26 @@
     color: var(--accent);
   }
 
+  nav .back {
+    min-width: 52px;
+    border-radius: 10px;
+    background: var(--surface-2);
+    color: var(--text);
+    font-weight: 700;
+  }
+
+  nav .back:disabled {
+    color: var(--muted);
+    opacity: 0.5;
+  }
+
+  @media (max-width: 420px) {
+    nav a span,
+    nav button:not(.back) span {
+      display: none;
+    }
+  }
+
   .back-to-guest {
     display: block;
     margin: 8px auto 0;
@@ -210,8 +237,10 @@
   }
 
   .offline {
-    position: sticky;
-    top: 0;
+    position: fixed;
+    top: calc(80px + env(safe-area-inset-top));
+    left: 0;
+    right: 0;
     z-index: 15;
     padding: 6px 16px;
     background: var(--bad-surface);

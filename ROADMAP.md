@@ -3,6 +3,8 @@
 What DJINN can do today, and what's planned next. Plans can change; ideas
 and requests are welcome at DJINN@newterrastudios.com or as an issue.
 
+Changes being prepared for the next release are tracked in [CHANGELOG.md](CHANGELOG.md).
+
 ## Released
 
 ### 0.4.5 (October 2026): DJINN GO

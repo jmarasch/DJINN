@@ -415,6 +415,13 @@ async fn collaborations_count_for_every_artist() {
         [("David Guetta", 2), ("KREAM", 1), ("Zara Larsson", 1)],
         "no combined artist"
     );
+    let visible = store.artists_page_filtered(false, 0, 10).await.unwrap();
+    let visible_names: Vec<_> = visible.items.iter().map(|a| a.name.as_str()).collect();
+    assert_eq!(visible_names, ["David Guetta", "Zara Larsson"]);
+    assert_eq!(store.artist_jumps_filtered(false).await.unwrap().len(), 2);
+    let hidden = store.search("KREAM", 10).await.unwrap().artists;
+    assert_eq!(hidden.len(), 1);
+    assert!(store.artist(hidden[0].id).await.unwrap().is_some());
 
     let track = &store.search("volcano", 5).await.unwrap().tracks[0];
     let credits: Vec<_> = track
@@ -447,6 +454,82 @@ async fn collaborations_count_for_every_artist() {
     assert_eq!(detail.albums.len(), 1, "his own album");
     assert_eq!(detail.appears_on.len(), 1, "Zara's single");
     assert_eq!(detail.top_tracks.len(), 2);
+}
+
+#[tokio::test]
+async fn compilation_albums_are_grouped_and_filterable() {
+    let store = Store::open_in_memory().await.unwrap();
+    let mut songs = vec![
+        scanned("/music/mix/a.flac", "One", "Ada", "Weekend Mix"),
+        scanned("/music/mix/b.flac", "Two", "Bea", "Weekend Mix"),
+        scanned("/music/mix/c.flac", "Three", "Cyd", "Weekend Mix"),
+        scanned("/music/film/a.flac", "Scene One", "Dee", "Film Soundtrack"),
+        scanned("/music/film/b.flac", "Scene Two", "Eli", "Film Soundtrack"),
+        scanned("/music/solo/a.flac", "Solo", "Finn", "Solo Album"),
+    ];
+    songs[3].genre = Some("Soundtrack".into());
+    store.save_scanned(&songs).await.unwrap();
+    store.refresh_artwork().await.unwrap();
+
+    let various = store
+        .albums_page_filtered(AlbumSort::Name, AlbumFilter::Various, 0, 10)
+        .await
+        .unwrap();
+    assert_eq!(various.total, 1);
+    assert_eq!(various.items[0].title, "Weekend Mix");
+    assert_eq!(various.items[0].artist, "Various Artists");
+    assert_eq!(
+        store
+            .album(various.items[0].id)
+            .await
+            .unwrap()
+            .unwrap()
+            .tracks
+            .len(),
+        3
+    );
+    let soundtracks = store
+        .albums_page_filtered(AlbumSort::Name, AlbumFilter::Soundtracks, 0, 10)
+        .await
+        .unwrap();
+    assert_eq!(soundtracks.total, 1);
+    assert_eq!(soundtracks.items[0].artist, "Soundtrack");
+    assert_eq!(
+        store
+            .album_jumps_filtered(AlbumSort::Name, AlbumFilter::Various)
+            .await
+            .unwrap()[0]
+            .offset,
+        0
+    );
+    let artists = store.artists_page_filtered(false, 0, 20).await.unwrap();
+    assert_eq!(
+        artists
+            .items
+            .iter()
+            .map(|a| a.name.as_str())
+            .collect::<Vec<_>>(),
+        ["Finn"]
+    );
+    assert_eq!(store.search("Ada", 10).await.unwrap().artists.len(), 1);
+    let removed = store
+        .known_files()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|file| file.path.ends_with("/mix/c.flac"))
+        .unwrap()
+        .id;
+    store.mark_removed(&[removed]).await.unwrap();
+    store.refresh_artwork().await.unwrap();
+    assert_eq!(
+        store
+            .albums_page_filtered(AlbumSort::Name, AlbumFilter::Various, 0, 10)
+            .await
+            .unwrap()
+            .total,
+        0
+    );
 }
 
 #[tokio::test]
@@ -583,6 +666,8 @@ async fn artist_pictures_come_from_their_category() {
     assert_eq!(
         store.picture_source(id).await.unwrap(),
         Some(PictureSource {
+            name: "Band".to_owned(),
+            mbid: None,
             commons_category: None,
             checked: false
         })
@@ -607,6 +692,8 @@ async fn artist_pictures_come_from_their_category() {
         art_hash: hash.to_owned(),
         credit: "Someone (CC BY-SA 4.0)".to_owned(),
         credit_url: format!("https://commons.wikimedia.org/wiki/File:{hash}.jpg"),
+        source: "commons".to_owned(),
+        remote_url: None,
     };
     store
         .save_artist_pictures(id, &[picture("a"), picture("b")])
@@ -622,4 +709,56 @@ async fn artist_pictures_come_from_their_category() {
         [picture("c")],
         "replaced, not added"
     );
+}
+
+#[tokio::test]
+async fn host_pictures_survive_commons_rechecks_and_can_be_managed() {
+    let store = Store::open_in_memory().await.unwrap();
+    store
+        .save_scanned(&[scanned("/m/host.flac", "Opener", "Host Band", "Debut")])
+        .await
+        .unwrap();
+    let id = store.search("host band", 10).await.unwrap().artists[0].id;
+    let manual = ArtistPicture {
+        art_hash: "manual".into(),
+        credit: "Host licensed".into(),
+        credit_url: "".into(),
+        source: "manual".into(),
+        remote_url: None,
+    };
+    let commons = ArtistPicture {
+        art_hash: "commons".into(),
+        credit: "Photographer".into(),
+        credit_url: "https://commons.wikimedia.org/wiki/File:Example.jpg".into(),
+        source: "commons".into(),
+        remote_url: None,
+    };
+    store.add_artist_picture(id, &manual).await.unwrap();
+    store
+        .save_artist_pictures(id, std::slice::from_ref(&commons))
+        .await
+        .unwrap();
+    assert_eq!(
+        store.artist_pictures(id).await.unwrap(),
+        [manual.clone(), commons.clone()]
+    );
+    assert!(store.art_hash_in_use(&manual.art_hash).await.unwrap());
+    assert!(store
+        .reorder_artist_pictures(id, &[commons.art_hash.clone(), manual.art_hash.clone()])
+        .await
+        .unwrap());
+    assert_eq!(
+        store.artist_pictures(id).await.unwrap(),
+        [commons.clone(), manual.clone()]
+    );
+    store.save_artist_pictures(id, &[]).await.unwrap();
+    assert_eq!(
+        store.artist_pictures(id).await.unwrap(),
+        std::slice::from_ref(&manual)
+    );
+    assert!(store
+        .remove_artist_picture(id, &manual.art_hash)
+        .await
+        .unwrap());
+    assert!(!store.art_hash_in_use(&manual.art_hash).await.unwrap());
 }

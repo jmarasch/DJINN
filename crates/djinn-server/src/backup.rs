@@ -135,7 +135,7 @@ async fn make_backup(state: &AppState, work: &Path) -> anyhow::Result<PathBuf> {
     state.store.snapshot(&db).await?;
     let manifest = Manifest {
         format: FORMAT,
-        version: env!("CARGO_PKG_VERSION").to_owned(),
+        version: env!("DJINN_RELEASE_VERSION").to_owned(),
         created_ms: now_ms(),
         roots: crate::folders::library_roots(state).await?,
     };
@@ -275,11 +275,11 @@ fn read_manifest(path: &Path) -> ApiResult<Manifest> {
         .map_err(|_| not_backup())?;
     let manifest: Manifest = serde_json::from_str(&text).map_err(|_| not_backup())?;
     zip.by_name(DB_ENTRY).map_err(|_| not_backup())?;
-    if manifest.format > FORMAT || newer(&manifest.version, env!("CARGO_PKG_VERSION")) {
+    if manifest.format > FORMAT || newer(&manifest.version, env!("DJINN_RELEASE_VERSION")) {
         return Err(ApiError::bad_request(format!(
             "this backup is from DJINN {}, newer than this one ({}). Update DJINN first.",
             manifest.version,
-            env!("CARGO_PKG_VERSION")
+            env!("DJINN_RELEASE_VERSION")
         )));
     }
     Ok(manifest)

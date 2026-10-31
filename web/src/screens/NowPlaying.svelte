@@ -88,6 +88,7 @@
   const themeLabel = $derived({ auto: 'Auto', light: 'Light', dark: 'Dark' }[theme.mode])
 </script>
 
+<div class="playing-page">
 <div class="top">
   {#if app.player.playlist}
     <a
@@ -101,17 +102,25 @@
   {:else}
     <span></span>
   {/if}
-  <button class="theme" onclick={cycleTheme} aria-label="Theme: {themeLabel}" title="Theme: {themeLabel}">
-    <Icon name="theme" size={18} />
-    {themeLabel}
-  </button>
+  <div class="display-actions">
+    <a class="button" href="/tv" title="Switch to TV display">TV display</a>
+    <button class="theme" onclick={cycleTheme} aria-label="Theme: {themeLabel}" title="Theme: {themeLabel}">
+      <Icon name="theme" size={18} />
+      {themeLabel}
+    </button>
+  </div>
 </div>
 
+<div class="stage">
 <section class="now">
   {#if current}
     <div class="cover">
-      <Art hash={current.track.art_hash} size={320} round={14} />
+      <Art hash={current.track.art_hash} size={420} round={16} />
     </div>
+  {/if}
+  <div class="song-info">
+  {#if current}
+    <span class="label">{app.player.state === 'paused' ? 'Paused' : 'Now playing'}</span>
     <h1 class="title">{current.track.title}</h1>
     <p class="artist">
       {#if current.track.credits.length || current.track.artist}
@@ -149,7 +158,7 @@
     {/if}
   {:else}
     <div class="idle">
-      <Icon name="disc" size={72} />
+      <img src="/images/empty-record.webp" alt="" />
       <h1>Nothing playing</h1>
       <p class="muted">
         {app.output.error ? `Audio output problem: ${app.output.error}` : 'Find a song and add it to the queue.'}
@@ -209,10 +218,32 @@
       </p>
     </div>
   {/if}
+  </div>
+</section>
 
-  {#if next}
-    <div class="next">
-      <span class="label">Up next</span>
+  <aside class="side">
+    <h2>Up next</h2>
+    {#if app.queue.length}
+      <ol class="queue-list">
+        {#each app.queue.slice(0, 6) as item (item.id)}
+          {@const mine = myRequest(item.track.id)}
+          <li>
+            <Art hash={item.track.art_hash} size={56} />
+            <div class="text">
+              <div class="ellipsis">{item.track.title}</div>
+              <div class="muted small ellipsis">{byline(item.track.artist)}</div>
+              <div class="small requester">{askedBy(item)}</div>
+            </div>
+            {#if mine}
+              <button class="cancel" onclick={() => cancelRequest(mine.id)}>
+                {involvement(mine) === 'backer' ? 'Step back' : 'Cancel'}
+              </button>
+            {/if}
+          </li>
+        {/each}
+      </ol>
+      {#if app.queue.length > 6}<p class="muted small">and {app.queue.length - 6} more</p>{/if}
+    {:else if next}
       <div class="next-row">
         <Art hash={next.track.art_hash} size={40} />
         <div class="text">
@@ -231,8 +262,20 @@
           </button>
         {/if}
       </div>
+      <p class="muted small">No requests yet. Yours could be next.</p>
+    {:else}
+      <p class="muted">No requests yet. Yours could be next.</p>
+    {/if}
+
+    <div class="join-prompt">
+      <img src="/api/join/qr.svg" alt="Scan to add a song" />
+      <div>
+        <strong>Add a song</strong>
+        <p class="small muted">Scan with your phone, then choose from the library.</p>
+      </div>
     </div>
-  {/if}
+  </aside>
+</div>
 
   {#if !isAdmin()}
     <p class="host-link">
@@ -244,12 +287,36 @@
       {/if}
     </p>
   {/if}
-</section>
+</div>
 
 <style>
+  .playing-page {
+    position: relative;
+    isolation: isolate;
+    min-height: calc(100dvh - 120px);
+  }
+
+  .playing-page::before {
+    content: '';
+    position: fixed;
+    z-index: -1;
+    inset: 0;
+    background: url('/images/listening-waves.webp') center / cover no-repeat;
+    opacity: 0.18;
+    pointer-events: none;
+  }
+
+  .stage {
+    display: grid;
+    grid-template-columns: minmax(0, 1.9fr) minmax(280px, 1fr);
+    gap: clamp(24px, 3vw, 48px);
+    min-height: calc(100dvh - 180px);
+    margin-top: 24px;
+  }
+
   .play-here {
     margin-top: 12px;
-    text-align: center;
+    text-align: left;
   }
 
   .play-here button {
@@ -293,7 +360,7 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    margin: 12px auto 0;
+    margin: 12px 0 0;
     padding: 0 16px;
     min-height: 40px;
     border-radius: 999px;
@@ -306,6 +373,21 @@
     justify-content: space-between;
     gap: 8px;
     min-height: 40px;
+  }
+
+  .display-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .display-actions .button {
+    min-height: 34px;
+    padding: 7px 10px;
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--muted);
+    font-size: 0.8125rem;
   }
 
   .source {
@@ -336,17 +418,21 @@
 
   .now {
     display: flex;
-    flex-direction: column;
-    align-items: center;
-    text-align: center;
-    gap: 6px;
-    padding-top: 4px;
+    align-items: flex-start;
+    gap: clamp(20px, 2.5vw, 36px);
+    min-width: 0;
+    padding-top: 32px;
+  }
+
+  .song-info {
+    flex: 1;
+    min-width: 0;
   }
 
   .cover {
-    width: min(320px, 74vw);
+    flex: none;
+    width: min(32vw, 330px);
     aspect-ratio: 1;
-    margin-bottom: 14px;
   }
 
   .cover :global(.art) {
@@ -356,8 +442,10 @@
   }
 
   .title {
-    margin: 0;
-    font-size: 1.5rem;
+    margin: 8px 0 10px;
+    font-size: clamp(1.75rem, 3vw, 3rem);
+    line-height: 1.1;
+    overflow-wrap: anywhere;
   }
 
   .artist {
@@ -370,7 +458,8 @@
   }
 
   .badge {
-    margin: 6px 0 0;
+    display: inline-block;
+    margin: 16px 0 0;
     padding: 4px 12px;
     border-radius: 999px;
     background: var(--surface-2);
@@ -403,10 +492,15 @@
   .idle {
     display: flex;
     flex-direction: column;
-    align-items: center;
+    align-items: flex-start;
     gap: 4px;
     padding: 36px 0 16px;
     color: var(--muted);
+  }
+
+  .idle img {
+    width: min(210px, 58vw);
+    height: auto;
   }
 
   .idle h1 {
@@ -445,13 +539,65 @@
     margin: 2px 0 0;
   }
 
-  .next {
-    width: 100%;
-    margin-top: 20px;
-    padding: 12px;
-    border-radius: 12px;
-    background: var(--surface);
-    text-align: left;
+  .side {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    padding: 26px 0 0;
+  }
+
+  .side h2 {
+    margin: 0 0 22px;
+    color: var(--accent);
+    font-size: 0.9rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
+  .queue-list {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .queue-list li {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+  }
+
+  .requester {
+    color: var(--accent);
+  }
+
+  .join-prompt {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-top: auto;
+    padding: 16px;
+    border-radius: 16px;
+    background: color-mix(in srgb, var(--surface) 80%, transparent);
+  }
+
+  .join-prompt img {
+    flex: none;
+    width: clamp(76px, 8vw, 110px);
+    aspect-ratio: 1;
+    border-radius: 8px;
+    background: #fff;
+  }
+
+  .join-prompt strong {
+    font-size: 1.1rem;
+  }
+
+  .join-prompt p {
+    margin: 6px 0 0;
   }
 
   .label {
@@ -465,7 +611,7 @@
     display: flex;
     align-items: center;
     gap: 12px;
-    margin-top: 6px;
+    margin-top: 0;
   }
 
   .text {
@@ -481,7 +627,7 @@
   }
 
   .host-link {
-    margin-top: 28px;
+    margin-top: 22px;
     color: var(--muted);
     font-size: 0.875rem;
   }
@@ -492,5 +638,57 @@
     background: transparent;
     color: var(--muted);
     text-decoration: underline;
+  }
+
+  @media (max-width: 950px) {
+    .stage {
+      grid-template-columns: 1fr;
+      min-height: 0;
+    }
+
+    .side {
+      padding-top: 12px;
+    }
+
+    .join-prompt {
+      margin-top: 28px;
+    }
+  }
+
+  @media (max-width: 600px) {
+    .stage {
+      margin-top: 16px;
+    }
+
+    .now {
+      flex-direction: column;
+      align-items: center;
+      padding-top: 10px;
+    }
+
+    .cover {
+      width: min(72vw, 300px);
+    }
+
+    .song-info {
+      width: 100%;
+      text-align: center;
+    }
+
+    .play-here {
+      text-align: center;
+    }
+
+    .controls {
+      justify-content: center;
+    }
+
+    .skip-vote {
+      margin: 12px auto 0;
+    }
+
+    .idle {
+      align-items: center;
+    }
   }
 </style>

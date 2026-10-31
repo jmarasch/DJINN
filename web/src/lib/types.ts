@@ -528,10 +528,13 @@ export interface Settings {
   sound_analysis: boolean
   /** Slideshows of more artist pictures (Wikimedia Commons). */
   artist_pictures: boolean
+  picture_settings: PictureSettings
   /** When sound analysis and AI listening may run. */
   background: Schedule
   /** Artist names never split, one per line. */
   artist_keep_whole: string
+  /** Show artists who appear only as a secondary song credit. */
+  show_collaboration_artists: boolean
   /** The TV page (/tv) works without signing in. */
   tv_page: boolean
   /** Anyone signed in can play the party in their own browser. */
@@ -540,6 +543,41 @@ export interface Settings {
   skip_votes: number
   /** AcoustID application key, for identifying songs by sound. */
   acoustid_key: string
+}
+
+export interface PictureSettings {
+  count: number
+  /** 0 means no separate per-artist size limit. */
+  per_artist_mb: number
+  /** 0 means no cache limit. */
+  cache_mb: number
+  max_edge: number
+  min_width: number
+  min_height: number
+  deezer: boolean
+  wikipedia: boolean
+  commons: boolean
+  fanart: boolean
+  fanart_key: string
+  audiodb: boolean
+  audiodb_key: string
+  unsplash: boolean
+  unsplash_key: string
+  allow_remote: boolean
+}
+
+export interface ArtCacheStatus {
+  used_bytes: number
+  max_bytes: number
+}
+
+export interface UnsplashChoice {
+  id: string
+  thumbnail: string
+  credit: string
+  credit_url: string
+  width: number
+  height: number
 }
 
 export interface Page<T> {
@@ -559,6 +597,7 @@ export type TrackSort = 'title' | 'artist' | 'added' | 'popular' | 'year' | 'old
 
 /** Year is newest first, oldest is by year oldest first. */
 export type AlbumSort = 'name' | 'year' | 'oldest'
+export type AlbumFilter = 'all' | 'various' | 'soundtracks'
 
 /** Where a letter or year starts in a sorted list. */
 export interface Jump {
@@ -636,6 +675,13 @@ export interface ReplayGainSettings {
   preamp_db: number
   max_preamp_db: number
   loudness: LoudnessStatus
+}
+
+export interface EqualizerSettings {
+  enabled: boolean
+  /** Twelve frequency bands in dB, from 32 Hz to 16 kHz. */
+  bands_db: number[]
+  output_gain_db: number
 }
 
 export interface CastDevice {
@@ -907,4 +953,6 @@ export interface ArtistPicture {
   credit: string
   /** Its page on Wikimedia Commons. */
   credit_url: string
+  source: 'commons' | 'manual' | 'fanart' | 'audiodb' | 'unsplash'
+  remote_url: string | null
 }

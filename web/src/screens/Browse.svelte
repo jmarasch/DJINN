@@ -13,7 +13,7 @@
   import { jumpCache } from '../lib/listCache'
   import TrackRow from '../lib/TrackRow.svelte'
   import TrackTile from '../lib/TrackTile.svelte'
-  import type { AlbumSort, GenreMap, Jump, Track, TrackSort } from '../lib/types'
+  import type { AlbumFilter, AlbumSort, GenreMap, Jump, Track, TrackSort } from '../lib/types'
 
   let {
     song,
@@ -46,6 +46,7 @@
   let tab = $state((sessionStorage.getItem('djinn-browse-tab') as Tab) || 'artists')
   let sort = $state((sessionStorage.getItem('djinn-browse-sort') as TrackSort) || 'title')
   let albumSort = $state((sessionStorage.getItem('djinn-browse-album-sort') as AlbumSort) || 'name')
+  let albumFilter = $state<AlbumFilter>('all')
   let view = $state<View>(readView())
   let genreView = $state<GenreView>(readStored('djinn-genre-view') === 'cloud' ? 'cloud' : 'tags')
   let genres = $state<GenreMap | null>(null)
@@ -62,7 +63,7 @@
   let list = $state<{ jumpTo: (offset: number) => void }>()
   let lists = $state<HTMLElement>()
   let jumps = $state<Jump[]>([])
-  const jumpKey = $derived(tab === 'albums' ? `albums-${albumSort}` : tab === 'songs' ? `songs-${sort}` : tab)
+  const jumpKey = $derived(tab === 'albums' ? `albums-${albumSort}-${albumFilter}` : tab === 'songs' ? `songs-${sort}` : tab)
   const byYear = $derived(
     (tab === 'albums' && albumSort !== 'name') || (tab === 'songs' && (sort === 'year' || sort === 'oldest')),
   )
@@ -73,7 +74,7 @@
     jumps = cached ?? []
     if (cached || tab === 'genres') return
     const loading =
-      tab === 'artists' ? api.artistJumps() : tab === 'albums' ? api.albumJumps(albumSort) : api.trackJumps(sort)
+      tab === 'artists' ? api.artistJumps() : tab === 'albums' ? api.albumJumps(albumSort, albumFilter) : api.trackJumps(sort)
     loading
       .then((found) => {
         jumpCache.set(k, found)
@@ -226,19 +227,29 @@
       {/if}
     {/if}
   {:else if tab === 'albums'}
-    <label class="sort">
-      <span class="muted small">Sort by</span>
-      <select bind:value={albumSort}>
-        <option value="name">Name</option>
-        <option value="year">Year (newest first)</option>
-        <option value="oldest">Year (oldest first)</option>
-      </select>
-    </label>
+    <div class="album-filters">
+      <label class="sort">
+        <span class="muted small">Show</span>
+        <select bind:value={albumFilter}>
+          <option value="all">All albums</option>
+          <option value="various">Various Artists</option>
+          <option value="soundtracks">Soundtracks</option>
+        </select>
+      </label>
+      <label class="sort">
+        <span class="muted small">Sort by</span>
+        <select bind:value={albumSort}>
+          <option value="name">Name</option>
+          <option value="year">Year (newest first)</option>
+          <option value="oldest">Year (oldest first)</option>
+        </select>
+      </label>
+    </div>
     <InfiniteList
       bind:this={list}
       inset={STUCK_PX}
-      cacheKey="albums-{albumSort}"
-      load={(offset) => api.albums(albumSort, offset)}
+      cacheKey="albums-{albumSort}-{albumFilter}"
+      load={(offset) => api.albums(albumSort, albumFilter, offset)}
       key={(a) => a.id}
       count={(n) => plural(n, 'album', 'albums')}
       {grid}
@@ -435,9 +446,20 @@
   }
 
   .sort {
+    display: flex;
     flex-direction: row;
     align-items: center;
     gap: 10px;
     margin-bottom: 4px;
   }
+
+  .album-filters {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 16px;
+    margin-bottom: 4px;
+  }
+
+  .album-filters .sort { margin-bottom: 0; }
 </style>

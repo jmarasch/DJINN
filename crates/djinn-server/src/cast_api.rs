@@ -6,6 +6,7 @@
 //! can't sign in. Only DJINN hands the URL out.
 
 use axum::body::{Body, Bytes};
+use std::net::IpAddr;
 use std::time::Duration;
 
 use axum::extract::{Path, State};
@@ -18,7 +19,7 @@ use djinn_cast::{CastError, CastMedia, CastStatus, Metadata};
 use djinn_store::Store;
 use serde::{Deserialize, Serialize};
 
-use crate::auth::{AdminUser, CurrentUser};
+use crate::auth::{AdminUser, CurrentUser, Device};
 use crate::error::{ApiError, ApiResult};
 use crate::events::ServerEvent;
 use crate::settings;
@@ -59,14 +60,40 @@ struct Listen {
     url: Option<String>,
 }
 
+/// The host's own browser would play a delayed copy beside its speakers.
+/// Compare the resolved client address with every local interface, including
+/// loopback and VPN adapters; another device on the LAN remains eligible.
+fn is_server_address(ip: IpAddr, local: &[IpAddr]) -> bool {
+    let ip = ip.to_canonical();
+    ip.is_loopback() || local.iter().any(|address| address.to_canonical() == ip)
+}
+
+fn on_server(ip: Option<IpAddr>) -> bool {
+    let Some(ip) = ip.map(|address| address.to_canonical()) else {
+        return false;
+    };
+    if ip.is_loopback() {
+        return true;
+    }
+    let Ok(interfaces) = if_addrs::get_if_addrs() else {
+        return false;
+    };
+    let local: Vec<IpAddr> = interfaces.iter().map(|interface| interface.ip()).collect();
+    is_server_address(ip, &local)
+}
+
 /// Where Play here listens: the same stream casts play.
-async fn listen(_: CurrentUser, State(state): State<AppState>) -> ApiResult<Json<Listen>> {
+async fn listen(
+    _: CurrentUser,
+    device: Device,
+    State(state): State<AppState>,
+) -> ApiResult<Json<Listen>> {
     let on = settings::flag(&state.store, PLAY_HERE, false).await?;
     Ok(Json(Listen {
         url: state
             .stream
             .as_ref()
-            .filter(|_| on)
+            .filter(|_| on && !on_server(device.addr))
             .map(|_| stream_path(&state.cast_token)),
     }))
 }
@@ -483,6 +510,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn host_addresses_are_distinct_from_other_lan_devices() {
+        let local: Vec<IpAddr> = ["192.168.1.20", "fd7a:115c:a1e0::1"]
+            .into_iter()
+            .map(|ip| ip.parse().unwrap())
+            .collect();
+        assert!(is_server_address("127.0.0.1".parse().unwrap(), &local));
+        assert!(is_server_address("::1".parse().unwrap(), &local));
+        assert!(is_server_address("192.168.1.20".parse().unwrap(), &local));
+        assert!(is_server_address(
+            "::ffff:192.168.1.20".parse().unwrap(),
+            &local
+        ));
+        assert!(is_server_address(
+            "fd7a:115c:a1e0::1".parse().unwrap(),
+            &local
+        ));
+        assert!(!is_server_address("192.168.1.21".parse().unwrap(), &local));
+    }
+
+    #[test]
     fn title_blocks_follow_the_icy_format() {
         assert_eq!(icy_block(None), [0]);
         let block = icy_block(Some("Zara Larsson - Lush Life"));
@@ -498,8 +545,13 @@ mod tests {
     #[tokio::test]
     async fn play_here_hands_out_the_stream_once_turned_on() {
         use crate::test_util::{call, get_body, session};
+        use axum::body::to_bytes;
+        use axum::extract::ConnectInfo;
+        use axum::http::header::COOKIE;
         use axum::http::Method;
+        use axum::http::Request;
         use djinn_store::Role;
+        use tower::ServiceExt;
 
         let (_tap, reader) = djinn_engine::stream_tap(1.0, 48_000);
         let stream = LiveStream::start(reader, 48_000).unwrap();
@@ -524,5 +576,24 @@ mod tests {
             get_body(&state, "/api/listen", &guest).await,
             (StatusCode::OK, r#"{"url":"/cast/secret/live.mp3"}"#.into())
         );
+
+        for (address, expected) in [
+            ("127.0.0.1:4321", r#"{"url":null}"#),
+            ("198.51.100.7:4321", r#"{"url":"/cast/secret/live.mp3"}"#),
+        ] {
+            let mut request = Request::builder()
+                .method(Method::GET)
+                .uri("/api/listen")
+                .header(COOKIE, &guest)
+                .body(Body::empty())
+                .unwrap();
+            request.extensions_mut().insert(ConnectInfo(
+                address.parse::<std::net::SocketAddr>().unwrap(),
+            ));
+            let response = crate::app(state.clone()).oneshot(request).await.unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            let body = to_bytes(response.into_body(), 1024).await.unwrap();
+            assert_eq!(body.as_ref(), expected.as_bytes(), "client {address}");
+        }
     }
 }

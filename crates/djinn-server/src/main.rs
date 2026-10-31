@@ -66,7 +66,7 @@ use crate::jukebox::Jukebox;
 use crate::state::AppState;
 
 #[derive(Parser)]
-#[command(name = "djinn", version, about)]
+#[command(name = "djinn", version = env!("DJINN_RELEASE_VERSION"), about)]
 struct Cli {
     /// Path to config.toml. Defaults to next to the binary on Windows and
     /// ~/.config/djinn/config.toml elsewhere.
@@ -167,6 +167,10 @@ async fn run() -> anyhow::Result<()> {
         backup::finish(&store, &config.library.roots, restored).await?;
     }
     tracing::info!(path = %config.database.path.display(), "database ready");
+    let picture_settings = library_api::PictureSettings::load(&store).await?;
+    djinn_library::art::set_cache_limit(
+        (picture_settings.cache_mb as u64).saturating_mul(1024 * 1024),
+    );
     let removed = store.delete_expired_sessions().await?;
     if removed > 0 {
         tracing::debug!(removed, "expired sessions cleaned up");
@@ -283,7 +287,7 @@ async fn run() -> anyhow::Result<()> {
         }
     };
     tracing::info!(
-        version = env!("CARGO_PKG_VERSION"),
+        version = env!("DJINN_RELEASE_VERSION"),
         addr = %config.server.listen,
         "DJINN listening"
     );

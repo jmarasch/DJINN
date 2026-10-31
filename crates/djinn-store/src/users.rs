@@ -121,6 +121,14 @@ pub enum CreateUserError {
     Store(#[from] StoreError),
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum RenameUserError {
+    #[error("username is already taken")]
+    Taken,
+    #[error(transparent)]
+    Store(#[from] StoreError),
+}
+
 impl Store {
     pub async fn create_user(
         &self,
@@ -218,6 +226,20 @@ impl Store {
             .execute(&self.pool)
             .await?;
         Ok(result.rows_affected() > 0)
+    }
+
+    /// Changes an account's sign-in name without ending its sessions.
+    pub async fn set_username(&self, id: i64, username: &str) -> Result<bool, RenameUserError> {
+        match sqlx::query("UPDATE users SET username = ? WHERE id = ? AND role != 'guest'")
+            .bind(username)
+            .bind(id)
+            .execute(&self.pool)
+            .await
+        {
+            Ok(result) => Ok(result.rows_affected() > 0),
+            Err(sqlx::Error::Database(e)) if e.is_unique_violation() => Err(RenameUserError::Taken),
+            Err(e) => Err(StoreError::from(e).into()),
+        }
     }
 
     /// Moves an account to another role (see `roles`).
@@ -633,6 +655,27 @@ mod tests {
             .create_session(user.id, b"dj-session", now_ms() + 60_000)
             .await
             .unwrap();
+        assert!(matches!(
+            store.set_username(user.id, "ROOT").await,
+            Err(RenameUserError::Taken)
+        ));
+        assert!(store.set_username(user.id, "musicfan").await.unwrap());
+        assert!(store.user_credentials("dj").await.unwrap().is_none());
+        assert_eq!(
+            store
+                .user_credentials("MUSICFAN")
+                .await
+                .unwrap()
+                .unwrap()
+                .0
+                .id,
+            user.id
+        );
+        assert_eq!(
+            store.session_user(b"dj-session").await.unwrap().unwrap().id,
+            user.id,
+            "renaming keeps signed-in devices"
+        );
         assert!(store.set_role(user.id, Role::Admin).await.unwrap());
         assert_eq!(store.admin_count().await.unwrap(), 2);
         assert!(store.set_password(user.id, "new").await.unwrap());
@@ -641,7 +684,7 @@ mod tests {
             None,
             "signed out"
         );
-        let (_, hash) = store.user_credentials("dj").await.unwrap().unwrap();
+        let (_, hash) = store.user_credentials("musicfan").await.unwrap().unwrap();
         assert_eq!(hash, "new");
         assert!(store.user(admin.id).await.unwrap().unwrap().unlimited);
 

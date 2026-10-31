@@ -141,6 +141,7 @@ impl EngineThread {
             Command::Skip => self.player.skip(&mut self.outputs),
             Command::SetCrossfade(secs) => self.player.set_crossfade(secs),
             Command::SetVolume(volume) => self.outputs.set_volume(volume),
+            Command::SetEqualizer(config) => self.outputs.set_equalizer(config),
             Command::SetOutputs(configs) => self.outputs.configure(configs),
         }
         self.flush_events();

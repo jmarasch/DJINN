@@ -1,11 +1,10 @@
 name: CI
 
-# Docs-only pushes skip CI, and a newer push cancels the run it replaces:
-# the repo is private, so runner minutes count (Windows ones double).
+# Pull requests only: work is pushed once per release, so a release builds
+# twice in all (this, then the release workflow on its tag). Merging doesn't
+# run it again; the PR already checked that code. Docs-only PRs skip it, and
+# a newer push cancels the run it replaces.
 on:
-  push:
-    branches: [main]
-    paths-ignore: ['**.md', 'docs/**', 'LICENSE*']
   pull_request:
     paths-ignore: ['**.md', 'docs/**', 'LICENSE*']
 

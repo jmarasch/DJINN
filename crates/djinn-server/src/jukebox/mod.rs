@@ -18,7 +18,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
-use djinn_engine::{Command, EndReason, Event as EngineEvent, PlayState as EngineState, TrackId};
+use djinn_engine::{
+    Command, EndReason, EqualizerConfig, Event as EngineEvent, PlayState as EngineState, TrackId,
+    BAND_HZ, MAX_BAND_DB, MAX_OUTPUT_GAIN_DB, MIN_OUTPUT_GAIN_DB,
+};
 use djinn_store::{
     AddRequestError, Backer, PlaySource, QueueItem, RequestLimits, RequestOrigin, RequestOutcome,
     Store, Track, User, Withdrawal,
@@ -46,6 +49,7 @@ pub const VOLUME: &str = "volume";
 pub const MAX_QUEUE: &str = "max_queue";
 /// Crossfade between songs, in seconds (0 joins them gaplessly).
 pub const CROSSFADE: &str = "crossfade_secs";
+pub const EQUALIZER_SETTING: &str = "equalizer";
 /// Playlist that plays when nobody has requested anything; 0 or missing
 /// means none.
 pub const ACTIVE_PLAYLIST: &str = "active_playlist";
@@ -70,6 +74,81 @@ const DEFAULT_VOLUME: i64 = 80;
 const MAX_REPLACED: usize = 8;
 
 pub type EngineSink = Box<dyn Fn(Command) + Send + Sync>;
+
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct EqualizerSettings {
+    pub enabled: bool,
+    pub bands_db: [f32; BAND_HZ.len()],
+    pub output_gain_db: f32,
+}
+
+impl EqualizerSettings {
+    pub fn valid(self) -> bool {
+        self.bands_db
+            .iter()
+            .all(|gain| gain.is_finite() && gain.abs() <= MAX_BAND_DB)
+            && self.output_gain_db.is_finite()
+            && (MIN_OUTPUT_GAIN_DB..=MAX_OUTPUT_GAIN_DB).contains(&self.output_gain_db)
+    }
+
+    fn engine_config(self) -> EqualizerConfig {
+        EqualizerConfig {
+            enabled: self.enabled,
+            bands_db: self.bands_db,
+            output_gain_db: self.output_gain_db,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct LegacyEqualizerSettings {
+    enabled: bool,
+    bands_db: [f32; 5],
+}
+
+fn parse_equalizer(saved: Option<&str>) -> EqualizerSettings {
+    let Some(saved) = saved else {
+        return EqualizerSettings::default();
+    };
+    if let Ok(settings) = serde_json::from_str::<EqualizerSettings>(saved) {
+        return if settings.valid() {
+            settings
+        } else {
+            EqualizerSettings::default()
+        };
+    }
+    let Ok(old) = serde_json::from_str::<LegacyEqualizerSettings>(saved) else {
+        return EqualizerSettings::default();
+    };
+    if old
+        .bands_db
+        .iter()
+        .any(|gain| !gain.is_finite() || gain.abs() > MAX_BAND_DB)
+    {
+        return EqualizerSettings::default();
+    }
+    const OLD_HZ: [u32; 5] = [60, 250, 1000, 4000, 12000];
+    let bands_db = std::array::from_fn(|index| {
+        let frequency = BAND_HZ[index];
+        if frequency <= OLD_HZ[0] {
+            return old.bands_db[0];
+        }
+        if frequency >= OLD_HZ[4] {
+            return old.bands_db[4];
+        }
+        let upper = OLD_HZ.partition_point(|&old_hz| old_hz < frequency);
+        let lower = upper - 1;
+        let fraction = (f64::from(frequency) / f64::from(OLD_HZ[lower])).ln()
+            / (f64::from(OLD_HZ[upper]) / f64::from(OLD_HZ[lower])).ln();
+        old.bands_db[lower] + (old.bands_db[upper] - old.bands_db[lower]) * fraction as f32
+    });
+    EqualizerSettings {
+        enabled: old.enabled,
+        bands_db,
+        output_gain_db: 0.0,
+    }
+}
 
 #[derive(Clone, Debug)]
 struct Pending {
@@ -152,6 +231,7 @@ pub struct Jukebox {
     /// Song to play next from the playlist ("play from here").
     start_at: Option<i64>,
     replay_gain: ReplayGain,
+    equalizer: EqualizerSettings,
     /// Picks radio songs (set once the server's sound index exists).
     mixer: Option<Arc<dyn Mixer>>,
     /// The radio, while it's the active "playlist".
@@ -212,6 +292,8 @@ impl Jukebox {
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(0.0),
         };
+        let saved_equalizer = store.get_setting(EQUALIZER_SETTING).await?;
+        let equalizer = parse_equalizer(saved_equalizer.as_deref());
         let mut seed = [0u8; 8];
         getrandom::fill(&mut seed).map_err(|e| anyhow::anyhow!("no system randomness: {e}"))?;
         let mut jukebox = Self {
@@ -239,6 +321,7 @@ impl Jukebox {
             cursor: (cursor > 0).then_some(cursor),
             start_at: None,
             replay_gain,
+            equalizer,
             mixer: None,
             radio: None,
             party: None,
@@ -247,6 +330,7 @@ impl Jukebox {
         };
         (jukebox.engine)(Command::SetVolume(gain(volume)));
         (jukebox.engine)(Command::SetCrossfade(u32::from(crossfade)));
+        (jukebox.engine)(Command::SetEqualizer(equalizer.engine_config()));
         jukebox.load_active().await?;
         jukebox.load_resume().await?;
         Ok(jukebox)
@@ -351,6 +435,15 @@ impl Jukebox {
 
     pub fn replay_gain(&self) -> ReplayGain {
         self.replay_gain
+    }
+
+    pub fn equalizer(&self) -> EqualizerSettings {
+        self.equalizer
+    }
+
+    pub fn set_equalizer(&mut self, equalizer: EqualizerSettings) {
+        self.equalizer = equalizer;
+        (self.engine)(Command::SetEqualizer(equalizer.engine_config()));
     }
 
     /// Applies from the next song on.

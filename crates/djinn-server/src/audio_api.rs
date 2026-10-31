@@ -1,5 +1,5 @@
 //! Audio settings (admin): outputs (play through several devices at once,
-//! each with its own volume trim and delay) and ReplayGain.
+//! each with its own volume trim and delay), ReplayGain, and equalization.
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -14,7 +14,10 @@ use serde::{Deserialize, Serialize};
 use crate::auth::AdminUser;
 use crate::error::{ApiError, ApiResult};
 use crate::events::{LoudnessStatus, OutputStatus, ServerEvent};
-use crate::jukebox::{ReplayGain, MAX_PREAMP_DB, REPLAY_GAIN_MODE, REPLAY_GAIN_PREAMP};
+use crate::jukebox::{
+    EqualizerSettings, ReplayGain, EQUALIZER_SETTING, MAX_PREAMP_DB, REPLAY_GAIN_MODE,
+    REPLAY_GAIN_PREAMP,
+};
 use crate::state::AppState;
 
 const MAX_LABEL: usize = 60;
@@ -25,6 +28,7 @@ pub fn router() -> Router<AppState> {
         .route("/outputs/devices", get(devices))
         .route("/outputs/{id}", put(update).delete(remove))
         .route("/audio/replaygain", get(replay_gain).put(set_replay_gain))
+        .route("/audio/equalizer", get(equalizer).put(set_equalizer))
 }
 
 /// The engine's view of the configured outputs.
@@ -227,6 +231,29 @@ async fn set_replay_gain(
     replay_gain(admin, State(state)).await
 }
 
+async fn equalizer(
+    _: AdminUser,
+    State(state): State<AppState>,
+) -> ApiResult<Json<EqualizerSettings>> {
+    Ok(Json(state.jukebox.lock().await.equalizer()))
+}
+
+async fn set_equalizer(
+    _: AdminUser,
+    State(state): State<AppState>,
+    Json(body): Json<EqualizerSettings>,
+) -> ApiResult<Json<EqualizerSettings>> {
+    if !body.valid() {
+        return Err(ApiError::bad_request(
+            "EQ bands must be -12 to 12 dB and output level -12 to 6 dB",
+        ));
+    }
+    let saved = serde_json::to_string(&body).map_err(anyhow::Error::from)?;
+    state.store.set_setting(EQUALIZER_SETTING, &saved).await?;
+    state.jukebox.lock().await.set_equalizer(body);
+    Ok(Json(body))
+}
+
 pub async fn loudness_status(state: &AppState) -> ApiResult<LoudnessStatus> {
     Ok(LoudnessStatus {
         progress: state
@@ -371,6 +398,19 @@ fn clean_label(label: &str, device_id: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn equalizer_rejects_invalid_gains() {
+        let mut settings = EqualizerSettings::default();
+        settings.bands_db[0] = f32::NAN;
+        assert!(!settings.valid());
+        settings.bands_db[0] = 12.5;
+        assert!(!settings.valid());
+        settings.bands_db[0] = -12.0;
+        assert!(settings.valid());
+        settings.output_gain_db = 6.5;
+        assert!(!settings.valid());
+    }
 
     #[test]
     fn rows_become_engine_configs() {

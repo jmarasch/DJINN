@@ -27,9 +27,12 @@ import type {
   AiStatus,
   Album,
   AlbumDetail,
+  AlbumFilter,
   AlbumSort,
   ArtistDetail,
   ArtistPicture,
+  UnsplashChoice,
+  ArtCacheStatus,
   ArtistSummary,
   AudioDevice,
   CastList,
@@ -61,6 +64,7 @@ import type {
   RadioSeed,
   ReplayGainMode,
   ReplayGainSettings,
+  EqualizerSettings,
   RequestLogEntry,
   Role,
   ScanProgress,
@@ -121,6 +125,8 @@ export const api = {
   login: (username: string, password: string) => post<User | NeedsCode>('/auth/login', { username, password }),
   finishTwoStep: (ticket: string, code: string) => post<User>('/auth/two-step', { ticket, code }),
   changePassword: (current: string, next: string) => post<void>('/me/password', { current, new: next }),
+  changeUsername: (username: string, currentPassword: string) =>
+    post<User>('/me/username', { username, current_password: currentPassword }),
   twoStep: () => get<TwoStepStatus>('/me/two-step'),
   startTwoStep: () => post<TwoStepSetup>('/me/two-step/start'),
   confirmTwoStep: (code: string) => post<{ recovery_codes: string[] }>('/me/two-step/confirm', { code }),
@@ -189,10 +195,10 @@ export const api = {
   /** The query read by the AI reader; takes a few seconds. */
   ask: (q: string) => get<Described | null>(`/search/ask?q=${encodeURIComponent(q)}`),
   artists: (offset: number) => get<Page<ArtistSummary>>(`/artists?offset=${offset}`),
-  albums: (sort: AlbumSort, offset: number) => get<Page<Album>>(`/albums?sort=${sort}&offset=${offset}`),
+  albums: (sort: AlbumSort, filter: AlbumFilter, offset: number) => get<Page<Album>>(`/albums?sort=${sort}&filter=${filter}&offset=${offset}`),
   /** Where each letter (or year) starts in a list, for the jump strip. */
   artistJumps: () => get<Jump[]>('/artists/jumps'),
-  albumJumps: (sort: AlbumSort) => get<Jump[]>(`/albums/jumps?sort=${sort}`),
+  albumJumps: (sort: AlbumSort, filter: AlbumFilter) => get<Jump[]>(`/albums/jumps?sort=${sort}&filter=${filter}`),
   trackJumps: (sort: TrackSort) => get<Jump[]>(`/tracks/jumps?sort=${sort}`),
   playWild: () => post<void>('/playlists/wild/play'),
   playRadio: (seed: RadioSeed) => post<void>('/playlists/radio/play', seed),
@@ -215,6 +221,20 @@ export const api = {
   /** Cover art; `size` (pixels) asks for a thumbnail. */
   /** Slideshow pictures; the first request for an artist fetches them, which takes a few seconds. */
   artistPictures: (id: number) => get<ArtistPicture[]>(`/artists/${id}/pictures`),
+  manageArtistPictures: (id: number) => get<ArtistPicture[]>(`/artists/${id}/pictures/manage`),
+  searchUnsplash: (id: number) => get<UnsplashChoice[]>(`/artists/${id}/pictures/unsplash`),
+  addUnsplashPicture: (id: number, photoId: string) => post<ArtistPicture[]>(`/artists/${id}/pictures/unsplash`, { photo_id: photoId }),
+  uploadArtistPicture: async (id: number, file: File, credit: string, creditUrl: string) => {
+    const query = new URLSearchParams({ credit, credit_url: creditUrl })
+    const res = await fetch(`/api/artists/${id}/pictures?${query}`, { method: 'POST', body: file })
+    const data = await res.json().catch(() => null)
+    if (!res.ok) throw new ApiError(res.status, data?.error ?? `Upload failed (${res.status})`)
+    return data as ArtistPicture[]
+  },
+  removeArtistPicture: (id: number, hash: string) => del<ArtistPicture[]>(`/artists/${id}/pictures/${hash}`),
+  orderArtistPictures: (id: number, hashes: string[]) => put<ArtistPicture[]>(`/artists/${id}/pictures/order`, hashes),
+  recheckArtistPictures: (id: number) => post<ArtistPicture[]>(`/artists/${id}/pictures/recheck`),
+  artCacheStatus: () => get<ArtCacheStatus>('/library/art-cache'),
   artUrl: (hash: string, size?: number) => `/api/art/${hash}${size ? `?size=${size}` : ''}`,
 
   queue: () => get<QueueItem[]>('/queue'),
@@ -280,7 +300,7 @@ export const api = {
   deleteUser: (id: number) => del<void>(`/users/${id}`),
   updateUser: (
     id: number,
-    changes: { unlimited?: boolean; role?: Role; role_id?: number; status?: AccountStatus; password?: string },
+    changes: { username?: string; unlimited?: boolean; role?: Role; role_id?: number; status?: AccountStatus; password?: string },
   ) => patch<void>(`/users/${id}`, changes),
   roles: () => get<AccountRole[]>('/roles'),
   createRole: (role: Omit<AccountRole, 'id' | 'builtin' | 'accounts'>) => post<AccountRole>('/roles', role),
@@ -322,6 +342,7 @@ export const api = {
     }),
   removeOutput: (id: number) => del<void>(`/outputs/${id}`),
   replayGain: () => get<ReplayGainSettings>('/audio/replaygain'),
+  equalizer: () => get<EqualizerSettings>('/audio/equalizer'),
   identify: () => get<IdentifyStatus & { found: IdentificationRow[] }>('/identify'),
   startIdentify: () => post<void>('/identify/start'),
   stopIdentify: () => post<void>('/identify/stop'),
@@ -362,6 +383,7 @@ export const api = {
   setCastVolume: (id: string, level: number) => put<void>(`/cast/${encodeURIComponent(id)}/volume`, { level }),
   saveReplayGain: (mode: ReplayGainMode, preamp_db: number) =>
     put<ReplayGainSettings>('/audio/replaygain', { mode, preamp_db }),
+  saveEqualizer: (settings: EqualizerSettings) => put<EqualizerSettings>('/audio/equalizer', settings),
 
   libraryStatus: () => get<LibraryStatus>('/library/status'),
   openArtFolder: () => post<void>('/library/open-art-folder'),

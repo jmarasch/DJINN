@@ -6,6 +6,7 @@
   import BackupPanel from '../lib/BackupPanel.svelte'
   import LibraryExtras from '../lib/LibraryExtras.svelte'
   import LibraryProgress from '../lib/LibraryProgress.svelte'
+  import { clearListCache } from '../lib/listCache'
   import LogViewer from '../lib/LogViewer.svelte'
   import ResetPanel from '../lib/ResetPanel.svelte'
   import SystemStatus from '../lib/SystemStatus.svelte'
@@ -13,6 +14,7 @@
   import AiPanel from '../lib/AiPanel.svelte'
   import CastPanel from '../lib/CastPanel.svelte'
   import CrossfadePanel from '../lib/CrossfadePanel.svelte'
+  import EqualizerPanel from '../lib/EqualizerPanel.svelte'
   import OutputsPanel from '../lib/OutputsPanel.svelte'
   import PublicNetworkNote from '../lib/PublicNetworkNote.svelte'
   import ReplayGainPanel from '../lib/ReplayGainPanel.svelte'
@@ -97,7 +99,7 @@
 
   async function saveSettings(e: SubmitEvent) {
     e.preventDefault()
-    if (settings) await attempt(() => api.saveSettings(settings!), 'Saved')
+    if (settings && await attempt(() => api.saveSettings(settings!), 'Saved')) clearListCache()
   }
 
   const scanning = $derived(app.scan !== null && !app.scan.done)
@@ -151,13 +153,18 @@
 
   {#if settings}
     <section class="card">
-      <h2>Artist names that are never split</h2>
+      <h2>Artist library</h2>
       <form class="settings" onsubmit={saveSettings}>
+        <label class="switch big">
+          <input type="checkbox" bind:checked={settings.show_collaboration_artists} />
+          Show all credited artists in the Artists library
+        </label>
+        <p class="small muted">When off, secondary "&amp;" and "feat." artists stay searchable and linked from songs, but only artists with their own music appear in Artists.</p>
         <label>
-          One per line
+          Names that should never be split, one per line
           <textarea rows="6" bind:value={settings.artist_keep_whole} spellcheck="false"></textarea>
           <span class="small muted">
-            Songs credited to "A &amp; B" or "A feat. B" count for each artist. Band names that contain &amp;, commas,
+            Songs credited to "A &amp; B" or "A feat. B" still link to each artist. Band names that contain &amp;, commas,
             or "x" go here so they stay one artist. Saving re-reads the library.
           </span>
         </label>
@@ -187,6 +194,7 @@
   <OutputsPanel />
   <CastPanel />
   <ReplayGainPanel />
+  <EqualizerPanel />
 {:else if tab === 'smart'}
   <SmartPlayPanel />
 {:else if tab === 'ai'}

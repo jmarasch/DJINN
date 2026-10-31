@@ -2,6 +2,7 @@
 //! songs whose files went away.
 
 use super::*;
+use std::collections::{BTreeMap, BTreeSet};
 
 impl Store {
     pub async fn known_files(&self) -> Result<Vec<KnownFile>> {
@@ -29,6 +30,71 @@ impl Store {
     /// uses them). Run after a scan.
     pub async fn refresh_artwork(&self) -> Result<()> {
         let mut tx = self.pool.begin().await?;
+        // Files without an album-artist tag are provisionally filed under
+        // their first credited artist. Compare the tracks in each album
+        // folder after the scan, then collect multi-artist albums together.
+        type Untagged = (
+            i64,
+            String,
+            String,
+            Option<i64>,
+            Option<i64>,
+            Option<i64>,
+            Option<String>,
+        );
+        let untagged: Vec<Untagged> = sqlx::query_as(
+            "SELECT id, path, album, artist_id, album_id, year, genre FROM tracks
+             WHERE album IS NOT NULL AND album_artist IS NULL AND removed_at IS NULL",
+        )
+        .fetch_all(&mut *tx)
+        .await?;
+        let mut groups: BTreeMap<(String, String), Vec<Untagged>> = BTreeMap::new();
+        for row in untagged {
+            let folder = row
+                .1
+                .rsplit_once(['/', '\\'])
+                .map_or("", |(parent, _)| parent);
+            groups
+                .entry((folder.to_owned(), row.2.to_lowercase()))
+                .or_default()
+                .push(row);
+        }
+        for rows in groups.values() {
+            let artists: BTreeSet<i64> = rows.iter().filter_map(|row| row.3).collect();
+            let soundtrack = rows.iter().any(|row| {
+                row.2.to_lowercase().contains("soundtrack")
+                    || row.2.to_lowercase().contains("original motion picture")
+                    || row
+                        .6
+                        .as_deref()
+                        .is_some_and(|genre| genre.to_lowercase().contains("soundtrack"))
+            });
+            let collection = if soundtrack {
+                Some("Soundtrack")
+            } else if artists.len() >= 3 {
+                Some("Various Artists")
+            } else {
+                None
+            };
+            for row in rows {
+                let target_artist = if let Some(name) = collection {
+                    Some(upsert_artist(&mut tx, name).await?)
+                } else {
+                    row.3
+                };
+                let Some(target_artist) = target_artist else {
+                    continue;
+                };
+                let target_album = upsert_album(&mut tx, &row.2, target_artist, row.5).await?;
+                if row.4 != Some(target_album) {
+                    sqlx::query("UPDATE tracks SET album_id = ? WHERE id = ?")
+                        .bind(target_album)
+                        .bind(row.0)
+                        .execute(&mut *tx)
+                        .await?;
+                }
+            }
+        }
         // Albums: the first listed song's embedded cover, then the album
         // folder's image, then any song's artwork, then a cover found online.
         sqlx::query(

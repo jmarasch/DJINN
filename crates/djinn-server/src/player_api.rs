@@ -280,12 +280,17 @@ struct Settings {
     /// Slideshows of more artist pictures (Wikimedia Commons).
     #[serde(default)]
     artist_pictures: bool,
+    /// Artist picture quality and cache limits.
+    #[serde(default)]
+    picture_settings: crate::library_api::PictureSettings,
     /// When sound analysis and AI listening may run.
     #[serde(default)]
     background: crate::background::Schedule,
     /// Artist names never split into separate artists, one per line.
     #[serde(default)]
     artist_keep_whole: String,
+    #[serde(default = "default_true")]
+    show_collaboration_artists: bool,
     /// The TV page (/tv) works without signing in.
     #[serde(default = "default_true")]
     tv_page: bool,
@@ -329,11 +334,14 @@ async fn settings(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json
         musicbrainz: settings::musicbrainz(store).await?.is_some(),
         sound_analysis: crate::audio_api::analysis_on(&state).await,
         artist_pictures: settings::flag(store, crate::library_api::ARTIST_PICTURES, false).await?,
+        picture_settings: crate::library_api::PictureSettings::load(store).await?,
         background: crate::background::Schedule::load(store).await?,
         artist_keep_whole: djinn_library::keep_whole(store)
             .await
             .map_err(anyhow::Error::from)?
             .join("\n"),
+        show_collaboration_artists: settings::flag(store, "show_collaboration_artists", true)
+            .await?,
         tv_page: crate::tv_api::enabled(&state).await?,
         play_here: settings::flag(store, crate::cast_api::PLAY_HERE, false).await?,
         skip_votes: settings::number(store, jukebox::SKIP_VOTES, 0).await?,
@@ -363,6 +371,7 @@ async fn update_settings(
             "max_queue must be 0 (no cap) to 1000",
         ));
     }
+    body.picture_settings.validate()?;
     let contact = body.musicbrainz_contact.trim();
     if contact.chars().count() > 200 || contact.chars().any(char::is_control) {
         return Err(ApiError::bad_request(
@@ -382,12 +391,35 @@ async fn update_settings(
     settings::set_flag(store, settings::MUSICBRAINZ, body.musicbrainz).await?;
     let was_analyzing = crate::audio_api::analysis_on(&state).await;
     let had_pictures = settings::flag(store, crate::library_api::ARTIST_PICTURES, false).await?;
+    let old_picture_settings = crate::library_api::PictureSettings::load(store).await?;
+    let changed_primary_sources = old_picture_settings.deezer != body.picture_settings.deezer
+        || old_picture_settings.wikipedia != body.picture_settings.wikipedia
+        || old_picture_settings.commons != body.picture_settings.commons;
     settings::set_flag(
         store,
         crate::library_api::ARTIST_PICTURES,
         body.artist_pictures,
     )
     .await?;
+    body.picture_settings.save(store).await?;
+    if changed_primary_sources {
+        store.clear_online_artist_visuals().await?;
+    }
+    if old_picture_settings.commons != body.picture_settings.commons
+        || old_picture_settings.deezer != body.picture_settings.deezer
+        || old_picture_settings.wikipedia != body.picture_settings.wikipedia
+        || old_picture_settings.fanart != body.picture_settings.fanart
+        || old_picture_settings.fanart_key != body.picture_settings.fanart_key
+        || old_picture_settings.audiodb != body.picture_settings.audiodb
+        || old_picture_settings.audiodb_key != body.picture_settings.audiodb_key
+        || old_picture_settings.count != body.picture_settings.count
+        || old_picture_settings.per_artist_mb != body.picture_settings.per_artist_mb
+        || old_picture_settings.max_edge != body.picture_settings.max_edge
+        || old_picture_settings.min_width != body.picture_settings.min_width
+        || old_picture_settings.min_height != body.picture_settings.min_height
+    {
+        store.recheck_all_artist_pictures().await?;
+    }
     settings::set_flag(store, crate::audio_api::SOUND_ANALYSIS, body.sound_analysis).await?;
     body.background.save(store).await?;
     store
@@ -423,6 +455,12 @@ async fn update_settings(
         .await
         .set_skip_votes_needed(u32::try_from(body.skip_votes).unwrap_or(0));
     let was_online = settings::flag(store, settings::ONLINE_INFO, false).await?;
+    settings::set_flag(
+        store,
+        "show_collaboration_artists",
+        body.show_collaboration_artists,
+    )
+    .await?;
     settings::set_flag(store, settings::ONLINE_INFO, body.online_artist_info).await?;
     // A changed never-split list means re-reading every file's artists.
     let keep_whole: Vec<&str> = body
@@ -450,9 +488,8 @@ async fn update_settings(
     // this existed didn't keep.
     let added_photos = body.online_artist_info && !was_online;
     let added_musicbrainz = body.musicbrainz && !had_musicbrainz;
-    let added_pictures =
-        body.artist_pictures && !had_pictures && body.online_artist_info && body.musicbrainz;
-    if added_photos || added_musicbrainz || added_pictures {
+    let added_pictures = body.artist_pictures && !had_pictures && body.online_artist_info;
+    if added_photos || added_musicbrainz || added_pictures || changed_primary_sources {
         let force = added_musicbrainz || added_pictures || (added_photos && had_musicbrainz);
         crate::library_api::start_artist_lookup(&state, force);
     }

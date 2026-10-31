@@ -12,6 +12,7 @@ mod decoder;
 mod devices;
 mod drift;
 mod engine;
+mod equalizer;
 mod error;
 mod features;
 mod fingerprint;
@@ -27,6 +28,9 @@ use std::path::PathBuf;
 
 pub use devices::{output_devices, DeviceInfo};
 pub use engine::{Engine, EngineConfig};
+pub use equalizer::{
+    EqualizerConfig, BAND_HZ, MAX_BAND_DB, MAX_OUTPUT_GAIN_DB, MIN_OUTPUT_GAIN_DB,
+};
 pub use error::EngineError;
 pub use features::{
     analyze, decode_mono, decode_stereo, describe, Analysis, Features, FEATURES_VERSION,
@@ -132,6 +136,8 @@ pub enum Command {
     Skip,
     /// Master volume as linear gain, clamped to 0.0..=1.0.
     SetVolume(f32),
+    /// Apply the same EQ to speaker outputs and the casting stream.
+    SetEqualizer(EqualizerConfig),
     /// Crossfade length in seconds for upcoming transitions, 0 to 12; 0
     /// joins tracks gaplessly.
     SetCrossfade(u32),

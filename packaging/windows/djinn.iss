@@ -13,7 +13,7 @@
   #define Binary "..\..\target\release\djinn.exe"
 #endif
 #ifndef Version
-  ; "0.1.0" as Cargo.toml has it (the numeric file version adds a ".0").
+  ; A local build uses Cargo's version. Release builds pass the padded date.
   #define Version GetStringFileInfo(Binary, "ProductVersion")
 #endif
 

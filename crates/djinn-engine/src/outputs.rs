@@ -16,10 +16,13 @@ use std::time::{Duration, Instant};
 use cpal::traits::{DeviceTrait, HostTrait};
 
 use crate::drift::DriftControl;
+use crate::equalizer::Equalizer;
 use crate::output::{Output, BUFFER_SECS};
 use crate::player::Sink;
 use crate::tap::StreamTap;
-use crate::{Event, OutputConfig, OutputDevice, OutputState, OutputStatus, MAX_DELAY_MS};
+use crate::{
+    EqualizerConfig, Event, OutputConfig, OutputDevice, OutputState, OutputStatus, MAX_DELAY_MS,
+};
 
 const RETRY: Duration = Duration::from_secs(2);
 /// Named devices (often Bluetooth speakers that come and go) retry less
@@ -100,6 +103,8 @@ pub(crate) struct Outputs {
     /// Index of the clock output, while one is open.
     clock: Option<usize>,
     volume: f32,
+    equalizer: Equalizer,
+    equalized: Vec<f32>,
     paused: bool,
     /// Master frames written.
     frames_in: u64,
@@ -123,6 +128,8 @@ impl Outputs {
             slots: Vec::new(),
             clock: None,
             volume: 1.0,
+            equalizer: Equalizer::new(master_rate),
+            equalized: Vec::new(),
             paused: false,
             frames_in: 0,
             consumed_floor: Cell::new(0),
@@ -194,6 +201,10 @@ impl Outputs {
     pub fn set_volume(&mut self, volume: f32) {
         self.volume = volume.clamp(0.0, 1.0);
         self.apply_gains();
+    }
+
+    pub fn set_equalizer(&mut self, config: EqualizerConfig) {
+        self.equalizer.set(config);
     }
 
     pub fn set_paused(&mut self, paused: bool) {
@@ -526,6 +537,14 @@ impl Sink for Outputs {
 
     fn write(&mut self, samples: &[f32]) {
         self.frames_in += (samples.len() / 2) as u64;
+        let samples = if self.equalizer.active() {
+            self.equalized.clear();
+            self.equalized.extend_from_slice(samples);
+            self.equalizer.process(&mut self.equalized);
+            self.equalized.as_slice()
+        } else {
+            samples
+        };
         if let Some(tap) = self.tap.as_mut() {
             tap.write(samples);
         }

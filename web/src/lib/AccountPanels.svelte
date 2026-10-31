@@ -1,5 +1,5 @@
 <script lang="ts">
-  // Your own account: password, two-step sign-in, and where you're signed
+  // Your own account: username, password, two-step sign-in, and where you're signed
   // in. Used by the party app's Account page and by DJINN GO.
   import { onMount } from 'svelte'
   import { api } from './api'
@@ -8,6 +8,11 @@
   import TwoStepPanel from './TwoStepPanel.svelte'
   import type { Device } from './types'
 
+  let username = $state(app.me?.username ?? '')
+  let usernamePassword = $state('')
+  let usernameMessage = $state('')
+  let usernameError = $state('')
+  let usernameBusy = $state(false)
   let current = $state('')
   let next = $state('')
   let confirm = $state('')
@@ -23,6 +28,24 @@
       devices = await api.myDevices()
     } catch {
       devices = []
+    }
+  }
+
+  async function changeUsername(e: SubmitEvent) {
+    e.preventDefault()
+    usernameMessage = ''
+    usernameError = ''
+    usernameBusy = true
+    try {
+      const updated = await api.changeUsername(username, usernamePassword)
+      app.me = updated
+      username = updated.username
+      usernamePassword = ''
+      usernameMessage = 'Username changed. Use it for your next sign-in and in any phone apps.'
+    } catch (err) {
+      usernameError = err instanceof Error ? err.message : 'Could not change username'
+    } finally {
+      usernameBusy = false
     }
   }
 
@@ -73,6 +96,26 @@
   const when = (ms: number) =>
     new Date(ms).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 </script>
+
+{#if app.me?.role !== 'guest'}
+  <section class="card">
+    <h2>Username</h2>
+    <p class="small muted">Your sign-in name also goes in phone apps connected to DJINN GO.</p>
+    <form class="stack" onsubmit={changeUsername}>
+      <label>
+        Username
+        <input bind:value={username} maxlength="32" autocomplete="username" autocapitalize="none" required />
+      </label>
+      <label>
+        Current password
+        <input type="password" bind:value={usernamePassword} autocomplete="current-password" required />
+      </label>
+      {#if usernameError}<p class="error">{usernameError}</p>{/if}
+      {#if usernameMessage}<p class="muted">{usernameMessage}</p>{/if}
+      <button class="primary" disabled={usernameBusy}>Change username</button>
+    </form>
+  </section>
+{/if}
 
 <section class="card">
   <h2>Password</h2>

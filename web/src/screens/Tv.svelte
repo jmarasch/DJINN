@@ -190,10 +190,12 @@
 <div class="tv" class:idle-cursor={idleCursor} onmousemove={showCursor}>
   {#if pictures.length}
     <div class="pictures">
-      <ArtistSlideshow {pictures} src={(hash) => art(hash) ?? ''} seconds={10} credit={false} bind:shown={pictureShown} />
+      <ArtistSlideshow {pictures} src={(picture) => picture.remote_url ?? art(picture.art_hash) ?? ''} seconds={10} credit={false} bind:shown={pictureShown} />
     </div>
     {#if pictures[pictureShown]}
-      <div class="picture-credit">Photo: {pictures[pictureShown].credit}, Wikimedia Commons</div>
+      <div class="picture-credit">
+        Photo: {#if pictures[pictureShown].credit_url}<a href={pictures[pictureShown].credit_url} target="_blank" rel="noopener noreferrer">{pictures[pictureShown].credit}</a>{:else}{pictures[pictureShown].credit}{/if}{pictures[pictureShown].source === 'commons' ? ', Wikimedia Commons' : ''}
+      </div>
     {/if}
   {:else if current?.track.art_hash}
     <div class="backdrop" style:background-image="url({art(current.track.art_hash, 512)})"></div>
@@ -300,6 +302,7 @@
   {/if}
 
   <div class="corner" class:hidden={casting}>
+    <a href="/#/" class="regular-display">Regular display</a>
     {#if streamUrl}
       <button class:on={soundOn} onclick={toggleSound}>{soundOn ? 'Sound on' : 'Play sound here'}</button>
     {/if}
@@ -324,7 +327,8 @@
     display: grid;
     grid-template-columns: minmax(0, 1.9fr) minmax(0, 1fr);
     gap: 3vw;
-    padding: 4vh 3vw;
+    /* Keep the controls above the content instead of covering Up next. */
+    padding: clamp(96px, 9vh, 140px) 3vw 4vh;
     overflow: hidden;
     color: #fff;
     background: #0d0b14;
@@ -352,6 +356,7 @@
 
   .picture-credit {
     position: absolute;
+    z-index: 1;
     left: 1.5vw;
     bottom: 1.2vh;
     max-width: 45vw;
@@ -603,6 +608,7 @@
 
   .corner {
     position: absolute;
+    z-index: 2;
     right: 1.5vw;
     top: 1.5vh;
     display: flex;
@@ -610,13 +616,16 @@
     transition: opacity 0.3s;
   }
 
-  .corner button {
+  .corner button,
+  .corner .regular-display {
+    display: inline-block;
     padding: 0.4em 0.9em;
     border: 0;
     border-radius: 2em;
     background: rgb(255 255 255 / 0.15);
     color: #fff;
     font-size: 0.7em;
+    text-decoration: none;
   }
 
   .corner button.on {
