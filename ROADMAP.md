@@ -26,6 +26,9 @@ and requests are welcome at DJINN@newterrastudios.com or as an issue.
 - **Converting.** Optionally convert songs on the DJINN computer for
   phones that can't play a format, or to use less mobile data. Off
   unless you turn it on, with limits so the party never suffers.
+
+Also new in 0.4.5:
+
 - **Lighter on modest computers.** Every library setting on the Library
   page. A library check just reads your folders and tags; sound analysis
   (for "more like this", radio and smart play), artist photos and bios,
@@ -37,6 +40,19 @@ and requests are welcome at DJINN@newterrastudios.com or as an issue.
   while their song plays.
 - **Fix the AI's genre guesses.** Take a wrong "Sounds like" genre off a
   song; it stays off when the AI listens again.
+- **Choose when heavy work runs.** Sound analysis and AI listening can run
+  any time, only while no music is playing, or only between hours you pick.
+- **GO's queue works like the party's.** Songs you add play next, ahead of
+  the rest of an album, playlist or radio, and starting a radio no longer
+  stops the song playing. Choose whether tapping a song plays it now or
+  adds it to your queue.
+- Similar artists on GO's artist pages, and the A to Z strip no longer
+  covers the like buttons.
+- Uploads are limited to 15 MB by default (raise it for lossless files).
+- On Windows, `djinn.exe --version` and `--help` print in the terminal, and
+  the log file is always written.
+- The guide explains Android's new Nearby devices permission for Chrome,
+  and Windows 11's Smart App Control.
 
 ### 0.3.1 (October 2026)
 
