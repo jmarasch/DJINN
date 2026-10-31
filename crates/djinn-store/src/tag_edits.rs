@@ -181,6 +181,48 @@ impl Store {
         tx.commit().await?;
         Ok(paths)
     }
+
+    /// "Sounds like" genres taken off songs, as (track id, genre).
+    pub async fn removed_styles(&self) -> Result<Vec<(i64, String)>> {
+        let rows = sqlx::query_as("SELECT track_id, genre FROM removed_styles")
+            .fetch_all(self.pool())
+            .await?;
+        Ok(rows)
+    }
+
+    /// Takes a "Sounds like" genre off a song, or (`removed` false) puts
+    /// it back. False if there's no such song.
+    pub async fn set_style_removed(
+        &self,
+        track_id: i64,
+        genre: &str,
+        removed: bool,
+    ) -> Result<bool> {
+        if removed {
+            let added = sqlx::query(
+                "INSERT INTO removed_styles (track_id, genre) \
+                 SELECT id, ? FROM tracks WHERE id = ? ON CONFLICT DO NOTHING",
+            )
+            .bind(genre)
+            .bind(track_id)
+            .execute(self.pool())
+            .await?;
+            if added.rows_affected() > 0 {
+                return Ok(true);
+            }
+        } else {
+            sqlx::query("DELETE FROM removed_styles WHERE track_id = ? AND genre = ?")
+                .bind(track_id)
+                .bind(genre)
+                .execute(self.pool())
+                .await?;
+        }
+        let exists = sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM tracks WHERE id = ?)")
+            .bind(track_id)
+            .fetch_one(self.pool())
+            .await?;
+        Ok(exists)
+    }
 }
 
 #[cfg(test)]
@@ -249,5 +291,29 @@ mod tests {
             .unwrap();
         assert!(store.tag_edits_by_path().await.unwrap().is_empty());
         assert_eq!(store.tag_edit(id).await.unwrap(), TagEdit::default());
+    }
+
+    #[tokio::test]
+    async fn styles_come_off_and_back() {
+        let (store, id) = store_with_song().await;
+        assert!(store.set_style_removed(id, "trap", true).await.unwrap());
+        assert!(
+            store.set_style_removed(id, "trap", true).await.unwrap(),
+            "twice is fine"
+        );
+        assert!(store.set_style_removed(id, "lo fi", true).await.unwrap());
+        assert!(
+            !store.set_style_removed(999, "trap", true).await.unwrap(),
+            "no such song"
+        );
+        let mut removed = store.removed_styles().await.unwrap();
+        removed.sort();
+        assert_eq!(removed, [(id, "lo fi".to_owned()), (id, "trap".to_owned())]);
+
+        assert!(store.set_style_removed(id, "trap", false).await.unwrap());
+        assert_eq!(
+            store.removed_styles().await.unwrap(),
+            [(id, "lo fi".to_owned())]
+        );
     }
 }

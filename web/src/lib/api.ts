@@ -196,6 +196,9 @@ export const api = {
   playWild: () => post<void>('/playlists/wild/play'),
   playRadio: (seed: RadioSeed) => post<void>('/playlists/radio/play', seed),
   trackTags: (id: number) => get<TrackTags>(`/tracks/${id}/tags`),
+  /** Takes a "Sounds like" genre off a song; it stays off when the AI listens again. */
+  removeStyle: (id: number, genre: string) => del<void>(`/tracks/${id}/styles/${encodeURIComponent(genre)}`),
+  restoreStyle: (id: number, genre: string) => put<void>(`/tracks/${id}/styles/${encodeURIComponent(genre)}`, {}),
   genre: (name: string) => get<GenrePage>(`/genres/${encodeURIComponent(name)}`),
   genres: () => get<GenreMap>('/genres'),
   playlistFromSongs: (name: string, trackIds: number[]) =>
