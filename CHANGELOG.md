@@ -8,6 +8,9 @@
 - Added a Back button to DJINN GO and made Now Playing a full page.
 - Added artwork for empty playback and listening screens, and changed artist photos into a faded page background.
 - Added a switch between the regular Playing page and the TV display.
+- Gave Playing the TV layout's large artwork, song details, Up Next list, and join code while keeping its playback controls.
+- Extended the subtle Playing artwork and artist photo backgrounds across their full pages.
+- Moved TV display controls clear of the Up Next heading.
 - Hid Tune In when the jukebox browser is on the server computer.
 
 ### Artist images

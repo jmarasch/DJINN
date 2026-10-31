@@ -82,11 +82,12 @@
 {#if error}
   <p class="error">{error}</p>
 {:else if artist}
+  <div class="artist-page">
+  {#if pictures.length}
+    <div class="background"><ArtistSlideshow {pictures} src={(picture) => picture.remote_url ?? api.artUrl(picture.art_hash)} credit={false} bind:shown={pictureShown} /></div>
+    <div class="shade"></div>
+  {/if}
   <div class="hero" class:with-picture={pictures.length > 0}>
-    {#if pictures.length}
-      <div class="background"><ArtistSlideshow {pictures} src={(picture) => picture.remote_url ?? api.artUrl(picture.art_hash)} credit={false} bind:shown={pictureShown} /></div>
-      <div class="shade"></div>
-    {/if}
     <header>
       <Art hash={artist.art_hash} size={140} round={999} letter={artist.name.charAt(0).toUpperCase()} />
       <div class="heading">
@@ -206,37 +207,42 @@
       onchange={() => api.artistPictures(id).then((list) => (pictures = list)).catch(() => {})}
     />
   {/if}
+  </div>
 {/if}
 
 <style>
+  .artist-page {
+    position: relative;
+  }
+
+  .artist-page > :not(.background):not(.shade) {
+    position: relative;
+    z-index: 1;
+  }
+
   .hero {
     position: relative;
-    overflow: hidden;
-    border-radius: 16px;
   }
 
   .hero.with-picture {
-    min-height: 250px;
-    display: flex;
-    align-items: end;
-    padding: 26px 14px 12px;
-    background: #14111f;
-    color: #fff;
+    min-height: 0;
   }
 
   .background,
   .shade {
-    position: absolute;
+    position: fixed;
+    z-index: 0;
     inset: 0;
+    pointer-events: none;
   }
 
   .background {
-    opacity: 0.45;
+    opacity: 0.32;
+    filter: blur(10px) saturate(0.75);
   }
 
   .shade {
-    background: linear-gradient(to bottom, rgb(10 8 16 / 0.15), rgb(10 8 16 / 0.8));
-    pointer-events: none;
+    background: color-mix(in srgb, var(--bg) 55%, transparent);
   }
 
   .hero header {
@@ -245,7 +251,7 @@
   }
 
   .hero.with-picture h1 {
-    color: #fff;
+    color: var(--text);
   }
 
   .admin-actions {

@@ -115,7 +115,7 @@
   {#if !app.connected}
     <div class="offline">Reconnecting to the jukebox...</div>
   {/if}
-  <main>
+  <main class:playing={route.path === '/'}>
     {#if similarId}
       <Similar id={similarId} />
     {:else if genreName}
@@ -160,6 +160,10 @@
   main.narrow {
     max-width: 420px;
     padding-top: 10vh;
+  }
+
+  main.playing {
+    max-width: 1300px;
   }
 
   nav {

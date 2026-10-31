@@ -327,7 +327,8 @@
     display: grid;
     grid-template-columns: minmax(0, 1.9fr) minmax(0, 1fr);
     gap: 3vw;
-    padding: 4vh 3vw;
+    /* Keep the controls above the content instead of covering Up next. */
+    padding: clamp(96px, 9vh, 140px) 3vw 4vh;
     overflow: hidden;
     color: #fff;
     background: #0d0b14;
@@ -607,6 +608,7 @@
 
   .corner {
     position: absolute;
+    z-index: 2;
     right: 1.5vw;
     top: 1.5vh;
     display: flex;
