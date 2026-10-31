@@ -19,7 +19,7 @@ cargo run -p djinn-server -- --config config.example.toml
 cargo build --release                  # single binary: target/release/djinn
 ```
 
-**GitHub builds only for releases.** Every push to an open PR runs CI (Linux and Windows), merging runs it again on main, and a tag runs the release workflow. Don't push work in progress: commit locally, run the checks above locally (they're what CI runs), and push only when a version is ready to release, so it builds once. Batch follow-up fixes into that push instead of pushing each one. Test builds for the Windows machine are made locally and sent over the LAN, or come from a published release.
+**GitHub builds only for releases.** Every push to an open PR runs CI (Linux and Windows) and a tag runs the release workflow, so a release should build twice in all (merging doesn't run CI). Don't push work in progress: commit locally, run the checks above locally (they're what CI runs), and push only when a version is ready to release, so it builds once. Batch follow-up fixes into that push instead of pushing each one. Test builds for the Windows machine are made locally and sent over the LAN, or come from a published release.
 
 Linux build prerequisite: `libasound2-dev` and `pkg-config`.
 
