@@ -87,107 +87,109 @@
     <div class="background"><ArtistSlideshow {pictures} src={(picture) => picture.remote_url ?? api.artUrl(picture.art_hash)} credit={false} bind:shown={pictureShown} /></div>
     <div class="shade"></div>
   {/if}
-  <div class="hero" class:with-picture={pictures.length > 0}>
-    <header>
-      <Art hash={artist.art_hash} size={140} round={999} letter={artist.name.charAt(0).toUpperCase()} />
-      <div class="heading">
-        <h1>{artist.name}</h1>
-        {#if artist.genres}
-          <div class="genres"><GenreChips genres={artist.genres.split(', ')} /></div>
-        {/if}
-        <div class="admin-actions">
-          <RadioButton seed={{ kind: 'artist', id: artist.id }} />
-          <QueueAll kind="artist" refId={artist.id} />
-          <AddToPlaylist kind="artist" refId={artist.id} label={artist.name} />
-          {#if isAdmin()}
-            <button class="pill" onclick={() => (editing = true)}><Icon name="edit" size={18} /> Edit artist</button>
-            <button class="pill" onclick={() => (managing = true)}>Manage pictures</button>
+  <div class="page-content">
+    <div class="hero" class:with-picture={pictures.length > 0}>
+      <header>
+        <Art hash={artist.art_hash} size={140} round={999} letter={artist.name.charAt(0).toUpperCase()} />
+        <div class="heading">
+          <h1>{artist.name}</h1>
+          {#if artist.genres}
+            <div class="genres"><GenreChips genres={artist.genres.split(', ')} /></div>
+          {/if}
+          <div class="admin-actions">
+            <RadioButton seed={{ kind: 'artist', id: artist.id }} />
+            <QueueAll kind="artist" refId={artist.id} />
+            <AddToPlaylist kind="artist" refId={artist.id} label={artist.name} />
+            {#if isAdmin()}
+              <button class="pill" onclick={() => (editing = true)}><Icon name="edit" size={18} /> Edit artist</button>
+              <button class="pill" onclick={() => (managing = true)}>Manage pictures</button>
+            {/if}
+          </div>
+        </div>
+      </header>
+    </div>
+    {#if pictures[pictureShown]}
+      {@const picture = pictures[pictureShown]}
+      <p class="credit small muted">
+        Slideshow photo: {#if picture.credit_url}<a href={picture.credit_url} target="_blank" rel="noopener noreferrer">{picture.credit}</a>{:else}{picture.credit}{/if}{picture.source === 'commons' ? ', Wikimedia Commons' : ''}
+      </p>
+    {/if}
+    {#if artist.photo_credit}
+      <p class="credit small muted">
+        Photo: {#if artist.photo_credit_url}<a href={artist.photo_credit_url} target="_blank" rel="noopener"
+            >{artist.photo_credit}</a
+          >{:else}{artist.photo_credit}{/if}, Wikimedia Commons
+      </p>
+    {/if}
+
+    {#if artist.bio}
+      <section class="bio">
+        <p class:clamped={!bioOpen}>{artist.bio}</p>
+        <div class="bio-links">
+          <button class="link" onclick={() => (bioOpen = !bioOpen)}>{bioOpen ? 'Less' : 'More'}</button>
+          {#if artist.bio_url}
+            <a href={artist.bio_url} target="_blank" rel="noopener">Wikipedia</a>
           {/if}
         </div>
-      </div>
-    </header>
-  </div>
-  {#if pictures[pictureShown]}
-    {@const picture = pictures[pictureShown]}
-    <p class="credit small muted">
-      Slideshow photo: {#if picture.credit_url}<a href={picture.credit_url} target="_blank" rel="noopener noreferrer">{picture.credit}</a>{:else}{picture.credit}{/if}{picture.source === 'commons' ? ', Wikimedia Commons' : ''}
-    </p>
-  {/if}
-  {#if artist.photo_credit}
-    <p class="credit small muted">
-      Photo: {#if artist.photo_credit_url}<a href={artist.photo_credit_url} target="_blank" rel="noopener"
-          >{artist.photo_credit}</a
-        >{:else}{artist.photo_credit}{/if}, Wikimedia Commons
-    </p>
-  {/if}
+      </section>
+    {/if}
 
-  {#if artist.bio}
-    <section class="bio">
-      <p class:clamped={!bioOpen}>{artist.bio}</p>
-      <div class="bio-links">
-        <button class="link" onclick={() => (bioOpen = !bioOpen)}>{bioOpen ? 'Less' : 'More'}</button>
-        {#if artist.bio_url}
-          <a href={artist.bio_url} target="_blank" rel="noopener">Wikipedia</a>
+    {#if artist.top_tracks.length}
+      <h2>{ranked ? 'Top songs' : 'Songs'}</h2>
+      {#each artist.top_tracks as track (track.id)}
+        <TrackRow {track} note={track.requests ? plural(track.requests, 'request') : null} />
+      {/each}
+    {/if}
+
+    {#if artist.albums.length}
+      <div class="section-head">
+        <h2>Albums</h2>
+        {#if artist.albums.length > 1}
+          <SortChoice options={albumOrders} bind:value={albumSort} storageKey="djinn-artist-album-sort" label="Sort albums" />
         {/if}
       </div>
-    </section>
-  {/if}
+      <div class="albums">
+        {#each sorted(artist.albums) as album (album.id)}
+          <a class="album" href="#/album/{album.id}">
+            <div class="cover"><Art hash={album.art_hash} size={160} round={10} /></div>
+            <span class="ellipsis">{album.title}</span>
+            {#if album.year}<span class="muted small">{album.year}</span>{/if}
+          </a>
+        {/each}
+      </div>
+    {/if}
 
-  {#if artist.top_tracks.length}
-    <h2>{ranked ? 'Top songs' : 'Songs'}</h2>
-    {#each artist.top_tracks as track (track.id)}
-      <TrackRow {track} note={track.requests ? plural(track.requests, 'request') : null} />
-    {/each}
-  {/if}
+    {#if artist.appears_on.length}
+      <h2>Appears on</h2>
+      <div class="albums">
+        {#each sorted(artist.appears_on) as album (album.id)}
+          <a class="album" href="#/album/{album.id}">
+            <div class="cover"><Art hash={album.art_hash} size={160} round={10} /></div>
+            <span class="ellipsis">{album.title}</span>
+            <span class="muted small ellipsis">{album.artist}</span>
+          </a>
+        {/each}
+      </div>
+    {/if}
 
-  {#if artist.albums.length}
-    <div class="section-head">
-      <h2>Albums</h2>
-      {#if artist.albums.length > 1}
-        <SortChoice options={albumOrders} bind:value={albumSort} storageKey="djinn-artist-album-sort" label="Sort albums" />
-      {/if}
-    </div>
-    <div class="albums">
-      {#each sorted(artist.albums) as album (album.id)}
-        <a class="album" href="#/album/{album.id}">
-          <div class="cover"><Art hash={album.art_hash} size={160} round={10} /></div>
-          <span class="ellipsis">{album.title}</span>
-          {#if album.year}<span class="muted small">{album.year}</span>{/if}
-        </a>
+    {#if moreSongs.length}
+      <h2>More songs</h2>
+      {#each moreSongs as track (track.id)}
+        <TrackRow {track} />
       {/each}
-    </div>
-  {/if}
-
-  {#if artist.appears_on.length}
-    <h2>Appears on</h2>
-    <div class="albums">
-      {#each sorted(artist.appears_on) as album (album.id)}
-        <a class="album" href="#/album/{album.id}">
-          <div class="cover"><Art hash={album.art_hash} size={160} round={10} /></div>
-          <span class="ellipsis">{album.title}</span>
-          <span class="muted small ellipsis">{album.artist}</span>
-        </a>
-      {/each}
-    </div>
-  {/if}
-
-  {#if moreSongs.length}
-    <h2>More songs</h2>
-    {#each moreSongs as track (track.id)}
-      <TrackRow {track} />
-    {/each}
-  {/if}
-  {#if similar.length}
-    <h2>Similar artists</h2>
-    <div class="artists">
-      {#each similar as other (other.id)}
-        <a class="artist" href="#/artist/{other.id}">
-          <Art hash={other.art_hash} size={96} round={999} letter={other.name.charAt(0).toUpperCase()} />
-          <span class="ellipsis">{other.name}</span>
-        </a>
-      {/each}
-    </div>
-  {/if}
+    {/if}
+    {#if similar.length}
+      <h2>Similar artists</h2>
+      <div class="artists">
+        {#each similar as other (other.id)}
+          <a class="artist" href="#/artist/{other.id}">
+            <Art hash={other.art_hash} size={96} round={999} letter={other.name.charAt(0).toUpperCase()} />
+            <span class="ellipsis">{other.name}</span>
+          </a>
+        {/each}
+      </div>
+    {/if}
+  </div>
   {#if editing}
     <TagEditor
       title="Edit artist"
@@ -215,7 +217,7 @@
     position: relative;
   }
 
-  .artist-page > :not(.background):not(.shade) {
+  .page-content {
     position: relative;
     z-index: 1;
   }

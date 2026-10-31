@@ -52,32 +52,39 @@
 {#if error}
   <p class="error">{error}</p>
 {:else if album}
-  <header>
-    <Art hash={album.art_hash} size={160} round={12} />
-    <div>
-      <h1>{album.title}</h1>
-      <a href="#/artist/{album.artist_id}">{album.artist}</a>
-      {#if album.year}<span class="muted"> · {album.year}</span>{/if}
-      {#if album.genres}
-        <div class="genres"><GenreChips genres={album.genres.split(',').map((g) => g.trim())} /></div>
-      {/if}
-      <div class="admin-actions">
-        <QueueAll kind="album" refId={album.id} />
-        <AddToPlaylist kind="album" refId={album.id} label={album.title} />
-        {#if isAdmin()}
-          <button class="pill" onclick={() => (editing = true)}><Icon name="edit" size={18} /> Edit album</button>
-        {/if}
-      </div>
-    </div>
-  </header>
-  {#if album.tracks.length > 1}
-    <div class="sort">
-      <SortChoice options={trackOrders} bind:value={trackSort} storageKey="djinn-album-track-sort" label="Sort songs" />
-    </div>
+  <div class="album-page">
+  {#if album.art_hash}
+    <div class="background" style:background-image="url({api.artUrl(album.art_hash, 512)})"></div>
+    <div class="shade"></div>
   {/if}
-  {#each tracks as track (track.id)}
-    <TrackRow {track} showArt={false} showAlbum={false} number={track.track_no} />
-  {/each}
+  <div class="page-content">
+    <header>
+      <Art hash={album.art_hash} size={160} round={12} />
+      <div>
+        <h1>{album.title}</h1>
+        <a href="#/artist/{album.artist_id}">{album.artist}</a>
+        {#if album.year}<span class="muted"> · {album.year}</span>{/if}
+        {#if album.genres}
+          <div class="genres"><GenreChips genres={album.genres.split(',').map((g) => g.trim())} /></div>
+        {/if}
+        <div class="admin-actions">
+          <QueueAll kind="album" refId={album.id} />
+          <AddToPlaylist kind="album" refId={album.id} label={album.title} />
+          {#if isAdmin()}
+            <button class="pill" onclick={() => (editing = true)}><Icon name="edit" size={18} /> Edit album</button>
+          {/if}
+        </div>
+      </div>
+    </header>
+    {#if album.tracks.length > 1}
+      <div class="sort">
+        <SortChoice options={trackOrders} bind:value={trackSort} storageKey="djinn-album-track-sort" label="Sort songs" />
+      </div>
+    {/if}
+    {#each tracks as track (track.id)}
+      <TrackRow {track} showArt={false} showAlbum={false} number={track.track_no} />
+    {/each}
+  </div>
   {#if editing}
     {@const ids = album.tracks.map((t) => t.id)}
     <TagEditor
@@ -94,9 +101,41 @@
       onsaved={() => edited(ids)}
     />
   {/if}
+  </div>
 {/if}
 
 <style>
+  .back {
+    position: relative;
+    z-index: 1;
+  }
+
+  .album-page { position: relative; }
+
+  .page-content {
+    position: relative;
+    z-index: 1;
+  }
+
+  .background,
+  .shade {
+    position: fixed;
+    z-index: 0;
+    inset: 0;
+    pointer-events: none;
+  }
+
+  .background {
+    background-position: center;
+    background-size: cover;
+    opacity: 0.32;
+    filter: blur(10px) saturate(0.75);
+  }
+
+  .shade {
+    background: color-mix(in srgb, var(--bg) 55%, transparent);
+  }
+
   .genres {
     margin: 6px 0 2px;
   }
