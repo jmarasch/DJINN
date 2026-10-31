@@ -6,13 +6,33 @@ use super::*;
 impl Store {
     /// Artists with playable tracks, A to Z.
     pub async fn artists_page(&self, offset: i64, limit: i64) -> Result<Page<ArtistSummary>> {
+        self.artists_page_filtered(true, offset, limit).await
+    }
+
+    pub async fn artists_page_filtered(
+        &self,
+        show_collaborations: bool,
+        offset: i64,
+        limit: i64,
+    ) -> Result<Page<ArtistSummary>> {
         let items = sqlx::query_as(concat!(
             "SELECT id, name, art_hash, track_count FROM (",
             artist_counts!(),
-            ") WHERE track_count > 0 ORDER BY ",
+            ") summary WHERE track_count > 0 AND lower(name) NOT IN
+              ('various artists', 'various', 'va', 'v.a.', 'soundtrack', 'soundtracks', 'ost', 'original soundtrack')
+              AND (? OR EXISTS (
+                SELECT 1 FROM tracks t LEFT JOIN albums al ON al.id = t.album_id
+                LEFT JOIN artists ar ON ar.id = al.artist_id
+                WHERE t.removed_at IS NULL AND
+                  ((t.album_id IS NULL AND t.artist_id = summary.id)
+                    OR (al.artist_id = summary.id AND ",
+            album_kind!(),
+            " = 'regular'))))
+              ORDER BY ",
             sort_key!("name"),
             " LIMIT ? OFFSET ?"
         ))
+        .bind(show_collaborations)
         .bind(limit)
         .bind(offset)
         .fetch_all(&self.pool)
@@ -20,8 +40,18 @@ impl Store {
         let total = sqlx::query_scalar(concat!(
             "SELECT count(*) FROM (",
             artist_counts!(),
-            ") WHERE track_count > 0"
+            ") summary WHERE track_count > 0 AND lower(name) NOT IN
+              ('various artists', 'various', 'va', 'v.a.', 'soundtrack', 'soundtracks', 'ost', 'original soundtrack')
+              AND (? OR EXISTS (
+                SELECT 1 FROM tracks t LEFT JOIN albums al ON al.id = t.album_id
+                LEFT JOIN artists ar ON ar.id = al.artist_id
+                WHERE t.removed_at IS NULL AND
+                  ((t.album_id IS NULL AND t.artist_id = summary.id)
+                    OR (al.artist_id = summary.id AND ",
+            album_kind!(),
+            " = 'regular'))))"
         ))
+        .bind(show_collaborations)
         .fetch_one(&self.pool)
         .await?;
         Ok(Page { items, total })
@@ -34,11 +64,25 @@ impl Store {
         offset: i64,
         limit: i64,
     ) -> Result<Page<Album>> {
+        self.albums_page_filtered(sort, AlbumFilter::All, offset, limit)
+            .await
+    }
+
+    pub async fn albums_page_filtered(
+        &self,
+        sort: AlbumSort,
+        filter: AlbumFilter,
+        offset: i64,
+        limit: i64,
+    ) -> Result<Page<Album>> {
         let sql = match sort {
             AlbumSort::Name => concat!(
                 "SELECT ",
                 album_columns!(),
                 listed_albums!(),
+                " AND (? = 'all' OR ",
+                album_kind!(),
+                " = ?)",
                 " ORDER BY ",
                 album_order!(name),
                 " LIMIT ? OFFSET ?"
@@ -47,6 +91,9 @@ impl Store {
                 "SELECT ",
                 album_columns!(),
                 listed_albums!(),
+                " AND (? = 'all' OR ",
+                album_kind!(),
+                " = ?)",
                 " ORDER BY ",
                 album_order!(newest),
                 " LIMIT ? OFFSET ?"
@@ -55,19 +102,32 @@ impl Store {
                 "SELECT ",
                 album_columns!(),
                 listed_albums!(),
+                " AND (? = 'all' OR ",
+                album_kind!(),
+                " = ?)",
                 " ORDER BY ",
                 album_order!(oldest),
                 " LIMIT ? OFFSET ?"
             ),
         };
         let items = sqlx::query_as(sql)
+            .bind(filter.as_str())
+            .bind(filter.as_str())
             .bind(limit)
             .bind(offset)
             .fetch_all(&self.pool)
             .await?;
-        let total = sqlx::query_scalar(concat!("SELECT count(*)", listed_albums!()))
-            .fetch_one(&self.pool)
-            .await?;
+        let total = sqlx::query_scalar(concat!(
+            "SELECT count(*)",
+            listed_albums!(),
+            " AND (? = 'all' OR ",
+            album_kind!(),
+            " = ?)"
+        ))
+        .bind(filter.as_str())
+        .bind(filter.as_str())
+        .fetch_one(&self.pool)
+        .await?;
         Ok(Page { items, total })
     }
 
@@ -145,14 +205,29 @@ impl Store {
 
     /// Where each letter starts in the artist list.
     pub async fn artist_jumps(&self) -> Result<Vec<Jump>> {
+        self.artist_jumps_filtered(true).await
+    }
+
+    pub async fn artist_jumps_filtered(&self, show_collaborations: bool) -> Result<Vec<Jump>> {
         let keys = sqlx::query_scalar(concat!(
             "SELECT ",
             sort_key!("name"),
             " FROM (",
             artist_counts!(),
-            ") WHERE track_count > 0 ORDER BY ",
+            ") summary WHERE track_count > 0 AND lower(name) NOT IN
+              ('various artists', 'various', 'va', 'v.a.', 'soundtrack', 'soundtracks', 'ost', 'original soundtrack')
+              AND (? OR EXISTS (
+                SELECT 1 FROM tracks t LEFT JOIN albums al ON al.id = t.album_id
+                LEFT JOIN artists ar ON ar.id = al.artist_id
+                WHERE t.removed_at IS NULL AND
+                  ((t.album_id IS NULL AND t.artist_id = summary.id)
+                    OR (al.artist_id = summary.id AND ",
+            album_kind!(),
+            " = 'regular'))))
+              ORDER BY ",
             sort_key!("name")
         ))
+        .bind(show_collaborations)
         .fetch_all(&self.pool)
         .await?;
         Ok(jumps(keys, false))
@@ -160,28 +235,49 @@ impl Store {
 
     /// Where each letter (or year) starts in the album list.
     pub async fn album_jumps(&self, sort: AlbumSort) -> Result<Vec<Jump>> {
+        self.album_jumps_filtered(sort, AlbumFilter::All).await
+    }
+
+    pub async fn album_jumps_filtered(
+        &self,
+        sort: AlbumSort,
+        filter: AlbumFilter,
+    ) -> Result<Vec<Jump>> {
         let sql = match sort {
             AlbumSort::Name => concat!(
                 "SELECT ",
                 sort_key!("al.title"),
                 listed_albums!(),
+                " AND (? = 'all' OR ",
+                album_kind!(),
+                " = ?)",
                 " ORDER BY ",
                 album_order!(name)
             ),
             AlbumSort::Year => concat!(
                 "SELECT CAST(al.year AS TEXT)",
                 listed_albums!(),
+                " AND (? = 'all' OR ",
+                album_kind!(),
+                " = ?)",
                 " ORDER BY ",
                 album_order!(newest)
             ),
             AlbumSort::Oldest => concat!(
                 "SELECT CAST(al.year AS TEXT)",
                 listed_albums!(),
+                " AND (? = 'all' OR ",
+                album_kind!(),
+                " = ?)",
                 " ORDER BY ",
                 album_order!(oldest)
             ),
         };
-        let keys = sqlx::query_scalar(sql).fetch_all(&self.pool).await?;
+        let keys = sqlx::query_scalar(sql)
+            .bind(filter.as_str())
+            .bind(filter.as_str())
+            .fetch_all(&self.pool)
+            .await?;
         Ok(jumps(keys, sort != AlbumSort::Name))
     }
 

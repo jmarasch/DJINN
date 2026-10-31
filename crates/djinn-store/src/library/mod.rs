@@ -217,6 +217,25 @@ pub enum AlbumSort {
 
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
+pub enum AlbumFilter {
+    #[default]
+    All,
+    Various,
+    Soundtracks,
+}
+
+impl AlbumFilter {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::All => "all",
+            Self::Various => "various",
+            Self::Soundtracks => "soundtracks",
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum TrackSort {
     #[default]
     Title,
@@ -391,6 +410,23 @@ macro_rules! listed_albums {
             available!(),
             ")"
         )
+    };
+}
+
+// An explicit album artist or soundtrack genre wins. The remaining
+// multi-artist albums are classed as Various Artists.
+macro_rules! album_kind {
+    () => {
+        "(CASE WHEN lower(ar.name) IN ('soundtrack', 'soundtracks', 'ost', 'original soundtrack')
+             OR lower(al.title) LIKE '%soundtrack%'
+             OR lower(al.title) LIKE '%original motion picture%'
+             OR EXISTS (SELECT 1 FROM tracks kt WHERE kt.album_id = al.id
+                        AND kt.removed_at IS NULL AND lower(coalesce(kt.genre, '')) LIKE '%soundtrack%')
+           THEN 'soundtracks'
+           WHEN lower(ar.name) IN ('various artists', 'various', 'va', 'v.a.')
+           OR (SELECT count(DISTINCT kt.artist_id) FROM tracks kt
+               WHERE kt.album_id = al.id AND kt.removed_at IS NULL) >= 3
+           THEN 'various' ELSE 'regular' END)"
     };
 }
 

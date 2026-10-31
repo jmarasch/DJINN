@@ -101,10 +101,13 @@
   {:else}
     <span></span>
   {/if}
-  <button class="theme" onclick={cycleTheme} aria-label="Theme: {themeLabel}" title="Theme: {themeLabel}">
-    <Icon name="theme" size={18} />
-    {themeLabel}
-  </button>
+  <div class="display-actions">
+    <a class="button" href="/tv" title="Switch to TV display">TV display</a>
+    <button class="theme" onclick={cycleTheme} aria-label="Theme: {themeLabel}" title="Theme: {themeLabel}">
+      <Icon name="theme" size={18} />
+      {themeLabel}
+    </button>
+  </div>
 </div>
 
 <section class="now">
@@ -306,6 +309,21 @@
     justify-content: space-between;
     gap: 8px;
     min-height: 40px;
+  }
+
+  .display-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .display-actions .button {
+    min-height: 34px;
+    padding: 7px 10px;
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--muted);
+    font-size: 0.8125rem;
   }
 
   .source {

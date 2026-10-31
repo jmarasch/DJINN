@@ -289,6 +289,8 @@ struct Settings {
     /// Artist names never split into separate artists, one per line.
     #[serde(default)]
     artist_keep_whole: String,
+    #[serde(default = "default_true")]
+    show_collaboration_artists: bool,
     /// The TV page (/tv) works without signing in.
     #[serde(default = "default_true")]
     tv_page: bool,
@@ -338,6 +340,8 @@ async fn settings(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json
             .await
             .map_err(anyhow::Error::from)?
             .join("\n"),
+        show_collaboration_artists: settings::flag(store, "show_collaboration_artists", true)
+            .await?,
         tv_page: crate::tv_api::enabled(&state).await?,
         play_here: settings::flag(store, crate::cast_api::PLAY_HERE, false).await?,
         skip_votes: settings::number(store, jukebox::SKIP_VOTES, 0).await?,
@@ -451,6 +455,12 @@ async fn update_settings(
         .await
         .set_skip_votes_needed(u32::try_from(body.skip_votes).unwrap_or(0));
     let was_online = settings::flag(store, settings::ONLINE_INFO, false).await?;
+    settings::set_flag(
+        store,
+        "show_collaboration_artists",
+        body.show_collaboration_artists,
+    )
+    .await?;
     settings::set_flag(store, settings::ONLINE_INFO, body.online_artist_info).await?;
     // A changed never-split list means re-reading every file's artists.
     let keep_whole: Vec<&str> = body

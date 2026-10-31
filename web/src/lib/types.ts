@@ -533,6 +533,8 @@ export interface Settings {
   background: Schedule
   /** Artist names never split, one per line. */
   artist_keep_whole: string
+  /** Show artists who appear only as a secondary song credit. */
+  show_collaboration_artists: boolean
   /** The TV page (/tv) works without signing in. */
   tv_page: boolean
   /** Anyone signed in can play the party in their own browser. */
@@ -595,6 +597,7 @@ export type TrackSort = 'title' | 'artist' | 'added' | 'popular' | 'year' | 'old
 
 /** Year is newest first, oldest is by year oldest first. */
 export type AlbumSort = 'name' | 'year' | 'oldest'
+export type AlbumFilter = 'all' | 'various' | 'soundtracks'
 
 /** Where a letter or year starts in a sorted list. */
 export interface Jump {

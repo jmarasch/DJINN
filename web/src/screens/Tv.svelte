@@ -302,6 +302,7 @@
   {/if}
 
   <div class="corner" class:hidden={casting}>
+    <a href="/#/" class="regular-display">Regular display</a>
     {#if streamUrl}
       <button class:on={soundOn} onclick={toggleSound}>{soundOn ? 'Sound on' : 'Play sound here'}</button>
     {/if}
@@ -613,13 +614,16 @@
     transition: opacity 0.3s;
   }
 
-  .corner button {
+  .corner button,
+  .corner .regular-display {
+    display: inline-block;
     padding: 0.4em 0.9em;
     border: 0;
     border-radius: 2em;
     background: rgb(255 255 255 / 0.15);
     color: #fff;
     font-size: 0.7em;
+    text-decoration: none;
   }
 
   .corner button.on {

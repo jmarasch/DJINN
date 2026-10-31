@@ -12,8 +12,8 @@ use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use djinn_library::{art, ScanProgress};
 use djinn_store::{
-    Album, AlbumDetail, AlbumSort, ArtistDetail, ArtistSummary, Jump, Page, SearchResults,
-    TagChange, TagEdit, Track, TrackSort,
+    Album, AlbumDetail, AlbumFilter, AlbumSort, ArtistDetail, ArtistSummary, Jump, Page,
+    SearchResults, TagChange, TagEdit, Track, TrackSort,
 };
 use serde::{Deserialize, Serialize};
 
@@ -151,7 +151,13 @@ async fn artists(
     Query(page): Query<PageQuery>,
 ) -> ApiResult<Json<Page<ArtistSummary>>> {
     let (offset, limit) = page.bounds();
-    Ok(Json(state.store.artists_page(offset, limit).await?))
+    let show = settings::flag(&state.store, "show_collaboration_artists", true).await?;
+    Ok(Json(
+        state
+            .store
+            .artists_page_filtered(show, offset, limit)
+            .await?,
+    ))
 }
 
 #[derive(Deserialize)]
@@ -161,6 +167,8 @@ struct AlbumQuery {
     limit: Option<i64>,
     #[serde(default)]
     sort: AlbumSort,
+    #[serde(default)]
+    filter: AlbumFilter,
 }
 
 async fn albums(
@@ -175,13 +183,17 @@ async fn albums(
     };
     let (offset, limit) = page.bounds();
     Ok(Json(
-        state.store.albums_page(query.sort, offset, limit).await?,
+        state
+            .store
+            .albums_page_filtered(query.sort, query.filter, offset, limit)
+            .await?,
     ))
 }
 
 /// Where each letter starts in the artist list, for the jump strip.
 async fn artist_jumps(_: CurrentUser, State(state): State<AppState>) -> ApiResult<Json<Vec<Jump>>> {
-    Ok(Json(state.store.artist_jumps().await?))
+    let show = settings::flag(&state.store, "show_collaboration_artists", true).await?;
+    Ok(Json(state.store.artist_jumps_filtered(show).await?))
 }
 
 /// Where each letter or year starts in the album list.
@@ -190,7 +202,12 @@ async fn album_jumps(
     State(state): State<AppState>,
     Query(query): Query<AlbumQuery>,
 ) -> ApiResult<Json<Vec<Jump>>> {
-    Ok(Json(state.store.album_jumps(query.sort).await?))
+    Ok(Json(
+        state
+            .store
+            .album_jumps_filtered(query.sort, query.filter)
+            .await?,
+    ))
 }
 
 /// Where each letter or year starts in the song list.
