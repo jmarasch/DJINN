@@ -68,7 +68,7 @@ async function connect() {
 
 /** Starts listening. Browsers only allow it after a tap, so call it from one. */
 export async function startPlayHere() {
-  if (playHere.on) return
+  if (playHere.on || !playHere.url) return
   playHere.on = true
   playHere.waiting = true
   await connect()
