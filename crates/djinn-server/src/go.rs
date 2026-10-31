@@ -1066,7 +1066,8 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
-        let right = format!(r#"{{"ticket":"{ticket}","code":"{}"}}"#, code(0));
+        let used_code = code(0);
+        let right = format!(r#"{{"ticket":"{ticket}","code":"{used_code}"}}"#);
         let (status, _, cookie) = go(
             &state,
             Method::POST,
@@ -1088,7 +1089,7 @@ mod tests {
         )
         .await;
         let ticket = field(&text, "ticket").as_str().unwrap().to_owned();
-        let again = format!(r#"{{"ticket":"{ticket}","code":"{}"}}"#, code(0));
+        let again = format!(r#"{{"ticket":"{ticket}","code":"{used_code}"}}"#);
         let (status, _, _) = go(
             &state,
             Method::POST,
