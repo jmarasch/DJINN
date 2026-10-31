@@ -14,6 +14,7 @@
   import AiPanel from '../lib/AiPanel.svelte'
   import CastPanel from '../lib/CastPanel.svelte'
   import CrossfadePanel from '../lib/CrossfadePanel.svelte'
+  import EqualizerPanel from '../lib/EqualizerPanel.svelte'
   import OutputsPanel from '../lib/OutputsPanel.svelte'
   import PublicNetworkNote from '../lib/PublicNetworkNote.svelte'
   import ReplayGainPanel from '../lib/ReplayGainPanel.svelte'
@@ -193,6 +194,7 @@
   <OutputsPanel />
   <CastPanel />
   <ReplayGainPanel />
+  <EqualizerPanel />
 {:else if tab === 'smart'}
   <SmartPlayPanel />
 {:else if tab === 'ai'}

@@ -109,6 +109,37 @@ impl Harness {
 }
 
 #[tokio::test]
+async fn equalizer_restores_and_reaches_the_engine() {
+    let store = Store::open_in_memory().await.unwrap();
+    let saved = EqualizerSettings {
+        enabled: true,
+        bands_db: [6.0, -3.0, 0.0, 2.0, -1.0],
+    };
+    store
+        .set_setting(EQUALIZER_SETTING, &serde_json::to_string(&saved).unwrap())
+        .await
+        .unwrap();
+    let sent = Arc::new(Mutex::new(Vec::new()));
+    let commands = Arc::clone(&sent);
+    let (events, _) = broadcast::channel(16);
+    let mut jukebox = Jukebox::new(
+        store,
+        Box::new(move |command| commands.lock().unwrap().push(command)),
+        events,
+    )
+    .await
+    .unwrap();
+    assert_eq!(jukebox.equalizer().bands_db, saved.bands_db);
+    assert!(sent.lock().unwrap().iter().any(|command| {
+        matches!(command, Command::SetEqualizer(config) if config.enabled && config.bands_db == saved.bands_db)
+    }));
+    jukebox.set_equalizer(EqualizerSettings::default());
+    assert!(
+        matches!(sent.lock().unwrap().last(), Some(Command::SetEqualizer(config)) if !config.enabled)
+    );
+}
+
+#[tokio::test]
 async fn skip_votes() {
     let mut h = Harness::new(3).await;
     let (admin, user) = (h.admin.clone(), h.user.clone());

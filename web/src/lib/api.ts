@@ -64,6 +64,7 @@ import type {
   RadioSeed,
   ReplayGainMode,
   ReplayGainSettings,
+  EqualizerSettings,
   RequestLogEntry,
   Role,
   ScanProgress,
@@ -339,6 +340,7 @@ export const api = {
     }),
   removeOutput: (id: number) => del<void>(`/outputs/${id}`),
   replayGain: () => get<ReplayGainSettings>('/audio/replaygain'),
+  equalizer: () => get<EqualizerSettings>('/audio/equalizer'),
   identify: () => get<IdentifyStatus & { found: IdentificationRow[] }>('/identify'),
   startIdentify: () => post<void>('/identify/start'),
   stopIdentify: () => post<void>('/identify/stop'),
@@ -379,6 +381,7 @@ export const api = {
   setCastVolume: (id: string, level: number) => put<void>(`/cast/${encodeURIComponent(id)}/volume`, { level }),
   saveReplayGain: (mode: ReplayGainMode, preamp_db: number) =>
     put<ReplayGainSettings>('/audio/replaygain', { mode, preamp_db }),
+  saveEqualizer: (settings: EqualizerSettings) => put<EqualizerSettings>('/audio/equalizer', settings),
 
   libraryStatus: () => get<LibraryStatus>('/library/status'),
   openArtFolder: () => post<void>('/library/open-art-folder'),

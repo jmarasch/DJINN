@@ -12,6 +12,7 @@
 - Extended the subtle Playing artwork and artist photo backgrounds across their full pages.
 - Moved TV display controls clear of the Up Next heading.
 - Hid Tune In when the jukebox browser is on the server computer.
+- Added a five-band equalizer in Admin > Audio, with live adjustment, automatic headroom, and a flat reset.
 
 ### Artist images
 

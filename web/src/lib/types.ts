@@ -677,6 +677,12 @@ export interface ReplayGainSettings {
   loudness: LoudnessStatus
 }
 
+export interface EqualizerSettings {
+  enabled: boolean
+  /** Bass, low mids, mids, presence, and treble in dB. */
+  bands_db: [number, number, number, number, number]
+}
+
 export interface CastDevice {
   id: string
   name: string
