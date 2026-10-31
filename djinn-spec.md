@@ -293,7 +293,7 @@ Runtime-tunable settings live in the `settings` table, not the config file.
 
 ### Phase 7: DJINN GO (personal streaming)
 
-Personal listening, apart from the party, on the same library and database. Same binary and process; its own listener (default port 8067, `[go]` in the config, off until the admin turns it on) so it can be reached from away from home without exposing the party or Admin. Released in steps: 0.4.0, 0.4.1, 0.4.2, 0.4.3.
+Personal listening, apart from the party, on the same library and database. Same binary and process; its own listener (default port 8067, `[go]` in the config, off until the admin turns it on) so it can be reached from away from home without exposing the party or Admin. Planned in steps (0.4.0 to 0.4.3) and released together as 0.4.5.
 
 **Accounts and roles (0.4.0)**
 - One set of users for the party and GO. Built-in roles `admin` and `guest` stay; every other role is admin-defined, with permissions. Existing `user` accounts move to a built-in, editable "Listener" role.
