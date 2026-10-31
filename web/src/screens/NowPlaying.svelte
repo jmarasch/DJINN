@@ -149,7 +149,7 @@
     {/if}
   {:else}
     <div class="idle">
-      <Icon name="disc" size={72} />
+      <img src="/images/empty-record.webp" alt="" />
       <h1>Nothing playing</h1>
       <p class="muted">
         {app.output.error ? `Audio output problem: ${app.output.error}` : 'Find a song and add it to the queue.'}
@@ -335,12 +335,27 @@
   }
 
   .now {
+    position: relative;
+    isolation: isolate;
     display: flex;
     flex-direction: column;
     align-items: center;
     text-align: center;
     gap: 6px;
     padding-top: 4px;
+  }
+
+  .now::before {
+    content: '';
+    position: absolute;
+    z-index: -1;
+    top: 0;
+    left: -16px;
+    right: -16px;
+    height: 370px;
+    background: linear-gradient(to bottom, transparent 35%, var(--bg)), url('/images/listening-waves.webp') center top / cover no-repeat;
+    opacity: 0.65;
+    pointer-events: none;
   }
 
   .cover {
@@ -407,6 +422,11 @@
     gap: 4px;
     padding: 36px 0 16px;
     color: var(--muted);
+  }
+
+  .idle img {
+    width: min(210px, 58vw);
+    height: auto;
   }
 
   .idle h1 {

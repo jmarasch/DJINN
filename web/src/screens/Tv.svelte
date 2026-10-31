@@ -190,10 +190,12 @@
 <div class="tv" class:idle-cursor={idleCursor} onmousemove={showCursor}>
   {#if pictures.length}
     <div class="pictures">
-      <ArtistSlideshow {pictures} src={(hash) => art(hash) ?? ''} seconds={10} credit={false} bind:shown={pictureShown} />
+      <ArtistSlideshow {pictures} src={(picture) => picture.remote_url ?? art(picture.art_hash) ?? ''} seconds={10} credit={false} bind:shown={pictureShown} />
     </div>
     {#if pictures[pictureShown]}
-      <div class="picture-credit">Photo: {pictures[pictureShown].credit}, Wikimedia Commons</div>
+      <div class="picture-credit">
+        Photo: {#if pictures[pictureShown].credit_url}<a href={pictures[pictureShown].credit_url} target="_blank" rel="noopener noreferrer">{pictures[pictureShown].credit}</a>{:else}{pictures[pictureShown].credit}{/if}{pictures[pictureShown].source === 'commons' ? ', Wikimedia Commons' : ''}
+      </div>
     {/if}
   {:else if current?.track.art_hash}
     <div class="backdrop" style:background-image="url({art(current.track.art_hash, 512)})"></div>
@@ -352,6 +354,7 @@
 
   .picture-credit {
     position: absolute;
+    z-index: 1;
     left: 1.5vw;
     bottom: 1.2vh;
     max-width: 45vw;

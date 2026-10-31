@@ -583,6 +583,8 @@ async fn artist_pictures_come_from_their_category() {
     assert_eq!(
         store.picture_source(id).await.unwrap(),
         Some(PictureSource {
+            name: "Band".to_owned(),
+            mbid: None,
             commons_category: None,
             checked: false
         })
@@ -607,6 +609,8 @@ async fn artist_pictures_come_from_their_category() {
         art_hash: hash.to_owned(),
         credit: "Someone (CC BY-SA 4.0)".to_owned(),
         credit_url: format!("https://commons.wikimedia.org/wiki/File:{hash}.jpg"),
+        source: "commons".to_owned(),
+        remote_url: None,
     };
     store
         .save_artist_pictures(id, &[picture("a"), picture("b")])
@@ -622,4 +626,56 @@ async fn artist_pictures_come_from_their_category() {
         [picture("c")],
         "replaced, not added"
     );
+}
+
+#[tokio::test]
+async fn host_pictures_survive_commons_rechecks_and_can_be_managed() {
+    let store = Store::open_in_memory().await.unwrap();
+    store
+        .save_scanned(&[scanned("/m/host.flac", "Opener", "Host Band", "Debut")])
+        .await
+        .unwrap();
+    let id = store.search("host band", 10).await.unwrap().artists[0].id;
+    let manual = ArtistPicture {
+        art_hash: "manual".into(),
+        credit: "Host licensed".into(),
+        credit_url: "".into(),
+        source: "manual".into(),
+        remote_url: None,
+    };
+    let commons = ArtistPicture {
+        art_hash: "commons".into(),
+        credit: "Photographer".into(),
+        credit_url: "https://commons.wikimedia.org/wiki/File:Example.jpg".into(),
+        source: "commons".into(),
+        remote_url: None,
+    };
+    store.add_artist_picture(id, &manual).await.unwrap();
+    store
+        .save_artist_pictures(id, std::slice::from_ref(&commons))
+        .await
+        .unwrap();
+    assert_eq!(
+        store.artist_pictures(id).await.unwrap(),
+        [manual.clone(), commons.clone()]
+    );
+    assert!(store.art_hash_in_use(&manual.art_hash).await.unwrap());
+    assert!(store
+        .reorder_artist_pictures(id, &[commons.art_hash.clone(), manual.art_hash.clone()])
+        .await
+        .unwrap());
+    assert_eq!(
+        store.artist_pictures(id).await.unwrap(),
+        [commons.clone(), manual.clone()]
+    );
+    store.save_artist_pictures(id, &[]).await.unwrap();
+    assert_eq!(
+        store.artist_pictures(id).await.unwrap(),
+        std::slice::from_ref(&manual)
+    );
+    assert!(store
+        .remove_artist_picture(id, &manual.art_hash)
+        .await
+        .unwrap());
+    assert!(!store.art_hash_in_use(&manual.art_hash).await.unwrap());
 }

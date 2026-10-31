@@ -528,6 +528,7 @@ export interface Settings {
   sound_analysis: boolean
   /** Slideshows of more artist pictures (Wikimedia Commons). */
   artist_pictures: boolean
+  picture_settings: PictureSettings
   /** When sound analysis and AI listening may run. */
   background: Schedule
   /** Artist names never split, one per line. */
@@ -540,6 +541,41 @@ export interface Settings {
   skip_votes: number
   /** AcoustID application key, for identifying songs by sound. */
   acoustid_key: string
+}
+
+export interface PictureSettings {
+  count: number
+  /** 0 means no separate per-artist size limit. */
+  per_artist_mb: number
+  /** 0 means no cache limit. */
+  cache_mb: number
+  max_edge: number
+  min_width: number
+  min_height: number
+  deezer: boolean
+  wikipedia: boolean
+  commons: boolean
+  fanart: boolean
+  fanart_key: string
+  audiodb: boolean
+  audiodb_key: string
+  unsplash: boolean
+  unsplash_key: string
+  allow_remote: boolean
+}
+
+export interface ArtCacheStatus {
+  used_bytes: number
+  max_bytes: number
+}
+
+export interface UnsplashChoice {
+  id: string
+  thumbnail: string
+  credit: string
+  credit_url: string
+  width: number
+  height: number
 }
 
 export interface Page<T> {
@@ -907,4 +943,6 @@ export interface ArtistPicture {
   credit: string
   /** Its page on Wikimedia Commons. */
   credit_url: string
+  source: 'commons' | 'manual' | 'fanart' | 'audiodb' | 'unsplash'
+  remote_url: string | null
 }
