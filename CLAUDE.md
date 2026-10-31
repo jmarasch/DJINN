@@ -19,6 +19,8 @@ cargo run -p djinn-server -- --config config.example.toml
 cargo build --release                  # single binary: target/release/djinn
 ```
 
+**GitHub builds only for releases.** Every push to an open PR runs CI (Linux and Windows), merging runs it again on main, and a tag runs the release workflow. Don't push work in progress: commit locally, run the checks above locally (they're what CI runs), and push only when a version is ready to release, so it builds once. Batch follow-up fixes into that push instead of pushing each one. Test builds for the Windows machine are made locally and sent over the LAN, or come from a published release.
+
 Linux build prerequisite: `libasound2-dev` and `pkg-config`.
 
 Windows build prerequisites: rustup (MSVC toolchain), Visual Studio Build Tools with the C++ workload (SQLite and the exe icon compile with it), Node.js LTS, and Inno Setup 6 for the installer. With winget: `winget install Rustlang.Rustup OpenJS.NodeJS.LTS JRSoftware.InnoSetup` and `winget install Microsoft.VisualStudio.2022.BuildTools --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"` (without the override it installs no C++ compiler). Use the commands above from PowerShell.
