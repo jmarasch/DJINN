@@ -31,6 +31,9 @@
     <li>Search for a song or browse the library, then tap it to add it to the party queue.</li>
   </ol>
   <p class="muted small">Requests play in order. When the queue is empty, the party mix keeps going.</p>
+  <p class="muted small">
+    Android: if Chrome won't open the page, allow Chrome's Nearby devices permission in the phone's settings.
+  </p>
 </div>
 
 <style>

@@ -12,6 +12,11 @@
   off or allow local network access.
 - **VPN on the phone:** a VPN app on the phone can keep it from reaching
   devices at home. Turn it off while at the party.
+- **Android and Chrome (ERR_TOO_MANY_RETRIES):** newer Android asks before
+  an app may reach devices on your home network. In the phone's Settings >
+  Apps > Chrome > Permissions, allow **Nearby devices** (some phones call it
+  Local network), then reload. Other browsers may work without it until
+  they ask too.
 - **The address:** the join QR code and the address under it point at this
   computer. If it changed (a new network), reopen the QR code. Admin >
   System > **Status** lists every address phones can use.
@@ -45,7 +50,22 @@ since Bluetooth lags) until they line up. See
 
 ## Windows says "Windows protected your PC"
 
-The installer isn't code signed yet. Click **More info**, then **Run anyway**.
+DJINN isn't code signed. Click **More info**, then **Run anyway**.
+
+## The installer does nothing, or Windows blocks it with no way around
+
+That's **Smart App Control**, which Windows 11 switches on for new
+installs. It blocks programs that aren't code signed, DJINN included, and
+unlike the warning above it has no **Run anyway**. Check Windows Security >
+App & browser control > Smart App Control.
+
+Your choices:
+
+- **Turn it off** in that same place, then run the installer again. Windows
+  can't turn Smart App Control back on afterwards without resetting the PC,
+  so decide with that in mind. Windows Security and Defender keep working.
+- **Run DJINN on another computer**: one where Smart App Control is off, or
+  Linux.
 
 ## The admin password is lost
 

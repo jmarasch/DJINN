@@ -59,7 +59,9 @@ Admins can always use GO.
 ## On your phone
 
 **Getting there:** in GO on a computer, **Account > Open on your phone**
-shows a QR code for GO's address; scan it with the phone's camera.
+shows a QR code for GO's address; scan it with the phone's camera. If
+Chrome on Android won't open it (ERR_TOO_MANY_RETRIES), allow Chrome's
+**Nearby devices** permission in the phone's settings.
 
 **Install it as an app:** open GO in your phone's browser, then use
 **Add to Home Screen** (Safari: the Share button; Chrome: the menu). It

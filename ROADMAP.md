@@ -141,6 +141,17 @@ and requests are welcome at DJINN@newterrastudios.com or as an issue.
 - **Security for the internet.** Login lockouts, optional two-step
   sign-in, a sign-in log, and guides for safe access from away with
   Tailscale or Cloudflare Tunnel.
+- **Lighter on modest computers.** Every library setting on the Library
+  page. A library check just reads your folders and tags; sound analysis
+  (for "more like this", radio and smart play), artist photos and bios,
+  MusicBrainz lookups and identifying songs by sound are each switched on
+  separately. Background work is sized to the computer's processor and
+  always leaves room for the music.
+- **Artist picture slideshows.** Optionally fetch more pictures of each
+  artist and show them as a slideshow on their page and on the TV page
+  while their song plays.
+- **Fix the AI's genre guesses.** Take a wrong "Sounds like" genre off a
+  song; it stays off when the AI listens again.
 
 ### 0.4.1
 
