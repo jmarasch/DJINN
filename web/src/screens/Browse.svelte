@@ -227,22 +227,24 @@
       {/if}
     {/if}
   {:else if tab === 'albums'}
-    <label class="sort">
-      <span class="muted small">Show</span>
-      <select bind:value={albumFilter}>
-        <option value="all">All albums</option>
-        <option value="various">Various Artists</option>
-        <option value="soundtracks">Soundtracks</option>
-      </select>
-    </label>
-    <label class="sort">
-      <span class="muted small">Sort by</span>
-      <select bind:value={albumSort}>
-        <option value="name">Name</option>
-        <option value="year">Year (newest first)</option>
-        <option value="oldest">Year (oldest first)</option>
-      </select>
-    </label>
+    <div class="album-filters">
+      <label class="sort">
+        <span class="muted small">Show</span>
+        <select bind:value={albumFilter}>
+          <option value="all">All albums</option>
+          <option value="various">Various Artists</option>
+          <option value="soundtracks">Soundtracks</option>
+        </select>
+      </label>
+      <label class="sort">
+        <span class="muted small">Sort by</span>
+        <select bind:value={albumSort}>
+          <option value="name">Name</option>
+          <option value="year">Year (newest first)</option>
+          <option value="oldest">Year (oldest first)</option>
+        </select>
+      </label>
+    </div>
     <InfiniteList
       bind:this={list}
       inset={STUCK_PX}
@@ -444,9 +446,20 @@
   }
 
   .sort {
+    display: flex;
     flex-direction: row;
     align-items: center;
     gap: 10px;
     margin-bottom: 4px;
   }
+
+  .album-filters {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 16px;
+    margin-bottom: 4px;
+  }
+
+  .album-filters .sort { margin-bottom: 0; }
 </style>

@@ -244,7 +244,9 @@ async fn set_equalizer(
     Json(body): Json<EqualizerSettings>,
 ) -> ApiResult<Json<EqualizerSettings>> {
     if !body.valid() {
-        return Err(ApiError::bad_request("each EQ band must be -12 to 12 dB"));
+        return Err(ApiError::bad_request(
+            "EQ bands must be -12 to 12 dB and output level -12 to 6 dB",
+        ));
     }
     let saved = serde_json::to_string(&body).map_err(anyhow::Error::from)?;
     state.store.set_setting(EQUALIZER_SETTING, &saved).await?;
@@ -406,6 +408,8 @@ mod tests {
         assert!(!settings.valid());
         settings.bands_db[0] = -12.0;
         assert!(settings.valid());
+        settings.output_gain_db = 6.5;
+        assert!(!settings.valid());
     }
 
     #[test]

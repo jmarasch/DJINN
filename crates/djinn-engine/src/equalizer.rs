@@ -1,16 +1,21 @@
-//! Five-band equalizer on the engine thread, before speaker and stream fan-out.
+//! Twelve-band equalizer on the engine thread, before speaker and stream fan-out.
 
 use std::f64::consts::PI;
 
-pub const BAND_HZ: [u32; 5] = [60, 250, 1000, 4000, 12000];
+pub const BAND_HZ: [u32; 12] = [
+    32, 64, 125, 250, 500, 1000, 2000, 4000, 6000, 8000, 12000, 16000,
+];
 pub const MAX_BAND_DB: f32 = 12.0;
-const Q: f64 = 1.0;
+pub const MIN_OUTPUT_GAIN_DB: f32 = -12.0;
+pub const MAX_OUTPUT_GAIN_DB: f32 = 6.0;
+const Q: f64 = 1.4;
 const FADE_FRAMES: usize = 256;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct EqualizerConfig {
     pub enabled: bool,
     pub bands_db: [f32; BAND_HZ.len()],
+    pub output_gain_db: f32,
 }
 
 impl Default for EqualizerConfig {
@@ -18,6 +23,7 @@ impl Default for EqualizerConfig {
         Self {
             enabled: false,
             bands_db: [0.0; BAND_HZ.len()],
+            output_gain_db: 0.0,
         }
     }
 }
@@ -72,61 +78,34 @@ impl Biquad {
         state.y1 = output;
         output
     }
-
-    fn magnitude(&self, omega: f64) -> f64 {
-        let cosine = omega.cos();
-        let cosine2 = (2.0 * omega).cos();
-        let sine = omega.sin();
-        let sine2 = (2.0 * omega).sin();
-        let numerator = (self.b0 + self.b1 * cosine + self.b2 * cosine2).powi(2)
-            + (self.b1 * sine + self.b2 * sine2).powi(2);
-        let denominator = (1.0 + self.a1 * cosine + self.a2 * cosine2).powi(2)
-            + (self.a1 * sine + self.a2 * sine2).powi(2);
-        (numerator / denominator).sqrt()
-    }
 }
 
 struct Bank {
-    filters: [Biquad; BAND_HZ.len()],
+    filters: [Option<Biquad>; BAND_HZ.len()],
     active: bool,
-    headroom: f64,
+    output_gain: f64,
 }
 
 impl Bank {
     fn new(rate: u32, config: EqualizerConfig) -> Self {
         let filters = std::array::from_fn(|i| {
             let gain = config.bands_db[i];
-            Biquad::peak(
-                rate,
-                BAND_HZ[i],
-                if gain.is_finite() {
-                    gain.clamp(-MAX_BAND_DB, MAX_BAND_DB)
-                } else {
-                    0.0
-                },
-            )
+            (gain.is_finite() && gain != 0.0)
+                .then(|| Biquad::peak(rate, BAND_HZ[i], gain.clamp(-MAX_BAND_DB, MAX_BAND_DB)))
         });
-        let active = config.enabled && config.bands_db.iter().any(|gain| *gain != 0.0);
-        let headroom = if active {
-            // Compute the filter cascade's largest frequency gain once when
-            // settings change, then leave that much digital headroom.
-            let peak = (0..1024)
-                .map(|step| {
-                    let omega = PI * (step as f64 + 0.5) / 1024.0;
-                    filters
-                        .iter()
-                        .map(|filter| filter.magnitude(omega))
-                        .product::<f64>()
-                })
-                .fold(1.0_f64, f64::max);
-            1.0 / peak
+        let active =
+            config.enabled && (filters.iter().any(Option::is_some) || config.output_gain_db != 0.0);
+        let gain = if config.output_gain_db.is_finite() {
+            config
+                .output_gain_db
+                .clamp(MIN_OUTPUT_GAIN_DB, MAX_OUTPUT_GAIN_DB)
         } else {
-            1.0
+            0.0
         };
         Self {
             filters,
             active,
-            headroom,
+            output_gain: 10.0_f64.powf(f64::from(gain) / 20.0),
         }
     }
 
@@ -135,11 +114,27 @@ impl Bank {
             return input;
         }
         let mut sample = f64::from(input);
-        for filter in &mut self.filters {
+        for filter in self.filters.iter_mut().flatten() {
             sample = filter.process(sample, channel);
         }
-        (sample * self.headroom).clamp(-1.0, 1.0) as f32
+        soft_limit(sample * self.output_gain)
     }
+}
+
+// Preserve ordinary signal levels. Only peaks above 90% of full scale
+// approach the digital ceiling smoothly, rather than turning every band
+// boost into a quieter whole mix.
+fn soft_limit(sample: f64) -> f32 {
+    if !sample.is_finite() {
+        return 0.0;
+    }
+    let magnitude = sample.abs();
+    let limited = if magnitude <= 0.9 {
+        magnitude
+    } else {
+        0.9 + 0.1 * ((magnitude - 0.9) / 0.1).tanh()
+    };
+    (sample.signum() * limited) as f32
 }
 
 pub(crate) struct Equalizer {
@@ -214,6 +209,18 @@ mod tests {
         assert_eq!(samples, [0.25, -0.5, 0.75, -0.125]);
     }
 
+    #[test]
+    fn enabled_flat_is_bit_exact() {
+        let mut eq = Equalizer::new(48_000);
+        eq.set(EqualizerConfig {
+            enabled: true,
+            ..EqualizerConfig::default()
+        });
+        let mut samples = [0.25, -0.5, 0.75, -0.125];
+        eq.process(&mut samples);
+        assert_eq!(samples, [0.25, -0.5, 0.75, -0.125]);
+    }
+
     fn rms_after_filter(frequency: f64, config: EqualizerConfig) -> f64 {
         let mut eq = Equalizer::new(48_000);
         eq.set(config);
@@ -235,10 +242,30 @@ mod tests {
     fn bass_boost_changes_the_spectrum_without_clipping() {
         let config = EqualizerConfig {
             enabled: true,
-            bands_db: [9.0, 0.0, 0.0, 0.0, 0.0],
+            bands_db: [0.0, 9.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            output_gain_db: 0.0,
         };
-        let bass = rms_after_filter(60.0, config);
+        let bass = rms_after_filter(64.0, config);
         let mid = rms_after_filter(1_000.0, config);
         assert!(bass > mid * 2.0, "bass={bass}, mid={mid}");
+        let flat_mid = rms_after_filter(1_000.0, EqualizerConfig::default());
+        assert!(
+            (mid - flat_mid).abs() < flat_mid * 0.1,
+            "midrange should stay near its original level"
+        );
+    }
+
+    #[test]
+    fn output_gain_restores_level_and_soft_limit_bounds_peaks() {
+        let config = EqualizerConfig {
+            enabled: true,
+            bands_db: [0.0; BAND_HZ.len()],
+            output_gain_db: 6.0,
+        };
+        let boosted = rms_after_filter(1_000.0, config);
+        let flat = rms_after_filter(1_000.0, EqualizerConfig::default());
+        assert!(boosted > flat * 1.8);
+        assert!(soft_limit(100.0) <= 1.0);
+        assert!(soft_limit(-100.0) >= -1.0);
     }
 }

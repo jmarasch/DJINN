@@ -20,7 +20,7 @@ use std::time::Instant;
 
 use djinn_engine::{
     Command, EndReason, EqualizerConfig, Event as EngineEvent, PlayState as EngineState, TrackId,
-    BAND_HZ, MAX_BAND_DB,
+    BAND_HZ, MAX_BAND_DB, MAX_OUTPUT_GAIN_DB, MIN_OUTPUT_GAIN_DB,
 };
 use djinn_store::{
     AddRequestError, Backer, PlaySource, QueueItem, RequestLimits, RequestOrigin, RequestOutcome,
@@ -80,6 +80,7 @@ pub type EngineSink = Box<dyn Fn(Command) + Send + Sync>;
 pub struct EqualizerSettings {
     pub enabled: bool,
     pub bands_db: [f32; BAND_HZ.len()],
+    pub output_gain_db: f32,
 }
 
 impl EqualizerSettings {
@@ -87,13 +88,65 @@ impl EqualizerSettings {
         self.bands_db
             .iter()
             .all(|gain| gain.is_finite() && gain.abs() <= MAX_BAND_DB)
+            && self.output_gain_db.is_finite()
+            && (MIN_OUTPUT_GAIN_DB..=MAX_OUTPUT_GAIN_DB).contains(&self.output_gain_db)
     }
 
     fn engine_config(self) -> EqualizerConfig {
         EqualizerConfig {
             enabled: self.enabled,
             bands_db: self.bands_db,
+            output_gain_db: self.output_gain_db,
         }
+    }
+}
+
+#[derive(Deserialize)]
+struct LegacyEqualizerSettings {
+    enabled: bool,
+    bands_db: [f32; 5],
+}
+
+fn parse_equalizer(saved: Option<&str>) -> EqualizerSettings {
+    let Some(saved) = saved else {
+        return EqualizerSettings::default();
+    };
+    if let Ok(settings) = serde_json::from_str::<EqualizerSettings>(saved) {
+        return if settings.valid() {
+            settings
+        } else {
+            EqualizerSettings::default()
+        };
+    }
+    let Ok(old) = serde_json::from_str::<LegacyEqualizerSettings>(saved) else {
+        return EqualizerSettings::default();
+    };
+    if old
+        .bands_db
+        .iter()
+        .any(|gain| !gain.is_finite() || gain.abs() > MAX_BAND_DB)
+    {
+        return EqualizerSettings::default();
+    }
+    const OLD_HZ: [u32; 5] = [60, 250, 1000, 4000, 12000];
+    let bands_db = std::array::from_fn(|index| {
+        let frequency = BAND_HZ[index];
+        if frequency <= OLD_HZ[0] {
+            return old.bands_db[0];
+        }
+        if frequency >= OLD_HZ[4] {
+            return old.bands_db[4];
+        }
+        let upper = OLD_HZ.partition_point(|&old_hz| old_hz < frequency);
+        let lower = upper - 1;
+        let fraction = (f64::from(frequency) / f64::from(OLD_HZ[lower])).ln()
+            / (f64::from(OLD_HZ[upper]) / f64::from(OLD_HZ[lower])).ln();
+        old.bands_db[lower] + (old.bands_db[upper] - old.bands_db[lower]) * fraction as f32
+    });
+    EqualizerSettings {
+        enabled: old.enabled,
+        bands_db,
+        output_gain_db: 0.0,
     }
 }
 
@@ -239,12 +292,8 @@ impl Jukebox {
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(0.0),
         };
-        let equalizer = store
-            .get_setting(EQUALIZER_SETTING)
-            .await?
-            .and_then(|saved| serde_json::from_str::<EqualizerSettings>(&saved).ok())
-            .filter(|settings| settings.valid())
-            .unwrap_or_default();
+        let saved_equalizer = store.get_setting(EQUALIZER_SETTING).await?;
+        let equalizer = parse_equalizer(saved_equalizer.as_deref());
         let mut seed = [0u8; 8];
         getrandom::fill(&mut seed).map_err(|e| anyhow::anyhow!("no system randomness: {e}"))?;
         let mut jukebox = Self {

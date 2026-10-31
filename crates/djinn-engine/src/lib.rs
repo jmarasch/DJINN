@@ -28,7 +28,9 @@ use std::path::PathBuf;
 
 pub use devices::{output_devices, DeviceInfo};
 pub use engine::{Engine, EngineConfig};
-pub use equalizer::{EqualizerConfig, BAND_HZ, MAX_BAND_DB};
+pub use equalizer::{
+    EqualizerConfig, BAND_HZ, MAX_BAND_DB, MAX_OUTPUT_GAIN_DB, MIN_OUTPUT_GAIN_DB,
+};
 pub use error::EngineError;
 pub use features::{
     analyze, decode_mono, decode_stereo, describe, Analysis, Features, FEATURES_VERSION,

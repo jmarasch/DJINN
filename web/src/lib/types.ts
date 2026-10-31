@@ -679,8 +679,9 @@ export interface ReplayGainSettings {
 
 export interface EqualizerSettings {
   enabled: boolean
-  /** Bass, low mids, mids, presence, and treble in dB. */
-  bands_db: [number, number, number, number, number]
+  /** Twelve frequency bands in dB, from 32 Hz to 16 kHz. */
+  bands_db: number[]
+  output_gain_db: number
 }
 
 export interface CastDevice {
