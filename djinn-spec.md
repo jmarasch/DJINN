@@ -293,7 +293,7 @@ Runtime-tunable settings live in the `settings` table, not the config file.
 
 ### Phase 7: DJINN GO (personal streaming)
 
-Personal listening, apart from the party, on the same library and database. Same binary and process; its own listener (default port 8067, `[go]` in the config, off until the admin turns it on) so it can be reached from away from home without exposing the party or Admin. Released in steps: 0.4.0, 0.4.1, 0.4.2, 0.4.3.
+Personal listening, apart from the party, on the same library and database. Same binary and process; its own listener (default port 8067, `[go]` in the config, off until the admin turns it on) so it can be reached from away from home without exposing the party or Admin. Planned in steps (0.4.0 to 0.4.3) and released together as 0.4.5.
 
 **Accounts and roles (0.4.0)**
 - One set of users for the party and GO. Built-in roles `admin` and `guest` stay; every other role is admin-defined, with permissions. Existing `user` accounts move to a built-in, editable "Listener" role.
@@ -304,7 +304,7 @@ Personal listening, apart from the party, on the same library and database. Same
 **Security (0.4.0)**
 - The GO listener serves only GO: no Admin API, no bootstrap, no guest join.
 - Login slows down and then locks out per address and per account. Minimum password length, common passwords refused.
-- Optional two-step sign-in (TOTP); admin can require it per role.
+- Optional two-step sign-in (TOTP) with one-time recovery codes; admin can require it for GO per role and for admins. Once an account has it on, every sign-in asks for a code, on either port.
 - Remote access is a role permission; without it, GO only accepts addresses on the home network (private ranges, Tailscale).
 - `trusted_proxies` setting so lockouts and remote checks see the real client address behind Cloudflare Tunnel or a reverse proxy.
 - Session cookie `Secure` when reached over HTTPS; idle expiry; per-device sign-out.
@@ -328,11 +328,11 @@ Personal listening, apart from the party, on the same library and database. Same
 - 0.4.x: an "Open it for me" button maps the port with UPnP-IGD, detects carrier-grade NAT, and only opens with HTTPS: DJINN gets and renews a Let's Encrypt certificate for a dynamic DNS name.
 
 **Submitting music (0.4.1)**
-- Users with the permission upload songs. Uploads wait in `<db dir>/uploads/` (size limit, audio formats only, checked by decoding), get fingerprinted for duplicates and checked with identify, then go to admin review or straight in, per role.
+- Users with the permission upload songs. Uploads wait in `<db dir>/uploads/` (size limit, audio formats only, checked by decoding). A file sent before (same SHA-256) is refused; one matching a library song's title, artist and length (within 3 s) is flagged as a likely duplicate. Then it goes to admin review, or straight in when the role allows and it isn't a likely duplicate. (Identify-based tag checks are left for later.)
 - Approved songs move into a dedicated, writable Uploads library folder. Other music folders stay read-only.
 
 **Phones (0.4.2)**
-- Subsonic/OpenSubsonic API on the GO listener so existing apps (Symfonium, DSub, play:Sub, Substreamer, Feishin) work, including their offline downloads where the role allows downloads.
+- Subsonic/OpenSubsonic API (`/rest/*`, XML or JSON, formPost and apiKeyAuthentication extensions) on the GO listener so existing apps (Symfonium, DSub, play:Sub, Substreamer, Feishin) work, including their offline downloads where the role allows downloads. Apps sign in with a per-account app password (Subsonic's token sign-in needs the server to know the password, so account passwords, which are hashed, are never used). Same role, home-network and two-step checks as the rest of GO. Likes, playlists, play queue and history are shared with GO's page.
 - The web player installs as an app (PWA).
 
 **Converting (0.4.3)**

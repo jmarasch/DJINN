@@ -4,13 +4,13 @@
   import Icon from '../lib/Icon.svelte'
   import AboutPanel from '../lib/AboutPanel.svelte'
   import BackupPanel from '../lib/BackupPanel.svelte'
+  import LibraryExtras from '../lib/LibraryExtras.svelte'
   import LibraryProgress from '../lib/LibraryProgress.svelte'
   import LogViewer from '../lib/LogViewer.svelte'
   import ResetPanel from '../lib/ResetPanel.svelte'
   import SystemStatus from '../lib/SystemStatus.svelte'
   import UpdatePanel from '../lib/UpdatePanel.svelte'
   import AiPanel from '../lib/AiPanel.svelte'
-  import IdentifyPanel from '../lib/IdentifyPanel.svelte'
   import CastPanel from '../lib/CastPanel.svelte'
   import CrossfadePanel from '../lib/CrossfadePanel.svelte'
   import OutputsPanel from '../lib/OutputsPanel.svelte'
@@ -20,6 +20,7 @@
   import { adminTabRows, type AdminTab } from '../lib/adminTabs'
   import Sheet from '../lib/Sheet.svelte'
   import UsersPanel from '../lib/UsersPanel.svelte'
+  import GoPanel from '../lib/GoPanel.svelte'
   import { app, logout, toast } from '../lib/state.svelte'
   import type { LibraryRoot, RequestLogEntry, Settings } from '../lib/types'
 
@@ -50,7 +51,7 @@
       artDir = status.art_dir
       settings = s
       if (status.last_scan) app.scan = status.last_scan
-    } else if (which === 'audio' || which === 'smart' || which === 'users') {
+    } else if (which === 'audio' || which === 'smart' || which === 'users' || which === 'go') {
       // These panels load their own data.
     } else if (which === 'log') {
       log = await api.requestLog(200)
@@ -78,23 +79,6 @@
   async function removeRoot(root: LibraryRoot) {
     if (!confirm(`Remove ${root.path} from the library? Its songs disappear from DJINN (the files stay).`)) return
     await attempt(async () => (roots = await api.removeLibraryRoot(root.path)), 'Folder removed')
-  }
-
-  async function lookUp(force: boolean) {
-    try {
-      const { status } = await api.lookUpArtistInfo(force)
-      toast(
-        status === 'started'
-          ? force
-            ? 'Looking up every artist again'
-            : 'Looking up new artists'
-          : status === 'queued'
-            ? "A lookup is running. Every artist gets rechecked right after it."
-            : 'Already looking up artists. Results show up when it finishes.',
-      )
-    } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not start the lookup', true)
-    }
   }
 
   async function checkForChanges() {
@@ -162,49 +146,27 @@
     {#if app.scan && !scanning}
       <p class="small muted">Last check found {app.scan.found} files, read {app.scan.read}, removed {app.scan.removed}.</p>
     {/if}
-    {#if app.loudness}
-      {@const total = app.loudness.analyzed + app.loudness.waiting}
-      {#if app.loudness.waiting > 0}
-        <p class="small">
-          {#if app.loudness.running}<span class="spinner" aria-hidden="true"></span>{/if}
-          Listening to songs for "more like this" and leveling: {app.loudness.analyzed} of {total} done.
-        </p>
-      {:else if total}
-        <p class="small muted">All {total} songs analyzed for "more like this" and leveling.</p>
-      {/if}
-    {/if}
     <button disabled={scanning} onclick={checkForChanges}>Check for changes</button>
   </section>
 
-  <section class="card">
-    <h2>Artist photos and bios</h2>
-    {#if settings?.online_artist_info}
-      <p class="small muted">
-        Looked up on Deezer and Wikipedia after each library check{settings.musicbrainz_contact
-          ? ', plus MusicBrainz for exact matches, album covers, and genres'
-          : ''}. Pictures in your folders always win.
-      </p>
-      {#if !settings.musicbrainz_contact}
-        <p class="small muted">Add a MusicBrainz contact under <a href="#/admin/rules">Rules</a> for album covers, genres, and better bio matches.</p>
-      {/if}
-      {#if app.lookup.running}
-        <p class="small"><span class="spinner" aria-hidden="true"></span> Looking up artists... New pictures show up when it's done.</p>
-      {:else if app.lookup.last && app.lookup.finished_at}
-        <p class="small muted">
-          Last lookup {when(app.lookup.finished_at)}: {app.lookup.last.checked} artists checked,
-          {app.lookup.last.photos} photos, {app.lookup.last.bios} bios{settings.musicbrainz_contact
-            ? `, ${app.lookup.last.covers} album covers, ${app.lookup.last.genres} with genres`
-            : ''} found.
-        </p>
-      {/if}
-      <div class="row-buttons">
-        <button disabled={app.lookup.running} onclick={() => lookUp(false)}>Look up new artists</button>
-        <button onclick={() => lookUp(true)}>Recheck all</button>
-      </div>
-    {:else}
-      <p class="small muted">Off. Turn on "Look up artist photos and bios" under <a href="#/admin/rules">Rules</a>.</p>
-    {/if}
-  </section>
+  {#if settings}
+    <section class="card">
+      <h2>Artist names that are never split</h2>
+      <form class="settings" onsubmit={saveSettings}>
+        <label>
+          One per line
+          <textarea rows="6" bind:value={settings.artist_keep_whole} spellcheck="false"></textarea>
+          <span class="small muted">
+            Songs credited to "A &amp; B" or "A feat. B" count for each artist. Band names that contain &amp;, commas,
+            or "x" go here so they stay one artist. Saving re-reads the library.
+          </span>
+        </label>
+        <button class="primary">Save</button>
+      </form>
+    </section>
+
+    <LibraryExtras bind:settings />
+  {/if}
 
   <section class="card">
     <h2>Image cache</h2>
@@ -229,9 +191,10 @@
   <SmartPlayPanel />
 {:else if tab === 'ai'}
   <AiPanel />
-  <IdentifyPanel />
 {:else if tab === 'users'}
   <UsersPanel />
+{:else if tab === 'go'}
+  <GoPanel />
 {:else if tab === 'log'}
   <section class="card">
     <div class="log-head">
@@ -272,49 +235,6 @@
         Play here: a Tune In button on the Playing tab lets anyone play the party on their own phone
         or computer, a few seconds behind the speakers
       </label>
-      <label class="switch big">
-        <input type="checkbox" bind:checked={settings.online_artist_info} />
-        Look up artist photos and bios (sends artist names to Deezer and Wikipedia)
-      </label>
-      <label>
-        MusicBrainz contact (email or website)
-        <input
-          type="text"
-          bind:value={settings.musicbrainz_contact}
-          placeholder="Leave empty to skip MusicBrainz"
-          maxlength="200"
-          autocapitalize="none"
-        />
-        <span class="small muted">
-          MusicBrainz needs no account, but asks apps to say who to contact if something goes wrong. It's sent with
-          each MusicBrainz request and adds album covers, genres, and exact artist matches.
-        </span>
-      </label>
-      <label>
-        AcoustID key (for identifying songs by sound)
-        <input
-          type="text"
-          bind:value={settings.acoustid_key}
-          placeholder="Leave empty to skip"
-          maxlength="64"
-          autocapitalize="none"
-          spellcheck="false"
-        />
-        <span class="small muted">
-          Free for non-commercial use: register an application at
-          <a href="https://acoustid.org/new-application" target="_blank" rel="noopener noreferrer">acoustid.org/new-application</a>
-          and paste its key.
-          Song fingerprints (not the audio) are sent to AcoustID, and details come from MusicBrainz.
-        </span>
-      </label>
-      <label>
-        Artist names that are never split (one per line)
-        <textarea rows="6" bind:value={settings.artist_keep_whole} spellcheck="false"></textarea>
-        <span class="small muted">
-          Songs credited to "A &amp; B" or "A feat. B" count for each artist. Band names that contain
-          &amp;, commas, or "x" go here so they stay one artist. Saving re-reads the library.
-        </span>
-      </label>
       <label>
         Most songs in the queue at once (0 for no limit)
         <input type="number" min="0" max="1000" bind:value={settings.max_queue} />
@@ -349,6 +269,7 @@
   <AboutPanel />
 {/if}
 
+<a class="button account-link" href="#/account">Your account (password, two-step sign-in)</a>
 <button class="signout" onclick={logout}>Sign out</button>
 
 <style>
@@ -409,12 +330,6 @@
     font-size: 0.875rem;
   }
 
-  .row-buttons {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-  }
-
 
 
   .switch {
@@ -473,6 +388,11 @@
 
   .settings input[type='number'] {
     width: 100px;
+  }
+
+  .account-link {
+    width: 100%;
+    margin-top: 8px;
   }
 
   .signout {

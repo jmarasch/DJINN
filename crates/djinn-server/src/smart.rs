@@ -5,7 +5,8 @@
 use std::collections::{HashMap, HashSet};
 
 use axum::extract::{Path, Query, State};
-use axum::routing::get;
+use axum::http::StatusCode;
+use axum::routing::{get, put};
 use axum::{Json, Router};
 use djinn_ai::Reading;
 use djinn_library::genres::GenreMap;
@@ -14,8 +15,8 @@ use djinn_library::vibe::{self, SongFacts, Vocabulary};
 use djinn_store::{ArtistSummary, Track};
 use serde::{Deserialize, Serialize};
 
-use crate::auth::CurrentUser;
-use crate::error::ApiResult;
+use crate::auth::{AdminUser, CurrentUser};
+use crate::error::{ApiError, ApiResult};
 use crate::jukebox::SongLinks;
 use crate::settings;
 use crate::state::AppState;
@@ -68,6 +69,10 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/tracks/{id}/similar", get(similar_tracks))
         .route("/tracks/{id}/tags", get(track_tags))
+        .route(
+            "/tracks/{id}/styles/{genre}",
+            put(restore_style).delete(remove_style),
+        )
         .route("/artists/{id}/similar", get(similar_artists))
         .route("/genres", get(genres))
         .route("/genres/{name}", get(genre))
@@ -215,6 +220,42 @@ async fn track_tags(
     Json(TrackTags { genres, styles })
 }
 
+/// Takes a "Sounds like" genre off a song. It stays off when the AI
+/// listens again.
+async fn remove_style(
+    _: AdminUser,
+    State(state): State<AppState>,
+    Path((id, genre)): Path<(i64, String)>,
+) -> ApiResult<StatusCode> {
+    set_style_removed(&state, id, &genre, true).await
+}
+
+/// Puts a removed "Sounds like" genre back.
+async fn restore_style(
+    _: AdminUser,
+    State(state): State<AppState>,
+    Path((id, genre)): Path<(i64, String)>,
+) -> ApiResult<StatusCode> {
+    set_style_removed(&state, id, &genre, false).await
+}
+
+async fn set_style_removed(
+    state: &AppState,
+    id: i64,
+    genre: &str,
+    removed: bool,
+) -> ApiResult<StatusCode> {
+    let genre = vibe::normalize(genre);
+    if genre.is_empty() {
+        return Err(ApiError::bad_request("No genre given"));
+    }
+    if !state.store.set_style_removed(id, &genre, removed).await? {
+        return Err(ApiError::not_found());
+    }
+    refresh(state).await;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 #[derive(Serialize)]
 struct GenrePage {
     name: String,
@@ -315,14 +356,15 @@ pub async fn refresh(state: &AppState) {
         let artists = state.store.artist_genres().await?;
         let heard = state.store.heard_rows(djinn_ai::models::VERSION).await?;
         let led = state.store.artist_tracks().await?;
-        Ok::<_, djinn_store::StoreError>((rows, facts, artists, heard, led))
+        let removed = state.store.removed_styles().await?;
+        Ok::<_, djinn_store::StoreError>((rows, facts, artists, heard, led, removed))
     }
     .await;
     let genre_vectors = state.ai.genre_embeddings();
     let tag_untagged = settings::flag(&state.store, crate::ai::GENRE_TAGS, true)
         .await
         .unwrap_or(false);
-    let (rows, facts, artists, heard, led) = match loaded {
+    let (rows, facts, artists, heard, led, removed) = match loaded {
         Ok(loaded) => loaded,
         Err(e) => {
             tracing::error!(error = %e, "loading song facts failed");
@@ -349,6 +391,13 @@ pub async fn refresh(state: &AppState) {
                 .collect()
         };
         let heard: HashMap<i64, Vec<f32>> = heard.into_iter().collect();
+        // Genres taken off songs in the app. They come off after the AI's
+        // picks are made, so removing one never brings in another.
+        let mut off: HashMap<i64, HashSet<String>> = HashMap::new();
+        for (id, genre) in removed {
+            off.entry(id).or_default().insert(genre);
+        }
+        let kept = |id: i64, genre: &String| !off.get(&id).is_some_and(|g| g.contains(genre));
         // What the AI hears in each song, best first.
         let heard_genres: HashMap<i64, Vec<(f32, String)>> = heard
             .iter()
@@ -371,6 +420,7 @@ pub async fn refresh(state: &AppState) {
                     .iter()
                     .take(STYLES)
                     .filter(|(score, _)| *score >= HEARD_GENRE_MIN && *score >= best - STYLE_MARGIN)
+                    .filter(|(_, name)| kept(*id, name))
                     .map(|(_, name)| name.clone())
                     .collect();
                 (*id, found)
@@ -389,6 +439,7 @@ pub async fn refresh(state: &AppState) {
                                 .iter()
                                 .take(HEARD_GENRES)
                                 .filter(|(score, _)| *score >= HEARD_GENRE_MIN)
+                                .filter(|(_, name)| kept(f.id, name))
                                 .map(|(_, name)| name.clone()),
                         );
                     }
@@ -740,6 +791,8 @@ struct SimilarTracks {
     tracks: Vec<Track>,
     /// False until the song has been analyzed.
     analyzed: bool,
+    /// Sound analysis is switched on (else it never will be).
+    analysis_on: bool,
 }
 
 async fn similar_tracks(
@@ -755,6 +808,7 @@ async fn similar_tracks(
         .unwrap_or_default();
     Ok(Json(SimilarTracks {
         analyzed: !ids.is_empty(),
+        analysis_on: crate::audio_api::analysis_on(&state).await,
         tracks: state.store.tracks_by_ids(&ids).await?,
     }))
 }
@@ -842,5 +896,44 @@ mod tests {
             ["synth pop"]
         );
         assert!(genres_from_songs(&[]).is_empty());
+    }
+
+    #[tokio::test]
+    async fn admins_take_styles_off_songs() {
+        use crate::test_util::{call, session};
+        use axum::http::Method;
+        use djinn_store::Role;
+
+        let state = AppState::for_tests().await;
+        state
+            .store
+            .save_scanned(&[djinn_store::ScannedTrack {
+                path: "/music/interlude.flac".into(),
+                title: "Interlude".into(),
+                ..Default::default()
+            }])
+            .await
+            .unwrap();
+        let id = state.store.library_track_ids().await.unwrap()[0];
+        let admin = session(&state, "host", Role::Admin).await;
+        let guest = session(&state, "lee", Role::User).await;
+        let path = format!("/api/tracks/{id}/styles/Trap");
+
+        let (status, _) = call(&state, Method::DELETE, &path, None, Some(&guest)).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let (status, _) = call(&state, Method::DELETE, &path, None, Some(&admin)).await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        assert_eq!(
+            state.store.removed_styles().await.unwrap(),
+            [(id, "trap".to_owned())],
+            "kept normalized"
+        );
+        let (status, _) = call(&state, Method::PUT, &path, None, Some(&admin)).await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        assert!(state.store.removed_styles().await.unwrap().is_empty());
+
+        let missing = "/api/tracks/999/styles/trap";
+        let (status, _) = call(&state, Method::DELETE, missing, None, Some(&admin)).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
     }
 }

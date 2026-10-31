@@ -122,6 +122,10 @@ pub struct LoudnessStatus {
     #[serde(flatten)]
     pub progress: djinn_store::LoudnessProgress,
     pub running: bool,
+    /// Sound analysis is switched on.
+    pub on: bool,
+    /// What it's waiting for (music playing, or outside its hours).
+    pub held: Option<crate::background::Held>,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]

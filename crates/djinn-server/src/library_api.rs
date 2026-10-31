@@ -42,6 +42,7 @@ pub fn router() -> Router<AppState> {
         .route("/artists", get(artists))
         .route("/artists/jumps", get(artist_jumps))
         .route("/artists/{id}", get(artist))
+        .route("/artists/{id}/pictures", get(artist_pictures))
         .route("/artists/{id}/edit", put(edit_artist))
         .route("/art/{hash}", get(cover_art))
         .route("/library/rescan", post(rescan))
@@ -450,10 +451,7 @@ pub async fn reread(state: &AppState, paths: &[String]) -> ApiResult<()> {
     let _ = state.events.send(ServerEvent::LibraryChanged);
     crate::smart::refresh(state).await;
     // A new name makes a new artist or album to look up.
-    if settings::flag(&state.store, settings::ONLINE_INFO, false)
-        .await
-        .unwrap_or(false)
-    {
+    if settings::lookups_on(&state.store).await {
         start_artist_lookup(state, false);
     }
     Ok(())
@@ -491,7 +489,7 @@ async fn artist(
 #[derive(Deserialize)]
 pub struct ArtQuery {
     /// Thumbnail size in pixels (128 or 512); omit for the original.
-    size: Option<u32>,
+    pub size: Option<u32>,
 }
 
 /// Cover art by content hash, optionally as a thumbnail.
@@ -639,15 +637,61 @@ pub fn lookup_status(state: &AppState) -> LookupStatus {
     }
 }
 
+/// Setting key: 1 to show slideshows of more artist pictures, from
+/// Wikimedia Commons (with artist photos and bios, and MusicBrainz).
+pub const ARTIST_PICTURES: &str = "artist_pictures";
+
+async fn artist_pictures(
+    _: CurrentUser,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> ApiResult<Json<Vec<djinn_store::ArtistPicture>>> {
+    Ok(Json(pictures_for(&state, id).await?))
+}
+
+/// An artist's slideshow pictures: fetched from Commons the first time
+/// they're wanted, then from the image cache. Empty while switched off.
+pub async fn pictures_for(state: &AppState, id: i64) -> ApiResult<Vec<djinn_store::ArtistPicture>> {
+    let store = &state.store;
+    let on = settings::flag(store, ARTIST_PICTURES, false).await?
+        && settings::flag(store, settings::ONLINE_INFO, false).await?;
+    if !on {
+        return Ok(Vec::new());
+    }
+    let source = store
+        .picture_source(id)
+        .await?
+        .ok_or_else(ApiError::not_found)?;
+    if source.checked {
+        return Ok(store.artist_pictures(id).await?);
+    }
+    let Some(category) = source.commons_category else {
+        return Ok(Vec::new());
+    };
+    let _turn = state.scan.pictures.lock().await;
+    // Fetched by someone else while this waited.
+    if store.picture_source(id).await?.is_some_and(|s| s.checked) {
+        return Ok(store.artist_pictures(id).await?);
+    }
+    match djinn_library::online::artist_pictures(&category, &state.art_dir).await {
+        Ok(Some(pictures)) => {
+            store.save_artist_pictures(id, &pictures).await?;
+            Ok(pictures)
+        }
+        Ok(None) => Ok(Vec::new()),
+        Err(e) => {
+            tracing::warn!(error = %e, "fetching artist pictures failed");
+            Ok(Vec::new())
+        }
+    }
+}
+
 /// Starts an online artist lookup in the background. Returns false if one
 /// is already running.
 /// At startup: finishes lookups that failed last time (a busy service, no
 /// network), without rechecking anything that already worked.
 pub async fn retry_unfinished_lookups(state: &AppState) {
-    let on = settings::flag(&state.store, settings::ONLINE_INFO, false)
-        .await
-        .unwrap_or(false);
-    if !on {
+    if !settings::lookups_on(&state.store).await {
         return;
     }
     // Nothing is ever older than the oldest possible time, so these are
@@ -673,16 +717,12 @@ pub fn start_artist_lookup(state: &AppState, force: bool) -> bool {
                 .events
                 .send(ServerEvent::ArtistLookup(lookup_status(&state)));
             tracing::info!(force, "looking up artist photos and bios online");
-            let contact = state
-                .store
-                .get_setting(settings::MUSICBRAINZ_CONTACT)
-                .await
-                .ok()
-                .flatten()
-                .filter(|c| !c.trim().is_empty());
             let options = djinn_library::online::LookupOptions {
                 force,
-                musicbrainz_contact: contact,
+                photos_and_bios: settings::flag(&state.store, settings::ONLINE_INFO, false)
+                    .await
+                    .unwrap_or(false),
+                musicbrainz_contact: settings::musicbrainz(&state.store).await.ok().flatten(),
             };
             let result =
                 djinn_library::online::lookup_artists(&state.store, &state.art_dir, &options).await;
@@ -770,10 +810,7 @@ pub fn start_scan(state: &AppState) -> bool {
                     return;
                 }
                 let _ = state.events.send(ServerEvent::LibraryChanged);
-                if settings::flag(&state.store, settings::ONLINE_INFO, false)
-                    .await
-                    .unwrap_or(false)
-                {
+                if settings::lookups_on(&state.store).await {
                     start_artist_lookup(&state, false);
                 }
                 crate::audio_api::start_analysis(&state).await;

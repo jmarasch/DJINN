@@ -3,6 +3,7 @@
   // people sign up, invite links, and guests.
   import { onMount } from 'svelte'
   import { api } from './api'
+  import { deviceName } from './format'
   import Icon from './Icon.svelte'
   import Sheet from './Sheet.svelte'
   import { app, toast } from './state.svelte'
@@ -99,6 +100,13 @@
     if (password) await attempt(() => api.updateUser(user.id, { password }), `Password changed for ${user.username}`)
   }
 
+  async function resetTwoStep(user: User) {
+    if (!confirm(`Turn off two-step sign-in for ${user.username}? Do this when they've lost their phone and their recovery codes.`)) return
+    if (await attempt(() => api.turnOffUserTwoStep(user.id), `${user.username} signs in with just a password now`)) {
+      users = users.map((u) => (u.id === user.id ? { ...u, two_step: false } : u))
+    }
+  }
+
   async function removeUser(user: User) {
     if (!confirm(`Delete ${user.username}? Their queued songs are removed too.`)) return
     if (await attempt(() => api.deleteUser(user.id))) users = users.filter((u) => u.id !== user.id)
@@ -188,6 +196,8 @@
           submit_music: false,
           submit_without_review: false,
           unlimited_requests: false,
+          require_two_step: false,
+          convert: true,
         }
   }
 
@@ -227,49 +237,27 @@
     new Date(ms).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
   const day = (ms: number) => new Date(ms).toLocaleDateString([], { month: 'short', day: 'numeric' })
 
-  /** "Firefox on Windows" from a user agent, or the raw text. */
-  function deviceName(agent: string | null): string {
-    if (!agent) return 'Unknown device'
-    const browser = /Edg\//.test(agent)
-      ? 'Edge'
-      : /Firefox\//.test(agent)
-        ? 'Firefox'
-        : /Chrome\//.test(agent)
-          ? 'Chrome'
-          : /Safari\//.test(agent)
-            ? 'Safari'
-            : null
-    const system = /iPhone|iPad/.test(agent)
-      ? 'iPhone or iPad'
-      : /Android/.test(agent)
-        ? 'Android'
-        : /Windows/.test(agent)
-          ? 'Windows'
-          : /Mac OS X/.test(agent)
-            ? 'Mac'
-            : /Linux/.test(agent)
-              ? 'Linux'
-              : null
-    if (browser && system) return `${browser} on ${system}`
-    return browser ?? system ?? agent.slice(0, 60)
-  }
-
   const permissionLabels: [keyof Permissions, string, string][] = [
     ['go', 'Use DJINN GO', 'Personal listening, apart from the party.'],
     ['go_remote', 'Use GO away from home', 'Otherwise GO only works on your home network.'],
+    ['require_two_step', 'Must use two-step sign-in for GO', 'A code from an authenticator app after the password.'],
     ['downloads', 'Download songs', 'Save song files to their device.'],
+    ['convert', 'Have songs converted', 'MP3 copies when their device needs them, if converting is on (Admin > GO).'],
     ['share_playlists', 'Share playlists', 'Let other people see and play their playlists.'],
-    ['submit_music', 'Submit music', 'Upload songs for the library (coming in 0.4.1).'],
+    ['submit_music', 'Submit music', 'Upload songs for the library from DJINN GO.'],
     ['submit_without_review', 'Submitted music goes straight in', 'Otherwise you review each upload.'],
     ['unlimited_requests', 'No party request limit', 'Skip the per-person limit and the queue cap.'],
   ]
   const dependsOn: Partial<Record<keyof Permissions, keyof Permissions>> = {
     go_remote: 'go',
+    require_two_step: 'go',
     submit_without_review: 'submit_music',
   }
 
   function summary(role: AccountRole): string {
-    const can = permissionLabels.filter(([key]) => role[key]).map(([, label]) => label.toLowerCase())
+    const can = permissionLabels
+      .filter(([key]) => role[key])
+      .map(([, label]) => label[0].toLowerCase() + label.slice(1))
     return can.length ? `Can ${can.join(', ')}` : 'Party requests only'
   }
 </script>
@@ -308,6 +296,7 @@
           {user.username}
           {#if user.id === app.me?.id}<span class="muted small">(you)</span>{/if}
           {#if user.status === 'disabled'}<span class="badge">Turned off</span>{/if}
+          {#if user.two_step}<span class="badge">Two-step</span>{/if}
         </div>
         <div class="user-controls">
           <select
@@ -327,6 +316,9 @@
           {/if}
           <button class="small-button" onclick={() => showDevices(user)}>Devices</button>
           <button class="small-button" onclick={() => resetPassword(user)}>Reset password</button>
+          {#if user.two_step && user.id !== app.me?.id}
+            <button class="small-button" onclick={() => resetTwoStep(user)}>Turn off two-step</button>
+          {/if}
           {#if user.id !== app.me?.id}
             {#if user.status === 'disabled'}
               <button class="small-button" onclick={() => setStatus(user, 'active', `${user.username} can sign in again`)}>Turn on</button>

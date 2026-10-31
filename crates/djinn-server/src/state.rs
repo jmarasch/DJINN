@@ -53,6 +53,14 @@ pub struct AppState {
     pub ai: Arc<crate::ai::AiState>,
     /// Version checks and self-updates.
     pub update: Arc<crate::update::UpdateState>,
+    /// DJINN GO, personal listening on its own port.
+    pub go: Arc<crate::go::GoState>,
+    /// Slows password guessing.
+    pub limiter: Arc<crate::security::Limiter>,
+    /// Sign-ins waiting for their two-step code.
+    pub tickets: Arc<crate::two_step::Tickets>,
+    /// DJINN GO's optional converting.
+    pub converter: Arc<crate::convert::Converter>,
 }
 
 #[derive(Default)]
@@ -66,6 +74,11 @@ pub struct ScanState {
     pub lookup_last: Mutex<Option<(djinn_library::online::LookupSummary, i64)>>,
     /// Song loudness is being measured for ReplayGain.
     pub loudness_running: AtomicBool,
+    /// What sound analysis or AI listening is waiting for, if anything.
+    pub held: Mutex<Option<crate::background::Held>>,
+    /// Held while fetching an artist's slideshow pictures: one at a time,
+    /// so Commons isn't flooded and no artist is fetched twice.
+    pub pictures: tokio::sync::Mutex<()>,
     pub last: Mutex<Option<ScanProgress>>,
 }
 
@@ -103,12 +116,22 @@ impl AppState {
             catalog: Arc::default(),
             ai: Arc::new(crate::ai::AiState::new(&art_dir_for_models)),
             update: Arc::default(),
+            go: Arc::default(),
+            limiter: Arc::default(),
+            tickets: Arc::default(),
+            converter: Arc::default(),
         }
     }
 
     pub fn with_stream(mut self, stream: djinn_cast::stream::LiveStream, token: String) -> Self {
         self.stream = Some(stream);
         self.cast_token = Arc::new(token);
+        self
+    }
+
+    /// Where DJINN GO listens when it's on.
+    pub fn with_go_listen(mut self, listen: std::net::SocketAddr) -> Self {
+        self.go = Arc::new(crate::go::GoState::new(listen));
         self
     }
 

@@ -15,21 +15,23 @@ Each page covers one part of the app.
    settings under Admin > Rules.
 6. [Accounts and roles](accounts-and-roles.md): roles and what each can do,
    invite links, sign-ups and approvals, and signed-in devices.
-7. [Speakers and sound](speakers-and-sound.md): several speakers at once,
+7. [DJINN GO](djinn-go.md): your own listening apart from the party,
+   two-step sign-in, and using it away from home.
+8. [Speakers and sound](speakers-and-sound.md): several speakers at once,
    delays, crossfade, and even volume.
-8. [Casting, Play here and the TV page](casting-and-tv.md): Chromecast,
+9. [Casting, Play here and the TV page](casting-and-tv.md): Chromecast,
    smart TVs and Sonos, the party on your own phone, and a now-playing
    screen.
-9. [Search and AI](search-and-ai.md): finding songs by name or by
-   description, and the optional AI tools.
-10. [Your library](your-library.md): music folders, artist photos and bios,
+10. [Search and AI](search-and-ai.md): finding songs by name or by
+    description, and the optional AI tools.
+11. [Your library](your-library.md): music folders, artist photos and bios,
     correcting tags, and filling in missing ones.
-11. [Updates](updates.md): keeping DJINN up to date.
-12. [Back up and restore](backup-and-restore.md): save everything DJINN knows
+12. [Updates](updates.md): keeping DJINN up to date.
+13. [Back up and restore](backup-and-restore.md): save everything DJINN knows
     to one file, and move it to another computer.
-13. [System tools](system.md): status, restarting, the log, and clearing
+14. [System tools](system.md): status, restarting, the log, and clearing
     things out.
-14. [Troubleshooting](troubleshooting.md): no sound, phones can't connect, and
+15. [Troubleshooting](troubleshooting.md): no sound, phones can't connect, and
     other common problems.
 
 Who can do what: **guests** and **users** queue songs. **Admins** (hosts)

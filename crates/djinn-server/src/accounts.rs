@@ -36,6 +36,12 @@ pub fn router() -> Router<AppState> {
             get(my_sessions).delete(end_my_other_sessions),
         )
         .route("/me/sessions/{session}", delete(end_my_session))
+        .route(
+            "/me/app-password",
+            get(app_password)
+                .post(new_app_password)
+                .delete(remove_app_password),
+        )
 }
 
 async fn list_roles(
@@ -311,6 +317,53 @@ async fn end_my_session(
     if !state.store.end_session(me.user.id, session).await? {
         return Err(ApiError::not_found());
     }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Serialize)]
+struct AppPassword {
+    /// For Subsonic phone apps on DJINN GO; None until one is made.
+    password: Option<String>,
+}
+
+async fn app_password(
+    me: CurrentSession,
+    State(state): State<AppState>,
+) -> ApiResult<Json<AppPassword>> {
+    Ok(Json(AppPassword {
+        password: state.store.subsonic_key(me.user.id).await?,
+    }))
+}
+
+/// Makes a new app password, replacing any old one (apps using it stop
+/// working until they get the new one).
+async fn new_app_password(
+    me: CurrentSession,
+    State(state): State<AppState>,
+) -> ApiResult<Json<AppPassword>> {
+    if me.user.role == djinn_store::Role::Guest {
+        return Err(ApiError::forbidden());
+    }
+    // 20 letters and digits: typed into phone apps, so no symbols.
+    const ALPHABET: &[u8] = b"abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    let mut bytes = [0u8; 20];
+    getrandom::fill(&mut bytes).map_err(|e| anyhow::anyhow!("no system randomness: {e}"))?;
+    let password: String = bytes
+        .iter()
+        .map(|b| char::from(ALPHABET[usize::from(*b) % ALPHABET.len()]))
+        .collect();
+    state.store.set_subsonic_key(me.user.id, &password).await?;
+    tracing::info!(username = %me.user.username, "app password made");
+    Ok(Json(AppPassword {
+        password: Some(password),
+    }))
+}
+
+async fn remove_app_password(
+    me: CurrentSession,
+    State(state): State<AppState>,
+) -> ApiResult<StatusCode> {
+    state.store.delete_subsonic_key(me.user.id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

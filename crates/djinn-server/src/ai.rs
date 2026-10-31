@@ -202,6 +202,8 @@ pub struct AiStatus {
     heard: i64,
     waiting: i64,
     listening: bool,
+    /// What listening is waiting for (music playing, or outside its hours).
+    held: Option<crate::background::Held>,
     reader: crate::reader::ReaderStatus,
     options: AiOptions,
     system: SystemInfo,
@@ -229,7 +231,7 @@ pub struct SystemInfo {
 fn system_info() -> SystemInfo {
     let memory = djinn_platform::system::memory();
     SystemInfo {
-        cores: std::thread::available_parallelism().map_or(1, |n| n.get()),
+        cores: crate::cpu::threads(),
         memory_total: memory.map(|m| m.total),
         memory_available: memory.map(|m| m.available),
     }
@@ -293,6 +295,7 @@ pub async fn ai_status(state: &AppState) -> ApiResult<AiStatus> {
         heard,
         waiting,
         listening: ai.listening.load(Ordering::Acquire),
+        held: crate::background::waiting(state),
         reader: crate::reader::status(state).await?,
         options: options(state).await?,
         system: system_info(),
@@ -307,6 +310,8 @@ pub struct Listening {
     running: bool,
     heard: i64,
     waiting: i64,
+    /// What it's waiting for (music playing, or outside its hours).
+    held: Option<crate::background::Held>,
 }
 
 pub async fn listening(state: &AppState) -> ApiResult<Listening> {
@@ -316,6 +321,7 @@ pub async fn listening(state: &AppState) -> ApiResult<Listening> {
         running: state.ai.listening.load(Ordering::Acquire),
         heard,
         waiting,
+        held: crate::background::waiting(state),
     })
 }
 
@@ -420,7 +426,7 @@ async fn listen(state: &AppState) {
         return;
     }
     state.ai.stop_listening.store(false, Ordering::Release);
-    let cores = std::thread::available_parallelism().map_or(1, |n| n.get());
+    let cores = crate::cpu::threads();
     let speed = state.store.get_setting(LISTEN_SPEED).await.ok().flatten();
     let workers = match speed.as_deref() {
         Some("gentle") => 1,
@@ -444,6 +450,16 @@ async fn listen(state: &AppState) {
                 break 'rounds;
             };
             if state.ai.stop_listening.load(Ordering::Acquire) {
+                break 'rounds;
+            }
+            // Waits while the schedule says so (music playing, or outside
+            // its hours); gives up if stopped or switched off meanwhile.
+            let wanted = || async {
+                !state.ai.stop_listening.load(Ordering::Acquire)
+                    && state.ai.model().is_some()
+                    && enabled(state).await.unwrap_or(false)
+            };
+            if !crate::background::wait_turn(state, wanted, || broadcast(state)).await {
                 break 'rounds;
             }
             let jobs: Vec<_> = chunk

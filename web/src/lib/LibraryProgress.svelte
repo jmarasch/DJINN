@@ -3,6 +3,7 @@
   // (find, read, sort), then analyzing the sound, then AI listening if it's
   // on. Artist lookups run alongside and get their own line. Hidden when
   // nothing is happening.
+  import { heldText } from './background'
   import { app } from './state.svelte'
 
   type Step = { key: string; label: string }
@@ -16,7 +17,7 @@
     { key: 'finding', label: 'Find music' },
     { key: 'reading', label: 'Read songs' },
     { key: 'sorting', label: 'Sort albums and artists' },
-    { key: 'analysis', label: 'Analyze sound' },
+    ...(app.loudness?.on ? [{ key: 'analysis', label: 'Analyze sound' }] : []),
     ...(app.listening?.on ? [{ key: 'listening', label: 'AI listening' }] : []),
   ])
 
@@ -25,6 +26,10 @@
     scanning ? (app.scan?.phase ?? 'finding') : analyzing ? 'analysis' : listening ? 'listening' : null,
   )
   const index = $derived(current ? steps.findIndex((s) => s.key === current) : -1)
+  /** What the step running now waits for, if it waits (music playing, or outside its hours). */
+  const held = $derived(
+    current === 'analysis' ? app.loudness?.held : current === 'listening' ? app.listening?.held : null,
+  )
 
   const n = (x: number) => x.toLocaleString()
 
@@ -62,9 +67,10 @@
   <section class="progress-card" aria-live="polite">
     {#if current && index >= 0}
       <div class="head">
-        <span class="spinner" aria-hidden="true"></span>
+        {#if !held}<span class="spinner" aria-hidden="true"></span>{/if}
         <b>Step {index + 1} of {steps.length}: {steps[index].label}</b>
       </div>
+      {#if held}<p class="small">{heldText(held)}.</p>{/if}
       {#if detail}<p class="small muted">{detail}</p>{/if}
       {#if amount && amount[1] > 0}
         <progress max={amount[1]} value={Math.min(amount[0], amount[1])}></progress>
@@ -86,7 +92,7 @@
     {#if lookingUp}
       <p class="small muted lookup">
         {#if !current}<span class="spinner" aria-hidden="true"></span>{/if}
-        Also looking up artist photos and bios online
+        Also looking up artists online
       </p>
     {/if}
   </section>

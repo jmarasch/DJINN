@@ -4,8 +4,9 @@
   import { onMount } from 'svelte'
   import { api } from '../lib/api'
   import { app, connect } from '../lib/state.svelte'
+  import type { User } from '../lib/types'
 
-  let { onback }: { onback?: () => void } = $props()
+  let { onback, ondone }: { onback?: () => void; ondone?: (me: User) => void } = $props()
 
   const invite = new URLSearchParams(location.search).get('invite') ?? ''
   let inviteRole = $state<string | null>(null)
@@ -46,7 +47,8 @@
       } else {
         if (invite) history.replaceState(null, '', '/')
         app.me = result
-        connect()
+        if (ondone) ondone(result)
+        else connect()
       }
     } catch (err) {
       error = err instanceof Error ? err.message : 'Could not create the account'

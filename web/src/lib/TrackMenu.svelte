@@ -14,6 +14,8 @@
   let playlist = $state(false)
   let tags = $state<TrackTags | null>(null)
   let editing = $state<TrackEdit | null>(null)
+  // The "Sounds like" genre just taken off, for Undo while the menu is open.
+  let removed = $state<string | null>(null)
 
   async function editTags() {
     menu = false
@@ -34,6 +36,32 @@
       .then((t) => (tags = t))
       .catch(() => {})
   })
+
+  $effect(() => {
+    if (!menu) removed = null
+  })
+
+  async function removeStyle(genre: string) {
+    try {
+      await api.removeStyle(track.id, genre)
+      if (tags) tags.styles = tags.styles.filter((s) => s !== genre)
+      removed = genre
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not remove it', true)
+    }
+  }
+
+  async function undoRemove() {
+    const genre = removed
+    if (!genre) return
+    try {
+      await api.restoreStyle(track.id, genre)
+      if (tags) tags.styles = [...tags.styles, genre]
+      removed = null
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not put it back', true)
+    }
+  }
 
   function similar() {
     menu = false
@@ -56,15 +84,26 @@
 </button>
 {#if menu}
   <Sheet title={track.title} onclose={() => (menu = false)}>
-    {#if tags?.genres.length || tags?.styles.length}
+    {#if tags && (tags.genres.length || tags.styles.length || removed)}
       <div class="tags">
         {#if tags.genres.length}
           <span class="small muted">Genres</span>
           <GenreChips genres={tags.genres} onopen={() => (menu = false)} />
         {/if}
-        {#if tags.styles.length}
+        {#if tags.styles.length || removed}
           <span class="small muted">Sounds like</span>
-          <GenreChips genres={tags.styles} onopen={() => (menu = false)} />
+          <div class="styles">
+            <GenreChips
+              genres={tags.styles}
+              onopen={() => (menu = false)}
+              onremove={isAdmin() ? removeStyle : undefined}
+            />
+            {#if removed}
+              <p class="small muted">
+                Took off {removed}. <button class="link" onclick={undoRemove}>Undo</button>
+              </p>
+            {/if}
+          </div>
         {/if}
       </div>
     {/if}
@@ -111,6 +150,24 @@
     gap: 8px 12px;
     padding: 4px 4px 12px;
     border-bottom: 1px solid var(--line);
+  }
+
+  .styles {
+    display: grid;
+    gap: 6px;
+  }
+
+  .styles p {
+    margin: 0;
+  }
+
+  .link {
+    padding: 0;
+    min-height: 0;
+    border: 0;
+    background: none;
+    color: var(--accent);
+    font-size: 0.8125rem;
   }
 
   .item {

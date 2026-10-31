@@ -30,6 +30,13 @@
     | 'shuffle'
     | 'ordered'
     | 'similar'
+    | 'heart'
+    | 'heart-outline'
+    | 'previous'
+    | 'repeat'
+    | 'repeat-one'
+    | 'download'
+    | 'home'
 
   let { name, size = 22 }: { name: Name; size?: number } = $props()
 
@@ -68,6 +75,14 @@
     ordered: 'M7 7h10v3l4-4-4-4v3H5v6h2zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2z',
     list: 'M4 5h3v3H4zm5 0h11v3H9zM4 10.5h3v3H4zm5 0h11v3H9zM4 16h3v3H4zm5 0h11v3H9z',
     grid: 'M4 4h7v7H4zm9 0h7v7h-7zM4 13h7v7H4zm9 0h7v7h-7z',
+    heart: 'M12 21l-1.4-1.3C5.4 15 2 11.9 2 8.1 2 5 4.4 2.6 7.5 2.6c1.7 0 3.4.8 4.5 2.1 1.1-1.3 2.8-2.1 4.5-2.1C19.6 2.6 22 5 22 8.1c0 3.8-3.4 6.9-8.6 11.6z',
+    'heart-outline':
+      'M16.5 2.6c-1.7 0-3.4.8-4.5 2.1-1.1-1.3-2.8-2.1-4.5-2.1C4.4 2.6 2 5 2 8.1c0 3.8 3.4 6.9 8.6 11.6L12 21l1.4-1.3C18.6 15 22 11.9 22 8.1 22 5 19.6 2.6 16.5 2.6zm-4.4 15.6-.1.1-.1-.1C7.1 13.9 4 11.1 4 8.1 4 6.1 5.5 4.6 7.5 4.6c1.5 0 3 1 3.6 2.4h1.9c.5-1.4 2-2.4 3.5-2.4 2 0 3.5 1.5 3.5 3.5 0 3-3.1 5.8-7.9 10.1z',
+    previous: 'M18 5l-9 7 9 7zM6 5h2v14H6z',
+    repeat: 'M7 7h10v3l4-4-4-4v3H5v6h2zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2z',
+    'repeat-one': 'M7 7h10v3l4-4-4-4v3H5v6h2zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2zm-4-2V9h-1l-2 1v1h1.5v4z',
+    download: 'M19 9h-4V3H9v6H5l7 7zM5 18v2h14v-2z',
+    home: 'M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z',
     clock:
       'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zm0 16a7 7 0 1 1 0-14 7 7 0 0 1 0 14zm.5-11H11v5l4.2 2.5.8-1.2-3.5-2.1z',
   }

@@ -7,8 +7,30 @@ use djinn_store::Store;
 pub const GUEST_MODE: &str = "guest_mode";
 /// 1 to look up artist photos and bios online.
 pub const ONLINE_INFO: &str = "online_artist_info";
-/// Contact (email or website) sent to MusicBrainz; empty turns it off.
+/// Contact (email or website) sent to MusicBrainz, which it requires.
 pub const MUSICBRAINZ_CONTACT: &str = "musicbrainz_contact";
+/// 1 to look up album covers, genres and exact artist matches on
+/// MusicBrainz. Before this switch existed a contact turned it on, so
+/// that's what it defaults to.
+pub const MUSICBRAINZ: &str = "musicbrainz";
+
+/// The contact to send MusicBrainz, when MusicBrainz lookups are on.
+pub async fn musicbrainz(store: &Store) -> anyhow::Result<Option<String>> {
+    let contact = store
+        .get_setting(MUSICBRAINZ_CONTACT)
+        .await?
+        .unwrap_or_default()
+        .trim()
+        .to_owned();
+    let on = flag(store, MUSICBRAINZ, !contact.is_empty()).await?;
+    Ok((on && !contact.is_empty()).then_some(contact))
+}
+
+/// Whether any online lookup is on: artist photos and bios, or MusicBrainz.
+pub async fn lookups_on(store: &Store) -> bool {
+    flag(store, ONLINE_INFO, false).await.unwrap_or(false)
+        || musicbrainz(store).await.ok().flatten().is_some()
+}
 
 /// A number setting, or `default` when it's missing or not a number.
 pub async fn number(store: &Store, key: &str, default: i64) -> anyhow::Result<i64> {

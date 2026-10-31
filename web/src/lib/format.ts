@@ -19,3 +19,30 @@ export function sortName(name: string): string {
 
 export const byName = <T>(key: (item: T) => string) => (a: T, b: T) =>
   sortName(key(a)).localeCompare(sortName(key(b)))
+
+/** "Firefox on Windows" from a user agent, or the raw text. */
+export function deviceName(agent: string | null): string {
+  if (!agent) return 'Unknown device'
+  const browser = /Edg\//.test(agent)
+    ? 'Edge'
+    : /Firefox\//.test(agent)
+      ? 'Firefox'
+      : /Chrome\//.test(agent)
+        ? 'Chrome'
+        : /Safari\//.test(agent)
+          ? 'Safari'
+          : null
+  const system = /iPhone|iPad/.test(agent)
+    ? 'iPhone or iPad'
+    : /Android/.test(agent)
+      ? 'Android'
+      : /Windows/.test(agent)
+        ? 'Windows'
+        : /Mac OS X/.test(agent)
+          ? 'Mac'
+          : /Linux/.test(agent)
+            ? 'Linux'
+            : null
+  if (browser && system) return `${browser} on ${system}`
+  return browser ?? system ?? agent.slice(0, 60)
+}

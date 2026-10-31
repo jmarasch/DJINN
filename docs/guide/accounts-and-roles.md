@@ -1,7 +1,9 @@
 # Accounts and roles
 
 Everything here is under Admin > **Users**. The same accounts work for the
-party and, from 0.4.0, for DJINN GO, your personal listening.
+party and for [DJINN GO](djinn-go.md), your personal listening. Everyone can
+change their own password, turn on two-step sign-in and see where they're
+signed in under **Your account** (on the Playing tab).
 
 ## Roles
 
@@ -16,10 +18,15 @@ What a role can allow:
 - **Use DJINN GO:** personal listening, apart from the party.
 - **Use GO away from home:** without it, GO only works on your home network.
 - **GO streams at once:** how many devices can play at the same time.
+- **Must use two-step sign-in for GO:** a code from an authenticator app
+  after the password. See [DJINN GO](djinn-go.md#two-step-sign-in).
 - **Download songs:** save song files to a device. Off unless you turn it on.
+- **Have songs converted:** MP3 copies when their device needs them, once
+  you turn converting on. See [DJINN GO](djinn-go.md#converting).
 - **Share playlists:** let other people see and play their playlists.
-- **Submit music:** upload songs for the library (coming in 0.4.1), and
-  whether they go **straight in** or wait for you to review them.
+- **Submit music:** upload songs for the library from DJINN GO, and
+  whether they go **straight in** or wait for you to review them. See
+  [DJINN GO](djinn-go.md#submitting-music).
 - **No party request limit:** skip the per-person limit and the queue cap,
   like marking each of them **No limit**.
 
@@ -61,6 +68,8 @@ Each account has:
   it was last used. Sign out one device or all of them, for example after a
   lost phone.
 - **Reset password:** sets a new one and signs them out everywhere.
+- **Turn off two-step:** for someone who lost their phone and their
+  recovery codes.
 - **Turn off:** signs them out and stops them signing in, without deleting
   anything. **Turn on** undoes it.
 - **×** deletes the account (their queued songs go too).

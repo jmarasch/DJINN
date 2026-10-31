@@ -5,6 +5,7 @@ export const adminTabRows = [
     { id: 'rules', label: 'Rules' },
     { id: 'smart', label: 'Smart play' },
     { id: 'users', label: 'Users' },
+    { id: 'go', label: 'GO' },
     { id: 'log', label: 'Log' },
   ],
   [

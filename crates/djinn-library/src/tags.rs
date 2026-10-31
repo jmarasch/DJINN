@@ -142,6 +142,32 @@ pub fn read(
 
 /// Fills in tags and audio properties. Returns the artist and album artist
 /// values (several when the file has proper multi-artist tags).
+/// What a file says about itself, for checking an upload before it joins
+/// the library.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Basics {
+    pub title: Option<String>,
+    pub artist: Option<String>,
+    pub album: Option<String>,
+    pub album_artist: Option<String>,
+    pub duration_ms: Option<i64>,
+}
+
+/// The file's title, artists, album and length; None if its tags can't be
+/// read at all.
+pub fn basics(path: &Path) -> Option<Basics> {
+    let file = lofty::read_from_path(path).ok()?;
+    let mut track = ScannedTrack::default();
+    let (artists, album_artists) = fill_from_tags(&mut track, &file);
+    Some(Basics {
+        title: Some(track.title).filter(|t| !t.is_empty()),
+        artist: (!artists.is_empty()).then(|| artists.join(" & ")),
+        album: track.album,
+        album_artist: (!album_artists.is_empty()).then(|| album_artists.join(" & ")),
+        duration_ms: track.duration_ms.filter(|d| *d > 0),
+    })
+}
+
 fn fill_from_tags(track: &mut ScannedTrack, file: &TaggedFile) -> (Vec<String>, Vec<String>) {
     let props = file.properties();
     track.duration_ms = i64::try_from(props.duration().as_millis()).ok();

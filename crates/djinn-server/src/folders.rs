@@ -69,6 +69,22 @@ pub async fn move_roots(
     save_app_roots(store, &roots).await
 }
 
+/// Makes sure `path` is a library folder (for uploaded music), adding it
+/// if it isn't one or inside one. Returns true when it was added.
+pub async fn ensure_root(state: &AppState, path: &Path) -> anyhow::Result<bool> {
+    let path = canonical(path)?;
+    let roots = library_roots(state).await?;
+    if roots.iter().any(|root| path.starts_with(root)) {
+        return Ok(false);
+    }
+    let mut mine = app_roots(&state.store).await?;
+    mine.push(path.clone());
+    save_app_roots(&state.store, &mine).await?;
+    tracing::info!(path = %path.display(), "library folder added for uploaded music");
+    state.roots_changed.notify_one();
+    Ok(true)
+}
+
 /// Adds a library folder directly, for tests.
 #[cfg(test)]
 pub async fn add_root_for_tests(state: &AppState, path: &Path) {

@@ -5,6 +5,55 @@ and requests are welcome at DJINN@newterrastudios.com or as an issue.
 
 ## Released
 
+### 0.4.5 (October 2026): DJINN GO
+
+- **DJINN GO.** Your music library for yourself, apart from the party:
+  a web player with your own queue, likes, playlists, history and
+  personal radio, picking up where you left off on another device.
+  Runs on its own port so you can reach it from away from home.
+- **Roles.** Make your own roles and choose what each can do: use GO,
+  use it away from home, downloads (off unless you turn
+  them on), and more.
+- **Sign-ups.** Let people sign up on their own, with your approval, or
+  only by invite or by you adding them.
+- **Security for the internet.** Login lockouts, optional two-step
+  sign-in, a sign-in log, and guides for safe access from away with
+  Tailscale or Cloudflare Tunnel.
+- **Submit music.** People you allow can add songs. Uploads are checked
+  for duplicates and tags, then wait for your review or go straight in.
+- **GO on phones.** Use popular Subsonic apps on iPhone and Android, or
+  install the GO web player as an app.
+- **Converting.** Optionally convert songs on the DJINN computer for
+  phones that can't play a format, or to use less mobile data. Off
+  unless you turn it on, with limits so the party never suffers.
+
+Also new in 0.4.5:
+
+- **Lighter on modest computers.** Every library setting on the Library
+  page. A library check just reads your folders and tags; sound analysis
+  (for "more like this", radio and smart play), artist photos and bios,
+  MusicBrainz lookups and identifying songs by sound are each switched on
+  separately. Background work is sized to the computer's processor and
+  always leaves room for the music.
+- **Artist picture slideshows.** Optionally fetch more pictures of each
+  artist and show them as a slideshow on their page and on the TV page
+  while their song plays.
+- **Fix the AI's genre guesses.** Take a wrong "Sounds like" genre off a
+  song; it stays off when the AI listens again.
+- **Choose when heavy work runs.** Sound analysis and AI listening can run
+  any time, only while no music is playing, or only between hours you pick.
+- **GO's queue works like the party's.** Songs you add play next, ahead of
+  the rest of an album, playlist or radio, and starting a radio no longer
+  stops the song playing. Choose whether tapping a song plays it now or
+  adds it to your queue.
+- Similar artists on GO's artist pages, and the A to Z strip no longer
+  covers the like buttons.
+- Uploads are limited to 15 MB by default (raise it for lossless files).
+- On Windows, `djinn.exe --version` and `--help` print in the terminal, and
+  the log file is always written.
+- The guide explains Android's new Nearby devices permission for Chrome,
+  and Windows 11's Smart App Control.
+
 ### 0.3.1 (October 2026)
 
 - **Big libraries stay responsive.** With tens of thousands of songs the
@@ -126,37 +175,6 @@ and requests are welcome at DJINN@newterrastudios.com or as an issue.
 - Updates itself from signed releases.
 
 ## Planned
-
-### 0.4.0: DJINN GO
-
-- **DJINN GO.** Your music library for yourself, apart from the party:
-  a web player with your own queue, likes, playlists, history and
-  personal radio, picking up where you left off on another device.
-  Runs on its own port so you can reach it from away from home.
-- **Roles.** Make your own roles and choose what each can do: use GO,
-  use it away from home, downloads (off unless you turn
-  them on), and more.
-- **Sign-ups.** Let people sign up on their own, with your approval, or
-  only by invite or by you adding them.
-- **Security for the internet.** Login lockouts, optional two-step
-  sign-in, a sign-in log, and guides for safe access from away with
-  Tailscale or Cloudflare Tunnel.
-
-### 0.4.1
-
-- **Submit music.** People you allow can add songs. Uploads are checked
-  for duplicates and tags, then wait for your review or go straight in.
-
-### 0.4.2
-
-- **GO on phones.** Use popular Subsonic apps on iPhone and Android, or
-  install the GO web player as an app.
-
-### 0.4.3
-
-- **Converting.** Optionally convert songs on the DJINN computer for
-  phones that can't play a format, or to use less mobile data. Off
-  unless you turn it on, with limits so the party never suffers.
 
 ### 0.5.0
 

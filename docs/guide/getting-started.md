@@ -14,8 +14,10 @@ That's the installer. (The other `.exe`, `djinn-windows-x86_64.exe`, is the
 program on its own, which DJINN downloads when it updates itself. You don't
 need it.)
 
-- The installer isn't code signed yet, so Windows may say "Windows protected
-  your PC". Click **More info**, then **Run anyway**.
+- The installer isn't code signed, so Windows may say "Windows protected
+  your PC". Click **More info**, then **Run anyway**. If the installer does
+  nothing at all, Smart App Control is blocking it; see
+  [Troubleshooting](troubleshooting.md).
 - On first start Windows asks whether DJINN may use the network. Allow
   **private networks**, or phones won't be able to reach it.
 

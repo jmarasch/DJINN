@@ -44,6 +44,11 @@ Options:
 - **Stop for now** pauses it; it carries on when DJINN restarts or new music
   arrives. **Remove the model** deletes the download.
 
+What the AI hears in a song shows in its ⋮ menu under **Sounds like**, and
+puts the song on those genre pages too. If one is wrong, an admin can tap the
+**×** beside it to take it off that song (Undo puts it back). It stays off
+when the AI listens again, and other songs keep the genre.
+
 ### AI reader
 
 A small language model (Qwen2.5 1.5B Instruct) reads searches DJINN's own

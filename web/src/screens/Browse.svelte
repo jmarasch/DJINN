@@ -1,4 +1,7 @@
 <script lang="ts">
+  // The library by artist, album, song or genre. The party app's songs
+  // queue at the party; DJINN GO passes its own `song` and `songTile`.
+  import type { Snippet } from 'svelte'
   import LibraryProgress from '../lib/LibraryProgress.svelte'
   import { api } from '../lib/api'
   import Art from '../lib/Art.svelte'
@@ -10,7 +13,23 @@
   import { jumpCache } from '../lib/listCache'
   import TrackRow from '../lib/TrackRow.svelte'
   import TrackTile from '../lib/TrackTile.svelte'
-  import type { AlbumSort, GenreMap, Jump, TrackSort } from '../lib/types'
+  import type { AlbumSort, GenreMap, Jump, Track, TrackSort } from '../lib/types'
+
+  let {
+    song,
+    songTile,
+    like,
+    progress = true,
+  }: {
+    /** A song in the list view; the party's request row by default. */
+    song?: Snippet<[Track]>
+    /** A song in the grid view. */
+    songTile?: Snippet<[Track]>
+    /** A button beside each artist and album (DJINN GO's heart). */
+    like?: Snippet<['artist' | 'album', number, string]>
+    /** Show the library check's progress at the top. */
+    progress?: boolean
+  } = $props()
 
   type Tab = 'artists' | 'albums' | 'songs' | 'genres'
   type View = 'list' | 'grid'
@@ -64,6 +83,8 @@
         // No strip; the list still scrolls.
       })
   })
+  /** The jump strip had no room beside the list and sits over its edge. */
+  let stripInside = $state(false)
   const indexed = $derived(tab !== 'genres' && jumps.length > 1)
 
   // The genres load the first time their tab opens.
@@ -100,7 +121,7 @@
   const initial = (name: string) => name.charAt(0).toUpperCase()
 </script>
 
-<LibraryProgress />
+{#if progress}<LibraryProgress />{/if}
 
 <div class="bar">
   <div class="tabs" role="tablist">
@@ -140,10 +161,17 @@
 </div>
 
 {#if indexed}
-  <JumpStrip {jumps} years={byYear} {newestFirst} below={lists} onjump={(offset) => list?.jumpTo(offset)} />
+  <JumpStrip
+    {jumps}
+    years={byYear}
+    {newestFirst}
+    below={lists}
+    bind:inside={stripInside}
+    onjump={(offset) => list?.jumpTo(offset)}
+  />
 {/if}
 
-<div class="lists" class:indexed bind:this={lists}>
+<div class="lists" class:crowded={indexed && stripInside} bind:this={lists}>
   {#if tab === 'artists'}
     <InfiniteList
       bind:this={list}
@@ -157,17 +185,23 @@
     >
       {#snippet item(artist)}
         {#if grid}
-          <a class="tile" href="#/artist/{artist.id}">
-            <div class="cover"><Art hash={artist.art_hash} size={160} round={999} letter={initial(artist.name)} /></div>
-            <span class="ellipsis center-text">{artist.name}</span>
-            <span class="muted small center-text">{plural(artist.track_count, 'song', 'songs')}</span>
-          </a>
+          <div class="with-like">
+            <a class="tile" href="#/artist/{artist.id}">
+              <div class="cover"><Art hash={artist.art_hash} size={160} round={999} letter={initial(artist.name)} /></div>
+              <span class="ellipsis center-text">{artist.name}</span>
+              <span class="muted small center-text">{plural(artist.track_count, 'song', 'songs')}</span>
+            </a>
+            {#if like}<div class="tile-like">{@render like('artist', artist.id, artist.name)}</div>{/if}
+          </div>
         {:else}
-          <a class="row" href="#/artist/{artist.id}">
-            <Art hash={artist.art_hash} size={44} round={999} letter={initial(artist.name)} />
-            <span class="name ellipsis">{artist.name}</span>
-            <span class="muted small">{plural(artist.track_count, 'song', 'songs')}</span>
-          </a>
+          <div class="row-with-like">
+            <a class="row" href="#/artist/{artist.id}">
+              <Art hash={artist.art_hash} size={44} round={999} letter={initial(artist.name)} />
+              <span class="name ellipsis">{artist.name}</span>
+              <span class="muted small">{plural(artist.track_count, 'song', 'songs')}</span>
+            </a>
+            {#if like}{@render like('artist', artist.id, artist.name)}{/if}
+          </div>
         {/if}
       {/snippet}
     </InfiniteList>
@@ -212,21 +246,27 @@
     >
       {#snippet item(album)}
         {#if grid}
-          <a class="tile" href="#/album/{album.id}">
-            <div class="cover"><Art hash={album.art_hash} size={160} round={10} /></div>
-            <span class="ellipsis">{album.title}</span>
-            <span class="muted small ellipsis">{album.artist}{albumSort !== 'name' && album.year ? ` · ${album.year}` : ''}</span>
-          </a>
+          <div class="with-like">
+            <a class="tile" href="#/album/{album.id}">
+              <div class="cover"><Art hash={album.art_hash} size={160} round={10} /></div>
+              <span class="ellipsis">{album.title}</span>
+              <span class="muted small ellipsis">{album.artist}{albumSort !== 'name' && album.year ? ` · ${album.year}` : ''}</span>
+            </a>
+            {#if like}<div class="tile-like">{@render like('album', album.id, album.title)}</div>{/if}
+          </div>
         {:else}
-          <a class="row" href="#/album/{album.id}">
-            <Art hash={album.art_hash} size={52} />
-            <span class="name">
-              <span class="ellipsis block">{album.title}</span>
-              <span class="muted small ellipsis block">
-                {album.artist}{album.year ? ` · ${album.year}` : ''}
+          <div class="row-with-like">
+            <a class="row" href="#/album/{album.id}">
+              <Art hash={album.art_hash} size={52} />
+              <span class="name">
+                <span class="ellipsis block">{album.title}</span>
+                <span class="muted small ellipsis block">
+                  {album.artist}{album.year ? ` · ${album.year}` : ''}
+                </span>
               </span>
-            </span>
-          </a>
+            </a>
+            {#if like}{@render like('album', album.id, album.title)}{/if}
+          </div>
         {/if}
       {/snippet}
     </InfiniteList>
@@ -253,7 +293,9 @@
     >
       {#snippet item(track)}
         {#if grid}
-          <TrackTile {track} />
+          {#if songTile}{@render songTile(track)}{:else}<TrackTile {track} />{/if}
+        {:else if song}
+          {@render song(track)}
         {:else}
           <TrackRow {track} note={byYear && track.year ? String(track.year) : null} />
         {/if}
@@ -330,6 +372,36 @@
     min-width: 0;
   }
 
+  .row-with-like {
+    display: flex;
+    align-items: center;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .row-with-like .row {
+    flex: 1;
+    min-width: 0;
+    border-bottom: none;
+  }
+
+  .with-like {
+    position: relative;
+    min-width: 0;
+  }
+
+  /* The heart sits on the cover's corner. */
+  .tile-like {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    border-radius: 999px;
+    background: rgb(0 0 0 / 0.45);
+  }
+
+  .tile-like :global(button:not(.liked)) {
+    color: #fff;
+  }
+
   .block {
     display: block;
   }
@@ -356,12 +428,10 @@
     height: 100% !important;
   }
 
-  /* Room for the jump strip on the right, when it's on the page rather
+  /* Room for the jump strip on the right, when it's over the list rather
      than beside it. */
-  @media (max-width: 720px) {
-    .lists.indexed {
-      padding-right: 18px;
-    }
+  .lists.crowded {
+    padding-right: 18px;
   }
 
   .sort {

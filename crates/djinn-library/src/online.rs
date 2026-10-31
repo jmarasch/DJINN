@@ -17,7 +17,7 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use djinn_store::{ArtistInfo, Store};
+use djinn_store::{ArtistInfo, ArtistPicture, Store};
 use serde::Deserialize;
 use tokio::time::Instant;
 
@@ -37,6 +37,14 @@ const MUSICBRAINZ_INTERVAL: Duration = Duration::from_millis(1100);
 const MAX_RETRY_WAIT: Duration = Duration::from_secs(10);
 /// Genres kept per artist or album.
 const MAX_GENRES: usize = 5;
+/// Most pictures kept per artist for slideshows.
+const MAX_PICTURES: usize = 8;
+/// Slideshow pictures: this wide (TV size), from originals at least this
+/// big, so logos and small snapshots stay out.
+const PICTURE_WIDTH: &str = "1280";
+const PICTURE_MIN: (u64, u64) = (800, 450);
+/// Pictures downloaded at once.
+const PICTURES_AT_ONCE: usize = 4;
 /// Words in a Wikipedia description that mean the page is about a musician.
 const MUSIC_WORDS: &[&str] = &[
     "music",
@@ -65,6 +73,8 @@ const MUSIC_WORDS: &[&str] = &[
 pub struct LookupOptions {
     /// Look everything up again, not just new or stale entries.
     pub force: bool,
+    /// Artist photos (Deezer, Wikimedia Commons) and bios (Wikipedia).
+    pub photos_and_bios: bool,
     /// Contact (email or website) sent to MusicBrainz. MusicBrainz lookups
     /// only run when this is set.
     pub musicbrainz_contact: Option<String>,
@@ -91,6 +101,9 @@ pub async fn lookup_artists(
     options: &LookupOptions,
 ) -> Result<LookupSummary, LibraryError> {
     let mut services = Services::new(options.musicbrainz_contact.as_deref())?;
+    if !options.photos_and_bios && services.musicbrainz.is_none() {
+        return Ok(LookupSummary::default());
+    }
     // Without `force`, only never-checked ones (no check time is older
     // than the oldest possible time).
     let older_than = if options.force { i64::MAX } else { i64::MIN };
@@ -103,7 +116,9 @@ pub async fn lookup_artists(
         let mb = services.musicbrainz_artist(&artist.name, &titles).await;
         failed |= mb.failed();
         let mb = mb.found();
-        let wikidata = match mb.as_ref().and_then(|a| a.wikidata.as_deref()) {
+        // Wikidata only leads to photos and bios.
+        let wikidata_id = mb.as_ref().and_then(|a| a.wikidata.as_deref());
+        let wikidata = match wikidata_id.filter(|_| options.photos_and_bios) {
             Some(id) => {
                 let found = services.wikidata(id).await;
                 failed |= found.failed();
@@ -114,7 +129,7 @@ pub async fn lookup_artists(
 
         let mut info = ArtistInfo::default();
         // Artists with a picture in their own folder don't need a photo.
-        if !artist.has_folder_art {
+        if options.photos_and_bios && !artist.has_folder_art {
             match services.deezer_photo(&artist.name).await {
                 Fetch::Found(bytes) => info.photo = art::store(art_dir, &bytes).ok(),
                 Fetch::NotFound => {
@@ -132,16 +147,19 @@ pub async fn lookup_artists(
             }
         }
         // MusicBrainz's link to the exact page beats searching by name.
-        let bio = match wikidata.as_ref().and_then(|w| w.enwiki.as_deref()) {
-            Some(title) => services.wikipedia_summary(title).await,
-            None => services.wikipedia_bio(&artist.name).await,
-        };
-        failed |= bio.failed();
-        (info.bio, info.bio_url) = bio.found().unzip();
+        if options.photos_and_bios {
+            let bio = match wikidata.as_ref().and_then(|w| w.enwiki.as_deref()) {
+                Some(title) => services.wikipedia_summary(title).await,
+                None => services.wikipedia_bio(&artist.name).await,
+            };
+            failed |= bio.failed();
+            (info.bio, info.bio_url) = bio.found().unzip();
+        }
         if let Some(mb) = mb {
             info.genres = mb.genres;
             info.mbid = Some(mb.mbid);
         }
+        info.commons_category = wikidata.as_ref().and_then(|w| w.commons_category.clone());
         info.checked = !failed;
 
         summary.checked += usize::from(info.checked);
@@ -183,6 +201,21 @@ pub async fn lookup_artists(
 
     store.refresh_artwork().await?;
     Ok(summary)
+}
+
+/// Up to eight photos of an artist from their Wikimedia Commons category,
+/// TV-sized and with credits, stored in `art_dir`. `None` when Commons
+/// couldn't be reached (worth trying again later).
+pub async fn artist_pictures(
+    category: &str,
+    art_dir: &std::path::Path,
+) -> Result<Option<Vec<ArtistPicture>>, LibraryError> {
+    let services = Services::new(None)?;
+    Ok(match services.category_photos(category, art_dir).await {
+        Fetch::Found(pictures) => Some(pictures),
+        Fetch::NotFound => Some(Vec::new()),
+        Fetch::Failed => None,
+    })
 }
 
 /// The outcome of asking a service: found it, it has nothing, or the
@@ -399,14 +432,18 @@ impl Services {
         let Some(entity) = response.entities.into_values().next() else {
             return Fetch::NotFound;
         };
-        Fetch::Found(Wikidata {
-            enwiki: entity.sitelinks.get("enwiki").map(|s| s.title.clone()),
-            image: entity
+        let claim = |property: &str| {
+            entity
                 .claims
-                .get("P18")
+                .get(property)
                 .and_then(|claims| claims.first())
                 .and_then(|claim| claim.mainsnak.datavalue.as_ref())
-                .and_then(|value| value.value.as_str().map(str::to_owned)),
+                .and_then(|value| value.value.as_str().map(str::to_owned))
+        };
+        Fetch::Found(Wikidata {
+            enwiki: entity.sitelinks.get("enwiki").map(|s| s.title.clone()),
+            image: claim("P18"),
+            commons_category: claim("P373"),
         })
     }
 
@@ -437,22 +474,9 @@ impl Services {
         else {
             return Fetch::NotFound;
         };
+        let credit = image.credit();
         let (Some(url), Some(page)) = (image.thumburl, image.descriptionurl) else {
             return Fetch::NotFound;
-        };
-        let meta = |key: &str| {
-            image
-                .extmetadata
-                .get(key)
-                .and_then(|m| m.value.as_str())
-                .map(strip_html)
-                .filter(|v| !v.is_empty())
-        };
-        let credit = match (meta("Artist"), meta("LicenseShortName")) {
-            (Some(author), Some(license)) => format!("{author} ({license})"),
-            (Some(author), None) => author,
-            (None, Some(license)) => license,
-            (None, None) => "Wikimedia Commons".to_owned(),
         };
         let Some(response) = send(self.web.get(url)).await else {
             return Fetch::Failed;
@@ -468,6 +492,89 @@ impl Services {
             Ok(_) => Fetch::NotFound,
             Err(_) => Fetch::Failed,
         }
+    }
+
+    /// Photos from a Commons category (JPEGs big enough for a TV), in
+    /// name order, downloaded TV-sized into `art_dir`.
+    async fn category_photos(
+        &self,
+        category: &str,
+        art_dir: &std::path::Path,
+    ) -> Fetch<Vec<ArtistPicture>> {
+        let title = format!("Category:{category}");
+        let list: Option<CommonsQuery> = get_json(
+            self.web
+                .get("https://commons.wikimedia.org/w/api.php")
+                .query(&[
+                    ("action", "query"),
+                    ("generator", "categorymembers"),
+                    ("gcmtitle", &title),
+                    ("gcmtype", "file"),
+                    ("gcmlimit", "50"),
+                    ("prop", "imageinfo"),
+                    ("iiprop", "extmetadata|url|mime|size"),
+                    ("iiurlwidth", PICTURE_WIDTH),
+                    ("format", "json"),
+                ]),
+        )
+        .await;
+        let Some(list) = list else {
+            return Fetch::Failed;
+        };
+        let mut pages: Vec<CommonsPage> = list.query.pages.into_values().collect();
+        pages.sort_by(|a, b| a.title.cmp(&b.title));
+        let candidates: Vec<(String, String, String)> = pages
+            .into_iter()
+            .filter_map(|p| p.imageinfo.into_iter().next())
+            .filter(|i| {
+                i.mime == "image/jpeg" && i.width >= PICTURE_MIN.0 && i.height >= PICTURE_MIN.1
+            })
+            .filter_map(|i| {
+                let credit = i.credit();
+                Some((i.thumburl?, credit, i.descriptionurl?))
+            })
+            .take(MAX_PICTURES)
+            .collect();
+        // A few at a time: the images come from Commons' file servers, not
+        // its API, and the first request for a size makes it on the spot.
+        let mut pictures = Vec::new();
+        let mut failed = false;
+        for chunk in candidates.chunks(PICTURES_AT_ONCE) {
+            let mut jobs = tokio::task::JoinSet::new();
+            for (i, (url, credit, page)) in chunk.iter().cloned().enumerate() {
+                let request = self.web.get(url);
+                jobs.spawn(async move {
+                    let bytes = match send(request).await {
+                        Some(response) => response.bytes().await.ok(),
+                        None => None,
+                    };
+                    (i, bytes, credit, page)
+                });
+            }
+            let mut done = jobs.join_all().await;
+            done.sort_by_key(|(i, ..)| *i);
+            for (_, bytes, credit, page) in done {
+                let Some(bytes) = bytes else {
+                    failed = true;
+                    continue;
+                };
+                if !art::mime_type(&bytes).starts_with("image/") {
+                    continue;
+                }
+                if let Ok(art_hash) = art::store(art_dir, &bytes) {
+                    pictures.push(ArtistPicture {
+                        art_hash,
+                        credit,
+                        credit_url: page,
+                    });
+                }
+            }
+        }
+        // Some found is good enough; none because of errors is worth a retry.
+        if pictures.is_empty() && failed {
+            return Fetch::Failed;
+        }
+        Fetch::Found(pictures)
     }
 
     /// The photo of the best-known Deezer artist with exactly this name.
@@ -719,20 +826,26 @@ struct Wikidata {
     enwiki: Option<String>,
     /// Commons file name of the main image.
     image: Option<String>,
+    /// Name of the Commons category with more pictures.
+    commons_category: Option<String>,
 }
 
 #[derive(Deserialize)]
 struct CommonsQuery {
+    /// Missing when nothing matched (an empty category).
+    #[serde(default)]
     query: CommonsPages,
 }
 
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
 struct CommonsPages {
     pages: HashMap<String, CommonsPage>,
 }
 
 #[derive(Deserialize)]
 struct CommonsPage {
+    #[serde(default)]
+    title: String,
     #[serde(default)]
     imageinfo: Vec<CommonsImage>,
 }
@@ -742,7 +855,33 @@ struct CommonsImage {
     thumburl: Option<String>,
     descriptionurl: Option<String>,
     #[serde(default)]
+    mime: String,
+    /// The original's size.
+    #[serde(default)]
+    width: u64,
+    #[serde(default)]
+    height: u64,
+    #[serde(default)]
     extmetadata: HashMap<String, CommonsMeta>,
+}
+
+impl CommonsImage {
+    /// "Author (License)" from its metadata.
+    fn credit(&self) -> String {
+        let meta = |key: &str| {
+            self.extmetadata
+                .get(key)
+                .and_then(|m| m.value.as_str())
+                .map(strip_html)
+                .filter(|v| !v.is_empty())
+        };
+        match (meta("Artist"), meta("LicenseShortName")) {
+            (Some(author), Some(license)) => format!("{author} ({license})"),
+            (Some(author), None) => author,
+            (None, Some(license)) => license,
+            (None, None) => "Wikimedia Commons".to_owned(),
+        }
+    }
 }
 
 #[derive(Deserialize)]

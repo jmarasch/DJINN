@@ -8,6 +8,7 @@ pub mod online;
 pub mod radio;
 pub mod sound;
 mod tags;
+pub use tags::{basics, Basics};
 pub mod vibe;
 
 use std::collections::{HashMap, HashSet};
@@ -248,7 +249,7 @@ fn walk(roots: &[PathBuf]) -> (Vec<FoundFile>, Vec<PathBuf>) {
             let entry = match entry {
                 Ok(entry) => entry,
                 Err(e) => {
-                    tracing::warn!(error = %e, "cannot read library entry");
+                    tracing::warn!(path = ?e.path(), error = %e, "cannot read library entry");
                     continue;
                 }
             };

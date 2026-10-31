@@ -15,9 +15,160 @@ export interface User {
   /** The account's role (see AccountRole); used when role is 'user'. */
   role_id: number
   status: AccountStatus
+  /** Two-step sign-in is on. */
+  two_step: boolean
   /** Only on the signed-in user (/me). */
   role_name?: string | null
   permissions?: Permissions
+  /** DJINN GO asks this account for two-step sign-in. Only on /me. */
+  two_step_required?: boolean
+}
+
+/** Login's answer when the password was right but a code is needed. */
+export interface NeedsCode {
+  two_step: true
+  ticket: string
+}
+
+export interface TwoStepStatus {
+  on: boolean
+  required: boolean
+  recovery_codes_left: number
+}
+
+export interface TwoStepSetup {
+  secret: string
+  uri: string
+  qr_svg: string
+}
+
+/** DJINN GO: a song's file links. */
+export interface PlayLinks {
+  url: string
+  download_url: string | null
+  /** The file's type, to check this device can play it. */
+  mime: string
+  /** Volume for even loudness, 1 for unchanged. */
+  gain: number
+  /** `url` plays an MP3 converted from the original. */
+  converted: boolean
+  /** Converting is on for this account (ask with convert). */
+  can_convert: boolean
+}
+
+export interface ConvertSettings {
+  enabled: boolean
+  kbps: number
+  jobs: number
+  cache_mb: number
+}
+
+export interface GoPlaylist {
+  id: number
+  user_id: number
+  owner: string
+  name: string
+  shared: boolean
+  tracks: number
+  updated_at: number
+}
+
+export interface GoPlaylistDetail extends GoPlaylist {
+  songs: Track[]
+}
+
+/** Your DJINN GO preferences. */
+export interface GoPrefs {
+  /** What tapping a song does: play it now, or add it to the queue. */
+  tap: 'play' | 'queue'
+}
+
+export interface GoResume {
+  queue: number[]
+  position: number
+  position_ms: number
+  updated_at: number
+  songs: Track[]
+}
+
+export interface GoHome {
+  resume: GoResume | null
+  recent: Track[]
+  playlists: GoPlaylist[]
+  newest: Track[]
+}
+
+export type LikeKind = 'track' | 'album' | 'artist'
+
+export interface LikedIds {
+  tracks: number[]
+  albums: number[]
+  artists: number[]
+}
+
+export interface Liked {
+  tracks: Track[]
+  albums: Album[]
+  artists: ArtistSummary[]
+}
+
+export interface Played extends Track {
+  played_at: number
+}
+
+export interface Submission {
+  id: number
+  user_id: number | null
+  uploader: string | null
+  file_name: string
+  size: number
+  title: string | null
+  artist: string | null
+  album: string | null
+  duration_ms: number | null
+  duplicate_of: number | null
+  /** "Artist - Title" of the library song it looks like. */
+  duplicate_title: string | null
+  status: 'waiting' | 'approved' | 'declined'
+  /** Why it was turned down. */
+  note: string | null
+  created_at: number
+  decided_at: number | null
+}
+
+export interface UploadSettings {
+  folder: string
+  max_mb: number
+}
+
+export interface GoListener {
+  username: string
+  title: string
+  seconds_ago: number
+}
+
+export interface GoStatus {
+  enabled: boolean
+  running: boolean
+  error: string | null
+  port: number
+  addresses: string[]
+  tailscale: string | null
+  trusted_proxies: string
+  admin_two_step: boolean
+  listening: GoListener[]
+  mbps: number
+}
+
+export interface SignIn {
+  id: number
+  at: number
+  user_id: number | null
+  username: string
+  ip: string | null
+  user_agent: string | null
+  via: 'party' | 'go'
+  outcome: string
 }
 
 export type AccountStatus = 'active' | 'pending' | 'disabled'
@@ -33,6 +184,10 @@ export interface Permissions {
   submit_music: boolean
   submit_without_review: boolean
   unlimited_requests: boolean
+  /** Must use two-step sign-in for DJINN GO. */
+  require_two_step: boolean
+  /** May have songs converted, when converting is on. */
+  convert: boolean
 }
 
 export interface AccountRole extends Permissions {
@@ -365,8 +520,16 @@ export interface Settings {
   max_queue: number
   guest_mode: boolean
   online_artist_info: boolean
-  /** Empty turns MusicBrainz lookups off. */
+  /** Sent to MusicBrainz, which needs one. */
   musicbrainz_contact: string
+  /** Album covers, genres and exact artist matches from MusicBrainz. */
+  musicbrainz: boolean
+  /** Analyze every song's sound after library checks. */
+  sound_analysis: boolean
+  /** Slideshows of more artist pictures (Wikimedia Commons). */
+  artist_pictures: boolean
+  /** When sound analysis and AI listening may run. */
+  background: Schedule
   /** Artist names never split, one per line. */
   artist_keep_whole: string
   /** The TV page (/tv) works without signing in. */
@@ -431,7 +594,18 @@ export interface Listening {
   running: boolean
   heard: number
   waiting: number
+  held: Held | null
 }
+
+/** When heavy background work may run; hours are this computer's time. */
+export interface Schedule {
+  when: 'any' | 'idle' | 'hours'
+  from: number
+  until: number
+}
+
+/** Why background work is waiting. */
+export type Held = { reason: 'music' } | { reason: 'hours'; from: number; until: number }
 
 export interface LibraryStatus {
   scanning: boolean
@@ -452,6 +626,9 @@ export interface LoudnessStatus {
   /** Songs analyzed (loudness and sound). */
   analyzed: number
   running: boolean
+  /** Sound analysis is switched on. */
+  on: boolean
+  held: Held | null
 }
 
 export interface ReplayGainSettings {
@@ -500,6 +677,7 @@ export interface AiStatus {
   heard: number
   waiting: number
   listening: boolean
+  held: Held | null
   reader: ReaderStatus
   options: AiOptions
   system: SystemInfo
@@ -721,3 +899,12 @@ export interface SystemStatus {
 
 /** What Admin > System can clear out. */
 export type SystemReset = 'queue' | 'tag_edits' | 'analysis' | 'listening' | 'history' | 'settings' | 'everything'
+
+/** A picture of an artist for slideshows. */
+export interface ArtistPicture {
+  art_hash: string
+  /** "Author (License)". */
+  credit: string
+  /** Its page on Wikimedia Commons. */
+  credit_url: string
+}

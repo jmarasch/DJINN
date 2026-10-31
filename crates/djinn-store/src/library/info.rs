@@ -39,6 +39,7 @@ impl Store {
                                                         ELSE ? END,
                                 bio = coalesce(?, bio), bio_url = coalesce(?, bio_url),
                                 mbid = coalesce(?, mbid), genres = coalesce(?, genres),
+                                commons_category = coalesce(?, commons_category),
                                 info_checked_at = CASE WHEN ? THEN ? ELSE info_checked_at END
              WHERE id = ?",
         )
@@ -52,11 +53,70 @@ impl Store {
         .bind(&info.bio_url)
         .bind(&info.mbid)
         .bind(&info.genres)
+        .bind(&info.commons_category)
         .bind(info.checked)
         .bind(now_ms())
         .bind(id)
         .execute(&self.pool)
         .await?;
+        Ok(())
+    }
+
+    /// Where an artist's slideshow pictures come from; `None` for no such
+    /// artist.
+    pub async fn picture_source(&self, artist_id: i64) -> Result<Option<PictureSource>> {
+        let source = sqlx::query_as(
+            "SELECT commons_category, pictures_checked_at IS NOT NULL AS checked
+             FROM artists WHERE id = ?",
+        )
+        .bind(artist_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(source)
+    }
+
+    /// An artist's slideshow pictures, in order.
+    pub async fn artist_pictures(&self, artist_id: i64) -> Result<Vec<ArtistPicture>> {
+        let pictures = sqlx::query_as(
+            "SELECT art_hash, credit, credit_url FROM artist_pictures
+             WHERE artist_id = ? ORDER BY position",
+        )
+        .bind(artist_id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(pictures)
+    }
+
+    /// Replaces an artist's slideshow pictures and marks them fetched.
+    pub async fn save_artist_pictures(
+        &self,
+        artist_id: i64,
+        pictures: &[ArtistPicture],
+    ) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("DELETE FROM artist_pictures WHERE artist_id = ?")
+            .bind(artist_id)
+            .execute(&mut *tx)
+            .await?;
+        for (position, picture) in (0_i64..).zip(pictures) {
+            sqlx::query(
+                "INSERT INTO artist_pictures (artist_id, position, art_hash, credit, credit_url)
+                 VALUES (?, ?, ?, ?, ?)",
+            )
+            .bind(artist_id)
+            .bind(position)
+            .bind(&picture.art_hash)
+            .bind(&picture.credit)
+            .bind(&picture.credit_url)
+            .execute(&mut *tx)
+            .await?;
+        }
+        sqlx::query("UPDATE artists SET pictures_checked_at = ? WHERE id = ?")
+            .bind(now_ms())
+            .bind(artist_id)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
         Ok(())
     }
 

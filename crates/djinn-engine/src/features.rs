@@ -161,6 +161,50 @@ pub fn analyze(path: &Path) -> Result<Analysis, EngineError> {
     })
 }
 
+/// Decodes a whole file to interleaved stereo, a chunk at a time (for
+/// converting it to another format). `rate_for` picks the output rate from
+/// the file's own; `on_chunk` gets the rate and each chunk, and returns
+/// false to stop early.
+pub fn decode_stereo(
+    path: &Path,
+    rate_for: impl Fn(u32) -> u32,
+    on_chunk: &mut dyn FnMut(u32, &[f32]) -> bool,
+) -> Result<(), EngineError> {
+    let mut decoder = TrackDecoder::open(path)?;
+    let source = decoder.sample_rate();
+    let rate = rate_for(source);
+    let mut resampler = if source == rate {
+        None
+    } else {
+        Some(StreamResampler::fixed(source, rate)?)
+    };
+    let (mut stereo, mut staged) = (Vec::new(), Vec::new());
+    loop {
+        stereo.clear();
+        if !decoder.decode_next(&mut stereo)? {
+            if let Some(r) = resampler.as_mut() {
+                staged.clear();
+                r.finish(&mut staged)?;
+                if !staged.is_empty() {
+                    on_chunk(rate, &staged);
+                }
+            }
+            return Ok(());
+        }
+        let chunk = match resampler.as_mut() {
+            Some(r) => {
+                staged.clear();
+                r.process(&stereo, &mut staged)?;
+                &staged
+            }
+            None => &stereo,
+        };
+        if !chunk.is_empty() && !on_chunk(rate, chunk) {
+            return Ok(());
+        }
+    }
+}
+
 /// Decodes up to `max_secs` of a file to mono at `rate` (for models that
 /// listen to songs).
 pub fn decode_mono(path: &Path, rate: u32, max_secs: u32) -> Result<Vec<f32>, EngineError> {

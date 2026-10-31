@@ -71,6 +71,7 @@ macro_rules! album_columns {
         "al.id, al.title, al.artist_id, ar.name AS artist, al.year, al.art_hash, al.genres"
     };
 }
+pub(crate) use album_columns;
 
 #[derive(Clone, Debug, PartialEq, Serialize, FromRow)]
 pub struct Artist {
@@ -112,7 +113,27 @@ pub struct ArtistInfo {
     pub bio_url: Option<String>,
     pub mbid: Option<String>,
     pub genres: Option<String>,
+    /// The artist's Wikimedia Commons category, for slideshow pictures.
+    pub commons_category: Option<String>,
     /// Both services answered; don't look again until the periodic recheck.
+    pub checked: bool,
+}
+
+/// A picture of an artist for slideshows, kept in the image cache.
+#[derive(Clone, Debug, PartialEq, Serialize, FromRow)]
+pub struct ArtistPicture {
+    pub art_hash: String,
+    /// "Author (License)".
+    pub credit: String,
+    /// Where it came from (its page on Wikimedia Commons).
+    pub credit_url: String,
+}
+
+/// Where an artist's slideshow pictures come from, and whether they were
+/// fetched already.
+#[derive(Clone, Debug, PartialEq, FromRow)]
+pub struct PictureSource {
+    pub commons_category: Option<String>,
     pub checked: bool,
 }
 
@@ -435,6 +456,7 @@ macro_rules! artist_counts {
          ) c ON c.artist_id = ar.id"
     };
 }
+pub(crate) use artist_counts;
 
 impl Store {
     pub async fn track_count(&self) -> Result<i64> {

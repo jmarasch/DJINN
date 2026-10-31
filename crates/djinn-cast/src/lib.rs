@@ -4,6 +4,7 @@
 pub mod cast;
 mod caster;
 mod castv2;
+pub mod convert;
 pub mod discover;
 pub mod stream;
 mod upnp;

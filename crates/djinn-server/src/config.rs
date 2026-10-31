@@ -21,6 +21,23 @@ pub struct Config {
     pub library: LibraryConfig,
     pub database: DatabaseConfig,
     pub audio: AudioConfig,
+    pub go: GoConfig,
+}
+
+/// DJINN GO, personal listening. It's turned on and off in the app; this
+/// is only where it listens.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct GoConfig {
+    pub listen: SocketAddr,
+}
+
+impl Default for GoConfig {
+    fn default() -> Self {
+        Self {
+            listen: crate::go::DEFAULT_LISTEN,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

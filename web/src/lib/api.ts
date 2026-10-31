@@ -1,5 +1,23 @@
 import type {
   About,
+  ConvertSettings,
+  Submission,
+  UploadSettings,
+  GoHome,
+  GoPlaylist,
+  GoPlaylistDetail,
+  GoPrefs,
+  GoResume,
+  LikeKind,
+  Liked,
+  LikedIds,
+  PlayLinks,
+  Played,
+  GoStatus,
+  NeedsCode,
+  SignIn,
+  TwoStepSetup,
+  TwoStepStatus,
   AccountRole,
   AccountStatus,
   Device,
@@ -11,6 +29,7 @@ import type {
   AlbumDetail,
   AlbumSort,
   ArtistDetail,
+  ArtistPicture,
   ArtistSummary,
   AudioDevice,
   CastList,
@@ -99,7 +118,62 @@ const del = <T>(path: string) => request<T>('DELETE', path)
 
 export const api = {
   me: () => get<User>('/me'),
-  login: (username: string, password: string) => post<User>('/auth/login', { username, password }),
+  login: (username: string, password: string) => post<User | NeedsCode>('/auth/login', { username, password }),
+  finishTwoStep: (ticket: string, code: string) => post<User>('/auth/two-step', { ticket, code }),
+  changePassword: (current: string, next: string) => post<void>('/me/password', { current, new: next }),
+  twoStep: () => get<TwoStepStatus>('/me/two-step'),
+  startTwoStep: () => post<TwoStepSetup>('/me/two-step/start'),
+  confirmTwoStep: (code: string) => post<{ recovery_codes: string[] }>('/me/two-step/confirm', { code }),
+  turnOffTwoStep: (password: string) => post<void>('/me/two-step/off', { password }),
+  myDevices: () => get<Device[]>('/me/sessions'),
+  appPassword: () => get<{ password: string | null }>('/me/app-password'),
+  newAppPassword: () => post<{ password: string | null }>('/me/app-password'),
+  removeAppPassword: () => del<void>('/me/app-password'),
+  signOutMyDevice: (id: number) => del<void>(`/me/sessions/${id}`),
+  signOutMyOtherDevices: () => del<void>('/me/sessions'),
+  /** DJINN GO: a short-lived link to a song's file (GO port only). */
+  playLinks: (trackId: number, convert = false) =>
+    get<PlayLinks>(`/go/play/${trackId}${convert ? '?convert=1' : ''}`),
+  convertSettings: () => get<ConvertSettings & { cache_used_mb: number }>('/go/convert'),
+  saveConvertSettings: (s: ConvertSettings) => put<ConvertSettings & { cache_used_mb: number }>('/go/convert', s),
+  goHome: () => get<GoHome>('/go/home'),
+  goAddress: (here: string) =>
+    get<{ url: string; qr_svg: string; others: string[] }>(`/go/address?here=${encodeURIComponent(here)}`),
+  goLiked: () => get<Liked>('/go/likes'),
+  goLikedIds: () => get<LikedIds>('/go/likes/ids'),
+  goLike: (kind: LikeKind, id: number, on: boolean) =>
+    on ? put<void>(`/go/likes/${kind}/${id}`, {}) : del<void>(`/go/likes/${kind}/${id}`),
+  goPlayed: (trackId: number, msPlayed: number) =>
+    post<void>('/go/plays', { track_id: trackId, ms_played: Math.round(msPlayed) }),
+  goHistory: (offset = 0) => get<Played[]>(`/go/history?offset=${offset}`),
+  goResume: () => get<GoResume | null>('/go/resume'),
+  goPrefs: () => get<GoPrefs>('/go/prefs'),
+  setGoPrefs: (prefs: GoPrefs) => put<void>('/go/prefs', prefs),
+  goSaveResume: (queue: number[], position: number, positionMs: number) =>
+    put<void>('/go/resume', { queue, position, position_ms: Math.round(positionMs) }),
+  goPlaylists: () => get<GoPlaylist[]>('/go/playlists'),
+  goPlaylist: (id: number) => get<GoPlaylistDetail>(`/go/playlists/${id}`),
+  goCreatePlaylist: (name: string, songs: number[] = []) =>
+    post<GoPlaylistDetail>('/go/playlists', { name, songs }),
+  goUpdatePlaylist: (id: number, changes: { name?: string; shared?: boolean }) =>
+    patch<void>(`/go/playlists/${id}`, changes),
+  goDeletePlaylist: (id: number) => del<void>(`/go/playlists/${id}`),
+  goAddToPlaylist: (id: number, songs: number[]) => post<void>(`/go/playlists/${id}/songs`, { songs }),
+  goSetPlaylistSongs: (id: number, songs: number[]) => put<void>(`/go/playlists/${id}/songs`, { songs }),
+  goRadio: (trackId: number) => get<Track[]>(`/go/radio/${trackId}`),
+  mySubmissions: () => get<Submission[]>('/go/submissions'),
+  withdrawSubmission: (id: number) => del<void>(`/go/submissions/${id}`),
+  waitingSubmissions: () => get<Submission[]>('/submissions'),
+  approveSubmission: (id: number) => post<void>(`/submissions/${id}/approve`),
+  declineSubmission: (id: number, note: string) => post<void>(`/submissions/${id}/decline`, { note }),
+  uploadSettings: () => get<UploadSettings>('/submissions/settings'),
+  saveUploadSettings: (s: UploadSettings) => put<UploadSettings>('/submissions/settings', s),
+  goSendToParty: (trackId: number) => post<{ outcome: 'added' | 'backed' }>(`/go/party/${trackId}`),
+  goStatus: () => get<GoStatus>('/go/status'),
+  saveGoSettings: (settings: { enabled: boolean; trusted_proxies: string; admin_two_step: boolean }) =>
+    put<GoStatus>('/go/settings', settings),
+  signIns: (limit = 200) => get<SignIn[]>(`/go/sign-ins?limit=${limit}`),
+  turnOffUserTwoStep: (id: number) => del<void>(`/users/${id}/two-step`),
   logout: () => post<void>('/auth/logout'),
   bootstrapStatus: () => get<{ needed: boolean }>('/auth/bootstrap'),
   mode: () => get<Mode>('/auth/mode'),
@@ -123,6 +197,9 @@ export const api = {
   playWild: () => post<void>('/playlists/wild/play'),
   playRadio: (seed: RadioSeed) => post<void>('/playlists/radio/play', seed),
   trackTags: (id: number) => get<TrackTags>(`/tracks/${id}/tags`),
+  /** Takes a "Sounds like" genre off a song; it stays off when the AI listens again. */
+  removeStyle: (id: number, genre: string) => del<void>(`/tracks/${id}/styles/${encodeURIComponent(genre)}`),
+  restoreStyle: (id: number, genre: string) => put<void>(`/tracks/${id}/styles/${encodeURIComponent(genre)}`, {}),
   genre: (name: string) => get<GenrePage>(`/genres/${encodeURIComponent(name)}`),
   genres: () => get<GenreMap>('/genres'),
   playlistFromSongs: (name: string, trackIds: number[]) =>
@@ -130,11 +207,14 @@ export const api = {
   tracks: (sort: TrackSort, offset: number) =>
     get<Page<Track>>(`/tracks?sort=${sort}&offset=${offset}`),
   track: (id: number) => get<Track>(`/tracks/${id}`),
-  similarTracks: (id: number) => get<{ tracks: Track[]; analyzed: boolean }>(`/tracks/${id}/similar`),
+  similarTracks: (id: number) =>
+    get<{ tracks: Track[]; analyzed: boolean; analysis_on: boolean }>(`/tracks/${id}/similar`),
   similarArtists: (id: number) => get<ArtistSummary[]>(`/artists/${id}/similar`),
   album: (id: number) => get<AlbumDetail>(`/albums/${id}`),
   artist: (id: number) => get<ArtistDetail>(`/artists/${id}`),
   /** Cover art; `size` (pixels) asks for a thumbnail. */
+  /** Slideshow pictures; the first request for an artist fetches them, which takes a few seconds. */
+  artistPictures: (id: number) => get<ArtistPicture[]>(`/artists/${id}/pictures`),
   artUrl: (hash: string, size?: number) => `/api/art/${hash}${size ? `?size=${size}` : ''}`,
 
   queue: () => get<QueueItem[]>('/queue'),

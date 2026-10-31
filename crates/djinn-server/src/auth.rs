@@ -4,6 +4,7 @@
 //! database stores only their SHA-256 hash. Passwords are hashed with
 //! Argon2id on the blocking pool.
 
+use std::net::IpAddr;
 use std::sync::OnceLock;
 
 use argon2::password_hash::phc::PasswordHash;
@@ -17,16 +18,16 @@ use axum::response::{AppendHeaders, IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use djinn_store::{
-    now_ms, AccountStatus, CreateUserError, GuestSummary, Permissions, Role, SignupError, Store,
-    User, LISTENER_ROLE,
+    now_ms, AccountStatus, CreateUserError, GuestSummary, NewSignIn, Permissions, Role,
+    SignupError, Store, User, LISTENER_ROLE,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::client::{self, ClientIp};
 use crate::error::{ApiError, ApiResult};
-use crate::settings;
 use crate::state::AppState;
+use crate::{security, settings, two_step};
 
 const COOKIE_NAME: &str = "djinn_session";
 const SESSION_DAYS: i64 = 30;
@@ -139,6 +140,8 @@ pub async fn signup_role(store: &Store) -> anyhow::Result<i64> {
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/auth/login", post(login))
+        .route("/auth/two-step", post(finish_two_step))
+        .route("/me/password", post(change_password))
         .route("/auth/logout", post(logout))
         .route("/auth/bootstrap", get(bootstrap_status).post(bootstrap))
         .route("/auth/mode", get(mode))
@@ -205,29 +208,55 @@ impl FromRequestParts<AppState> for CurrentUser {
     }
 }
 
-/// Where a request came from, noted on the sessions it starts.
+/// Where a request came from: noted on the sessions it starts and in the
+/// sign-in log, and checked by DJINN GO.
 pub struct Device {
+    pub addr: Option<IpAddr>,
     pub ip: Option<String>,
     pub agent: Option<String>,
+    /// On the home network (or Tailscale).
+    pub home: bool,
+    /// Reached over HTTPS through a trusted proxy.
+    pub https: bool,
+    /// Came in on the DJINN GO port.
+    pub go: bool,
 }
 
-impl<S: Send + Sync> FromRequestParts<S> for Device {
+impl FromRequestParts<AppState> for Device {
     type Rejection = std::convert::Infallible;
 
     async fn from_request_parts(
         parts: &mut Parts,
-        state: &S,
+        state: &AppState,
     ) -> Result<Self, std::convert::Infallible> {
-        let Ok(ClientIp(ip)) = ClientIp::from_request_parts(parts, state).await;
+        let origin = security::origin(
+            security::peer(&parts.extensions),
+            &parts.headers,
+            &state.go.proxies(),
+        );
         let agent = parts
             .headers
             .get(USER_AGENT)
             .and_then(|v| v.to_str().ok())
             .map(|v| v.chars().take(300).collect());
         Ok(Self {
-            ip: ip.map(|ip| ip.to_string()),
+            addr: origin.ip,
+            ip: origin.ip.map(|ip| ip.to_string()),
             agent,
+            home: origin.home,
+            https: origin.https,
+            go: parts.extensions.get::<crate::go::GoRequest>().is_some(),
         })
+    }
+}
+
+impl Device {
+    fn via(&self) -> &'static str {
+        if self.go {
+            "go"
+        } else {
+            "party"
+        }
     }
 }
 
@@ -239,6 +268,9 @@ pub struct Me {
     pub user: User,
     pub role_name: Option<String>,
     pub permissions: Permissions,
+    /// DJINN GO asks this account for two-step sign-in (see `user.two_step`
+    /// for whether it's on).
+    pub two_step_required: bool,
 }
 
 pub async fn me_for(state: &AppState, user: User) -> ApiResult<Me> {
@@ -247,11 +279,69 @@ pub async fn me_for(state: &AppState, user: User) -> ApiResult<Me> {
         Role::User => state.store.role(user.role_id).await?.map(|r| r.name),
         Role::Admin | Role::Guest => None,
     };
+    let two_step_required = two_step::required(state, &user).await?;
     Ok(Me {
         user,
         role_name,
         permissions,
+        two_step_required,
     })
+}
+
+/// Records a sign-in attempt in the log.
+pub(crate) async fn log_sign_in(
+    state: &AppState,
+    device: &Device,
+    username: &str,
+    user_id: Option<i64>,
+    outcome: &str,
+) -> ApiResult<()> {
+    state
+        .store
+        .log_sign_in(&NewSignIn {
+            user_id,
+            username: &username.chars().take(MAX_USERNAME * 2).collect::<String>(),
+            ip: device.ip.as_deref(),
+            user_agent: device.agent.as_deref(),
+            via: device.via(),
+            outcome,
+        })
+        .await?;
+    if outcome != "ok" {
+        tracing::info!(username, ip = ?device.ip, via = device.via(), outcome, "sign-in refused");
+    }
+    Ok(())
+}
+
+/// Checks the signed-in user's own password, counting wrong ones toward
+/// the lockout.
+pub async fn check_own_password(
+    state: &AppState,
+    user: &User,
+    password: String,
+) -> ApiResult<bool> {
+    if let Some(wait) = state.limiter.wait(&user.username, None) {
+        return Err(too_many_tries(wait));
+    }
+    let Some((_, hash)) = state.store.user_credentials(&user.username).await? else {
+        return Ok(false);
+    };
+    let ok = verify_password(password, hash).await?;
+    if !ok {
+        state.limiter.failed(&user.username, None);
+    }
+    Ok(ok)
+}
+
+fn too_many_tries(wait: std::time::Duration) -> ApiError {
+    let minutes = wait.as_secs().div_ceil(60).max(1);
+    ApiError::new(
+        StatusCode::TOO_MANY_REQUESTS,
+        format!(
+            "too many tries; wait {minutes} {} and try again",
+            if minutes == 1 { "minute" } else { "minutes" }
+        ),
+    )
 }
 
 impl FromRequestParts<AppState> for AdminUser {
@@ -272,42 +362,192 @@ struct Credentials {
     password: String,
 }
 
+#[derive(Serialize)]
+struct NeedsCode {
+    /// The password was right; send the code with this to finish.
+    two_step: bool,
+    ticket: String,
+}
+
+/// Signs in with a password. Accounts with two-step sign-in get a ticket
+/// to send with their code instead of a session. Too many wrong passwords
+/// for an account or from an address lock sign-ins for a while.
 async fn login(
     State(state): State<AppState>,
     device: Device,
     Json(body): Json<Credentials>,
-) -> ApiResult<impl IntoResponse> {
-    let found = state.store.user_credentials(body.username.trim()).await?;
+) -> ApiResult<Response> {
+    let username = body.username.trim();
+    if let Some(wait) = state.limiter.wait(username, device.addr) {
+        log_sign_in(&state, &device, username, None, "locked_out").await?;
+        return Err(too_many_tries(wait));
+    }
+    let found = state.store.user_credentials(username).await?;
     // Verify against a dummy hash for unknown users so response time doesn't
     // reveal which usernames exist.
     let (user, hash) = match found {
         Some((user, hash)) => (Some(user), hash),
         None => (None, dummy_hash().to_owned()),
     };
+    let user_id = user.as_ref().map(|u| u.id);
     let valid = verify_password(body.password, hash).await?;
-    let user = user
-        .filter(|_| valid)
-        .ok_or_else(|| ApiError::new(StatusCode::UNAUTHORIZED, "wrong username or password"))?;
+    let Some(user) = user.filter(|_| valid) else {
+        state.limiter.failed(username, device.addr);
+        log_sign_in(&state, &device, username, user_id, "wrong_password").await?;
+        return Err(ApiError::new(
+            StatusCode::UNAUTHORIZED,
+            "wrong username or password",
+        ));
+    };
+    state.limiter.succeeded(username);
     // Only said once the password is right, so it reveals nothing.
-    match user.status {
-        AccountStatus::Active => {}
-        AccountStatus::Pending => {
-            return Err(ApiError::new(
-                StatusCode::FORBIDDEN,
-                "your account is waiting for the host to approve it",
-            ))
-        }
-        AccountStatus::Disabled => {
-            return Err(ApiError::new(
-                StatusCode::FORBIDDEN,
-                "this account has been turned off",
-            ))
-        }
+    let refused = match user.status {
+        AccountStatus::Active => None,
+        AccountStatus::Pending => Some((
+            "waiting",
+            "your account is waiting for the host to approve it",
+        )),
+        AccountStatus::Disabled => Some(("turned_off", "this account has been turned off")),
+    };
+    let refused = match refused {
+        Some(r) => Some(r),
+        None if device.go => go_refusal(&state, &user, &device).await?,
+        None => None,
+    };
+    if let Some((outcome, message)) = refused {
+        log_sign_in(&state, &device, username, Some(user.id), outcome).await?;
+        return Err(ApiError::new(StatusCode::FORBIDDEN, message));
     }
+    if user.two_step {
+        let ticket = state.tickets.issue(&user)?;
+        return Ok(Json(NeedsCode {
+            two_step: true,
+            ticket,
+        })
+        .into_response());
+    }
+    log_sign_in(&state, &device, username, Some(user.id), "ok").await?;
     let cookie = start_session(&state, user.id, SESSION_DAYS, &device).await?;
     Ok((
         AppendHeaders([(SET_COOKIE, cookie)]),
         Json(me_for(&state, user).await?),
+    )
+        .into_response())
+}
+
+/// Why `user` can't use DJINN GO from `device`, if they can't: for the log
+/// and to show them.
+pub async fn go_refusal(
+    state: &AppState,
+    user: &User,
+    device: &Device,
+) -> ApiResult<Option<(&'static str, &'static str)>> {
+    let permissions = state.store.permissions(user).await?;
+    Ok(if user.role == Role::Guest || !permissions.go {
+        Some(("no_go", "your account can't use DJINN GO; ask the host"))
+    } else if !device.home && !permissions.go_remote {
+        Some((
+            "not_home",
+            "your account can only use DJINN GO on the home network",
+        ))
+    } else {
+        None
+    })
+}
+
+#[derive(Deserialize)]
+struct TwoStepCode {
+    ticket: String,
+    code: String,
+}
+
+/// Finishes a two-step sign-in with the code from the app, or a recovery
+/// code.
+async fn finish_two_step(
+    State(state): State<AppState>,
+    device: Device,
+    Json(body): Json<TwoStepCode>,
+) -> ApiResult<impl IntoResponse> {
+    let ticket = state.tickets.get(&body.ticket).ok_or_else(|| {
+        ApiError::new(
+            StatusCode::UNAUTHORIZED,
+            "that took too long; sign in again",
+        )
+    })?;
+    if let Some(wait) = state.limiter.wait(&ticket.username, device.addr) {
+        state.tickets.used(&body.ticket);
+        log_sign_in(
+            &state,
+            &device,
+            &ticket.username,
+            Some(ticket.user_id),
+            "locked_out",
+        )
+        .await?;
+        return Err(too_many_tries(wait));
+    }
+    if !two_step::verify(&state, ticket.user_id, &body.code).await? {
+        state.tickets.wrong(&body.ticket);
+        state.limiter.failed(&ticket.username, device.addr);
+        log_sign_in(
+            &state,
+            &device,
+            &ticket.username,
+            Some(ticket.user_id),
+            "wrong_code",
+        )
+        .await?;
+        return Err(ApiError::new(
+            StatusCode::UNAUTHORIZED,
+            "that code didn't work; try the newest one",
+        ));
+    }
+    state.tickets.used(&body.ticket);
+    let user = state
+        .store
+        .user(ticket.user_id)
+        .await?
+        .filter(|u| u.status == AccountStatus::Active)
+        .ok_or_else(ApiError::unauthorized)?;
+    log_sign_in(&state, &device, &user.username, Some(user.id), "ok").await?;
+    let cookie = start_session(&state, user.id, SESSION_DAYS, &device).await?;
+    Ok((
+        AppendHeaders([(SET_COOKIE, cookie)]),
+        Json(me_for(&state, user).await?),
+    ))
+}
+
+#[derive(Deserialize)]
+struct NewPassword {
+    current: String,
+    new: String,
+}
+
+/// Changes your own password. Every other device is signed out; this one
+/// gets a new session.
+async fn change_password(
+    me: CurrentSession,
+    State(state): State<AppState>,
+    device: Device,
+    Json(body): Json<NewPassword>,
+) -> ApiResult<impl IntoResponse> {
+    if me.user.role == Role::Guest {
+        return Err(ApiError::bad_request("guests don't have passwords"));
+    }
+    if !check_own_password(&state, &me.user, body.current).await? {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "your current password is wrong",
+        ));
+    }
+    validate_password(&body.new, &me.user.username)?;
+    let hash = hash_password(body.new).await?;
+    state.store.set_password(me.user.id, &hash).await?;
+    tracing::info!(username = %me.user.username, "password changed");
+    let cookie = start_session(&state, me.user.id, SESSION_DAYS, &device).await?;
+    Ok((
+        StatusCode::NO_CONTENT,
+        AppendHeaders([(SET_COOKIE, cookie)]),
     ))
 }
 
@@ -335,7 +575,7 @@ async fn me(
                 .store
                 .extend_session(&hash_token(&token), now_ms() + max_age * 1000)
                 .await?;
-            renewed = Some(session_cookie(&token, max_age)?);
+            renewed = Some(session_cookie(&token, max_age, false)?);
         }
     }
     Ok((
@@ -817,12 +1057,15 @@ async fn start_session(
             device.agent.as_deref(),
         )
         .await?;
-    session_cookie(&token, max_age)
+    session_cookie(&token, max_age, device.https)
 }
 
-fn session_cookie(token: &str, max_age: i64) -> ApiResult<HeaderValue> {
+/// The session cookie; `secure` (over HTTPS) keeps browsers from ever
+/// sending it unencrypted.
+fn session_cookie(token: &str, max_age: i64, secure: bool) -> ApiResult<HeaderValue> {
+    let secure = if secure { "; Secure" } else { "" };
     let cookie =
-        format!("{COOKIE_NAME}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age}");
+        format!("{COOKIE_NAME}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age}{secure}");
     Ok(HeaderValue::from_str(&cookie).map_err(anyhow::Error::from)?)
 }
 

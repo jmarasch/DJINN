@@ -80,7 +80,12 @@
         </span>
       </label>
 
-      {#if progress && total > 0}
+      {#if progress && !progress.on}
+        <p class="small muted">
+          Songs without ReplayGain tags are measured by sound analysis, which is off, so they play unchanged. Switch it
+          on under <a href="#/admin/library">Library</a>.
+        </p>
+      {:else if progress && total > 0}
         {#if progress.waiting > 0}
           <p class="small">
             {#if progress.running}<span class="spinner" aria-hidden="true"></span>{/if}

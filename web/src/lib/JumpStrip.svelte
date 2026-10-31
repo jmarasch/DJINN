@@ -10,6 +10,7 @@
     years = false,
     newestFirst = false,
     below,
+    inside = $bindable(false),
     onjump,
   }: {
     jumps: Jump[]
@@ -19,6 +20,9 @@
     /** The strip starts no higher than the top of this (the list), so it
      * doesn't cover what's above the list until that scrolls away. */
     below?: HTMLElement
+    /** No room beside the list, so the strip is over its right edge: the
+     * list should keep clear of it. */
+    inside?: boolean
     onjump: (offset: number) => void
   } = $props()
 
@@ -30,6 +34,11 @@
 
   let height = $state(0)
   let top = $state(TOP_PX)
+  /** Where the strip's left edge goes, just right of the list; null for
+   * the screen's edge when there's no room. */
+  let left = $state<number | null>(null)
+  /** Gap between the list and the strip beside it. */
+  const GAP_PX = 6
   let strip = $state<HTMLElement>()
   let pressed = $state<number | null>(null)
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -85,7 +94,16 @@
     let frame = 0
     const follow = () => {
       cancelAnimationFrame(frame)
-      frame = requestAnimationFrame(() => (top = Math.max(TOP_PX, el.getBoundingClientRect().top)))
+      frame = requestAnimationFrame(() => {
+        const box = el.getBoundingClientRect()
+        top = Math.max(TOP_PX, box.top)
+        const width = years ? 36 : 24
+        // Beside the list when the screen has room for it, whatever the
+        // page's width.
+        const beside = innerWidth - box.right >= width + GAP_PX
+        left = beside ? box.right + GAP_PX : null
+        inside = !beside
+      })
     }
     follow()
     addEventListener('scroll', follow, { passive: true })
@@ -136,6 +154,8 @@
     bind:this={strip}
     bind:clientHeight={height}
     style:top="{top}px"
+    style:left={left === null ? null : `${left}px`}
+    class:edge={left === null}
     onpointerdown={down}
     onpointermove={(e) => pressed !== null && pick(e.clientY)}
     onpointerup={up}
@@ -163,14 +183,17 @@
 <style>
   .strip {
     position: fixed;
-    /* Just outside the page column, or on the screen edge on a phone. */
-    right: max(0px, calc((100vw - 640px) / 2 - 30px));
     bottom: calc(76px + env(safe-area-inset-bottom));
     z-index: 6;
     width: 24px;
     touch-action: none;
     user-select: none;
     -webkit-user-select: none;
+  }
+
+  /* No room beside the list (a phone): on the screen's edge. */
+  .strip.edge {
+    right: 0;
   }
 
   .strip.years {

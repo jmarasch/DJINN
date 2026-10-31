@@ -55,7 +55,7 @@
       <p class="small muted">
         Add {status.needs_key ? 'an AcoustID key' : ''}{status.needs_key && status.needs_contact ? ' and ' : ''}{status.needs_contact
           ? 'a MusicBrainz contact'
-          : ''} under <a href="#/admin/rules">Rules</a> first.
+          : ''} above first.
       </p>
     {:else}
       <p class="small">

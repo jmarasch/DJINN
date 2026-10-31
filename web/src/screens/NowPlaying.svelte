@@ -236,8 +236,12 @@
 
   {#if !isAdmin()}
     <p class="host-link">
-      {#if app.me?.role === 'guest'}You're in as <b>{app.me.display_name}</b>. {/if}
-      <button onclick={signInAsHost}>Host sign in</button>
+      {#if app.me?.role === 'guest'}
+        You're in as <b>{app.me.display_name}</b>.
+        <button onclick={signInAsHost}>Host sign in</button>
+      {:else}
+        Signed in as <b>{app.me?.username}</b>. <a href="#/account">Your account</a>
+      {/if}
     </p>
   {/if}
 </section>

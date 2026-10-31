@@ -6,9 +6,13 @@ mod loudness;
 mod maintenance;
 mod outputs;
 mod party;
+mod personal;
 mod playlists;
 mod queue;
 mod roles;
+mod security;
+mod submissions;
+mod subsonic;
 mod tag_edits;
 mod users;
 
@@ -17,9 +21,13 @@ pub use library::*;
 pub use loudness::*;
 pub use outputs::*;
 pub use party::*;
+pub use personal::*;
 pub use playlists::*;
 pub use queue::*;
 pub use roles::*;
+pub use security::*;
+pub use submissions::*;
+pub use subsonic::*;
 pub use tag_edits::*;
 pub use users::*;
 

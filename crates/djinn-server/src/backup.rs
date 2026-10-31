@@ -71,7 +71,7 @@ pub fn router() -> Router<AppState> {
 }
 
 /// The folder holding the database (and the art cache).
-fn data_dir(state: &AppState) -> PathBuf {
+pub fn data_dir(state: &AppState) -> PathBuf {
     state
         .art_dir
         .parent()
@@ -377,7 +377,11 @@ fn swap(db: &Path, art_dir: &Path, zip_path: &Path, plan: Plan) -> anyhow::Resul
     fs::create_dir_all(art_dir)?;
     for i in 0..zip.len() {
         let mut entry = zip.by_index(i)?;
-        let Some(name) = entry.name().strip_prefix(ART_PREFIX).map(str::to_owned) else {
+        // Names that aren't valid text can't be art cache files.
+        let Ok(full) = entry.name() else {
+            continue;
+        };
+        let Some(name) = full.strip_prefix(ART_PREFIX).map(str::to_owned) else {
             continue;
         };
         // Cache files are flat, named by hash: anything else is skipped.
