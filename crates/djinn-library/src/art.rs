@@ -1,9 +1,11 @@
 //! Cover art: content-addressed files in the art cache directory.
 
+use std::collections::HashMap;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, OnceLock};
 
 use sha2::{Digest, Sha256};
 
@@ -26,6 +28,137 @@ const ARTIST_ART: &[&str] = &["artist.jpg", "artist.jpeg", "artist.png", "artist
 /// File extensions the cache uses, from the image's type.
 const EXTENSIONS: &[&str] = &["jpg", "png", "gif", "webp", "bmp", "img"];
 
+static CACHE_LIMIT: AtomicU64 = AtomicU64::new(0);
+static CACHE_USAGE: OnceLock<Mutex<HashMap<PathBuf, u64>>> = OnceLock::new();
+
+/// A zero limit leaves the cache unlimited. Existing files are never removed
+/// when a smaller limit is chosen; new writes wait until there is room.
+pub fn set_cache_limit(bytes: u64) {
+    CACHE_LIMIT.store(bytes, Ordering::Release);
+    if let Some(usage) = CACHE_USAGE.get() {
+        if let Ok(mut usage) = usage.lock() {
+            usage.clear();
+        }
+    }
+}
+
+/// Size of the whole cache, including thumbnails, without following links.
+pub fn cache_usage(art_dir: &Path) -> io::Result<u64> {
+    fn count(dir: &Path) -> io::Result<u64> {
+        let mut total = 0_u64;
+        if !dir.exists() {
+            return Ok(0);
+        }
+        for entry in fs::read_dir(dir)? {
+            let entry = entry?;
+            let kind = entry.file_type()?;
+            if kind.is_dir() {
+                total = total.saturating_add(count(&entry.path())?);
+            } else if kind.is_file() {
+                total = total.saturating_add(entry.metadata()?.len());
+            }
+        }
+        Ok(total)
+    }
+    count(art_dir)
+}
+
+/// Writes a new cache file only when the configured limit has room.
+fn cache_write(
+    art_dir: &Path,
+    destination: &Path,
+    bytes: &[u8],
+    write: impl FnOnce() -> io::Result<()>,
+) -> io::Result<bool> {
+    if destination.is_file() {
+        return Ok(true);
+    }
+    let limit = CACHE_LIMIT.load(Ordering::Acquire);
+    if limit == 0 {
+        write()?;
+        return Ok(true);
+    }
+    let mut usage = CACHE_USAGE
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .map_err(|_| io::Error::other("art cache lock poisoned"))?;
+    if destination.is_file() {
+        return Ok(true);
+    }
+    let used = match usage.get(art_dir) {
+        Some(used) => *used,
+        None => {
+            let used = cache_usage(art_dir)?;
+            usage.insert(art_dir.to_path_buf(), used);
+            used
+        }
+    };
+    if used.saturating_add(bytes.len() as u64) > limit {
+        return Ok(false);
+    }
+    write()?;
+    usage.insert(art_dir.to_path_buf(), used + bytes.len() as u64);
+    Ok(true)
+}
+
+/// Checks an artist photo's source resolution, then stores a bounded JPEG.
+/// `None` means the source was too small for display.
+pub fn prepare_artist_image(
+    bytes: &[u8],
+    min_width: u32,
+    min_height: u32,
+    max_edge: u32,
+) -> io::Result<Option<Vec<u8>>> {
+    if bytes.len() > 20 * 1024 * 1024 {
+        return Err(io::Error::other("image is larger than 20 MB"));
+    }
+    let reader = image::ImageReader::new(io::Cursor::new(bytes))
+        .with_guessed_format()
+        .map_err(io::Error::other)?;
+    let (width, height) = reader.into_dimensions().map_err(io::Error::other)?;
+    if width < min_width || height < min_height {
+        return Ok(None);
+    }
+    if (width as u64).saturating_mul(height as u64) > 64_000_000 {
+        return Err(io::Error::other("image resolution is too large"));
+    }
+    let image = image::load_from_memory(bytes).map_err(io::Error::other)?;
+    let mut jpeg = Vec::new();
+    image
+        .thumbnail(max_edge, max_edge)
+        .to_rgb8()
+        .write_with_encoder(image::codecs::jpeg::JpegEncoder::new_with_quality(
+            &mut jpeg, 85,
+        ))
+        .map_err(io::Error::other)?;
+    Ok(Some(jpeg))
+}
+
+/// Recounts after files were removed outside `store` or `thumbnail`.
+pub fn refresh_cache_usage(art_dir: &Path) {
+    if let Some(usage) = CACHE_USAGE.get() {
+        if let Ok(mut usage) = usage.lock() {
+            usage.remove(art_dir);
+        }
+    }
+}
+
+/// Removes an unused cache image and its thumbnails after the caller has
+/// checked that no database row still refers to its hash.
+pub fn remove(art_dir: &Path, hash: &str) -> io::Result<()> {
+    if let Some(file) = path(art_dir, hash) {
+        fs::remove_file(file)?;
+    }
+    for size in THUMBNAIL_SIZES {
+        let thumb = art_dir.join("thumbs").join(format!("{hash}-{size}.jpg"));
+        if thumb.is_file() {
+            fs::remove_file(thumb)?;
+        }
+    }
+    refresh_cache_usage(art_dir);
+    Ok(())
+}
+
 /// Stores `bytes` in `art_dir` as `<content hash>.<ext>` and returns the
 /// hash. Identical images (one per album, usually) are stored once.
 pub fn store(art_dir: &Path, bytes: &[u8]) -> io::Result<String> {
@@ -35,21 +168,26 @@ pub fn store(art_dir: &Path, bytes: &[u8]) -> io::Result<String> {
         return Ok(hash);
     }
     let path = art_dir.join(format!("{hash}.{}", extension(bytes)));
-    fs::create_dir_all(art_dir)?;
-    // Write then rename, so a reader never sees a partial file. Scanner
-    // threads can store the same image at once, so each write gets its own
-    // temporary name.
-    static NEXT: AtomicU64 = AtomicU64::new(0);
-    let n = NEXT.fetch_add(1, Ordering::Relaxed);
-    let tmp = art_dir.join(format!("{hash}.{}.{n}.tmp", std::process::id()));
-    fs::write(&tmp, bytes)?;
-    if let Err(e) = fs::rename(&tmp, &path) {
-        let _ = fs::remove_file(&tmp);
-        if !path.exists() {
-            return Err(e);
+    let stored = cache_write(art_dir, &path, bytes, || {
+        fs::create_dir_all(art_dir)?;
+        // Write then rename, so a reader never sees a partial file.
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let n = NEXT.fetch_add(1, Ordering::Relaxed);
+        let tmp = art_dir.join(format!("{hash}.{}.{n}.tmp", std::process::id()));
+        fs::write(&tmp, bytes)?;
+        if let Err(e) = fs::rename(&tmp, &path) {
+            let _ = fs::remove_file(&tmp);
+            if !path.exists() {
+                return Err(e);
+            }
         }
+        Ok(())
+    })?;
+    if stored {
+        Ok(hash)
+    } else {
+        Err(io::Error::other("art cache storage limit reached"))
     }
-    Ok(hash)
 }
 
 /// Path of cached art for `hash`, if the hash is well formed and present.
@@ -103,18 +241,21 @@ pub fn thumbnail(art_dir: &Path, hash: &str, size: u32) -> io::Result<Option<Pat
             &mut jpeg, 85,
         ))
         .map_err(io::Error::other)?;
-    fs::create_dir_all(&thumbs)?;
-    static NEXT: AtomicU64 = AtomicU64::new(0);
-    let n = NEXT.fetch_add(1, Ordering::Relaxed);
-    let tmp = thumbs.join(format!("{hash}-{size}.{}.{n}.tmp", std::process::id()));
-    fs::write(&tmp, &jpeg)?;
-    if let Err(e) = fs::rename(&tmp, &thumb) {
-        let _ = fs::remove_file(&tmp);
-        if !thumb.is_file() {
-            return Err(e);
+    let stored = cache_write(art_dir, &thumb, &jpeg, || {
+        fs::create_dir_all(&thumbs)?;
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let n = NEXT.fetch_add(1, Ordering::Relaxed);
+        let tmp = thumbs.join(format!("{hash}-{size}.{}.{n}.tmp", std::process::id()));
+        fs::write(&tmp, &jpeg)?;
+        if let Err(e) = fs::rename(&tmp, &thumb) {
+            let _ = fs::remove_file(&tmp);
+            if !thumb.is_file() {
+                return Err(e);
+            }
         }
-    }
-    Ok(Some(thumb))
+        Ok(())
+    })?;
+    Ok(Some(if stored { thumb } else { original }))
 }
 
 /// Gives cache files from before extensions were added one, so the folder
@@ -278,6 +419,21 @@ mod tests {
             None
         );
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn artist_images_respect_source_minimum_and_output_edge() {
+        let mut png = Vec::new();
+        image::RgbImage::from_pixel(1200, 700, image::Rgb([40, 80, 120]))
+            .write_to(&mut io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
+        assert!(prepare_artist_image(&png, 1300, 450, 800)
+            .unwrap()
+            .is_none());
+        let jpeg = prepare_artist_image(&png, 800, 450, 800).unwrap().unwrap();
+        let result = image::load_from_memory(&jpeg).unwrap();
+        assert_eq!((result.width(), result.height()), (800, 467));
+        assert_eq!(mime_type(&jpeg), "image/jpeg");
     }
 
     #[test]

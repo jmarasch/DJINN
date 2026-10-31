@@ -4,10 +4,11 @@
 use std::collections::BTreeMap;
 use std::sync::atomic::Ordering;
 
+use axum::body::{to_bytes, Body};
 use axum::extract::{Path, Query, State};
 use axum::http::{header, StatusCode};
 use axum::response::IntoResponse;
-use axum::routing::{get, post, put};
+use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use djinn_library::{art, ScanProgress};
 use djinn_store::{
@@ -42,12 +43,30 @@ pub fn router() -> Router<AppState> {
         .route("/artists", get(artists))
         .route("/artists/jumps", get(artist_jumps))
         .route("/artists/{id}", get(artist))
-        .route("/artists/{id}/pictures", get(artist_pictures))
+        .route(
+            "/artists/{id}/pictures",
+            get(artist_pictures).post(add_artist_picture),
+        )
+        .route("/artists/{id}/pictures/manage", get(manage_artist_pictures))
+        .route(
+            "/artists/{id}/pictures/unsplash",
+            get(search_unsplash).post(add_unsplash_picture),
+        )
+        .route("/artists/{id}/pictures/order", put(order_artist_pictures))
+        .route(
+            "/artists/{id}/pictures/recheck",
+            post(recheck_artist_pictures),
+        )
+        .route(
+            "/artists/{id}/pictures/{hash}",
+            delete(remove_artist_picture),
+        )
         .route("/artists/{id}/edit", put(edit_artist))
         .route("/art/{hash}", get(cover_art))
         .route("/library/rescan", post(rescan))
         .route("/library/artist-info", post(artist_info))
         .route("/library/open-art-folder", post(open_art_folder))
+        .route("/library/art-cache", get(art_cache_status))
         .route("/library/status", get(status))
 }
 
@@ -569,6 +588,27 @@ async fn open_art_folder(_: AdminUser, State(state): State<AppState>) -> ApiResu
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[derive(Serialize)]
+struct ArtCacheStatus {
+    used_bytes: u64,
+    max_bytes: u64,
+}
+
+async fn art_cache_status(
+    _: AdminUser,
+    State(state): State<AppState>,
+) -> ApiResult<Json<ArtCacheStatus>> {
+    let limits = PictureSettings::load(&state.store).await?;
+    let dir = state.art_dir.as_ref().clone();
+    let used_bytes = tokio::task::spawn_blocking(move || art::cache_usage(&dir))
+        .await
+        .map_err(anyhow::Error::from)??;
+    Ok(Json(ArtCacheStatus {
+        used_bytes,
+        max_bytes: (limits.cache_mb as u64).saturating_mul(1024 * 1024),
+    }))
+}
+
 /// What a request to start background work did.
 #[derive(Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -641,6 +681,161 @@ pub fn lookup_status(state: &AppState) -> LookupStatus {
 /// Wikimedia Commons (with artist photos and bios, and MusicBrainz).
 pub const ARTIST_PICTURES: &str = "artist_pictures";
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(default)]
+pub struct PictureSettings {
+    /// Most slideshow pictures kept for one artist.
+    pub count: i64,
+    /// Space for one artist's slideshow, 0 for no separate limit.
+    pub per_artist_mb: i64,
+    /// Whole art cache including covers and thumbnails, 0 for no limit.
+    pub cache_mb: i64,
+    /// Longest side of a stored artist picture.
+    pub max_edge: i64,
+    /// Source images smaller than these dimensions are skipped.
+    pub min_width: i64,
+    pub min_height: i64,
+    pub deezer: bool,
+    pub wikipedia: bool,
+    pub commons: bool,
+    pub fanart: bool,
+    pub fanart_key: String,
+    pub audiodb: bool,
+    pub audiodb_key: String,
+    pub unsplash: bool,
+    pub unsplash_key: String,
+    pub allow_remote: bool,
+}
+
+impl Default for PictureSettings {
+    fn default() -> Self {
+        Self {
+            count: 8,
+            per_artist_mb: 20,
+            cache_mb: 0,
+            max_edge: 1920,
+            min_width: 800,
+            min_height: 450,
+            deezer: true,
+            wikipedia: true,
+            commons: true,
+            fanart: false,
+            fanart_key: String::new(),
+            audiodb: false,
+            audiodb_key: "123".into(),
+            unsplash: false,
+            unsplash_key: String::new(),
+            allow_remote: false,
+        }
+    }
+}
+
+impl PictureSettings {
+    pub async fn load(store: &djinn_store::Store) -> anyhow::Result<Self> {
+        let default = Self::default();
+        Ok(Self {
+            count: settings::number(store, "artist_picture_count", default.count).await?,
+            per_artist_mb: settings::number(
+                store,
+                "artist_picture_per_artist_mb",
+                default.per_artist_mb,
+            )
+            .await?,
+            cache_mb: settings::number(store, "art_cache_max_mb", default.cache_mb).await?,
+            max_edge: settings::number(store, "artist_picture_max_edge", default.max_edge).await?,
+            min_width: settings::number(store, "artist_picture_min_width", default.min_width)
+                .await?,
+            min_height: settings::number(store, "artist_picture_min_height", default.min_height)
+                .await?,
+            deezer: settings::flag(store, "artist_source_deezer", default.deezer).await?,
+            wikipedia: settings::flag(store, "artist_source_wikipedia", default.wikipedia).await?,
+            commons: settings::flag(store, "artist_source_commons", default.commons).await?,
+            fanart: settings::flag(store, "artist_source_fanart", default.fanart).await?,
+            fanart_key: store
+                .get_setting("fanart_api_key")
+                .await?
+                .unwrap_or_default(),
+            audiodb: settings::flag(store, "artist_source_audiodb", default.audiodb).await?,
+            audiodb_key: store
+                .get_setting("audiodb_api_key")
+                .await?
+                .unwrap_or(default.audiodb_key),
+            unsplash: settings::flag(store, "artist_source_unsplash", default.unsplash).await?,
+            unsplash_key: store
+                .get_setting("unsplash_access_key")
+                .await?
+                .unwrap_or_default(),
+            allow_remote: settings::flag(store, "artist_remote_images", default.allow_remote)
+                .await?,
+        })
+    }
+
+    pub fn validate(&self) -> ApiResult<()> {
+        if !(1..=20).contains(&self.count)
+            || !(0..=200).contains(&self.per_artist_mb)
+            || !(0..=100_000).contains(&self.cache_mb)
+            || !(512..=4096).contains(&self.max_edge)
+            || !(0..=4096).contains(&self.min_width)
+            || !(0..=4096).contains(&self.min_height)
+            || self.min_width > self.max_edge
+            || self.min_height > self.max_edge
+        {
+            return Err(ApiError::bad_request("invalid artist picture limits"));
+        }
+        for key in [&self.fanart_key, &self.audiodb_key, &self.unsplash_key] {
+            if key.len() > 128
+                || !key
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+            {
+                return Err(ApiError::bad_request("invalid image-source API key"));
+            }
+        }
+        if (self.fanart && self.fanart_key.is_empty())
+            || (self.audiodb && self.audiodb_key.is_empty())
+            || (self.unsplash && self.unsplash_key.is_empty())
+        {
+            return Err(ApiError::bad_request(
+                "enabled image sources need their API keys",
+            ));
+        }
+        Ok(())
+    }
+
+    pub async fn save(&self, store: &djinn_store::Store) -> anyhow::Result<()> {
+        for (key, value) in [
+            ("artist_picture_count", self.count),
+            ("artist_picture_per_artist_mb", self.per_artist_mb),
+            ("art_cache_max_mb", self.cache_mb),
+            ("artist_picture_max_edge", self.max_edge),
+            ("artist_picture_min_width", self.min_width),
+            ("artist_picture_min_height", self.min_height),
+        ] {
+            store.set_setting(key, &value.to_string()).await?;
+        }
+        for (key, value) in [
+            ("artist_source_deezer", self.deezer),
+            ("artist_source_wikipedia", self.wikipedia),
+            ("artist_source_commons", self.commons),
+            ("artist_source_fanart", self.fanart),
+            ("artist_source_audiodb", self.audiodb),
+            ("artist_source_unsplash", self.unsplash),
+            ("artist_remote_images", self.allow_remote),
+        ] {
+            settings::set_flag(store, key, value).await?;
+        }
+        for (key, value) in [
+            ("fanart_api_key", &self.fanart_key),
+            ("audiodb_api_key", &self.audiodb_key),
+            ("unsplash_access_key", &self.unsplash_key),
+        ] {
+            store.set_setting(key, value).await?;
+        }
+        art::set_cache_limit((self.cache_mb as u64).saturating_mul(1024 * 1024));
+        Ok(())
+    }
+}
+
 async fn artist_pictures(
     _: CurrentUser,
     State(state): State<AppState>,
@@ -662,28 +857,437 @@ pub async fn pictures_for(state: &AppState, id: i64) -> ApiResult<Vec<djinn_stor
         .picture_source(id)
         .await?
         .ok_or_else(ApiError::not_found)?;
+    let existing = store.artist_pictures(id).await?;
     if source.checked {
-        return Ok(store.artist_pictures(id).await?);
+        return visible_pictures(store, existing).await;
     }
-    let Some(category) = source.commons_category else {
-        return Ok(Vec::new());
-    };
     let _turn = state.scan.pictures.lock().await;
     // Fetched by someone else while this waited.
     if store.picture_source(id).await?.is_some_and(|s| s.checked) {
-        return Ok(store.artist_pictures(id).await?);
+        return visible_pictures(store, store.artist_pictures(id).await?).await;
     }
-    match djinn_library::online::artist_pictures(&category, &state.art_dir).await {
+    let limits = PictureSettings::load(store).await?;
+    let existing_downloads: Vec<_> = existing
+        .iter()
+        .filter(|picture| picture.source != "manual" && picture.source != "unsplash")
+        .cloned()
+        .collect();
+    let retained: Vec<_> = existing
+        .into_iter()
+        .filter(|picture| picture.source == "manual" || picture.source == "unsplash")
+        .collect();
+    let count = (limits.count as usize).saturating_sub(retained.len());
+    let used = pictures_size(&state.art_dir, &retained);
+    let max_bytes = if limits.per_artist_mb == 0 {
+        0
+    } else {
+        (limits.per_artist_mb as u64)
+            .saturating_mul(1024 * 1024)
+            .saturating_sub(used)
+    };
+    if count == 0 || (limits.per_artist_mb > 0 && max_bytes == 0) {
+        store.save_artist_pictures(id, &[]).await?;
+        cleanup_unused_pictures(state, &existing_downloads).await?;
+        return visible_pictures(store, store.artist_pictures(id).await?).await;
+    }
+    let options = djinn_library::online::PictureOptions {
+        max_count: count,
+        max_bytes,
+        max_edge: limits.max_edge as u32,
+        min_width: limits.min_width as u32,
+        min_height: limits.min_height as u32,
+        deezer: limits.deezer,
+        wikipedia: limits.wikipedia,
+        commons: limits.commons,
+        fanart_key: if limits.fanart {
+            Some(limits.fanart_key.clone())
+        } else {
+            None
+        },
+        audiodb_key: if limits.audiodb {
+            Some(limits.audiodb_key.clone())
+        } else {
+            None
+        },
+    };
+    match djinn_library::online::artist_pictures(&source, &state.art_dir, &options).await {
         Ok(Some(pictures)) => {
             store.save_artist_pictures(id, &pictures).await?;
-            Ok(pictures)
+            cleanup_unused_pictures(state, &existing_downloads).await?;
+            visible_pictures(store, store.artist_pictures(id).await?).await
         }
-        Ok(None) => Ok(Vec::new()),
+        Ok(None) => visible_pictures(store, store.artist_pictures(id).await?).await,
         Err(e) => {
             tracing::warn!(error = %e, "fetching artist pictures failed");
-            Ok(Vec::new())
+            visible_pictures(store, store.artist_pictures(id).await?).await
         }
     }
+}
+
+async fn cleanup_unused_pictures(
+    state: &AppState,
+    pictures: &[djinn_store::ArtistPicture],
+) -> ApiResult<()> {
+    for old in pictures {
+        if !state.store.art_hash_in_use(&old.art_hash).await? {
+            let dir = state.art_dir.as_ref().clone();
+            let hash = old.art_hash.clone();
+            tokio::task::spawn_blocking(move || art::remove(&dir, &hash))
+                .await
+                .map_err(anyhow::Error::from)??;
+        }
+    }
+    Ok(())
+}
+
+async fn visible_pictures(
+    store: &djinn_store::Store,
+    pictures: Vec<djinn_store::ArtistPicture>,
+) -> ApiResult<Vec<djinn_store::ArtistPicture>> {
+    if settings::flag(store, "artist_remote_images", false).await? {
+        Ok(pictures)
+    } else {
+        Ok(pictures
+            .into_iter()
+            .filter(|p| p.remote_url.is_none())
+            .collect())
+    }
+}
+
+fn pictures_size(art_dir: &std::path::Path, pictures: &[djinn_store::ArtistPicture]) -> u64 {
+    pictures
+        .iter()
+        .filter_map(|picture| art::path(art_dir, &picture.art_hash))
+        .filter_map(|path| std::fs::metadata(path).ok())
+        .map(|meta| meta.len())
+        .sum()
+}
+
+#[derive(Deserialize)]
+struct UnsplashSelection {
+    photo_id: String,
+}
+
+#[derive(Serialize)]
+struct UnsplashChoice {
+    id: String,
+    thumbnail: String,
+    credit: String,
+    credit_url: String,
+    width: u64,
+    height: u64,
+}
+
+async fn unsplash_json(path: &str, key: &str) -> ApiResult<serde_json::Value> {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()?;
+    let response = client
+        .get(format!("https://api.unsplash.com/{path}"))
+        .header("Authorization", format!("Client-ID {key}"))
+        .header("Accept-Version", "v1")
+        .send()
+        .await?;
+    if !response.status().is_success() {
+        return Err(ApiError::new(
+            StatusCode::BAD_GATEWAY,
+            "Unsplash could not be reached or rejected the API key",
+        ));
+    }
+    Ok(serde_json::from_slice(&response.bytes().await?)?)
+}
+
+fn unsplash_choice(photo: &serde_json::Value) -> Option<UnsplashChoice> {
+    let id = photo["id"].as_str()?;
+    if !id
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return None;
+    }
+    let thumb = photo["urls"]["small"].as_str()?;
+    let page = photo["user"]["links"]["html"].as_str()?;
+    if !unsplash_image_url(thumb) || !page.starts_with("https://unsplash.com/") {
+        return None;
+    }
+    let name = photo["user"]["name"].as_str()?;
+    Some(UnsplashChoice {
+        id: id.into(),
+        thumbnail: thumb.into(),
+        credit: format!("{name} on Unsplash"),
+        credit_url: page.into(),
+        width: photo["width"].as_u64()?,
+        height: photo["height"].as_u64()?,
+    })
+}
+
+fn unsplash_image_url(url: &str) -> bool {
+    reqwest::Url::parse(url)
+        .is_ok_and(|u| u.scheme() == "https" && u.host_str() == Some("images.unsplash.com"))
+}
+
+async fn search_unsplash(
+    _: AdminUser,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> ApiResult<Json<Vec<UnsplashChoice>>> {
+    let source = state
+        .store
+        .picture_source(id)
+        .await?
+        .ok_or_else(ApiError::not_found)?;
+    let settings = PictureSettings::load(&state.store).await?;
+    if !settings.unsplash || !settings.allow_remote {
+        return Err(ApiError::bad_request(
+            "enable Unsplash and remote images in Library settings",
+        ));
+    }
+    let query = reqwest::Url::parse_with_params(
+        "https://api.unsplash.com/search/photos",
+        &[
+            ("query", format!("{} musician", source.name)),
+            ("per_page", "15".into()),
+        ],
+    )?;
+    let path =
+        query.path().trim_start_matches('/').to_owned() + "?" + query.query().unwrap_or_default();
+    let result = unsplash_json(&path, &settings.unsplash_key).await?;
+    Ok(Json(
+        result["results"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(unsplash_choice)
+            .filter(|p| {
+                p.width >= settings.min_width as u64 && p.height >= settings.min_height as u64
+            })
+            .collect(),
+    ))
+}
+
+async fn add_unsplash_picture(
+    _: AdminUser,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Json(selection): Json<UnsplashSelection>,
+) -> ApiResult<Json<Vec<djinn_store::ArtistPicture>>> {
+    if selection.photo_id.is_empty()
+        || selection.photo_id.len() > 64
+        || !selection
+            .photo_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return Err(ApiError::bad_request("invalid Unsplash photo ID"));
+    }
+    let _turn = state.scan.pictures.lock().await;
+    state
+        .store
+        .picture_source(id)
+        .await?
+        .ok_or_else(ApiError::not_found)?;
+    let settings = PictureSettings::load(&state.store).await?;
+    if !settings.unsplash || !settings.allow_remote {
+        return Err(ApiError::bad_request(
+            "enable Unsplash and remote images in Library settings",
+        ));
+    }
+    let existing = state.store.artist_pictures(id).await?;
+    if existing.len() >= settings.count as usize {
+        return Err(ApiError::bad_request(
+            "this artist has reached the picture count limit",
+        ));
+    }
+    let photo = unsplash_json(
+        &format!("photos/{}", selection.photo_id),
+        &settings.unsplash_key,
+    )
+    .await?;
+    let choice = unsplash_choice(&photo)
+        .ok_or_else(|| ApiError::bad_request("Unsplash did not return a usable photo"))?;
+    if choice.width < settings.min_width as u64 || choice.height < settings.min_height as u64 {
+        return Err(ApiError::bad_request(
+            "image is below the minimum resolution",
+        ));
+    }
+    let remote_url = photo["urls"]["regular"]
+        .as_str()
+        .filter(|url| unsplash_image_url(url))
+        .ok_or_else(|| ApiError::bad_request("Unsplash did not provide a valid image URL"))?;
+    let hash = format!("unsplash-{}", choice.id);
+    if existing.iter().any(|p| p.art_hash == hash) {
+        return Err(ApiError::conflict(
+            "this picture is already on the artist page",
+        ));
+    }
+    state
+        .store
+        .add_artist_picture(
+            id,
+            &djinn_store::ArtistPicture {
+                art_hash: hash,
+                credit: choice.credit,
+                credit_url: choice.credit_url,
+                source: "unsplash".into(),
+                remote_url: Some(remote_url.into()),
+            },
+        )
+        .await?;
+    // Unsplash asks API integrations to register a download when a photo is selected.
+    let _ = unsplash_json(
+        &format!("photos/{}/download", selection.photo_id),
+        &settings.unsplash_key,
+    )
+    .await;
+    Ok(Json(state.store.artist_pictures(id).await?))
+}
+
+async fn manage_artist_pictures(
+    _: AdminUser,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> ApiResult<Json<Vec<djinn_store::ArtistPicture>>> {
+    state
+        .store
+        .picture_source(id)
+        .await?
+        .ok_or_else(ApiError::not_found)?;
+    Ok(Json(state.store.artist_pictures(id).await?))
+}
+
+#[derive(Deserialize)]
+struct NewPicture {
+    credit: String,
+    #[serde(default)]
+    credit_url: String,
+}
+
+async fn add_artist_picture(
+    _: AdminUser,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Query(query): Query<NewPicture>,
+    body: Body,
+) -> ApiResult<Json<Vec<djinn_store::ArtistPicture>>> {
+    let credit = query.credit.trim();
+    let url = query.credit_url.trim();
+    if credit.is_empty()
+        || credit.chars().count() > 200
+        || url.len() > 500
+        || (!url.is_empty() && !(url.starts_with("https://") || url.starts_with("http://")))
+    {
+        return Err(ApiError::bad_request(
+            "add a short credit and an optional http link",
+        ));
+    }
+    let bytes = to_bytes(body, 20 * 1024 * 1024)
+        .await
+        .map_err(|_| ApiError::bad_request("image must be 20 MB or smaller"))?;
+    let _turn = state.scan.pictures.lock().await;
+    state
+        .store
+        .picture_source(id)
+        .await?
+        .ok_or_else(ApiError::not_found)?;
+    let limits = PictureSettings::load(&state.store).await?;
+    let existing = state.store.artist_pictures(id).await?;
+    if existing.len() >= limits.count as usize {
+        return Err(ApiError::bad_request(
+            "this artist has reached the picture count limit",
+        ));
+    }
+    let image = tokio::task::spawn_blocking({
+        let bytes = bytes.to_vec();
+        let min_width = limits.min_width as u32;
+        let min_height = limits.min_height as u32;
+        let max_edge = limits.max_edge as u32;
+        move || art::prepare_artist_image(&bytes, min_width, min_height, max_edge)
+    })
+    .await
+    .map_err(anyhow::Error::from)?
+    .map_err(|e| ApiError::bad_request(format!("couldn't read that image: {e}")))?
+    .ok_or_else(|| ApiError::bad_request("image is below the minimum resolution"))?;
+    let used = pictures_size(&state.art_dir, &existing);
+    if limits.per_artist_mb > 0
+        && used.saturating_add(image.len() as u64) > (limits.per_artist_mb as u64) * 1024 * 1024
+    {
+        return Err(ApiError::bad_request(
+            "this artist has reached the picture storage limit",
+        ));
+    }
+    let hash = art::store(&state.art_dir, &image).map_err(|e| {
+        ApiError::new(
+            StatusCode::INSUFFICIENT_STORAGE,
+            format!("couldn't store picture: {e}"),
+        )
+    })?;
+    if existing.iter().any(|picture| picture.art_hash == hash) {
+        return Err(ApiError::conflict(
+            "this picture is already on the artist page",
+        ));
+    }
+    state
+        .store
+        .add_artist_picture(
+            id,
+            &djinn_store::ArtistPicture {
+                art_hash: hash,
+                credit: credit.to_owned(),
+                credit_url: url.to_owned(),
+                source: "manual".to_owned(),
+                remote_url: None,
+            },
+        )
+        .await?;
+    Ok(Json(state.store.artist_pictures(id).await?))
+}
+
+async fn remove_artist_picture(
+    _: AdminUser,
+    State(state): State<AppState>,
+    Path((id, hash)): Path<(i64, String)>,
+) -> ApiResult<Json<Vec<djinn_store::ArtistPicture>>> {
+    let _turn = state.scan.pictures.lock().await;
+    if !state.store.remove_artist_picture(id, &hash).await? {
+        return Err(ApiError::not_found());
+    }
+    if !state.store.art_hash_in_use(&hash).await? {
+        let dir = state.art_dir.as_ref().clone();
+        tokio::task::spawn_blocking(move || art::remove(&dir, &hash))
+            .await
+            .map_err(anyhow::Error::from)??;
+    }
+    Ok(Json(state.store.artist_pictures(id).await?))
+}
+
+async fn order_artist_pictures(
+    _: AdminUser,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Json(hashes): Json<Vec<String>>,
+) -> ApiResult<Json<Vec<djinn_store::ArtistPicture>>> {
+    let _turn = state.scan.pictures.lock().await;
+    if !state.store.reorder_artist_pictures(id, &hashes).await? {
+        return Err(ApiError::bad_request(
+            "the picture list changed; reload it and try again",
+        ));
+    }
+    Ok(Json(state.store.artist_pictures(id).await?))
+}
+
+async fn recheck_artist_pictures(
+    _: AdminUser,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> ApiResult<Json<Vec<djinn_store::ArtistPicture>>> {
+    state
+        .store
+        .picture_source(id)
+        .await?
+        .ok_or_else(ApiError::not_found)?;
+    state.store.recheck_artist_pictures(id).await?;
+    Ok(Json(pictures_for(&state, id).await?))
 }
 
 /// Starts an online artist lookup in the background. Returns false if one
@@ -723,6 +1327,29 @@ pub fn start_artist_lookup(state: &AppState, force: bool) -> bool {
                     .await
                     .unwrap_or(false),
                 musicbrainz_contact: settings::musicbrainz(&state.store).await.ok().flatten(),
+                picture_options: PictureSettings::load(&state.store)
+                    .await
+                    .map(|limits| djinn_library::online::PictureOptions {
+                        max_count: limits.count as usize,
+                        max_bytes: (limits.per_artist_mb as u64).saturating_mul(1024 * 1024),
+                        max_edge: limits.max_edge as u32,
+                        min_width: limits.min_width as u32,
+                        min_height: limits.min_height as u32,
+                        deezer: limits.deezer,
+                        wikipedia: limits.wikipedia,
+                        commons: limits.commons,
+                        fanart_key: if limits.fanart {
+                            Some(limits.fanart_key)
+                        } else {
+                            None
+                        },
+                        audiodb_key: if limits.audiodb {
+                            Some(limits.audiodb_key)
+                        } else {
+                            None
+                        },
+                    })
+                    .unwrap_or_default(),
             };
             let result =
                 djinn_library::online::lookup_artists(&state.store, &state.art_dir, &options).await;
@@ -830,9 +1457,85 @@ pub fn start_scan(state: &AppState) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_util::{call, session};
+    use crate::test_util::{call, get_body, send_bytes, session};
     use axum::http::Method;
     use djinn_store::Role;
+
+    #[test]
+    fn unsplash_choices_use_provider_urls_and_photographer_credit() {
+        let photo = serde_json::json!({
+            "id": "abc_123",
+            "width": 2400,
+            "height": 1600,
+            "urls": { "small": "https://images.unsplash.com/photo-test?w=400" },
+            "user": { "name": "Photographer", "links": { "html": "https://unsplash.com/@photographer" } }
+        });
+        let choice = unsplash_choice(&photo).unwrap();
+        assert_eq!(choice.credit, "Photographer on Unsplash");
+        assert_eq!(choice.width, 2400);
+        assert!(!unsplash_image_url(
+            "https://images.unsplash.com.evil.test/photo"
+        ));
+    }
+
+    #[tokio::test]
+    async fn admin_can_import_and_remove_artist_picture_with_size_checks() {
+        use djinn_store::ScannedTrack;
+        let state = AppState::for_tests().await;
+        state
+            .store
+            .save_scanned(&[ScannedTrack {
+                path: "/music/song.flac".into(),
+                title: "Song".into(),
+                artist: Some("Band".into()),
+                album: Some("Album".into()),
+                ..Default::default()
+            }])
+            .await
+            .unwrap();
+        let id = state.store.search("Band", 10).await.unwrap().artists[0].id;
+        let admin = session(&state, "admin", Role::Admin).await;
+        let listener = session(&state, "listener", Role::User).await;
+        let url = format!("/api/artists/{id}/pictures?credit=Photographer");
+        let encode = |width, height| {
+            let mut bytes = Vec::new();
+            image::RgbImage::from_pixel(width, height, image::Rgb([30, 60, 90]))
+                .write_to(
+                    &mut std::io::Cursor::new(&mut bytes),
+                    image::ImageFormat::Png,
+                )
+                .unwrap();
+            bytes
+        };
+        let (status, _) = send_bytes(&state, Method::POST, &url, encode(100, 100), &admin).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        let (status, _) = send_bytes(&state, Method::POST, &url, encode(800, 450), &listener).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let (status, _) = send_bytes(&state, Method::POST, &url, encode(800, 450), &admin).await;
+        assert_eq!(status, StatusCode::OK);
+        let pictures = state.store.artist_pictures(id).await.unwrap();
+        assert_eq!(pictures.len(), 1);
+        assert_eq!(pictures[0].source, "manual");
+        assert!(art::path(&state.art_dir, &pictures[0].art_hash).is_some());
+        let (status, body) = get_body(
+            &state,
+            &format!("/api/artists/{id}/pictures/manage"),
+            &admin,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(body.contains("Photographer"));
+        let (status, _) = call(
+            &state,
+            Method::DELETE,
+            &format!("/api/artists/{id}/pictures/{}", pictures[0].art_hash),
+            None,
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(art::path(&state.art_dir, &pictures[0].art_hash).is_none());
+    }
 
     #[tokio::test]
     async fn starting_work_twice_is_not_an_error() {

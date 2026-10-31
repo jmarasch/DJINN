@@ -17,7 +17,7 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use djinn_store::{ArtistInfo, ArtistPicture, Store};
+use djinn_store::{ArtistInfo, ArtistPicture, PictureSource, Store};
 use serde::Deserialize;
 use tokio::time::Instant;
 
@@ -37,12 +37,6 @@ const MUSICBRAINZ_INTERVAL: Duration = Duration::from_millis(1100);
 const MAX_RETRY_WAIT: Duration = Duration::from_secs(10);
 /// Genres kept per artist or album.
 const MAX_GENRES: usize = 5;
-/// Most pictures kept per artist for slideshows.
-const MAX_PICTURES: usize = 8;
-/// Slideshow pictures: this wide (TV size), from originals at least this
-/// big, so logos and small snapshots stay out.
-const PICTURE_WIDTH: &str = "1280";
-const PICTURE_MIN: (u64, u64) = (800, 450);
 /// Pictures downloaded at once.
 const PICTURES_AT_ONCE: usize = 4;
 /// Words in a Wikipedia description that mean the page is about a musician.
@@ -78,6 +72,39 @@ pub struct LookupOptions {
     /// Contact (email or website) sent to MusicBrainz. MusicBrainz lookups
     /// only run when this is set.
     pub musicbrainz_contact: Option<String>,
+    pub picture_options: PictureOptions,
+}
+
+#[derive(Clone, Debug)]
+pub struct PictureOptions {
+    pub max_count: usize,
+    /// Zero means no per-artist byte cap.
+    pub max_bytes: u64,
+    pub max_edge: u32,
+    pub min_width: u32,
+    pub min_height: u32,
+    pub deezer: bool,
+    pub wikipedia: bool,
+    pub commons: bool,
+    pub fanart_key: Option<String>,
+    pub audiodb_key: Option<String>,
+}
+
+impl Default for PictureOptions {
+    fn default() -> Self {
+        Self {
+            max_count: 8,
+            max_bytes: 20 * 1024 * 1024,
+            max_edge: 1920,
+            min_width: 800,
+            min_height: 450,
+            deezer: true,
+            wikipedia: true,
+            commons: true,
+            fanart_key: None,
+            audiodb_key: None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize)]
@@ -118,7 +145,10 @@ pub async fn lookup_artists(
         let mb = mb.found();
         // Wikidata only leads to photos and bios.
         let wikidata_id = mb.as_ref().and_then(|a| a.wikidata.as_deref());
-        let wikidata = match wikidata_id.filter(|_| options.photos_and_bios) {
+        let wikidata = match wikidata_id.filter(|_| {
+            options.photos_and_bios
+                && (options.picture_options.commons || options.picture_options.wikipedia)
+        }) {
             Some(id) => {
                 let found = services.wikidata(id).await;
                 failed |= found.failed();
@@ -130,14 +160,37 @@ pub async fn lookup_artists(
         let mut info = ArtistInfo::default();
         // Artists with a picture in their own folder don't need a photo.
         if options.photos_and_bios && !artist.has_folder_art {
-            match services.deezer_photo(&artist.name).await {
-                Fetch::Found(bytes) => info.photo = art::store(art_dir, &bytes).ok(),
+            let deezer = if options.picture_options.deezer {
+                services.deezer_photo(&artist.name).await
+            } else {
+                Fetch::NotFound
+            };
+            match deezer {
+                Fetch::Found(bytes) => {
+                    info.photo =
+                        art::prepare_artist_image(&bytes, 0, 0, options.picture_options.max_edge)
+                            .ok()
+                            .flatten()
+                            .and_then(|image| art::store(art_dir, &image).ok());
+                }
                 Fetch::NotFound => {
-                    if let Some(file) = wikidata.as_ref().and_then(|w| w.image.as_deref()) {
+                    if let Some(file) = wikidata
+                        .as_ref()
+                        .and_then(|w| w.image.as_deref())
+                        .filter(|_| options.picture_options.commons)
+                    {
                         let photo = services.commons_photo(file).await;
                         failed |= photo.failed();
                         if let Some(photo) = photo.found() {
-                            info.photo = art::store(art_dir, &photo.bytes).ok();
+                            info.photo = art::prepare_artist_image(
+                                &photo.bytes,
+                                0,
+                                0,
+                                options.picture_options.max_edge,
+                            )
+                            .ok()
+                            .flatten()
+                            .and_then(|image| art::store(art_dir, &image).ok());
                             info.photo_credit = Some(photo.credit);
                             info.photo_credit_url = Some(photo.page);
                         }
@@ -147,7 +200,7 @@ pub async fn lookup_artists(
             }
         }
         // MusicBrainz's link to the exact page beats searching by name.
-        if options.photos_and_bios {
+        if options.photos_and_bios && options.picture_options.wikipedia {
             let bio = match wikidata.as_ref().and_then(|w| w.enwiki.as_deref()) {
                 Some(title) => services.wikipedia_summary(title).await,
                 None => services.wikipedia_bio(&artist.name).await,
@@ -180,7 +233,17 @@ pub async fn lookup_artists(
             let mut cover = None;
             if let (Some(mb), true) = (&mb, album.needs_cover) {
                 match services.cover_art(&mb.mbid).await {
-                    Fetch::Found(bytes) => cover = art::store(art_dir, &bytes).ok(),
+                    Fetch::Found(bytes) => {
+                        cover = art::prepare_artist_image(
+                            &bytes,
+                            0,
+                            0,
+                            options.picture_options.max_edge,
+                        )
+                        .ok()
+                        .flatten()
+                        .and_then(|image| art::store(art_dir, &image).ok());
+                    }
                     Fetch::NotFound => {}
                     Fetch::Failed => failed = true,
                 }
@@ -203,18 +266,62 @@ pub async fn lookup_artists(
     Ok(summary)
 }
 
-/// Up to eight photos of an artist from their Wikimedia Commons category,
-/// TV-sized and with credits, stored in `art_dir`. `None` when Commons
-/// couldn't be reached (worth trying again later).
+/// Artist photos from enabled providers. A failed source is retried later.
 pub async fn artist_pictures(
-    category: &str,
+    source: &PictureSource,
     art_dir: &std::path::Path,
+    options: &PictureOptions,
 ) -> Result<Option<Vec<ArtistPicture>>, LibraryError> {
     let services = Services::new(None)?;
-    Ok(match services.category_photos(category, art_dir).await {
-        Fetch::Found(pictures) => Some(pictures),
-        Fetch::NotFound => Some(Vec::new()),
-        Fetch::Failed => None,
+    let mut pictures = Vec::new();
+    let mut failed = false;
+    if options.commons {
+        if let Some(category) = source.commons_category.as_deref() {
+            match services.category_photos(category, art_dir, options).await {
+                Fetch::Found(found) => pictures.extend(found),
+                Fetch::Failed => failed = true,
+                Fetch::NotFound => {}
+            }
+        }
+    }
+    if pictures.len() < options.max_count {
+        let candidates = if let (Some(mbid), Some(key)) = (&source.mbid, &options.fanart_key) {
+            services.fanart_photos(mbid, key).await
+        } else {
+            Fetch::NotFound
+        };
+        match candidates {
+            Fetch::Found(found) => {
+                services
+                    .store_source_photos(found, art_dir, options, &mut pictures)
+                    .await
+            }
+            Fetch::Failed => failed = true,
+            Fetch::NotFound => {}
+        }
+    }
+    if pictures.len() < options.max_count {
+        let candidates = if let Some(key) = &options.audiodb_key {
+            services
+                .audiodb_photos(&source.name, source.mbid.as_deref(), key)
+                .await
+        } else {
+            Fetch::NotFound
+        };
+        match candidates {
+            Fetch::Found(found) => {
+                services
+                    .store_source_photos(found, art_dir, options, &mut pictures)
+                    .await
+            }
+            Fetch::Failed => failed = true,
+            Fetch::NotFound => {}
+        }
+    }
+    Ok(if pictures.is_empty() && failed {
+        None
+    } else {
+        Some(pictures)
     })
 }
 
@@ -257,7 +364,168 @@ struct Services {
     musicbrainz: Option<MusicBrainz>,
 }
 
+struct SourcePhoto {
+    url: String,
+    credit: String,
+    page: String,
+    source: String,
+}
+
+fn trusted_image_url(url: &str, host: &str) -> bool {
+    reqwest::Url::parse(url)
+        .is_ok_and(|parsed| parsed.scheme() == "https" && parsed.host_str() == Some(host))
+}
+
 impl Services {
+    async fn fanart_photos(&self, mbid: &str, key: &str) -> Fetch<Vec<SourcePhoto>> {
+        let url = format!("https://webservice.fanart.tv/v3.2/music/{mbid}");
+        let Some(data) =
+            get_json::<serde_json::Value>(self.web.get(url).query(&[("api_key", key)])).await
+        else {
+            return Fetch::Failed;
+        };
+        let found = data["artistbackground"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|entry| {
+                let url = entry["url"].as_str()?;
+                trusted_image_url(url, "assets.fanart.tv").then_some((url, entry))
+            })
+            .map(|(url, entry)| SourcePhoto {
+                url: url.to_owned(),
+                credit: entry["copyright"]
+                    .as_str()
+                    .filter(|value| !value.eq_ignore_ascii_case("unknown"))
+                    .map(|value| format!("{value} via fanart.tv"))
+                    .unwrap_or_else(|| "fanart.tv contributor".into()),
+                page: entry["copyright_link"]
+                    .as_str()
+                    .filter(|link| link.starts_with("https://"))
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| format!("https://fanart.tv/artist/{mbid}/")),
+                source: "fanart".into(),
+            })
+            .collect();
+        Fetch::Found(found)
+    }
+
+    async fn audiodb_photos(
+        &self,
+        name: &str,
+        mbid: Option<&str>,
+        key: &str,
+    ) -> Fetch<Vec<SourcePhoto>> {
+        let url = format!("https://www.theaudiodb.com/api/v1/json/{key}/search.php");
+        let Some(data) =
+            get_json::<serde_json::Value>(self.web.get(url).query(&[("s", name)])).await
+        else {
+            return Fetch::Failed;
+        };
+        let Some(artists) = data["artists"].as_array() else {
+            return Fetch::NotFound;
+        };
+        let matches: Vec<_> = artists
+            .iter()
+            .filter(|artist| {
+                artist["strArtist"]
+                    .as_str()
+                    .is_some_and(|found| found.eq_ignore_ascii_case(name))
+                    && mbid.is_none_or(|id| {
+                        artist["strMusicBrainzID"]
+                            .as_str()
+                            .is_some_and(|found| found.eq_ignore_ascii_case(id))
+                    })
+            })
+            .collect();
+        let [artist] = matches.as_slice() else {
+            return Fetch::NotFound;
+        };
+        let page = artist["idArtist"]
+            .as_str()
+            .map(|id| format!("https://www.theaudiodb.com/artist/{id}"))
+            .unwrap_or_else(|| "https://www.theaudiodb.com/".into());
+        let found = [
+            "strArtistFanart",
+            "strArtistFanart2",
+            "strArtistFanart3",
+            "strArtistFanart4",
+            "strArtistWideThumb",
+            "strArtistThumb",
+        ]
+        .into_iter()
+        .filter_map(|field| artist[field].as_str())
+        .filter(|url| trusted_image_url(url, "www.theaudiodb.com"))
+        .map(|url| SourcePhoto {
+            url: url.to_owned(),
+            credit: "TheAudioDB contributor".into(),
+            page: page.clone(),
+            source: "audiodb".into(),
+        })
+        .collect();
+        Fetch::Found(found)
+    }
+
+    async fn store_source_photos(
+        &self,
+        candidates: Vec<SourcePhoto>,
+        art_dir: &std::path::Path,
+        options: &PictureOptions,
+        pictures: &mut Vec<ArtistPicture>,
+    ) {
+        let mut used: u64 = pictures
+            .iter()
+            .filter_map(|p| art::path(art_dir, &p.art_hash))
+            .filter_map(|p| std::fs::metadata(p).ok())
+            .map(|m| m.len())
+            .sum();
+        for photo in candidates {
+            if pictures.len() >= options.max_count {
+                break;
+            }
+            let Some(response) = send(self.web.get(&photo.url)).await else {
+                continue;
+            };
+            if response
+                .content_length()
+                .is_some_and(|n| n > 20 * 1024 * 1024)
+            {
+                continue;
+            }
+            let Ok(bytes) = response.bytes().await else {
+                continue;
+            };
+            if bytes.len() > 20 * 1024 * 1024 {
+                continue;
+            }
+            let Ok(Some(image)) = art::prepare_artist_image(
+                &bytes,
+                options.min_width,
+                options.min_height,
+                options.max_edge,
+            ) else {
+                continue;
+            };
+            if options.max_bytes > 0 && used.saturating_add(image.len() as u64) > options.max_bytes
+            {
+                continue;
+            }
+            if let Ok(hash) = art::store(art_dir, &image) {
+                if pictures.iter().any(|p| p.art_hash == hash) {
+                    continue;
+                }
+                used += image.len() as u64;
+                pictures.push(ArtistPicture {
+                    art_hash: hash,
+                    credit: photo.credit,
+                    credit_url: photo.page,
+                    source: photo.source,
+                    remote_url: None,
+                });
+            }
+        }
+    }
+
     fn new(contact: Option<&str>) -> Result<Self, LibraryError> {
         // reqwest is built without a default TLS provider; use ring.
         let _ = rustls::crypto::ring::default_provider().install_default();
@@ -500,8 +768,10 @@ impl Services {
         &self,
         category: &str,
         art_dir: &std::path::Path,
+        options: &PictureOptions,
     ) -> Fetch<Vec<ArtistPicture>> {
         let title = format!("Category:{category}");
+        let max_width = options.max_edge.to_string();
         let list: Option<CommonsQuery> = get_json(
             self.web
                 .get("https://commons.wikimedia.org/w/api.php")
@@ -513,7 +783,7 @@ impl Services {
                     ("gcmlimit", "50"),
                     ("prop", "imageinfo"),
                     ("iiprop", "extmetadata|url|mime|size"),
-                    ("iiurlwidth", PICTURE_WIDTH),
+                    ("iiurlwidth", max_width.as_str()),
                     ("format", "json"),
                 ]),
         )
@@ -527,18 +797,21 @@ impl Services {
             .into_iter()
             .filter_map(|p| p.imageinfo.into_iter().next())
             .filter(|i| {
-                i.mime == "image/jpeg" && i.width >= PICTURE_MIN.0 && i.height >= PICTURE_MIN.1
+                i.mime == "image/jpeg"
+                    && i.width >= u64::from(options.min_width)
+                    && i.height >= u64::from(options.min_height)
             })
             .filter_map(|i| {
                 let credit = i.credit();
                 Some((i.thumburl?, credit, i.descriptionurl?))
             })
-            .take(MAX_PICTURES)
+            .take(options.max_count)
             .collect();
         // A few at a time: the images come from Commons' file servers, not
         // its API, and the first request for a size makes it on the spot.
         let mut pictures = Vec::new();
         let mut failed = false;
+        let mut used = 0_u64;
         for chunk in candidates.chunks(PICTURES_AT_ONCE) {
             let mut jobs = tokio::task::JoinSet::new();
             for (i, (url, credit, page)) in chunk.iter().cloned().enumerate() {
@@ -561,11 +834,27 @@ impl Services {
                 if !art::mime_type(&bytes).starts_with("image/") {
                     continue;
                 }
-                if let Ok(art_hash) = art::store(art_dir, &bytes) {
+                let Ok(Some(image)) = art::prepare_artist_image(
+                    &bytes,
+                    options.min_width,
+                    options.min_height,
+                    options.max_edge,
+                ) else {
+                    continue;
+                };
+                if options.max_bytes > 0
+                    && used.saturating_add(image.len() as u64) > options.max_bytes
+                {
+                    continue;
+                }
+                if let Ok(art_hash) = art::store(art_dir, &image) {
+                    used += image.len() as u64;
                     pictures.push(ArtistPicture {
                         art_hash,
                         credit,
                         credit_url: page,
+                        source: "commons".into(),
+                        remote_url: None,
                     });
                 }
             }

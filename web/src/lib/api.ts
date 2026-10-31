@@ -30,6 +30,8 @@ import type {
   AlbumSort,
   ArtistDetail,
   ArtistPicture,
+  UnsplashChoice,
+  ArtCacheStatus,
   ArtistSummary,
   AudioDevice,
   CastList,
@@ -215,6 +217,20 @@ export const api = {
   /** Cover art; `size` (pixels) asks for a thumbnail. */
   /** Slideshow pictures; the first request for an artist fetches them, which takes a few seconds. */
   artistPictures: (id: number) => get<ArtistPicture[]>(`/artists/${id}/pictures`),
+  manageArtistPictures: (id: number) => get<ArtistPicture[]>(`/artists/${id}/pictures/manage`),
+  searchUnsplash: (id: number) => get<UnsplashChoice[]>(`/artists/${id}/pictures/unsplash`),
+  addUnsplashPicture: (id: number, photoId: string) => post<ArtistPicture[]>(`/artists/${id}/pictures/unsplash`, { photo_id: photoId }),
+  uploadArtistPicture: async (id: number, file: File, credit: string, creditUrl: string) => {
+    const query = new URLSearchParams({ credit, credit_url: creditUrl })
+    const res = await fetch(`/api/artists/${id}/pictures?${query}`, { method: 'POST', body: file })
+    const data = await res.json().catch(() => null)
+    if (!res.ok) throw new ApiError(res.status, data?.error ?? `Upload failed (${res.status})`)
+    return data as ArtistPicture[]
+  },
+  removeArtistPicture: (id: number, hash: string) => del<ArtistPicture[]>(`/artists/${id}/pictures/${hash}`),
+  orderArtistPictures: (id: number, hashes: string[]) => put<ArtistPicture[]>(`/artists/${id}/pictures/order`, hashes),
+  recheckArtistPictures: (id: number) => post<ArtistPicture[]>(`/artists/${id}/pictures/recheck`),
+  artCacheStatus: () => get<ArtCacheStatus>('/library/art-cache'),
   artUrl: (hash: string, size?: number) => `/api/art/${hash}${size ? `?size=${size}` : ''}`,
 
   queue: () => get<QueueItem[]>('/queue'),

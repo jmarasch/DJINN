@@ -66,7 +66,7 @@ impl Store {
     /// artist.
     pub async fn picture_source(&self, artist_id: i64) -> Result<Option<PictureSource>> {
         let source = sqlx::query_as(
-            "SELECT commons_category, pictures_checked_at IS NOT NULL AS checked
+            "SELECT name, mbid, commons_category, pictures_checked_at IS NOT NULL AS checked
              FROM artists WHERE id = ?",
         )
         .bind(artist_id)
@@ -78,7 +78,7 @@ impl Store {
     /// An artist's slideshow pictures, in order.
     pub async fn artist_pictures(&self, artist_id: i64) -> Result<Vec<ArtistPicture>> {
         let pictures = sqlx::query_as(
-            "SELECT art_hash, credit, credit_url FROM artist_pictures
+            "SELECT art_hash, credit, credit_url, source, remote_url FROM artist_pictures
              WHERE artist_id = ? ORDER BY position",
         )
         .bind(artist_id)
@@ -93,21 +93,30 @@ impl Store {
         artist_id: i64,
         pictures: &[ArtistPicture],
     ) -> Result<()> {
+        let retained = sqlx::query_as::<_, ArtistPicture>(
+            "SELECT art_hash, credit, credit_url, source, remote_url FROM artist_pictures
+             WHERE artist_id = ? AND source IN ('manual', 'unsplash') ORDER BY position",
+        )
+        .bind(artist_id)
+        .fetch_all(&self.pool)
+        .await?;
         let mut tx = self.pool.begin().await?;
         sqlx::query("DELETE FROM artist_pictures WHERE artist_id = ?")
             .bind(artist_id)
             .execute(&mut *tx)
             .await?;
-        for (position, picture) in (0_i64..).zip(pictures) {
+        for (position, picture) in (0_i64..).zip(retained.iter().chain(pictures)) {
             sqlx::query(
-                "INSERT INTO artist_pictures (artist_id, position, art_hash, credit, credit_url)
-                 VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO artist_pictures (artist_id, position, art_hash, credit, credit_url, source, remote_url)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(artist_id)
             .bind(position)
             .bind(&picture.art_hash)
             .bind(&picture.credit)
             .bind(&picture.credit_url)
+            .bind(&picture.source)
+            .bind(&picture.remote_url)
             .execute(&mut *tx)
             .await?;
         }
@@ -117,6 +126,112 @@ impl Store {
             .execute(&mut *tx)
             .await?;
         tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn add_artist_picture(&self, artist_id: i64, picture: &ArtistPicture) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO artist_pictures (artist_id, position, art_hash, credit, credit_url, source, remote_url)
+             VALUES (?, coalesce((SELECT max(position) + 1 FROM artist_pictures WHERE artist_id = ?), 0), ?, ?, ?, ?, ?)",
+        )
+        .bind(artist_id)
+        .bind(artist_id)
+        .bind(&picture.art_hash)
+        .bind(&picture.credit)
+        .bind(&picture.credit_url)
+        .bind(&picture.source)
+        .bind(&picture.remote_url)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn remove_artist_picture(&self, artist_id: i64, hash: &str) -> Result<bool> {
+        let removed =
+            sqlx::query("DELETE FROM artist_pictures WHERE artist_id = ? AND art_hash = ?")
+                .bind(artist_id)
+                .bind(hash)
+                .execute(&self.pool)
+                .await?;
+        Ok(removed.rows_affected() > 0)
+    }
+
+    pub async fn reorder_artist_pictures(&self, artist_id: i64, hashes: &[String]) -> Result<bool> {
+        let existing = self.artist_pictures(artist_id).await?;
+        if existing.len() != hashes.len()
+            || !existing
+                .iter()
+                .all(|picture| hashes.contains(&picture.art_hash))
+        {
+            return Ok(false);
+        }
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("DELETE FROM artist_pictures WHERE artist_id = ?")
+            .bind(artist_id)
+            .execute(&mut *tx)
+            .await?;
+        for (position, hash) in (0_i64..).zip(hashes) {
+            let Some(picture) = existing.iter().find(|picture| picture.art_hash == *hash) else {
+                return Ok(false);
+            };
+            sqlx::query(
+                "INSERT INTO artist_pictures (artist_id, position, art_hash, credit, credit_url, source, remote_url)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)",
+            )
+            .bind(artist_id)
+            .bind(position)
+            .bind(&picture.art_hash)
+            .bind(&picture.credit)
+            .bind(&picture.credit_url)
+            .bind(&picture.source)
+            .bind(&picture.remote_url)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(true)
+    }
+
+    pub async fn art_hash_in_use(&self, hash: &str) -> Result<bool> {
+        let used: i64 = sqlx::query_scalar(
+            "SELECT EXISTS (
+                SELECT 1 FROM artist_pictures WHERE art_hash = ?
+                UNION ALL SELECT 1 FROM tracks WHERE art_hash = ? OR embedded_art = ? OR folder_art = ? OR artist_art = ?
+                UNION ALL SELECT 1 FROM albums WHERE art_hash = ? OR online_art_hash = ?
+                UNION ALL SELECT 1 FROM artists WHERE art_hash = ? OR online_art_hash = ?
+             )",
+        )
+        .bind(hash).bind(hash).bind(hash).bind(hash).bind(hash)
+        .bind(hash).bind(hash).bind(hash).bind(hash)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(used != 0)
+    }
+
+    pub async fn recheck_artist_pictures(&self, artist_id: i64) -> Result<()> {
+        sqlx::query("UPDATE artists SET pictures_checked_at = NULL WHERE id = ?")
+            .bind(artist_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn recheck_all_artist_pictures(&self) -> Result<()> {
+        sqlx::query("UPDATE artists SET pictures_checked_at = NULL")
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Source changes discard online portraits and bios so the next lookup
+    /// reflects the newly enabled providers.
+    pub async fn clear_online_artist_visuals(&self) -> Result<()> {
+        sqlx::query(
+            "UPDATE artists SET online_art_hash = NULL, photo_credit = NULL,
+                    photo_credit_url = NULL, bio = NULL, bio_url = NULL, info_checked_at = NULL",
+        )
+        .execute(&self.pool)
+        .await?;
         Ok(())
     }
 

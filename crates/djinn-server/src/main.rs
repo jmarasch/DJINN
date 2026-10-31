@@ -167,6 +167,10 @@ async fn run() -> anyhow::Result<()> {
         backup::finish(&store, &config.library.roots, restored).await?;
     }
     tracing::info!(path = %config.database.path.display(), "database ready");
+    let picture_settings = library_api::PictureSettings::load(&store).await?;
+    djinn_library::art::set_cache_limit(
+        (picture_settings.cache_mb as u64).saturating_mul(1024 * 1024),
+    );
     let removed = store.delete_expired_sessions().await?;
     if removed > 0 {
         tracing::debug!(removed, "expired sessions cleaned up");

@@ -5,6 +5,7 @@
   import RadioButton from '../lib/RadioButton.svelte'
   import { api } from '../lib/api'
   import ArtistSlideshow from '../lib/ArtistSlideshow.svelte'
+  import ArtistMediaManager from '../lib/ArtistMediaManager.svelte'
   import Art from '../lib/Art.svelte'
   import Icon from '../lib/Icon.svelte'
   import SortChoice from '../lib/SortChoice.svelte'
@@ -19,9 +20,11 @@
   let error = $state('')
   let bioOpen = $state(false)
   let editing = $state(false)
+  let managing = $state(false)
 
   let similar = $state<ArtistSummary[]>([])
   let pictures = $state<ArtistPicture[]>([])
+  let pictureShown = $state(0)
 
   $effect(() => {
     artist = null
@@ -76,31 +79,39 @@
   ]
 </script>
 
-<button class="back" onclick={() => history.back()}><Icon name="back" /> Back</button>
-
 {#if error}
   <p class="error">{error}</p>
 {:else if artist}
-  {#if pictures.length}
-    <div class="banner"><ArtistSlideshow {pictures} src={(hash) => api.artUrl(hash)} /></div>
-  {/if}
-  <header>
-    <Art hash={artist.art_hash} size={140} round={999} letter={artist.name.charAt(0).toUpperCase()} />
-    <div class="heading">
-      <h1>{artist.name}</h1>
-      {#if artist.genres}
-        <div class="genres"><GenreChips genres={artist.genres.split(', ')} /></div>
-      {/if}
-      <div class="admin-actions">
-        <RadioButton seed={{ kind: 'artist', id: artist.id }} />
-        <QueueAll kind="artist" refId={artist.id} />
-        <AddToPlaylist kind="artist" refId={artist.id} label={artist.name} />
-        {#if isAdmin()}
-          <button class="pill" onclick={() => (editing = true)}><Icon name="edit" size={18} /> Edit artist</button>
+  <div class="hero" class:with-picture={pictures.length > 0}>
+    {#if pictures.length}
+      <div class="background"><ArtistSlideshow {pictures} src={(picture) => picture.remote_url ?? api.artUrl(picture.art_hash)} credit={false} bind:shown={pictureShown} /></div>
+      <div class="shade"></div>
+    {/if}
+    <header>
+      <Art hash={artist.art_hash} size={140} round={999} letter={artist.name.charAt(0).toUpperCase()} />
+      <div class="heading">
+        <h1>{artist.name}</h1>
+        {#if artist.genres}
+          <div class="genres"><GenreChips genres={artist.genres.split(', ')} /></div>
         {/if}
+        <div class="admin-actions">
+          <RadioButton seed={{ kind: 'artist', id: artist.id }} />
+          <QueueAll kind="artist" refId={artist.id} />
+          <AddToPlaylist kind="artist" refId={artist.id} label={artist.name} />
+          {#if isAdmin()}
+            <button class="pill" onclick={() => (editing = true)}><Icon name="edit" size={18} /> Edit artist</button>
+            <button class="pill" onclick={() => (managing = true)}>Manage pictures</button>
+          {/if}
+        </div>
       </div>
-    </div>
-  </header>
+    </header>
+  </div>
+  {#if pictures[pictureShown]}
+    {@const picture = pictures[pictureShown]}
+    <p class="credit small muted">
+      Slideshow photo: {#if picture.credit_url}<a href={picture.credit_url} target="_blank" rel="noopener noreferrer">{picture.credit}</a>{:else}{picture.credit}{/if}{picture.source === 'commons' ? ', Wikimedia Commons' : ''}
+    </p>
+  {/if}
   {#if artist.photo_credit}
     <p class="credit small muted">
       Photo: {#if artist.photo_credit_url}<a href={artist.photo_credit_url} target="_blank" rel="noopener"
@@ -187,15 +198,54 @@
       onsaved={() => (editing = false)}
     />
   {/if}
+  {#if managing}
+    <ArtistMediaManager
+      {id}
+      name={artist.name}
+      onclose={() => (managing = false)}
+      onchange={() => api.artistPictures(id).then((list) => (pictures = list)).catch(() => {})}
+    />
+  {/if}
 {/if}
 
 <style>
-  .banner {
-    height: clamp(180px, 42vw, 340px);
-    margin: 0 0 16px;
+  .hero {
+    position: relative;
     overflow: hidden;
     border-radius: 16px;
-    background: var(--surface-2);
+  }
+
+  .hero.with-picture {
+    min-height: 250px;
+    display: flex;
+    align-items: end;
+    padding: 26px 14px 12px;
+    background: #14111f;
+    color: #fff;
+  }
+
+  .background,
+  .shade {
+    position: absolute;
+    inset: 0;
+  }
+
+  .background {
+    opacity: 0.45;
+  }
+
+  .shade {
+    background: linear-gradient(to bottom, rgb(10 8 16 / 0.15), rgb(10 8 16 / 0.8));
+    pointer-events: none;
+  }
+
+  .hero header {
+    position: relative;
+    z-index: 1;
+  }
+
+  .hero.with-picture h1 {
+    color: #fff;
   }
 
   .admin-actions {

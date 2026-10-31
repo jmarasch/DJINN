@@ -11,7 +11,7 @@
     shown = $bindable(0),
   }: {
     pictures: ArtistPicture[]
-    src: (hash: string) => string
+    src: (picture: ArtistPicture) => string
     seconds?: number
     /** Show the credit inside; off when the parent shows it elsewhere. */
     credit?: boolean
@@ -37,10 +37,14 @@
 {#if pictures.length}
   <div class="slideshow">
     {#each pictures as picture, i (picture.art_hash)}
-      <img src={src(picture.art_hash)} alt="" class:shown={i === shown} loading={i === 0 ? 'eager' : 'lazy'} />
+      <img src={src(picture)} alt="" class:shown={i === shown} loading={i === 0 ? 'eager' : 'lazy'} />
     {/each}
     {#if credit && current}
-      <a class="credit" href={current.credit_url} target="_blank" rel="noopener">{current.credit}, Wikimedia Commons</a>
+      {#if current.credit_url}
+        <a class="credit" href={current.credit_url} target="_blank" rel="noopener">{current.credit}{current.source === 'commons' ? ', Wikimedia Commons' : ''}</a>
+      {:else}
+        <span class="credit">{current.credit}</span>
+      {/if}
     {/if}
   </div>
 {/if}

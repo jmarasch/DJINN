@@ -127,12 +127,18 @@ pub struct ArtistPicture {
     pub credit: String,
     /// Where it came from (its page on Wikimedia Commons).
     pub credit_url: String,
+    /// "commons" or "manual".
+    pub source: String,
+    /// Direct provider image URL when local caching is not permitted.
+    pub remote_url: Option<String>,
 }
 
 /// Where an artist's slideshow pictures come from, and whether they were
 /// fetched already.
 #[derive(Clone, Debug, PartialEq, FromRow)]
 pub struct PictureSource {
+    pub name: String,
+    pub mbid: Option<String>,
     pub commons_category: Option<String>,
     pub checked: bool,
 }
