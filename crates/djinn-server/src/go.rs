@@ -240,6 +240,7 @@ const ROUTES: &[(Method, &str, Access)] = &[
     (Method::POST, "/api/auth/logout", Access::Public),
     (Method::GET, "/api/me", Access::Setup),
     (Method::POST, "/api/me/password", Access::Setup),
+    (Method::POST, "/api/me/username", Access::Setup),
     (Method::GET, "/api/me/two-step", Access::Setup),
     (Method::POST, "/api/me/two-step/start", Access::Setup),
     (Method::POST, "/api/me/two-step/confirm", Access::Setup),
@@ -874,6 +875,10 @@ mod tests {
         assert_eq!(access(&Method::POST, "/api/auth/bootstrap"), None);
         assert_eq!(access(&Method::POST, "/api/auth/guest"), None);
         assert_eq!(access(&Method::GET, "/api/me"), Some(Access::Setup));
+        assert_eq!(
+            access(&Method::POST, "/api/me/username"),
+            Some(Access::Setup)
+        );
     }
 
     /// Sends a request to the GO port; returns status, body and any cookie.

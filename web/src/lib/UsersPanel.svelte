@@ -22,7 +22,9 @@
   let roles = $state<AccountRole[]>([])
   let invites = $state<Invite[]>([])
   let signup = $state<SignupSettings | null>(null)
-  let newUser = $state({ username: '', password: '', access: 'role:1' })
+  let newUser = $state({ username: '', password: '', confirm: '', access: 'role:1' })
+  let editingUsername = $state<User | null>(null)
+  let usernameDraft = $state('')
   let newInvite = $state({ role_id: 1, note: '', uses: '1', days: '7' })
   /** The link for the invite just made; shown once. */
   let inviteLink = $state<string | null>(null)
@@ -100,6 +102,26 @@
     if (password) await attempt(() => api.updateUser(user.id, { password }), `Password changed for ${user.username}`)
   }
 
+  function editUsername(user: User) {
+    editingUsername = user
+    usernameDraft = user.username
+  }
+
+  async function saveUsername(e: SubmitEvent) {
+    e.preventDefault()
+    if (!editingUsername) return
+    const user = editingUsername
+    const username = usernameDraft.trim()
+    if (username === user.username) {
+      editingUsername = null
+      return
+    }
+    if (await attempt(() => api.updateUser(user.id, { username }), `Username changed to ${username}`)) {
+      users = users.map((u) => (u.id === user.id ? { ...u, username } : u))
+      editingUsername = null
+    }
+  }
+
   async function resetTwoStep(user: User) {
     if (!confirm(`Turn off two-step sign-in for ${user.username}? Do this when they've lost their phone and their recovery codes.`)) return
     if (await attempt(() => api.turnOffUserTwoStep(user.id), `${user.username} signs in with just a password now`)) {
@@ -114,6 +136,10 @@
 
   async function addUser(e: SubmitEvent) {
     e.preventDefault()
+    if (newUser.password !== newUser.confirm) {
+      toast('Passwords do not match', true)
+      return
+    }
     const admin = newUser.access === 'admin'
     const roleId = admin ? 1 : Number(newUser.access.slice(5))
     const ok = await attempt(
@@ -121,7 +147,7 @@
       `Created ${newUser.username}`,
     )
     if (ok) {
-      newUser = { username: '', password: '', access: newUser.access }
+      newUser = { username: '', password: '', confirm: '', access: newUser.access }
       ;[users, roles] = await Promise.all([api.users(), api.roles()])
     }
   }
@@ -278,6 +304,7 @@
             >
               {#each roles as role (role.id)}<option value="role:{role.id}">{role.name}</option>{/each}
             </select>
+            <button class="small-button" onclick={() => editUsername(user)}>Change username</button>
             <button class="primary small-button" onclick={() => approve(user)}>Approve</button>
             <button class="small-button" onclick={() => deny(user)}>Turn down</button>
           </div>
@@ -315,6 +342,9 @@
             </label>
           {/if}
           <button class="small-button" onclick={() => showDevices(user)}>Devices</button>
+          {#if user.id !== app.me?.id}
+            <button class="small-button" onclick={() => editUsername(user)}>Change username</button>
+          {/if}
           <button class="small-button" onclick={() => resetPassword(user)}>Reset password</button>
           {#if user.two_step && user.id !== app.me?.id}
             <button class="small-button" onclick={() => resetTwoStep(user)}>Turn off two-step</button>
@@ -334,8 +364,9 @@
     </div>
   {/each}
   <form class="new-user" onsubmit={addUser}>
-    <input placeholder="Username" bind:value={newUser.username} autocapitalize="none" required />
-    <input placeholder="Password" type="password" bind:value={newUser.password} minlength="8" required />
+    <input placeholder="Username" bind:value={newUser.username} maxlength="32" autocapitalize="none" required />
+    <input placeholder="Password" type="password" bind:value={newUser.password} autocomplete="new-password" minlength="8" required />
+    <input placeholder="Password again" type="password" bind:value={newUser.confirm} autocomplete="new-password" required />
     <select bind:value={newUser.access} aria-label="Role for the new account">
       {#each roles as role (role.id)}<option value="role:{role.id}">{role.name}</option>{/each}
       <option value="admin">Admin</option>
@@ -500,6 +531,18 @@
   </Sheet>
 {/if}
 
+{#if editingUsername}
+  <Sheet title="Change username" onclose={() => (editingUsername = null)}>
+    <form class="username-form" onsubmit={saveUsername}>
+      <label>
+        New username for {editingUsername.username}
+        <input bind:value={usernameDraft} maxlength="32" autocomplete="off" autocapitalize="none" required />
+      </label>
+      <button class="primary">Save username</button>
+    </form>
+  </Sheet>
+{/if}
+
 {#if devicesFor}
   <Sheet title="{devicesFor.username}'s devices" onclose={() => (devicesFor = null)}>
     {#each devices as device (device.id)}
@@ -581,6 +624,17 @@
   .invite-form input {
     min-width: 0;
   }
+
+  .new-user > :first-child,
+  .new-user > select,
+  .new-user > button { grid-column: 1 / -1; }
+
+  .username-form {
+    display: grid;
+    gap: 12px;
+  }
+
+  .username-form input { width: 100%; }
 
   .new-link {
     display: grid;

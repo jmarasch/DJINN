@@ -125,6 +125,8 @@ export const api = {
   login: (username: string, password: string) => post<User | NeedsCode>('/auth/login', { username, password }),
   finishTwoStep: (ticket: string, code: string) => post<User>('/auth/two-step', { ticket, code }),
   changePassword: (current: string, next: string) => post<void>('/me/password', { current, new: next }),
+  changeUsername: (username: string, currentPassword: string) =>
+    post<User>('/me/username', { username, current_password: currentPassword }),
   twoStep: () => get<TwoStepStatus>('/me/two-step'),
   startTwoStep: () => post<TwoStepSetup>('/me/two-step/start'),
   confirmTwoStep: (code: string) => post<{ recovery_codes: string[] }>('/me/two-step/confirm', { code }),
@@ -298,7 +300,7 @@ export const api = {
   deleteUser: (id: number) => del<void>(`/users/${id}`),
   updateUser: (
     id: number,
-    changes: { unlimited?: boolean; role?: Role; role_id?: number; status?: AccountStatus; password?: string },
+    changes: { username?: string; unlimited?: boolean; role?: Role; role_id?: number; status?: AccountStatus; password?: string },
   ) => patch<void>(`/users/${id}`, changes),
   roles: () => get<AccountRole[]>('/roles'),
   createRole: (role: Omit<AccountRole, 'id' | 'builtin' | 'accounts'>) => post<AccountRole>('/roles', role),

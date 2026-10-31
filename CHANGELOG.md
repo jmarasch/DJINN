@@ -15,6 +15,7 @@
 - Added a 12-band equalizer in Admin > Audio, with vertical sliders, editable presets, an output level control, and a flat reset. Soft peak limiting keeps boosts from lowering the whole mix.
 - Placed the Albums Show and Sort by filters side by side when space allows.
 - Kept artist song lists above the photo fade and added a subtle full-page album art background to album pages.
+- Added username changes in Your account and Admin > Users, and a second password field when admins add accounts.
 
 ### Artist images
 

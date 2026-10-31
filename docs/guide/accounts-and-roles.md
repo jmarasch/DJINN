@@ -2,7 +2,7 @@
 
 Everything here is under Admin > **Users**. The same accounts work for the
 party and for [DJINN GO](djinn-go.md), your personal listening. Everyone can
-change their own password, turn on two-step sign-in and see where they're
+change their own username and password, turn on two-step sign-in and see where they're
 signed in under **Your account** (on the Playing tab).
 
 ## Roles
@@ -36,7 +36,7 @@ Deleting a role moves its accounts to Listener.
 
 There are three ways in, and you can use any of them:
 
-- **Add them yourself:** under Accounts, type a username and password, pick a
+- **Add them yourself:** under Accounts, type a username and password twice, pick a
   role, and tap **Add account**.
 - **Invite links:** under Invite links, pick a role, how many times the link
   can be used and for how long, and tap **Make invite link**. Copy the link
@@ -62,6 +62,10 @@ hard to guess.
 
 Each account has:
 
+- **Change username:** give the account a new sign-in name. The old name stops
+  working, but signed-in devices stay signed in. Phone apps need the new
+  username. Everyone can also change
+  their own username under **Your account** after entering their password.
 - **Role:** change it from the list; pick Admin to make someone an admin.
 - **No limit:** this person's party requests aren't limited.
 - **Devices:** where they're signed in, with the browser, address and when

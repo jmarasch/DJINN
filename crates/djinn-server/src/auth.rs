@@ -18,8 +18,8 @@ use axum::response::{AppendHeaders, IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use djinn_store::{
-    now_ms, AccountStatus, CreateUserError, GuestSummary, NewSignIn, Permissions, Role,
-    SignupError, Store, User, LISTENER_ROLE,
+    now_ms, AccountStatus, CreateUserError, GuestSummary, NewSignIn, Permissions, RenameUserError,
+    Role, SignupError, Store, User, LISTENER_ROLE,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -142,6 +142,7 @@ pub fn router() -> Router<AppState> {
         .route("/auth/login", post(login))
         .route("/auth/two-step", post(finish_two_step))
         .route("/me/password", post(change_password))
+        .route("/me/username", post(change_username))
         .route("/auth/logout", post(logout))
         .route("/auth/bootstrap", get(bootstrap_status).post(bootstrap))
         .route("/auth/mode", get(mode))
@@ -551,6 +552,52 @@ async fn change_password(
     ))
 }
 
+#[derive(Deserialize)]
+struct NewUsername {
+    username: String,
+    current_password: String,
+}
+
+/// Changes your own sign-in name after checking your password. Existing
+/// sessions stay attached to the account ID.
+async fn change_username(
+    CurrentUser(user): CurrentUser,
+    State(state): State<AppState>,
+    Json(body): Json<NewUsername>,
+) -> ApiResult<Json<Me>> {
+    if user.role == Role::Guest {
+        return Err(ApiError::bad_request("guests don't have usernames"));
+    }
+    let username = validate_username(&body.username)?;
+    let matches_password = username.to_lowercase() == body.current_password.to_lowercase();
+    if !check_own_password(&state, &user, body.current_password).await? {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "your current password is wrong",
+        ));
+    }
+    if matches_password {
+        return Err(ApiError::bad_request(
+            "username and password cannot be the same",
+        ));
+    }
+    if username != user.username {
+        rename_user(&state, user.id, &username).await?;
+        tracing::info!(old = %user.username, new = %username, "username changed");
+    }
+    let updated = User { username, ..user };
+    Ok(Json(me_for(&state, updated).await?))
+}
+
+async fn rename_user(state: &AppState, id: i64, username: &str) -> ApiResult<()> {
+    match state.store.set_username(id, username).await {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(ApiError::not_found()),
+        Err(RenameUserError::Taken) => Err(ApiError::conflict("username is already taken")),
+        Err(RenameUserError::Store(e)) => Err(e.into()),
+    }
+}
+
 async fn logout(State(state): State<AppState>, headers: HeaderMap) -> ApiResult<impl IntoResponse> {
     if let Some(token) = session_token(&headers) {
         state.store.delete_session(&hash_token(&token)).await?;
@@ -885,6 +932,8 @@ async fn list_guests(
 
 #[derive(Deserialize)]
 struct UserUpdate {
+    /// New sign-in name.
+    username: Option<String>,
     unlimited: Option<bool>,
     role: Option<Role>,
     /// Moves the account to another role (see `roles`).
@@ -896,18 +945,32 @@ struct UserUpdate {
 }
 
 /// Edits a user: request limit exemption, admin or not, role, approval,
-/// turning off, or password. Guests only have the exemption.
+/// turning off, username, or password. Guests only have the exemption.
 async fn update_user(
     AdminUser(admin): AdminUser,
     State(state): State<AppState>,
     Path(id): Path<i64>,
     Json(body): Json<UserUpdate>,
 ) -> ApiResult<StatusCode> {
-    let user = state
+    let mut user = state
         .store
         .user(id)
         .await?
         .ok_or_else(ApiError::not_found)?;
+    if let Some(name) = body.username {
+        if user.role == Role::Guest {
+            return Err(ApiError::bad_request("guests don't have usernames"));
+        }
+        if id == admin.id {
+            return Err(ApiError::bad_request("change your name under Your account"));
+        }
+        let username = validate_username(&name)?;
+        if username != user.username {
+            rename_user(&state, id, &username).await?;
+            tracing::info!(old = %user.username, new = %username, "admin changed username");
+            user.username = username;
+        }
+    }
     if let Some(role) = body.role.filter(|&r| r != user.role) {
         if user.role == Role::Guest || role == Role::Guest {
             return Err(ApiError::bad_request(
@@ -1179,6 +1242,61 @@ mod tests {
         let (status, _) = call(&state, Method::POST, "/api/users", Some(new), Some(&admin)).await;
         assert_eq!(status, StatusCode::CONFLICT);
 
+        let rename = r#"{"username":"host","current_password":"wrong-one"}"#;
+        let (status, _) = call(
+            &state,
+            Method::POST,
+            "/api/me/username",
+            Some(rename),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let rename = r#"{"username":"GUEST1","current_password":"hunter22"}"#;
+        let (status, _) = call(
+            &state,
+            Method::POST,
+            "/api/me/username",
+            Some(rename),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        let rename = r#"{"username":"hunter22","current_password":"hunter22"}"#;
+        let (status, _) = call(
+            &state,
+            Method::POST,
+            "/api/me/username",
+            Some(rename),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        let rename = r#"{"username":"host","current_password":"hunter22"}"#;
+        let (status, _) = call(
+            &state,
+            Method::POST,
+            "/api/me/username",
+            Some(rename),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(state
+            .store
+            .user_credentials("admin")
+            .await
+            .unwrap()
+            .is_none());
+        assert!(state
+            .store
+            .user_credentials("host")
+            .await
+            .unwrap()
+            .is_some());
+        let (status, _) = call(&state, Method::GET, "/api/me", None, Some(&admin)).await;
+        assert_eq!(status, StatusCode::OK, "renaming keeps the current session");
+
         let wrong = r#"{"username":"guest1","password":"wrong-one"}"#;
         let (status, _) = call(&state, Method::POST, "/api/auth/login", Some(wrong), None).await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
@@ -1253,6 +1371,39 @@ mod tests {
             &state,
             Method::PATCH,
             &patch(me.id),
+            Some(r#"{"username":"newboss"}"#),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::BAD_REQUEST,
+            "admins use their own account page"
+        );
+        let (status, _) = call(
+            &state,
+            Method::PATCH,
+            &patch(dj.id),
+            Some(r#"{"username":"BOSS"}"#),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        let (status, _) = call(
+            &state,
+            Method::PATCH,
+            &patch(dj.id),
+            Some(r#"{"username":"dj2"}"#),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        assert!(state.store.user_credentials("dj").await.unwrap().is_none());
+
+        let (status, _) = call(
+            &state,
+            Method::PATCH,
+            &patch(me.id),
             Some(r#"{"role":"user"}"#),
             Some(&admin),
         )
@@ -1285,7 +1436,7 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::NO_CONTENT);
-        let login = r#"{"username":"dj","password":"longenough"}"#;
+        let login = r#"{"username":"dj2","password":"longenough"}"#;
         let (status, _) = call(&state, Method::POST, "/api/auth/login", Some(login), None).await;
         assert_eq!(status, StatusCode::OK, "new password works");
     }
