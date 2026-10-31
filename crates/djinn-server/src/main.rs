@@ -114,13 +114,15 @@ async fn run() -> anyhow::Result<()> {
     let has_console = djinn_platform::console::attach_parent_console();
     let cli = Cli::parse();
 
-    // Without a console (Windows release build started from Explorer or the
-    // Start menu), logs go to a file.
-    let log_file = cli
-        .log_file
-        .clone()
-        .or_else(|| (!has_console).then(default_log_file).flatten());
-    init_logging(log_file.as_deref())?;
+    // On Windows logs always go to a file (with no console, started from
+    // Explorer or the Start menu, there's nowhere else), and to the console
+    // as well when started from one. Elsewhere, to the console.
+    let log_file = cli.log_file.clone().or_else(|| {
+        (cfg!(windows) || !has_console)
+            .then(default_log_file)
+            .flatten()
+    });
+    init_logging(log_file.as_deref(), has_console && cli.log_file.is_none())?;
     cpu::log();
     if !has_console {
         // Otherwise loading the listening model flashes a console window.
@@ -424,13 +426,14 @@ async fn bind(addr: std::net::SocketAddr) -> std::io::Result<tokio::net::TcpList
     }
 }
 
-fn init_logging(file: Option<&std::path::Path>) -> anyhow::Result<()> {
+/// Logs to `file` and/or the `console`, and always to memory.
+fn init_logging(file: Option<&std::path::Path>, console: bool) -> anyhow::Result<()> {
     use tracing_subscriber::fmt::time::ChronoLocal;
     use tracing_subscriber::prelude::*;
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(LOG_DEFAULT));
     // Times in this computer's time zone, with the offset.
     let local = ChronoLocal::rfc_3339;
-    let out = match file {
+    let to_file = match file {
         Some(path) => {
             if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
                 std::fs::create_dir_all(dir)?;
@@ -441,14 +444,17 @@ fn init_logging(file: Option<&std::path::Path>) -> anyhow::Result<()> {
                 .open(path)
                 .with_context(|| format!("cannot open log file {}", path.display()))?;
             logs::set_file(path);
-            tracing_subscriber::fmt::layer()
+            let layer = tracing_subscriber::fmt::layer()
                 .with_timer(local())
                 .with_ansi(false)
                 .with_writer(std::sync::Mutex::new(file))
-                .boxed()
+                .boxed();
+            Some(layer)
         }
-        None => tracing_subscriber::fmt::layer().with_timer(local()).boxed(),
+        None => None,
     };
+    let to_console = (console || to_file.is_none())
+        .then(|| tracing_subscriber::fmt::layer().with_timer(local()).boxed());
     // The latest lines also stay in memory, for Admin > System.
     let recent = tracing_subscriber::fmt::layer()
         .with_timer(local())
@@ -456,7 +462,8 @@ fn init_logging(file: Option<&std::path::Path>) -> anyhow::Result<()> {
         .with_writer(|| logs::Recent);
     tracing_subscriber::registry()
         .with(filter)
-        .with(out)
+        .with(to_file)
+        .with(to_console)
         .with(recent)
         .init();
     Ok(())

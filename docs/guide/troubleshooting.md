@@ -48,6 +48,20 @@ since Bluetooth lags) until they line up. See
 - One artist split into two, or two artists merged? See
   [Artist names that are never split](rules.md#artist-names-that-are-never-split).
 
+## The computer is busy after adding a lot of music
+
+Some background work is normal after a big library change: DJINN reads each
+new song, and (when they're switched on) analyzes how it sounds and lets the
+AI listen. Admin > Library shows each step and how far along it is.
+
+On Windows, **Windows Security** also checks every song the first time
+DJINN reads it, and can use more of the processor than DJINN itself during
+the first library check. It settles down once the check is done. To skip
+that check for your music, add the music folders as exclusions in Windows
+Security > Virus & threat protection > Manage settings > Exclusions (this
+needs an administrator). Don't exclude the folder for submitted music if
+you accept uploads from other people: those files should still be checked.
+
 ## Windows says "Windows protected your PC"
 
 DJINN isn't code signed. Click **More info**, then **Run anyway**.

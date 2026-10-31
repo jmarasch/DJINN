@@ -253,6 +253,9 @@ pub async fn start_analysis(state: &AppState) {
         let version = djinn_engine::FEATURES_VERSION;
         let started = std::time::Instant::now();
         let mut analyzed = 0usize;
+        // Songs that couldn't be decoded (or are too short); they're marked
+        // done too, so they aren't tried again.
+        let mut unreadable = 0usize;
         loop {
             let batch = match state.store.tracks_to_analyze(version, ANALYSIS_BATCH).await {
                 Ok(batch) if !batch.is_empty() => batch,
@@ -285,6 +288,7 @@ pub async fn start_analysis(state: &AppState) {
                         ),
                         Err(e) => {
                             tracing::debug!(path = %path.display(), error = %e, "cannot analyze song");
+                            unreadable += 1;
                             (None, None)
                         }
                     };
@@ -310,7 +314,8 @@ pub async fn start_analysis(state: &AppState) {
         state.scan.loudness_running.store(false, Ordering::Release);
         if analyzed > 0 {
             tracing::info!(
-                songs = analyzed,
+                songs = analyzed - unreadable,
+                unreadable,
                 secs = started.elapsed().as_secs_f32(),
                 "songs analyzed"
             );

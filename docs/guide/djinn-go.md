@@ -35,16 +35,24 @@ Admins can always use GO.
   artist, album, song or genre (as a list or a grid, with the A to Z strip
   and sorting), or type to search. Tapping a song in the big lists plays it,
   then songs like it; in search results, an album or a playlist, the songs
-  after it follow.
+  after it follow. To have a tap add the song to your queue instead, set
+  **Your account > Playing > When you tap a song** to "Add it to the queue"
+  (saved on your account, so every device does the same). With nothing
+  playing, a tap always plays.
 - **The player** along the bottom opens to Now Playing: seek, shuffle,
   repeat (all, or one song), and **Up next**, where you can jump to a song
   or take it out. The next song loads before the current one ends, so
   albums play on with hardly a gap. Lock-screen and headphone buttons work.
+- **Songs you add go first,** like requests at the party: play next, add to
+  the queue and taps line up after the current song and anything you added
+  earlier, ahead of the rest of the album, playlist or radio. Up next marks
+  them "Added by you", and shuffle keeps them at the front.
 - **A song's menu** (the dots): play next, add to the queue, start radio
   from it, like it, add it to a playlist, go to its album or artist, send it
   to the party, or download it if your role allows.
 - **Radio** plays songs that sound like the one you start from, and keeps
-  going. It leaves out songs you heard in the last few hours and puts ones
+  going. Starting it while something plays doesn't interrupt: the radio
+  lines up after the current song and anything you added. It leaves out songs you heard in the last few hours and puts ones
   you skipped lately at the end. Without sound analysis, it plays the same
   artist and genre.
 - **Your music:** your liked songs, albums and artists (the heart), your
