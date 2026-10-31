@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2026.10.31 (October 31, 2026)
 
 ### Interface
 
@@ -16,6 +16,10 @@
 - Placed the Albums Show and Sort by filters side by side when space allows.
 - Kept artist song lists above the photo fade and added a subtle full-page album art background to album pages.
 - Added username changes in Your account and Admin > Users, and a second password field when admins add accounts.
+
+### Releases
+
+- Adopted date-based release numbers (`YYYY.MM.DD`). Cargo keeps the same date without zero padding; published tags and the About page show the padded date.
 
 ### Artist images
 

@@ -177,7 +177,7 @@ async fn about_info(state: &AppState) -> ApiResult<About> {
     let checked = update.checked();
     let available = checked.latest.as_ref().filter(|r| is_newer(&r.version));
     Ok(About {
-        version: env!("CARGO_PKG_VERSION"),
+        version: env!("DJINN_RELEASE_VERSION"),
         commit: env!("DJINN_COMMIT"),
         commit_date: env!("DJINN_COMMIT_DATE"),
         repository: format!("https://github.com/{REPOSITORY}"),
@@ -297,7 +297,7 @@ pub async fn this_release() -> Result<Option<ReleaseFiles>, String> {
     let url = std::env::var("DJINN_THIS_RELEASE_URL").unwrap_or_else(|_| {
         format!(
             "https://api.github.com/repos/{REPOSITORY}/releases/tags/v{}",
-            env!("CARGO_PKG_VERSION")
+            env!("DJINN_RELEASE_VERSION")
         )
     });
     let client = client()?;
@@ -649,11 +649,12 @@ mod tests {
 
     #[test]
     fn versions() {
+        assert_eq!(parse_version("v2027.01.05"), Some((2027, 1, 5)));
         assert_eq!(parse_version("v1.2.3"), Some((1, 2, 3)));
         assert_eq!(parse_version("0.10"), Some((0, 10, 0)));
         assert_eq!(parse_version("2.0.0-beta.1"), Some((2, 0, 0)));
         assert_eq!(parse_version("nightly"), None);
-        assert!(is_newer("v99.0.0"));
+        assert!(is_newer("v9999.12.31"));
         assert!(!is_newer(env!("CARGO_PKG_VERSION")));
         assert!(!is_newer("0.0.1"));
     }

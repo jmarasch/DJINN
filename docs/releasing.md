@@ -25,9 +25,17 @@ printed public key in `update.rs`.
 
 ## Making a release
 
-1. Bump `version` in the root `Cargo.toml` (for example `0.2.0`), run
-   `cargo build` so `Cargo.lock` follows, and commit.
-2. Tag and push: `git tag v0.2.0 && git push origin v0.2.0`.
+Release numbers show the publication date as `YYYY.MM.DD`. Cargo requires
+unpadded numeric parts, so a release shown as `2027.01.05` uses `2027.1.5`
+in `Cargo.toml`. The Git tag and About page use the padded form. The updater
+compares both forms numerically, including older `0.4.5` releases. Make at
+most one public release per date; batch any same-day fixes before tagging.
+
+1. On release day, set `version` in the root `Cargo.toml` to that date without
+   padding (for example `2027.1.5`), run `cargo build` so `Cargo.lock` follows,
+   and commit. Keep the changelog heading on the same date.
+2. Get the tag with `bash .github/scripts/release-tag.sh`, then tag and push
+   that value (for example `v2027.01.05`).
 3. The Release workflow (`.github/workflows/release.yml`) builds Linux and Windows binaries
    (`djinn-linux-x86_64`, `djinn-windows-x86_64.exe`) and the downloads
    for first installs (below), writes and signs `SHA256SUMS`, and

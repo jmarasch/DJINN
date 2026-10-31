@@ -191,7 +191,7 @@ async fn status(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json<S
         .unwrap_or_default()
     };
     Ok(Json(Status {
-        version: env!("CARGO_PKG_VERSION"),
+        version: env!("DJINN_RELEASE_VERSION"),
         started_ms: startup.map(|s| s.started_ms),
         addresses: startup.map(|s| s.addresses.clone()).unwrap_or_default(),
         public_network: state.network.public(),

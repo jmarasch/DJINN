@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.4.5"
+version = "2026.10.31"
 edition = "2021"
 publish = false
 license = "PolyForm-Noncommercial-1.0.0"

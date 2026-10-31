@@ -66,7 +66,7 @@ use crate::jukebox::Jukebox;
 use crate::state::AppState;
 
 #[derive(Parser)]
-#[command(name = "djinn", version, about)]
+#[command(name = "djinn", version = env!("DJINN_RELEASE_VERSION"), about)]
 struct Cli {
     /// Path to config.toml. Defaults to next to the binary on Windows and
     /// ~/.config/djinn/config.toml elsewhere.
@@ -287,7 +287,7 @@ async fn run() -> anyhow::Result<()> {
         }
     };
     tracing::info!(
-        version = env!("CARGO_PKG_VERSION"),
+        version = env!("DJINN_RELEASE_VERSION"),
         addr = %config.server.listen,
         "DJINN listening"
     );
