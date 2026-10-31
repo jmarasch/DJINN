@@ -28,10 +28,11 @@
 
 <h1>Queue</h1>
 {#if app.queue.length === 0}
-  <p class="muted">
-    No requests yet. When the queue is empty, songs come from the auto pool.
-  </p>
-  <a class="button primary" href="#/search">Find a song</a>
+  <div class="empty">
+    <img src="/images/empty-record.webp" alt="" />
+    <p class="muted">No requests yet. When the queue is empty, songs come from the auto pool.</p>
+    <a class="button primary" href="#/search">Find a song</a>
+  </div>
 {:else}
   <p class="muted small">
     {app.queue.length} {app.queue.length === 1 ? 'song' : 'songs'}{mine
@@ -88,6 +89,18 @@
 {/if}
 
 <style>
+  .empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+  }
+
+  .empty img {
+    width: min(190px, 55vw);
+    height: auto;
+  }
+
   ol {
     list-style: none;
     margin: 0;

@@ -5,7 +5,7 @@
   import AccountPanels from '../lib/AccountPanels.svelte'
   import { api, ApiError } from '../lib/api'
   import Icon from '../lib/Icon.svelte'
-  import { param, route } from '../lib/router.svelte'
+  import { goBack, navigation, param, route } from '../lib/router.svelte'
   import { app } from '../lib/state.svelte'
   import Toasts from '../lib/Toasts.svelte'
   import TwoStepPanel from '../lib/TwoStepPanel.svelte'
@@ -16,6 +16,7 @@
   import OpenOnPhone from './OpenOnPhone.svelte'
   import PhoneApps from './PhoneApps.svelte'
   import PlayerBar from './PlayerBar.svelte'
+  import NowPlaying from './views/NowPlaying.svelte'
   import SongMenu from './SongMenu.svelte'
   import Album from './views/Album.svelte'
   import Genre from './views/Genre.svelte'
@@ -74,7 +75,9 @@
     return m ? decodeURIComponent(m[1]) : null
   })
   const section = $derived(
-    route.path.startsWith('/search')
+    route.path === '/playing'
+      ? 'playing'
+      : route.path.startsWith('/search')
       ? 'search'
       : route.path.startsWith('/library') || route.path === '/submit' || playlistId
         ? 'library'
@@ -122,7 +125,10 @@
 {:else}
   <header>
     <a class="brand" href="#/">DJINN GO</a>
-    <nav>
+    <nav aria-label="Main navigation">
+      <button class="back" disabled={!navigation.canGoBack} onclick={goBack} aria-label="Back" title="Back">
+        <Icon name="back" size={28} /><span>Back</span>
+      </button>
       <a href="#/" class:active={section === 'home'} aria-label="Home"><Icon name="home" /><span>Home</span></a>
       <a href="#/search" class:active={section === 'search'} aria-label="Library"><Icon name="search" /><span>Library</span></a>
       <a href="#/library" class:active={section === 'library'} aria-label="Your music">
@@ -131,8 +137,10 @@
       <a href="#/account" class:active={section === 'account'} aria-label="Account"><Icon name="settings" /><span>Account</span></a>
     </nav>
   </header>
-  <main class="go" class:playing={player.index >= 0}>
-    {#if genreName}
+  <main class="go" class:playing={player.index >= 0 && route.path !== '/playing'}>
+    {#if route.path === '/playing'}
+      <NowPlaying />
+    {:else if genreName}
       <Genre name={genreName} />
     {:else if albumId}
       <Album id={albumId} />
@@ -194,9 +202,8 @@
     top: 0;
     z-index: 10;
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
+    flex-direction: column;
+    gap: 8px;
     max-width: 760px;
     margin: 0 auto;
     padding: calc(10px + env(safe-area-inset-top)) 16px 10px;
@@ -214,14 +221,20 @@
     gap: 4px;
   }
 
-  nav a {
+  nav a,
+  nav button {
     display: flex;
     align-items: center;
+    justify-content: center;
     gap: 6px;
+    flex: 1;
+    min-width: 0;
+    min-height: 44px;
     padding: 8px 10px;
     border-radius: 999px;
     color: var(--muted);
     text-decoration: none;
+    background: transparent;
   }
 
   nav a.active {
@@ -229,9 +242,21 @@
     color: var(--text);
   }
 
+  nav .back {
+    background: var(--surface-2);
+    color: var(--text);
+    font-weight: 700;
+  }
+
+  nav .back:disabled {
+    color: var(--muted);
+    opacity: 0.5;
+  }
+
   /* Icons only on narrow phones. */
   @media (max-width: 520px) {
-    nav a span {
+    nav a span,
+    nav button span {
       display: none;
     }
   }
