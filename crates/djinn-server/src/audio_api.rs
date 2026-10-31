@@ -249,9 +249,7 @@ pub async fn start_analysis(state: &AppState) {
     }
     let state = state.clone();
     tokio::spawn(async move {
-        let workers = std::thread::available_parallelism()
-            .map_or(1, |n| n.get() / 2)
-            .clamp(1, 4);
+        let workers = crate::cpu::analysis();
         let version = djinn_engine::FEATURES_VERSION;
         let started = std::time::Instant::now();
         let mut analyzed = 0usize;

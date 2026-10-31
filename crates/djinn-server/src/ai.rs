@@ -229,7 +229,7 @@ pub struct SystemInfo {
 fn system_info() -> SystemInfo {
     let memory = djinn_platform::system::memory();
     SystemInfo {
-        cores: std::thread::available_parallelism().map_or(1, |n| n.get()),
+        cores: crate::cpu::threads(),
         memory_total: memory.map(|m| m.total),
         memory_available: memory.map(|m| m.available),
     }
@@ -420,7 +420,7 @@ async fn listen(state: &AppState) {
         return;
     }
     state.ai.stop_listening.store(false, Ordering::Release);
-    let cores = std::thread::available_parallelism().map_or(1, |n| n.get());
+    let cores = crate::cpu::threads();
     let speed = state.store.get_setting(LISTEN_SPEED).await.ok().flatten();
     let workers = match speed.as_deref() {
         Some("gentle") => 1,

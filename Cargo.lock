@@ -1415,6 +1415,7 @@ dependencies = [
  "ipnet",
  "md-5",
  "notify",
+ "num_cpus",
  "open",
  "qrcode",
  "rand 0.10.3",

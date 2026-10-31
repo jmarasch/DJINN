@@ -249,7 +249,7 @@ fn walk(roots: &[PathBuf]) -> (Vec<FoundFile>, Vec<PathBuf>) {
             let entry = match entry {
                 Ok(entry) => entry,
                 Err(e) => {
-                    tracing::warn!(error = %e, "cannot read library entry");
+                    tracing::warn!(path = ?e.path(), error = %e, "cannot read library entry");
                     continue;
                 }
             };

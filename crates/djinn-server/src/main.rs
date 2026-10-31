@@ -15,6 +15,7 @@ mod cast_api;
 mod client;
 mod config;
 mod convert;
+mod cpu;
 mod desktop;
 mod download;
 mod error;
@@ -78,9 +79,20 @@ struct Cli {
     log_file: Option<PathBuf>,
 }
 
-#[tokio::main]
-async fn main() {
-    let code = match run().await {
+fn main() {
+    // Before the runtime starts any threads: it sets environment variables.
+    cpu::init();
+    let runtime = match tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(e) => {
+            eprintln!("Error: couldn't start: {e}");
+            std::process::exit(1)
+        }
+    };
+    let code = match runtime.block_on(run()) {
         Ok(()) => 0,
         Err(e) => {
             // Started from the Start menu or at sign-in there is no console
@@ -97,16 +109,19 @@ async fn main() {
 }
 
 async fn run() -> anyhow::Result<()> {
+    // Attached first, so --version, --help and argument errors reach the
+    // terminal that started a Windows release build.
+    let has_console = djinn_platform::console::attach_parent_console();
     let cli = Cli::parse();
 
     // Without a console (Windows release build started from Explorer or the
     // Start menu), logs go to a file.
-    let has_console = djinn_platform::console::attach_parent_console();
     let log_file = cli
         .log_file
         .clone()
         .or_else(|| (!has_console).then(default_log_file).flatten());
     init_logging(log_file.as_deref())?;
+    cpu::log();
     if !has_console {
         // Otherwise loading the listening model flashes a console window.
         djinn_ai::settle_cache_probe();

@@ -28,6 +28,7 @@ futures-util = "0.3.34"
 getrandom = "0.4.3"
 hmac = "0.13"
 notify = { version = "8.2.1", default-features = false }
+num_cpus = "1.17"
 open = "5.4.5"
 if-addrs = "0.15.0"
 ipnet = "2.12"
