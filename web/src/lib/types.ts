@@ -520,8 +520,14 @@ export interface Settings {
   max_queue: number
   guest_mode: boolean
   online_artist_info: boolean
-  /** Empty turns MusicBrainz lookups off. */
+  /** Sent to MusicBrainz, which needs one. */
   musicbrainz_contact: string
+  /** Album covers, genres and exact artist matches from MusicBrainz. */
+  musicbrainz: boolean
+  /** Analyze every song's sound after library checks. */
+  sound_analysis: boolean
+  /** When sound analysis and AI listening may run. */
+  background: Schedule
   /** Artist names never split, one per line. */
   artist_keep_whole: string
   /** The TV page (/tv) works without signing in. */
@@ -586,7 +592,18 @@ export interface Listening {
   running: boolean
   heard: number
   waiting: number
+  held: Held | null
 }
+
+/** When heavy background work may run; hours are this computer's time. */
+export interface Schedule {
+  when: 'any' | 'idle' | 'hours'
+  from: number
+  until: number
+}
+
+/** Why background work is waiting. */
+export type Held = { reason: 'music' } | { reason: 'hours'; from: number; until: number }
 
 export interface LibraryStatus {
   scanning: boolean
@@ -607,6 +624,9 @@ export interface LoudnessStatus {
   /** Songs analyzed (loudness and sound). */
   analyzed: number
   running: boolean
+  /** Sound analysis is switched on. */
+  on: boolean
+  held: Held | null
 }
 
 export interface ReplayGainSettings {
@@ -655,6 +675,7 @@ export interface AiStatus {
   heard: number
   waiting: number
   listening: boolean
+  held: Held | null
   reader: ReaderStatus
   options: AiOptions
   system: SystemInfo

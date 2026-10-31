@@ -46,7 +46,7 @@ since Bluetooth lags) until they line up. See
 - DJINN reads MP3, FLAC, AAC/M4A, Ogg Vorbis and WAV. Other formats are
   skipped.
 - One artist split into two, or two artists merged? See
-  [Artist names that are never split](rules.md#artist-names-that-are-never-split).
+  [Artist names that are never split](your-library.md#artist-names-that-are-never-split).
 
 ## The computer is busy after adding a lot of music
 

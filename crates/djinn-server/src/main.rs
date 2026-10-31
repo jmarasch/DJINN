@@ -9,6 +9,7 @@ mod ai;
 mod api;
 mod audio_api;
 mod auth;
+mod background;
 mod backup;
 mod banner;
 mod cast_api;

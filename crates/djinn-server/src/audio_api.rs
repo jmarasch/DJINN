@@ -234,16 +234,40 @@ pub async fn loudness_status(state: &AppState) -> ApiResult<LoudnessStatus> {
             .loudness_progress(djinn_engine::FEATURES_VERSION)
             .await?,
         running: state.scan.loudness_running.load(Ordering::Acquire),
+        on: analysis_on(state).await,
+        held: crate::background::waiting(state),
     })
+}
+
+/// Setting key: 1 to analyze every song's sound after library checks.
+/// Off for new installs; on for ones that had analyzed songs before it
+/// existed (migration 26).
+pub const SOUND_ANALYSIS: &str = "sound_analysis";
+
+pub async fn analysis_on(state: &AppState) -> bool {
+    crate::settings::flag(&state.store, SOUND_ANALYSIS, false)
+        .await
+        .unwrap_or(false)
+}
+
+async fn broadcast_analysis(state: &AppState) {
+    if let Ok(status) = loudness_status(state).await {
+        let _ = state.events.send(ServerEvent::Loudness(status));
+    }
 }
 
 /// Songs analyzed per round between progress updates.
 const ANALYSIS_BATCH: i64 = 16;
 
 /// Analyzes songs not analyzed yet in the background: loudness (for
-/// ReplayGain) and sound (for smart playlists), one decode each. Does
-/// nothing if it already runs.
+/// ReplayGain) and sound (for smart playlists), one decode each, when
+/// sound analysis is on and the schedule allows. Does nothing if it
+/// already runs. Then AI listening starts, if it's on.
 pub async fn start_analysis(state: &AppState) {
+    if !analysis_on(state).await {
+        crate::ai::start(state);
+        return;
+    }
     if state.scan.loudness_running.swap(true, Ordering::AcqRel) {
         return;
     }
@@ -267,7 +291,15 @@ pub async fn start_analysis(state: &AppState) {
             };
             // A few at a time on blocking threads; decoding is CPU-heavy,
             // and this leaves cores for playback.
+            let mut stopped = false;
             for chunk in batch.chunks(workers) {
+                let wanted = || analysis_on(&state);
+                if !crate::background::wait_turn(&state, wanted, || broadcast_analysis(&state))
+                    .await
+                {
+                    stopped = true;
+                    break;
+                }
                 let jobs: Vec<_> = chunk
                     .iter()
                     .map(|(id, path)| {
@@ -307,8 +339,9 @@ pub async fn start_analysis(state: &AppState) {
                     analyzed += 1;
                 }
             }
-            if let Ok(status) = loudness_status(&state).await {
-                let _ = state.events.send(ServerEvent::Loudness(status));
+            broadcast_analysis(&state).await;
+            if stopped {
+                break;
             }
         }
         state.scan.loudness_running.store(false, Ordering::Release);

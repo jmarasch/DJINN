@@ -267,10 +267,19 @@ struct Settings {
     /// Look up artist photos and bios online (Deezer, Wikipedia).
     #[serde(default)]
     online_artist_info: bool,
-    /// Contact sent to MusicBrainz (email or website). Empty turns
-    /// MusicBrainz lookups off.
+    /// Contact sent to MusicBrainz (email or website); it needs one.
     #[serde(default)]
     musicbrainz_contact: String,
+    /// Look up album covers, genres and exact artist matches on
+    /// MusicBrainz (with a contact).
+    #[serde(default)]
+    musicbrainz: bool,
+    /// Analyze every song's sound after library checks.
+    #[serde(default)]
+    sound_analysis: bool,
+    /// When sound analysis and AI listening may run.
+    #[serde(default)]
+    background: crate::background::Schedule,
     /// Artist names never split into separate artists, one per line.
     #[serde(default)]
     artist_keep_whole: String,
@@ -314,6 +323,9 @@ async fn settings(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json
             .get_setting(settings::MUSICBRAINZ_CONTACT)
             .await?
             .unwrap_or_default(),
+        musicbrainz: settings::musicbrainz(store).await?.is_some(),
+        sound_analysis: crate::audio_api::analysis_on(&state).await,
+        background: crate::background::Schedule::load(store).await?,
         artist_keep_whole: djinn_library::keep_whole(store)
             .await
             .map_err(anyhow::Error::from)?
@@ -353,14 +365,20 @@ async fn update_settings(
             "the MusicBrainz contact should be an email address or website",
         ));
     }
+    if body.musicbrainz && contact.is_empty() {
+        return Err(ApiError::bad_request(
+            "MusicBrainz needs a contact: an email address or website",
+        ));
+    }
     let store = &state.store;
-    let old_contact = store
-        .get_setting(settings::MUSICBRAINZ_CONTACT)
-        .await?
-        .unwrap_or_default();
+    let had_musicbrainz = settings::musicbrainz(store).await?.is_some();
     store
         .set_setting(settings::MUSICBRAINZ_CONTACT, contact)
         .await?;
+    settings::set_flag(store, settings::MUSICBRAINZ, body.musicbrainz).await?;
+    let was_analyzing = crate::audio_api::analysis_on(&state).await;
+    settings::set_flag(store, crate::audio_api::SOUND_ANALYSIS, body.sound_analysis).await?;
+    body.background.save(store).await?;
     store
         .set_setting(jukebox::HISTORY_WINDOW, &body.history_window.to_string())
         .await?;
@@ -414,11 +432,17 @@ async fn update_settings(
             .await?;
         crate::library_api::start_scan(&state);
     }
-    // Turning lookups on, or adding MusicBrainz, looks everything up now
-    // (MusicBrainz adds covers and genres to artists already checked).
-    let added_musicbrainz = old_contact.trim().is_empty() && !contact.is_empty();
-    if body.online_artist_info && (!was_online || added_musicbrainz) {
-        crate::library_api::start_artist_lookup(&state, added_musicbrainz);
+    // Turning a lookup on looks up every artist now: MusicBrainz adds
+    // covers and genres to artists already checked, and photos and bios
+    // need artists checked by MusicBrainz alone.
+    let added_photos = body.online_artist_info && !was_online;
+    let added_musicbrainz = body.musicbrainz && !had_musicbrainz;
+    if added_photos || added_musicbrainz {
+        let force = added_musicbrainz || (added_photos && had_musicbrainz);
+        crate::library_api::start_artist_lookup(&state, force);
+    }
+    if body.sound_analysis && !was_analyzing {
+        crate::audio_api::start_analysis(&state).await;
     }
     Ok(Json(body))
 }
@@ -646,5 +670,80 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         let (status, _) = call(&state, Method::GET, "/api/requests/log", None, Some(&bob)).await;
         assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn library_extras_are_opt_in() {
+        use crate::background::{Schedule, When};
+        use crate::test_util::get_body;
+
+        let state = AppState::for_tests().await;
+        let admin = session(&state, "host", Role::Admin).await;
+        let (_, body) = get_body(&state, "/api/settings", &admin).await;
+        let settings: serde_json::Value = serde_json::from_str(&body).unwrap();
+        for off in ["sound_analysis", "musicbrainz", "online_artist_info"] {
+            assert_eq!(settings[off], false, "{off} starts off");
+        }
+        assert_eq!(settings["background"]["when"], "any");
+
+        let base = r#""history_window":25,"per_user_limit":3,"max_queue":0,"guest_mode":false"#;
+        let no_contact = format!(r#"{{{base},"musicbrainz":true}}"#);
+        let (status, _) = call(
+            &state,
+            Method::PUT,
+            "/api/settings",
+            Some(&no_contact),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::BAD_REQUEST,
+            "MusicBrainz needs a contact"
+        );
+
+        let on = format!(
+            r#"{{{base},"musicbrainz":true,"musicbrainz_contact":"dj@example.com","sound_analysis":true,
+                "background":{{"when":"hours","from":22,"until":6}}}}"#
+        );
+        let (status, _) = call(
+            &state,
+            Method::PUT,
+            "/api/settings",
+            Some(&on),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(crate::audio_api::analysis_on(&state).await);
+        assert_eq!(
+            settings::musicbrainz(&state.store)
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("dj@example.com")
+        );
+        assert_eq!(
+            Schedule::load(&state.store).await.unwrap(),
+            Schedule {
+                when: When::Hours,
+                from: 22,
+                until: 6
+            }
+        );
+
+        // Switched off, the contact stays but MusicBrainz isn't used.
+        let off = format!(r#"{{{base},"musicbrainz_contact":"dj@example.com"}}"#);
+        let (status, _) = call(
+            &state,
+            Method::PUT,
+            "/api/settings",
+            Some(&off),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(settings::musicbrainz(&state.store).await.unwrap(), None);
+        assert!(!crate::audio_api::analysis_on(&state).await);
     }
 }

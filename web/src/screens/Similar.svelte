@@ -5,12 +5,14 @@
   import Credits from '../lib/Credits.svelte'
   import Icon from '../lib/Icon.svelte'
   import TrackRow from '../lib/TrackRow.svelte'
+  import { isAdmin } from '../lib/state.svelte'
   import type { Track } from '../lib/types'
 
   let { id }: { id: number } = $props()
   let seed = $state<Track | null>(null)
   let similar = $state<Track[] | null>(null)
   let analyzed = $state(true)
+  let analysisOn = $state(true)
   let error = $state('')
 
   $effect(() => {
@@ -21,6 +23,7 @@
         seed = track
         similar = result.tracks
         analyzed = result.analyzed
+        analysisOn = result.analysis_on
       })
       .catch((e) => (error = e.message))
   })
@@ -39,7 +42,12 @@
       <div class="muted ellipsis"><Credits track={seed} /></div>
     </div>
   </header>
-  {#if !analyzed}
+  {#if !analyzed && !analysisOn}
+    <p class="muted">
+      Finding songs that sound alike needs sound analysis, which is off.
+      {#if isAdmin()}Switch it on under <a href="#/admin/library">Admin > Library</a>.{/if}
+    </p>
+  {:else if !analyzed}
     <p class="muted">
       DJINN hasn't listened to this song yet. It analyzes new songs in the background, so check back in a little
       while.

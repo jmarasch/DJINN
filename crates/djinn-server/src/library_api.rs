@@ -450,10 +450,7 @@ pub async fn reread(state: &AppState, paths: &[String]) -> ApiResult<()> {
     let _ = state.events.send(ServerEvent::LibraryChanged);
     crate::smart::refresh(state).await;
     // A new name makes a new artist or album to look up.
-    if settings::flag(&state.store, settings::ONLINE_INFO, false)
-        .await
-        .unwrap_or(false)
-    {
+    if settings::lookups_on(&state.store).await {
         start_artist_lookup(state, false);
     }
     Ok(())
@@ -644,10 +641,7 @@ pub fn lookup_status(state: &AppState) -> LookupStatus {
 /// At startup: finishes lookups that failed last time (a busy service, no
 /// network), without rechecking anything that already worked.
 pub async fn retry_unfinished_lookups(state: &AppState) {
-    let on = settings::flag(&state.store, settings::ONLINE_INFO, false)
-        .await
-        .unwrap_or(false);
-    if !on {
+    if !settings::lookups_on(&state.store).await {
         return;
     }
     // Nothing is ever older than the oldest possible time, so these are
@@ -673,16 +667,12 @@ pub fn start_artist_lookup(state: &AppState, force: bool) -> bool {
                 .events
                 .send(ServerEvent::ArtistLookup(lookup_status(&state)));
             tracing::info!(force, "looking up artist photos and bios online");
-            let contact = state
-                .store
-                .get_setting(settings::MUSICBRAINZ_CONTACT)
-                .await
-                .ok()
-                .flatten()
-                .filter(|c| !c.trim().is_empty());
             let options = djinn_library::online::LookupOptions {
                 force,
-                musicbrainz_contact: contact,
+                photos_and_bios: settings::flag(&state.store, settings::ONLINE_INFO, false)
+                    .await
+                    .unwrap_or(false),
+                musicbrainz_contact: settings::musicbrainz(&state.store).await.ok().flatten(),
             };
             let result =
                 djinn_library::online::lookup_artists(&state.store, &state.art_dir, &options).await;
@@ -770,10 +760,7 @@ pub fn start_scan(state: &AppState) -> bool {
                     return;
                 }
                 let _ = state.events.send(ServerEvent::LibraryChanged);
-                if settings::flag(&state.store, settings::ONLINE_INFO, false)
-                    .await
-                    .unwrap_or(false)
-                {
+                if settings::lookups_on(&state.store).await {
                     start_artist_lookup(&state, false);
                 }
                 crate::audio_api::start_analysis(&state).await;

@@ -22,27 +22,6 @@ party play it on their own phone or computer, a few seconds behind the
 speakers. Off by default. See
 [Play here](casting-and-tv.md#play-here).
 
-## Online lookups
-
-- **Look up artist photos and bios:** sends artist names to Deezer and
-  Wikipedia.
-- **MusicBrainz contact (email or website):** MusicBrainz needs no account,
-  but asks apps to say who to contact if something goes wrong. With a contact
-  filled in, DJINN adds album covers, genres and exact artist matches from
-  MusicBrainz. Leave it empty to skip MusicBrainz.
-- **AcoustID key:** for identifying songs by their sound. It's free for
-  non-commercial use: register an application at
-  [acoustid.org/new-application](https://acoustid.org/new-application) and
-  paste its key.
-
-More in [Your library](your-library.md).
-
-## Artist names that are never split
-
-Songs credited to "A & B" or "A feat. B" count for each artist. Band names
-that contain &, commas or "x" (like "Earth, Wind & Fire") go here, one per
-line, so they stay one artist. Saving re-reads the library.
-
 ## The queue
 
 - **Most songs in the queue at once:** 0 for no limit.

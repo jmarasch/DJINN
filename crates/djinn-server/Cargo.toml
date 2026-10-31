@@ -13,6 +13,7 @@ path = "src/main.rs"
 anyhow.workspace = true
 argon2 = "0.6.0"
 axum.workspace = true
+chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
 clap.workspace = true
 dirs.workspace = true
 djinn-ai = { path = "../djinn-ai" }

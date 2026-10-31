@@ -791,6 +791,8 @@ struct SimilarTracks {
     tracks: Vec<Track>,
     /// False until the song has been analyzed.
     analyzed: bool,
+    /// Sound analysis is switched on (else it never will be).
+    analysis_on: bool,
 }
 
 async fn similar_tracks(
@@ -806,6 +808,7 @@ async fn similar_tracks(
         .unwrap_or_default();
     Ok(Json(SimilarTracks {
         analyzed: !ids.is_empty(),
+        analysis_on: crate::audio_api::analysis_on(&state).await,
         tracks: state.store.tracks_by_ids(&ids).await?,
     }))
 }

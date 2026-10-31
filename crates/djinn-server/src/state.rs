@@ -74,6 +74,8 @@ pub struct ScanState {
     pub lookup_last: Mutex<Option<(djinn_library::online::LookupSummary, i64)>>,
     /// Song loudness is being measured for ReplayGain.
     pub loudness_running: AtomicBool,
+    /// What sound analysis or AI listening is waiting for, if anything.
+    pub held: Mutex<Option<crate::background::Held>>,
     pub last: Mutex<Option<ScanProgress>>,
 }
 

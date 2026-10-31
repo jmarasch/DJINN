@@ -48,10 +48,12 @@ Start it from:
 - **An artist:** the **Radio** button on their page.
 - **A genre:** the radio button on the genre's page.
 
-Radio needs DJINN to have analyzed your songs, which it does in the
-background after each library check.
+Radio by sound needs [sound analysis](your-library.md#sound-analysis)
+(Admin > Library). Without it, radio plays the same artists and genres.
 
 ## More like this
 
 A song's ⋯ menu also has **More like this**, a list of songs that sound alike,
-and shows the song's genres. Artist pages list similar artists.
+and shows the song's genres. Artist pages list similar artists. Both need
+[sound analysis](your-library.md#sound-analysis); similar artists also use
+genres from MusicBrainz.

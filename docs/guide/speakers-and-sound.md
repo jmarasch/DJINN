@@ -34,8 +34,10 @@ blast.
   Good for playing whole albums.
 
 DJINN uses ReplayGain tags when a file has them. For files without, it
-measures each song once in the background and keeps the result in its own
-database; your files aren't changed. Songs not measured yet play unchanged.
+measures each song once during [sound analysis](your-library.md#sound-analysis)
+(Admin > Library) and keeps the result in its own database; your files aren't
+changed. Songs not measured yet, or all of them while sound analysis is off,
+play unchanged.
 
 **Boost:** leveled songs play quieter than most modern recordings. Raise it if
 everything sounds too soft; songs are never pushed into clipping.

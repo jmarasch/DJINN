@@ -125,6 +125,7 @@ export function connect() {
       running: data.listening,
       heard: data.heard,
       waiting: data.waiting,
+      held: data.held,
     }
   })
   on<IdentifyStatus>('identify_status', (data) => (app.identify = data))

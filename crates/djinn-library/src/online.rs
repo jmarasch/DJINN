@@ -65,6 +65,8 @@ const MUSIC_WORDS: &[&str] = &[
 pub struct LookupOptions {
     /// Look everything up again, not just new or stale entries.
     pub force: bool,
+    /// Artist photos (Deezer, Wikimedia Commons) and bios (Wikipedia).
+    pub photos_and_bios: bool,
     /// Contact (email or website) sent to MusicBrainz. MusicBrainz lookups
     /// only run when this is set.
     pub musicbrainz_contact: Option<String>,
@@ -91,6 +93,9 @@ pub async fn lookup_artists(
     options: &LookupOptions,
 ) -> Result<LookupSummary, LibraryError> {
     let mut services = Services::new(options.musicbrainz_contact.as_deref())?;
+    if !options.photos_and_bios && services.musicbrainz.is_none() {
+        return Ok(LookupSummary::default());
+    }
     // Without `force`, only never-checked ones (no check time is older
     // than the oldest possible time).
     let older_than = if options.force { i64::MAX } else { i64::MIN };
@@ -103,7 +108,9 @@ pub async fn lookup_artists(
         let mb = services.musicbrainz_artist(&artist.name, &titles).await;
         failed |= mb.failed();
         let mb = mb.found();
-        let wikidata = match mb.as_ref().and_then(|a| a.wikidata.as_deref()) {
+        // Wikidata only leads to photos and bios.
+        let wikidata_id = mb.as_ref().and_then(|a| a.wikidata.as_deref());
+        let wikidata = match wikidata_id.filter(|_| options.photos_and_bios) {
             Some(id) => {
                 let found = services.wikidata(id).await;
                 failed |= found.failed();
@@ -114,7 +121,7 @@ pub async fn lookup_artists(
 
         let mut info = ArtistInfo::default();
         // Artists with a picture in their own folder don't need a photo.
-        if !artist.has_folder_art {
+        if options.photos_and_bios && !artist.has_folder_art {
             match services.deezer_photo(&artist.name).await {
                 Fetch::Found(bytes) => info.photo = art::store(art_dir, &bytes).ok(),
                 Fetch::NotFound => {
@@ -132,12 +139,14 @@ pub async fn lookup_artists(
             }
         }
         // MusicBrainz's link to the exact page beats searching by name.
-        let bio = match wikidata.as_ref().and_then(|w| w.enwiki.as_deref()) {
-            Some(title) => services.wikipedia_summary(title).await,
-            None => services.wikipedia_bio(&artist.name).await,
-        };
-        failed |= bio.failed();
-        (info.bio, info.bio_url) = bio.found().unzip();
+        if options.photos_and_bios {
+            let bio = match wikidata.as_ref().and_then(|w| w.enwiki.as_deref()) {
+                Some(title) => services.wikipedia_summary(title).await,
+                None => services.wikipedia_bio(&artist.name).await,
+            };
+            failed |= bio.failed();
+            (info.bio, info.bio_url) = bio.found().unzip();
+        }
         if let Some(mb) = mb {
             info.genres = mb.genres;
             info.mbid = Some(mb.mbid);

@@ -1396,6 +1396,7 @@ dependencies = [
  "anyhow",
  "argon2",
  "axum",
+ "chrono",
  "clap",
  "data-encoding",
  "dirs",
