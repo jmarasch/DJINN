@@ -91,7 +91,12 @@ what the web player does, it can:
   settings. It works with no connection and with the app closed. DJINN GO isn't
   listed among the music services inside Google's Clock; those are Google's
   partners only.
-- **Show visuals.** Tap the cover on Now Playing for bars, then a ring.
+- **Show visuals.** Tap the cover on Now Playing to move through the styles:
+  bars, ring, wave, mirror, warp, tunnel, plasma, kaleidoscope, nebula and
+  stars. **Visuals** or **full screen** fills the screen and keeps it on, in
+  either direction; tap for controls, or let the styles change by themselves.
+  They react to the song's bass, mids, treble and beats. If they seem early or
+  late, **Settings > Visuals > Timing** lines them up with what you hear.
 - **Work with the rest of the phone:** lock screen and headset buttons, a home
   screen widget, voice requests, Android Auto, and Cast to a Chromecast or
   Google TV.

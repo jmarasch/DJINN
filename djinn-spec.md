@@ -374,8 +374,10 @@ The official native app for DJINN GO, in `android/` in this repository: songs as
 - The app lists the sounds it saved and can remove them. Saving is from a local copy, fetched first if needed, and keeps the song's stored quality.
 
 **Visuals**
-- Now Playing can show the song's sound instead of its cover: tap to go from the cover to bars to a ring. A tap in the player feeds the analysis, so it needs no microphone permission, and the audio passes through untouched.
-- MilkDrop-style presets are separate work, alongside the visualizers planned for 0.5.0.
+- Now Playing can show the song's sound instead of its cover, or fill the screen with it. A tap in the player feeds the analysis (bars, waveform, bass, mid, treble, beats), so it needs no microphone permission, and the audio passes through untouched.
+- Styles are shapes (bars, ring, wave, mirror) or original shaders on the phone's graphics chip (warp, tunnel, plasma, kaleidoscope, nebula, stars), OpenGL ES 2 with no native code. Warp feeds each frame into the next, the idea behind MilkDrop.
+- Audio reaches the tap ahead of the speaker and in bursts, so visuals read it through a steady clock, with a timing setting per device.
+- Real MilkDrop presets are separate work, alongside the visualizers planned for 0.5.0.
 
 **Server changes (GO's API)**
 - Device sign-in: an API login returns a token sent as `Authorization: Bearer`, stored as a session, so it appears under signed-in devices, can be signed out, and follows the same role, home-network, two-step and lockout rules as the web. Cookies keep working for browsers.

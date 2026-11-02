@@ -20,11 +20,13 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -38,6 +40,7 @@ import androidx.media3.common.util.UnstableApi
 import com.newterrastudios.djinn.go.data.KIND_DOWNLOAD
 import com.newterrastudios.djinn.go.data.KIND_SMART
 import com.newterrastudios.djinn.go.data.OfflineSong
+import com.newterrastudios.djinn.go.player.Spectrum
 import com.newterrastudios.djinn.go.work.SmartCacheWorker
 import kotlinx.coroutines.launch
 
@@ -117,6 +120,7 @@ fun SettingsScreen(nav: Nav) {
                 modifier = Modifier.padding(16.dp),
             ) { Text("Sign out") }
         }
+        item { VisualsSettings(nav) }
         if (nav.canKeepSongs) {
             item {
                 Heading("Quality of kept songs")
@@ -218,6 +222,50 @@ fun SettingsScreen(nav: Nav) {
         } else {
             item { Note("Your role doesn't include keeping songs on this phone. Ask your host for the download permission.") }
         }
+    }
+}
+
+/** The visuals' timing and strength. Both take effect as they're moved. */
+@UnstableApi
+@Composable
+private fun VisualsSettings(nav: Nav) {
+    val prefs = nav.prefs
+    var lead by remember { mutableFloatStateOf(prefs.visualsLeadMs.toFloat()) }
+    var intensity by remember { mutableFloatStateOf(prefs.visualsIntensity) }
+    var auto by remember { mutableStateOf(prefs.visualsAuto) }
+    Heading("Visuals")
+    Note("On Now Playing, tap the cover to see them. Fancier styles use more battery.")
+    Toggle("Change styles by themselves", "In full screen, a new style every 30 seconds.", auto) {
+        auto = it
+        prefs.visualsAuto = it
+    }
+    Column(Modifier.padding(horizontal = 16.dp)) {
+        Text("Timing: ${lead.toInt()} ms")
+        Text(
+            "If visuals seem to come before the sound, raise this; if after, lower it.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Slider(
+            value = lead,
+            onValueChange = {
+                lead = it
+                prefs.visualsLeadMs = it.toInt()
+                Spectrum.leadMs = it.toInt()
+            },
+            valueRange = 0f..800f,
+            steps = 15,
+        )
+        Text("Strength: ${(intensity * 100).toInt()}%")
+        Slider(
+            value = intensity,
+            onValueChange = {
+                intensity = it
+                prefs.visualsIntensity = it
+                Spectrum.intensity = it
+            },
+            valueRange = 0.5f..1.5f,
+        )
     }
 }
 

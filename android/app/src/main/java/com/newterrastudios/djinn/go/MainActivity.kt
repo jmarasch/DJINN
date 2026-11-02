@@ -29,6 +29,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.util.UnstableApi
 import com.newterrastudios.djinn.go.player.CastState
 import com.newterrastudios.djinn.go.player.PlayerState
+import com.newterrastudios.djinn.go.player.Spectrum
 import com.newterrastudios.djinn.go.work.SmartCacheWorker
 import com.newterrastudios.djinn.go.work.SyncWorker
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -74,6 +75,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        Spectrum.leadMs = app.prefs.visualsLeadMs
+        Spectrum.intensity = app.prefs.visualsIntensity
         handle(intent)
         setContent {
             DjinnTheme {

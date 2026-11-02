@@ -221,9 +221,22 @@ class Prefs(context: Context) {
     var visuals: Int
         get() = prefs.getInt("visuals", 0)
         set(value) = prefs.edit { putInt("visuals", value) }
+    /** Full screen moves through the styles by itself. */
+    var visualsAuto: Boolean
+        get() = prefs.getBoolean("visuals_auto", false)
+        set(value) = prefs.edit { putBoolean("visuals_auto", value) }
+    /** Lines the visuals up with the speaker, in milliseconds. */
+    var visualsLeadMs: Int
+        get() = prefs.getInt("visuals_lead_ms", DEFAULT_VISUALS_LEAD_MS)
+        set(value) = prefs.edit { putInt("visuals_lead_ms", value) }
+    /** How strongly they react, 1 being as the sound is. */
+    var visualsIntensity: Float
+        get() = prefs.getFloat("visuals_intensity", 1f)
+        set(value) = prefs.edit { putFloat("visuals_intensity", value) }
 
     companion object {
         const val DEFAULT_KBPS = 128
+        const val DEFAULT_VISUALS_LEAD_MS = 250
     }
 }
 
