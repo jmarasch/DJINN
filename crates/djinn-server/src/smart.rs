@@ -198,7 +198,7 @@ pub fn personal_radio(state: &AppState, id: i64, played: &[i64], skipped: &[i64]
         &session,
         RADIO_SONGS,
     );
-    draw_in_order(ranked, || rand::random::<f32>())
+    draw_in_order(ranked, rand::random::<f32>)
 }
 
 /// Puts songs in a random order where heavier ones tend to come first: each
@@ -991,5 +991,30 @@ mod tests {
         let missing = "/api/tracks/999/styles/trap";
         let (status, _) = call(&state, Method::DELETE, missing, None, Some(&admin)).await;
         assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+}
+
+#[cfg(test)]
+mod draw_tests {
+    use super::draw_in_order;
+
+    #[test]
+    fn heavier_songs_tend_to_come_first_but_not_always() {
+        // A small repeating generator, so the test always sees the same rolls.
+        let mut state = 1u32;
+        let mut random = move || {
+            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            (state >> 8) as f32 / (1u32 << 24) as f32
+        };
+        let mut heavy_first = 0;
+        for _ in 0..1000 {
+            let order = draw_in_order(vec![(1, 1.0), (2, 3.0)], &mut random);
+            assert_eq!(order.len(), 2);
+            if order[0] == 2 {
+                heavy_first += 1;
+            }
+        }
+        // Three times the weight comes first about three times in four.
+        assert!((680..820).contains(&heavy_first), "{heavy_first}");
     }
 }
