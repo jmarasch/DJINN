@@ -11,7 +11,7 @@ use argon2::password_hash::phc::PasswordHash;
 use argon2::password_hash::{PasswordHasher, PasswordVerifier};
 use argon2::Argon2;
 use axum::extract::{FromRequestParts, Path, State};
-use axum::http::header::{COOKIE, SET_COOKIE, USER_AGENT};
+use axum::http::header::{AUTHORIZATION, COOKIE, SET_COOKIE, USER_AGENT};
 use axum::http::request::Parts;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{AppendHeaders, IntoResponse, Response};
@@ -172,7 +172,8 @@ impl FromRequestParts<AppState> for CurrentSession {
     type Rejection = ApiError;
 
     async fn from_request_parts(parts: &mut Parts, state: &AppState) -> ApiResult<Self> {
-        let token = session_token(&parts.headers).ok_or_else(ApiError::unauthorized)?;
+        let go = parts.extensions.get::<crate::go::GoRequest>().is_some();
+        let token = request_token(&parts.headers, go).ok_or_else(ApiError::unauthorized)?;
         let found = state
             .store
             .session(&hash_token(&token))
@@ -361,6 +362,17 @@ impl FromRequestParts<AppState> for AdminUser {
 struct Credentials {
     username: String,
     password: String,
+    /// An app asking for a token instead of a cookie (GO's port only).
+    #[serde(default)]
+    device_token: bool,
+}
+
+/// A finished sign-in for an app: `token` goes in `Authorization: Bearer`
+/// on later requests.
+#[derive(Serialize)]
+struct DeviceSignIn {
+    token: String,
+    me: Me,
 }
 
 #[derive(Serialize)]
@@ -428,10 +440,26 @@ async fn login(
         .into_response());
     }
     log_sign_in(&state, &device, username, Some(user.id), "ok").await?;
-    let cookie = start_session(&state, user.id, SESSION_DAYS, &device).await?;
+    signed_in(&state, user, &device, body.device_token).await
+}
+
+/// Starts the session for a finished sign-in: a token for an app on GO's
+/// port, otherwise a cookie.
+async fn signed_in(
+    state: &AppState,
+    user: User,
+    device: &Device,
+    device_token: bool,
+) -> ApiResult<Response> {
+    if device_token && device.go {
+        let token = new_session(state, user.id, SESSION_DAYS, device).await?;
+        let me = me_for(state, user).await?;
+        return Ok(Json(DeviceSignIn { token, me }).into_response());
+    }
+    let cookie = start_session(state, user.id, SESSION_DAYS, device).await?;
     Ok((
         AppendHeaders([(SET_COOKIE, cookie)]),
-        Json(me_for(&state, user).await?),
+        Json(me_for(state, user).await?),
     )
         .into_response())
 }
@@ -460,6 +488,8 @@ pub async fn go_refusal(
 struct TwoStepCode {
     ticket: String,
     code: String,
+    #[serde(default)]
+    device_token: bool,
 }
 
 /// Finishes a two-step sign-in with the code from the app, or a recovery
@@ -468,7 +498,7 @@ async fn finish_two_step(
     State(state): State<AppState>,
     device: Device,
     Json(body): Json<TwoStepCode>,
-) -> ApiResult<impl IntoResponse> {
+) -> ApiResult<Response> {
     let ticket = state.tickets.get(&body.ticket).ok_or_else(|| {
         ApiError::new(
             StatusCode::UNAUTHORIZED,
@@ -511,11 +541,7 @@ async fn finish_two_step(
         .filter(|u| u.status == AccountStatus::Active)
         .ok_or_else(ApiError::unauthorized)?;
     log_sign_in(&state, &device, &user.username, Some(user.id), "ok").await?;
-    let cookie = start_session(&state, user.id, SESSION_DAYS, &device).await?;
-    Ok((
-        AppendHeaders([(SET_COOKIE, cookie)]),
-        Json(me_for(&state, user).await?),
-    ))
+    signed_in(&state, user, &device, body.device_token).await
 }
 
 #[derive(Deserialize)]
@@ -598,8 +624,12 @@ async fn rename_user(state: &AppState, id: i64, username: &str) -> ApiResult<()>
     }
 }
 
-async fn logout(State(state): State<AppState>, headers: HeaderMap) -> ApiResult<impl IntoResponse> {
-    if let Some(token) = session_token(&headers) {
+async fn logout(
+    State(state): State<AppState>,
+    device: Device,
+    headers: HeaderMap,
+) -> ApiResult<impl IntoResponse> {
+    if let Some(token) = request_token(&headers, device.go) {
         state.store.delete_session(&hash_token(&token)).await?;
     }
     let clear =
@@ -1108,6 +1138,17 @@ async fn start_session(
     days: i64,
     device: &Device,
 ) -> ApiResult<HeaderValue> {
+    let token = new_session(state, user_id, days, device).await?;
+    session_cookie(&token, days * 24 * 60 * 60, device.https)
+}
+
+/// Creates a session and returns its token. Only the hash is kept.
+async fn new_session(
+    state: &AppState,
+    user_id: i64,
+    days: i64,
+    device: &Device,
+) -> ApiResult<String> {
     let token = new_token()?;
     let max_age = days * 24 * 60 * 60;
     state
@@ -1120,7 +1161,7 @@ async fn start_session(
             device.agent.as_deref(),
         )
         .await?;
-    session_cookie(&token, max_age, device.https)
+    Ok(token)
 }
 
 /// The session cookie; `secure` (over HTTPS) keeps browsers from ever
@@ -1130,6 +1171,19 @@ fn session_cookie(token: &str, max_age: i64, secure: bool) -> ApiResult<HeaderVa
     let cookie =
         format!("{COOKIE_NAME}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age}{secure}");
     Ok(HeaderValue::from_str(&cookie).map_err(anyhow::Error::from)?)
+}
+
+/// The session a request carries. Apps send a token, which only GO's port
+/// accepts: a token from a phone is no use against the party or Admin.
+fn request_token(headers: &HeaderMap, go: bool) -> Option<String> {
+    let bearer = go.then(|| bearer_token(headers)).flatten();
+    bearer.or_else(|| session_token(headers))
+}
+
+fn bearer_token(headers: &HeaderMap) -> Option<String> {
+    let value = headers.get(AUTHORIZATION)?.to_str().ok()?;
+    let token = value.strip_prefix("Bearer ")?.trim();
+    (!token.is_empty()).then(|| token.to_owned())
 }
 
 fn session_token(headers: &HeaderMap) -> Option<String> {

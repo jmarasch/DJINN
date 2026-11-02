@@ -25,6 +25,12 @@ Linux build prerequisite: `libasound2-dev` and `pkg-config`.
 
 Windows build prerequisites: rustup (MSVC toolchain), Visual Studio Build Tools with the C++ workload (SQLite and the exe icon compile with it), Node.js LTS, and Inno Setup 6 for the installer. With winget: `winget install Rustlang.Rustup OpenJS.NodeJS.LTS JRSoftware.InnoSetup` and `winget install Microsoft.VisualStudio.2022.BuildTools --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"` (without the override it installs no C++ compiler). Use the commands above from PowerShell.
 
+Android app, from `android/` (needs Android Studio's JDK as `JAVA_HOME` and its SDK as `ANDROID_HOME`; Studio writes `local.properties`):
+
+```sh
+gradlew assembleDebug testDebugUnitTest
+```
+
 Installers (current user, no admin; see `docs/releasing.md`):
 
 ```sh
@@ -57,6 +63,7 @@ crates/
   djinn-platform/  OS integration: tray icon, MAC lookup, Windows console. No C deps,
                    so `cargo check -p djinn-platform --target x86_64-pc-windows-gnu` works here.
 web/               Svelte app (built to web/dist, embedded by djinn-server)
+android/           DJINN GO for Android (Kotlin, Compose, Media3; spec Phase 9). Talks only to GO's port.
 migrations/        sqlx migrations
 ```
 
@@ -84,6 +91,7 @@ migrations/        sqlx migrations
 - Updates: `update.rs` serves Admin > System > Updates and Admin > About (version, commit from `build.rs`, links) and checks `jmarasch/DJINN` releases daily; installs verify a signed `SHA256SUMS` (ed25519, `PUBLIC_KEY`), replace the binary, and restart (`update::restart` after shutdown). Releases come from `.github/workflows/release.yml` on a `v*` tag; see `docs/releasing.md`.
 - Library lists: artists, albums and songs have an A to Z (or year) jump strip (`JumpStrip.svelte`) fed by `/api/{artists,albums,tracks}/jumps` (where each letter or year starts, computed with the same ORDER BY macros as the pages in `djinn-store::library`); `InfiniteList` can start mid-list after a jump and loads the stretch above as you scroll up.
 - Store: one module per area (`library`, `playlists`, `users`, `queue`, `outputs`, `loudness`); all SQL is static strings (sqlx 0.9 rejects dynamic SQL), with shared column lists as macros used through `concat!`.
+- Android app: `data/GoApi.kt` is the API client (its one OkHttp client adds the Bearer token, only for the signed-in server); `player/PlaybackService.kt` is the Media3 service: items are `djinn://track/<id>`, resolved to a fresh play link only when the cache lacks them, with the song (not the link) as cache key, and it reports plays and resume; `player/PlayerState.kt` is the screens' view of it; `ui/` is Compose. Apps sign in with `device_token` in the login body and get a token that only GO's port accepts (`auth::request_token`). Android 16+ needs `ACCESS_LOCAL_NETWORK` to reach a server at home, requested in `MainActivity`.
 - Golden-sample audio fixtures: `crates/djinn-engine/tests/fixtures/` (README says how to regenerate). Acceptance checklists and test notes are kept locally in `notes/`, which is not in the repository.
 
 ## Coding rules (spec section 16)

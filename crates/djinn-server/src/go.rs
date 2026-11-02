@@ -1390,6 +1390,104 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+        // An app finishing two-step gets a token instead of a cookie.
+        let (_, text, _) = go(
+            &state,
+            Method::POST,
+            "/api/auth/login",
+            Some(r#"{"username":"sam","password":"correct horse","device_token":true}"#),
+            None,
+        )
+        .await;
+        let ticket = field(&text, "ticket").as_str().unwrap().to_owned();
+        let app = format!(
+            r#"{{"ticket":"{ticket}","code":"{}","device_token":true}}"#,
+            code(1)
+        );
+        let (status, text, cookie) =
+            go(&state, Method::POST, "/api/auth/two-step", Some(&app), None).await;
+        assert_eq!((status, cookie), (StatusCode::OK, None));
+        assert!(field(&text, "token").is_string());
+    }
+
+    #[tokio::test]
+    async fn apps_sign_in_with_a_token() {
+        let state = AppState::for_tests().await;
+        state.go.enabled.store(true, Ordering::Relaxed);
+        let listener = state.store.role(djinn_store::LISTENER_ROLE).await.unwrap();
+        account(&state, "sam", listener.unwrap().id).await;
+        let call = |method: Method, path: &str, token: Option<&str>, body: Option<String>| {
+            let mut request = Request::builder().method(method).uri(path);
+            if let Some(token) = token {
+                request = request.header(header::AUTHORIZATION, format!("Bearer {token}"));
+            }
+            if body.is_some() {
+                request = request.header(header::CONTENT_TYPE, "application/json");
+            }
+            let mut request = request.body(Body::from(body.unwrap_or_default())).unwrap();
+            request
+                .extensions_mut()
+                .insert(axum::extract::ConnectInfo(SocketAddr::from((
+                    [192, 168, 1, 8],
+                    50000,
+                ))));
+            router(state.clone()).oneshot(request)
+        };
+        let body = r#"{"username":"sam","password":"correct horse","device_token":true}"#;
+        let res = call(Method::POST, "/api/auth/login", None, Some(body.to_owned()))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        assert!(!res.headers().contains_key(header::SET_COOKIE), "no cookie");
+        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let text = String::from_utf8(bytes.to_vec()).unwrap();
+        let token = field(&text, "token").as_str().unwrap().to_owned();
+        assert_eq!(field(&text, "me")["username"], "sam");
+
+        let res = call(Method::GET, "/api/tracks", Some(&token), None).await;
+        assert_eq!(res.unwrap().status(), StatusCode::OK);
+        let res = call(Method::GET, "/api/tracks", Some("not-a-token"), None).await;
+        assert_eq!(res.unwrap().status(), StatusCode::UNAUTHORIZED);
+        let res = call(Method::GET, "/api/tracks", None, None).await;
+        assert_eq!(res.unwrap().status(), StatusCode::UNAUTHORIZED);
+
+        // It's a session like any other, on the list of signed-in devices.
+        let res = call(Method::GET, "/api/me/sessions", Some(&token), None).await;
+        assert_eq!(res.unwrap().status(), StatusCode::OK);
+
+        // Away from GO's port a token is nothing, even if it's real.
+        let (mut parts, _) = Request::builder()
+            .header(header::AUTHORIZATION, format!("Bearer {token}"))
+            .body(())
+            .unwrap()
+            .into_parts();
+        assert!(CurrentSession::from_request_parts(&mut parts, &state)
+            .await
+            .is_err());
+
+        // Signing out ends it.
+        let res = call(Method::POST, "/api/auth/logout", Some(&token), None).await;
+        assert_eq!(res.unwrap().status(), StatusCode::NO_CONTENT);
+        let res = call(Method::GET, "/api/tracks", Some(&token), None).await;
+        assert_eq!(res.unwrap().status(), StatusCode::UNAUTHORIZED);
+
+        // The party's sign-in ignores the request and sets a cookie.
+        let plain = Request::builder()
+            .method(Method::POST)
+            .uri("/auth/login")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(body))
+            .unwrap();
+        let res = crate::api::router()
+            .with_state(state.clone())
+            .oneshot(plain)
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        assert!(res.headers().contains_key(header::SET_COOKIE));
     }
 
     #[tokio::test]
