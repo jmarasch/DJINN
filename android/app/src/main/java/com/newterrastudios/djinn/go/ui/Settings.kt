@@ -37,11 +37,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.util.UnstableApi
+import com.newterrastudios.djinn.go.data.GoPrefs
 import com.newterrastudios.djinn.go.data.KIND_DOWNLOAD
 import com.newterrastudios.djinn.go.data.KIND_SMART
 import com.newterrastudios.djinn.go.data.OfflineSong
 import com.newterrastudios.djinn.go.player.Spectrum
 import com.newterrastudios.djinn.go.work.SmartCacheWorker
+import java.io.IOException
 import kotlinx.coroutines.launch
 
 private val QUALITIES = listOf(
@@ -120,6 +122,7 @@ fun SettingsScreen(nav: Nav) {
                 modifier = Modifier.padding(16.dp),
             ) { Text("Sign out") }
         }
+        item { TapSettings(nav) }
         item { VisualsSettings(nav) }
         if (nav.canKeepSongs) {
             item {
@@ -221,6 +224,43 @@ fun SettingsScreen(nav: Nav) {
             }
         } else {
             item { Note("Your role doesn't include keeping songs on this phone. Ask your host for the download permission.") }
+        }
+    }
+}
+
+private val TAP_CHOICES = listOf(
+    "play" to "Play it now",
+    "queue" to "Play it next",
+    "end" to "Add it to the end of the queue",
+)
+
+/** What a tap on a song does. Kept on the account, so every device follows it. */
+@UnstableApi
+@Composable
+private fun TapSettings(nav: Nav) {
+    Heading("When you tap a song")
+    TAP_CHOICES.forEach { (value, label) ->
+        fun choose() {
+            val before = nav.tapAction
+            nav.tapAction = value
+            nav.scope.launch {
+                try {
+                    nav.api.setPrefs(GoPrefs(value))
+                } catch (_: IOException) {
+                    nav.tapAction = before
+                    nav.message = "Couldn't reach the server, so that wasn't changed."
+                }
+            }
+        }
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clickable(onClick = ::choose)
+                .padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            RadioButton(selected = nav.tapAction == value, onClick = ::choose)
+            Text(label)
         }
     }
 }

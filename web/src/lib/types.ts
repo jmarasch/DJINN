@@ -79,8 +79,8 @@ export interface GoPlaylistDetail extends GoPlaylist {
 
 /** Your DJINN GO preferences. */
 export interface GoPrefs {
-  /** What tapping a song does: play it now, or add it to the queue. */
-  tap: 'play' | 'queue'
+  /** What tapping a song does: play it now, play it next, or add it to the end. */
+  tap: 'play' | 'queue' | 'end'
 }
 
 export interface GoResume {

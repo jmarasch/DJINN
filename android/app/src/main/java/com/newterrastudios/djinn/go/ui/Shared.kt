@@ -105,7 +105,20 @@ fun SongRow(track: Track, nav: Nav, onClick: () -> Unit) {
         title = track.title,
         subtitle = line,
         art = { Art(nav.api.artUrl(track.artHash), 44.dp) },
-        onClick = onClick,
+        onClick = {
+            // With nothing playing a tap always plays.
+            when {
+                nav.player.current == null || nav.tapAction == "play" -> onClick()
+                nav.tapAction == "queue" -> {
+                    nav.player.playNext(track)
+                    nav.message = "\"${track.title}\" will play next"
+                }
+                else -> {
+                    nav.player.addToEnd(track)
+                    nav.message = "\"${track.title}\" added to the end of the queue"
+                }
+            }
+        },
         end = {
             if (track.id in nav.keptIds) {
                 Icon(

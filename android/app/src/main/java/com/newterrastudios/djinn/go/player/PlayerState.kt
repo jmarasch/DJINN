@@ -19,8 +19,14 @@ import androidx.media3.session.SessionToken
 import com.newterrastudios.djinn.go.data.GoApi
 import com.newterrastudios.djinn.go.data.GoResume
 import com.newterrastudios.djinn.go.data.Track
+import java.io.IOException
+import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.guava.await
+import kotlinx.coroutines.launch
+
+/** Songs left when a radio asks for more. */
+private const val RADIO_LOW = 5
 
 fun Track.toMediaItem(api: GoApi): MediaItem = MediaItem.Builder()
     .setMediaId(id.toString())
@@ -80,6 +86,7 @@ class PlayerState(private val api: GoApi) {
             ) {
                 if (addedAhead > 0) addedAhead--
             }
+            extendRadio()
         }
 
         override fun onPlayerError(e: PlaybackException) {
@@ -132,6 +139,7 @@ class PlayerState(private val api: GoApi) {
         val player = controller ?: return
         error = null
         addedAhead = 0
+        radioSeed = null
         player.setMediaItems(songs.map { it.toMediaItem(api) }, start, 0)
         player.prepare()
         player.play()
@@ -141,6 +149,7 @@ class PlayerState(private val api: GoApi) {
         val player = controller ?: return
         error = null
         addedAhead = 0
+        radioSeed = null
         player.setMediaItems(
             saved.songs.map { it.toMediaItem(api) },
             saved.position.coerceIn(0, saved.songs.lastIndex),
@@ -150,24 +159,72 @@ class PlayerState(private val api: GoApi) {
         player.play()
     }
 
-    /** With nothing playing this starts it, so a tap always does something. */
-    fun playNext(track: Track) = insert(track, front = true)
-
-    fun addToQueue(track: Track) = insert(track, front = false)
-
-    private fun insert(track: Track, front: Boolean) {
+    /**
+     * After the song playing and what you lined up before, so several play in
+     * the order you chose them. With nothing playing this starts it.
+     */
+    fun playNext(track: Track) {
         val player = controller ?: return
         if (player.mediaItemCount == 0) return play(listOf(track))
-        val next = player.currentMediaItemIndex + 1
-        val at = if (front) next else next + addedAhead
+        val at = player.currentMediaItemIndex + 1 + addedAhead
         player.addMediaItem(at.coerceAtMost(player.mediaItemCount), track.toMediaItem(api))
         addedAhead++
     }
 
-    /** Lines radio up after the current song and anything you added. */
-    fun queueRadio(songs: List<Track>) {
+    /** After everything in the queue. */
+    fun addToEnd(track: Track) {
         val player = controller ?: return
-        if (player.mediaItemCount == 0) return play(songs)
+        if (player.mediaItemCount == 0) return play(listOf(track))
+        player.addMediaItem(track.toMediaItem(api))
+    }
+
+    /** Moves a song still to come to another place still to come. */
+    fun move(from: Int, to: Int) {
+        val player = controller ?: return
+        val first = player.currentMediaItemIndex + 1
+        if (from < first || from >= player.mediaItemCount) return
+        val target = to.coerceIn(first, player.mediaItemCount - 1)
+        if (target != from) player.moveMediaItem(from, target)
+    }
+
+    /** The song a radio started from, while one is on. */
+    private var radioSeed: Long? = null
+    private var extending = false
+    private val scope = MainScope()
+
+    /** More radio as it runs low, from the song it started with. */
+    private fun extendRadio() {
+        val player = controller ?: return
+        val seed = radioSeed ?: return
+        if (extending || player.mediaItemCount - player.currentMediaItemIndex > RADIO_LOW) return
+        extending = true
+        scope.launch {
+            try {
+                val known = (0 until player.mediaItemCount).map { player.getMediaItemAt(it).mediaId }.toSet()
+                var more = api.radio(seed).filter { it.id.toString() !in known }
+                if (more.isEmpty()) {
+                    // Nothing left around the seed: wander on from the last song.
+                    val last = player.getMediaItemAt(player.mediaItemCount - 1).mediaId.toLong()
+                    more = api.radio(last).filter { it.id.toString() !in known }
+                }
+                if (radioSeed == seed) player.addMediaItems(more.map { it.toMediaItem(api) })
+            } catch (_: IOException) {
+                // Offline: the radio ends with what it has.
+            } finally {
+                extending = false
+            }
+        }
+    }
+
+    /** Lines radio up after the current song and anything you added. */
+    fun queueRadio(seed: Long, songs: List<Track>) {
+        val player = controller ?: return
+        radioSeed = seed
+        if (player.mediaItemCount == 0) {
+            play(songs)
+            radioSeed = seed
+            return
+        }
         val at = player.currentMediaItemIndex + 1 + addedAhead
         player.removeMediaItems(at.coerceAtMost(player.mediaItemCount), player.mediaItemCount)
         val playing = player.currentMediaItem?.mediaId

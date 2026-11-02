@@ -4,7 +4,7 @@
   import Icon from '../../lib/Icon.svelte'
   import { app, toast } from '../../lib/state.svelte'
   import type { GoPlaylistDetail } from '../../lib/types'
-  import { addToQueue, playList, tapSong } from '../player.svelte'
+  import { addToEnd, playList, playNext, tapSong } from '../player.svelte'
   import SongRow from '../SongRow.svelte'
 
   let { id }: { id: number } = $props()
@@ -97,7 +97,8 @@
     <button class="primary" onclick={() => list && playList(list.songs)} disabled={!list.songs.length}>
       <Icon name="play" /> Play
     </button>
-    <button onclick={() => list && addToQueue(list.songs)} disabled={!list.songs.length}>Add to queue</button>
+    <button onclick={() => list && playNext(list.songs)} disabled={!list.songs.length}>Play next</button>
+    <button onclick={() => list && addToEnd(list.songs)} disabled={!list.songs.length}>Add to end of queue</button>
     {#if mine}
       <button onclick={() => (editing = !editing)}>{editing ? 'Done' : 'Edit'}</button>
     {/if}

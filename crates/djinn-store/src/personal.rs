@@ -102,8 +102,10 @@ pub enum TapAction {
     /// Play it now, in place of what's playing.
     #[default]
     Play,
-    /// Add it to the queue, after what you added before.
+    /// Play it next: after the song playing and what you lined up before.
     Queue,
+    /// Add it to the very end of the queue.
+    End,
 }
 
 /// Someone's DJINN GO preferences.

@@ -3,6 +3,7 @@
   import { duration } from '../../lib/format'
   import Icon from '../../lib/Icon.svelte'
   import {
+    moveInQueue,
     current,
     cycleRepeat,
     isAdded,
@@ -21,6 +22,43 @@
 
   const song = $derived(current())
   const upNext = $derived(player.queue.slice(player.index + 1))
+
+  // Dragging a song in Up next by its handle: the row follows the finger, and
+  // the queue only changes when it's let go.
+  let dragging = $state<number | null>(null)
+  let dragY = $state(0)
+  let dragStart = 0
+  let rowHeight = 56
+
+  function dragBegin(e: PointerEvent, i: number) {
+    const handle = e.currentTarget as HTMLElement
+    handle.setPointerCapture(e.pointerId)
+    rowHeight = handle.closest('.queued')?.getBoundingClientRect().height ?? rowHeight
+    dragStart = e.clientY
+    dragY = 0
+    dragging = i
+  }
+
+  function dragMove(e: PointerEvent) {
+    if (dragging !== null) dragY = e.clientY - dragStart
+  }
+
+  function dragEnd() {
+    if (dragging === null) return
+    const from = dragging
+    const places = Math.round(dragY / rowHeight)
+    dragging = null
+    dragY = 0
+    if (places) moveInQueue(player.index + 1 + from, player.index + 1 + from + places)
+  }
+
+  /** The same with arrow keys, for anyone not using a pointer. */
+  function dragKey(e: KeyboardEvent, i: number) {
+    const by = e.key === 'ArrowUp' ? -1 : e.key === 'ArrowDown' ? 1 : 0
+    if (!by) return
+    e.preventDefault()
+    moveInQueue(player.index + 1 + i, player.index + 1 + i + by)
+  }
   const time = (s: number) => duration(s * 1000)
 </script>
 
@@ -86,7 +124,19 @@
     <section class="queue">
       <h2>Up next{#if player.radio}{' '}<span class="muted small">(radio)</span>{/if}</h2>
       {#each upNext as track, i (`${track.id}-${player.index + 1 + i}`)}
-        <div class="queued">
+        <div class="queued" class:dragging={dragging === i} style:transform={dragging === i ? `translateY(${dragY}px)` : null}>
+          <button
+            class="icon drag"
+            aria-label="Move {track.title}"
+            title="Drag to move, or use the arrow keys"
+            onpointerdown={(e) => dragBegin(e, i)}
+            onpointermove={dragMove}
+            onpointerup={dragEnd}
+            onpointercancel={dragEnd}
+            onkeydown={(e) => dragKey(e, i)}
+          >
+            <Icon name="drag" size={18} />
+          </button>
           <button class="queued-song" onclick={() => jumpTo(player.index + 1 + i)}>
             <span class="title">{track.title}</span>
             <span class="muted small">{track.artist ?? ''}{#if isAdded(track)}{' · '}<span class="added">Added by you</span>{/if}</span>
@@ -216,6 +266,20 @@
     display: flex;
     align-items: center;
     border-bottom: 1px solid var(--line);
+  }
+
+  .queued.dragging {
+    position: relative;
+    z-index: 2;
+    background: var(--surface-2);
+    box-shadow: 0 4px 14px rgb(0 0 0 / 35%);
+  }
+
+  /* A finger on the handle moves the song, not the page. */
+  .drag {
+    touch-action: none;
+    cursor: grab;
+    color: var(--muted);
   }
 
   .queued-song {

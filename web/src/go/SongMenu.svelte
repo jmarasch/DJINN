@@ -3,7 +3,7 @@
   import { api } from '../lib/api'
   import Sheet from '../lib/Sheet.svelte'
   import { app, toast } from '../lib/state.svelte'
-  import { addToQueue, likes, playNext, startRadio, toggleLike } from './player.svelte'
+  import { addToEnd, likes, playNext, startRadio, toggleLike } from './player.svelte'
   import { ui } from './ui.svelte'
 
   const track = $derived(ui.menu)
@@ -47,8 +47,8 @@
   {@const song = track}
   <Sheet title={song.title} onclose={close}>
     <div class="actions">
-      <button onclick={() => act(() => playNext(song))}>Play next</button>
-      <button onclick={() => act(() => addToQueue([song]))}>Add to queue</button>
+      <button onclick={() => act(() => playNext([song]))}>Play next</button>
+      <button onclick={() => act(() => addToEnd([song]))}>Add to end of queue</button>
       <button onclick={() => act(() => startRadio(song))}>Start radio from this song</button>
       <button onclick={() => act(() => toggleLike('track', song.id))}>
         {likes.track.has(song.id) ? 'Unlike' : 'Like'}

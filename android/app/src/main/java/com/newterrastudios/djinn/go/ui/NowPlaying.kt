@@ -1,6 +1,19 @@
 package com.newterrastudios.djinn.go.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.layout.Box
+import androidx.compose.material.icons.filled.DragHandle
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.zIndex
+import kotlin.math.roundToInt
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -245,17 +258,63 @@ fun NowPlayingScreen(nav: Nav) {
         if (player.upNext.isNotEmpty()) {
             item { Heading("Up next") }
             items(player.upNext, key = { "${it.index}-${it.item.mediaId}" }) { entry ->
-                Row2(
-                    title = entry.item.mediaMetadata.title?.toString() ?: "",
-                    subtitle = entry.item.mediaMetadata.artist?.toString(),
-                    art = { Art(entry.item.mediaMetadata.artworkUri?.toString(), 44.dp) },
-                    onClick = { player.jumpTo(entry.index) },
-                    end = {
-                        IconButton(onClick = { player.remove(entry.index) }) {
-                            Icon(Icons.Default.Close, "Take out of the queue")
-                        }
-                    },
-                )
+                var dragged by remember { mutableStateOf(0f) }
+                var rowHeight by remember { mutableIntStateOf(1) }
+                val title = entry.item.mediaMetadata.title?.toString() ?: ""
+                Box(
+                    Modifier
+                        .onSizeChanged { rowHeight = it.height.coerceAtLeast(1) }
+                        .zIndex(if (dragged != 0f) 1f else 0f)
+                        .graphicsLayer { translationY = dragged }
+                        .background(if (dragged != 0f) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent),
+                ) {
+                    Row2(
+                        title = title,
+                        subtitle = entry.item.mediaMetadata.artist?.toString(),
+                        art = { Art(entry.item.mediaMetadata.artworkUri?.toString(), 44.dp) },
+                        onClick = { player.jumpTo(entry.index) },
+                        end = {
+                            IconButton(onClick = { player.remove(entry.index) }) {
+                                Icon(Icons.Default.Close, "Take out of the queue")
+                            }
+                            // The row follows the finger; the queue changes when it's let go.
+                            Icon(
+                                Icons.Default.DragHandle,
+                                contentDescription = "Move $title",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .padding(8.dp)
+                                    .pointerInput(entry.index) {
+                                        detectDragGestures(
+                                            onDrag = { change, by ->
+                                                change.consume()
+                                                dragged += by.y
+                                            },
+                                            onDragEnd = {
+                                                val places = (dragged / rowHeight).roundToInt()
+                                                dragged = 0f
+                                                if (places != 0) player.move(entry.index, entry.index + places)
+                                            },
+                                            onDragCancel = { dragged = 0f },
+                                        )
+                                    }
+                                    .semantics {
+                                        customActions = listOf(
+                                            CustomAccessibilityAction("Move up") {
+                                                player.move(entry.index, entry.index - 1)
+                                                true
+                                            },
+                                            CustomAccessibilityAction("Move down") {
+                                                player.move(entry.index, entry.index + 1)
+                                                true
+                                            },
+                                        )
+                                    },
+                            )
+                        },
+                    )
+                }
             }
         }
     }
@@ -315,7 +374,7 @@ fun SongMenu(track: Track, nav: Nav) {
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
         )
         MenuRow("Play next", Icons.Default.SkipNext) { then { nav.player.playNext(track) } }
-        MenuRow("Add to queue", Icons.AutoMirrored.Filled.QueueMusic) { then { nav.player.addToQueue(track) } }
+        MenuRow("Add to end of queue", Icons.AutoMirrored.Filled.QueueMusic) { then { nav.player.addToEnd(track) } }
         MenuRow("Start radio", Icons.Default.Radio) { then { nav.radioFor = track } }
         MenuRow("Add to playlist", Icons.AutoMirrored.Filled.PlaylistAdd) {
             scope.launch {

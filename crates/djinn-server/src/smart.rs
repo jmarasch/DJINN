@@ -125,22 +125,16 @@ impl crate::jukebox::Mixer for SmartMixer {
             return Vec::new();
         };
         let seeds = match seed {
-            RadioSeed::Track { id } => Seeds {
-                tracks: vec![*id],
-                only: None,
-                genres: catalog
-                    .tags
-                    .get(id)
-                    .cloned()
-                    .unwrap_or_default()
-                    .into_iter()
-                    .collect(),
-            },
-            RadioSeed::Artist { id } => Seeds {
-                tracks: catalog.artist_songs.get(id).cloned().unwrap_or_default(),
-                only: None,
-                genres: catalog.artist_genres.get(id).cloned().unwrap_or_default(),
-            },
+            RadioSeed::Track { id } => song_seeds(&catalog, *id),
+            RadioSeed::Artist { id } => {
+                let tracks = catalog.artist_songs.get(id).cloned().unwrap_or_default();
+                Seeds {
+                    favored: tracks.iter().copied().collect(),
+                    tracks,
+                    only: None,
+                    genres: catalog.artist_genres.get(id).cloned().unwrap_or_default(),
+                }
+            }
             RadioSeed::Genre { name } => {
                 let name = vibe::normalize(name);
                 let songs = catalog.songs_in(&name);
@@ -148,6 +142,7 @@ impl crate::jukebox::Mixer for SmartMixer {
                     only: Some(songs.iter().copied().collect()),
                     tracks: songs,
                     genres: [name].into_iter().collect(),
+                    favored: HashSet::new(),
                 }
             }
         };
@@ -157,6 +152,67 @@ impl crate::jukebox::Mixer for SmartMixer {
         };
         rank(&index, &seeds, &catalog.tags, &session, RADIO_SONGS)
     }
+}
+
+/// A radio from one song: sounding like it, and favoring its artists.
+fn song_seeds(catalog: &Catalog, id: i64) -> djinn_library::radio::Seeds {
+    let favored = catalog
+        .links
+        .artists
+        .get(&id)
+        .into_iter()
+        .flatten()
+        .filter_map(|artist| catalog.artist_songs.get(artist))
+        .flatten()
+        .copied()
+        .collect();
+    djinn_library::radio::Seeds {
+        tracks: vec![id],
+        only: None,
+        genres: catalog
+            .tags
+            .get(&id)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .collect(),
+        favored,
+    }
+}
+
+/// Personal radio's songs from one song, in the order to play them: a weighted
+/// draw, so it's different each time. Empty without sound analysis. `played`
+/// pulls it along, and `skipped` keeps those and songs like them away.
+pub fn personal_radio(state: &AppState, id: i64, played: &[i64], skipped: &[i64]) -> Vec<i64> {
+    let (Ok(catalog), Ok(index)) = (state.catalog.read(), state.sound.read()) else {
+        return Vec::new();
+    };
+    let session = djinn_library::radio::Session {
+        played: played.to_vec(),
+        skipped: skipped.to_vec(),
+    };
+    let ranked = djinn_library::radio::rank(
+        &index,
+        &song_seeds(&catalog, id),
+        &catalog.tags,
+        &session,
+        RADIO_SONGS,
+    );
+    draw_in_order(ranked, || rand::random::<f32>())
+}
+
+/// Puts songs in a random order where heavier ones tend to come first: each
+/// gets a key from its weight and a random number, and the smallest goes first.
+fn draw_in_order(ranked: Vec<(i64, f32)>, mut random: impl FnMut() -> f32) -> Vec<i64> {
+    let mut keyed: Vec<(f32, i64)> = ranked
+        .into_iter()
+        .map(|(id, weight)| {
+            let roll = random().clamp(1e-6, 1.0);
+            (-roll.ln() / weight.max(1e-6), id)
+        })
+        .collect();
+    keyed.sort_by(|a, b| a.0.total_cmp(&b.0));
+    keyed.into_iter().map(|(_, id)| id).collect()
 }
 
 /// Songs radio considers at a time.

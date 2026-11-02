@@ -176,6 +176,13 @@ class MainActivity : ComponentActivity() {
             if (nav.canKeepSongs) SmartCacheWorker.schedule(this@MainActivity)
         }
         LaunchedEffect(Unit) {
+            try {
+                nav.tapAction = api.prefs().tap
+            } catch (_: IOException) {
+                // A tap plays until the server says otherwise.
+            }
+        }
+        LaunchedEffect(Unit) {
             app.offline.dao.songsFlow(nav.server).collect { songs ->
                 nav.keptIds = songs.map { it.id }.toSet()
             }
@@ -201,7 +208,7 @@ class MainActivity : ComponentActivity() {
             snapshotFlow { nav.radioFor }.filterNotNull().collect { seed ->
                 nav.radioFor = null
                 try {
-                    player.queueRadio(api.radio(seed.id))
+                    player.queueRadio(seed.id, api.radio(seed.id))
                 } catch (_: IOException) {
                     player.error = "Couldn't start radio."
                 }
