@@ -9,6 +9,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material.icons.filled.Cast
 import androidx.compose.material.icons.filled.CastConnected
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.PhoneInTalk
@@ -102,6 +103,7 @@ fun NowPlayingScreen(nav: Nav) {
         visual = (visual + 1) % VisualStyle.entries.size
         nav.prefs.visuals = visual
     }
+    val style = VisualStyle.at(visual)
 
     LazyColumn(
         Modifier
@@ -130,19 +132,24 @@ fun NowPlayingScreen(nav: Nav) {
                     .padding(horizontal = 24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                if (VisualStyle.entries[visual] == VisualStyle.Art) {
+                if (style == VisualStyle.Art) {
                     Art(
                         item.mediaMetadata.artworkUri?.toString(),
                         280.dp,
                         modifier = Modifier.clickable(onClick = ::nextVisual),
                     )
                 } else {
-                    Visualizer(
-                        VisualStyle.entries[visual],
-                        onTap = ::nextVisual,
-                        modifier = Modifier
-                            .size(280.dp),
-                    )
+                    Visual(style, onTap = ::nextVisual, modifier = Modifier.size(280.dp))
+                }
+                TextButton(onClick = {
+                    if (style == VisualStyle.Art) {
+                        visual = VisualStyle.Warp.ordinal
+                        nav.prefs.visuals = visual
+                    }
+                    nav.push(Screen.Visuals)
+                }) {
+                    Icon(Icons.Default.Fullscreen, contentDescription = null)
+                    Text(if (style == VisualStyle.Art) "Visuals" else "${style.label}: full screen", modifier = Modifier.padding(start = 8.dp))
                 }
                 if (casting != null) {
                     Text(

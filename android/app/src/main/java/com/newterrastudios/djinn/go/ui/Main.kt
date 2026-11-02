@@ -53,6 +53,7 @@ sealed interface Screen {
     data class Playlist(val id: Long) : Screen
     data object NowPlaying : Screen
     data object Settings : Screen
+    data object Visuals : Screen
 }
 
 enum class Tab(val label: String) { Home("Home"), Library("Library"), Search("Search") }
@@ -108,6 +109,10 @@ class Nav(
 fun MainScreen(nav: Nav) {
     BackHandler(enabled = nav.stack.isNotEmpty()) { nav.pop() }
     val top = nav.stack.lastOrNull()
+    if (top == Screen.Visuals) {
+        FullVisuals(nav)
+        return
+    }
     if (top == Screen.NowPlaying) {
         NowPlayingScreen(nav)
         nav.menuFor?.let { SongMenu(it, nav) }
