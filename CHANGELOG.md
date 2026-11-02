@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Faster library
+
+- The Library tab opens right away and stays quick however far you scroll, on the party app and on GO. Only the rows near the screen are on the page, and lists are worked out once until the library changes.
+- The first start after updating moves sound analysis into its own table and compacts the database, once. This can take a minute or more on a big library and needs free disk space about the size of the database. Nothing needs analyzing again.
+
 ## 2026.11.01 (November 1, 2026)
 
 ### DJINN GO away from home

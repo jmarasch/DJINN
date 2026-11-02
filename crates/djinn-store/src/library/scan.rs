@@ -270,11 +270,7 @@ async fn save_track(tx: &mut Transaction<'_, Sqlite>, t: &ScannedTrack, now: i64
             loudness_peak = CASE WHEN size = excluded.size AND mtime = excluded.mtime
                                  THEN loudness_peak END,
             loudness_checked_at = CASE WHEN size = excluded.size AND mtime = excluded.mtime
-                                       THEN loudness_checked_at END,
-            features_version = CASE WHEN size = excluded.size AND mtime = excluded.mtime
-                                    THEN features_version END,
-            heard_version = CASE WHEN size = excluded.size AND mtime = excluded.mtime
-                                 THEN heard_version END
+                                       THEN loudness_checked_at END
          RETURNING id",
     )
     .bind(&t.path)
