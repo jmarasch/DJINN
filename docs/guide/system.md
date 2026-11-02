@@ -15,6 +15,12 @@ after it.
   it was. **Quit DJINN** stops it until someone starts it again on its
   computer.
 
+**Server ports** lets an admin change the party and DJINN GO ports. Pick two
+different available ports and save, then restart DJINN to apply them. If
+you connect directly to the party address, the Admin page follows the new
+party port after restart. Update any router forwarding or reverse proxy
+to use the new port. These saved ports override `config.toml`.
+
 ## Updates
 
 Checking for and installing new versions; see [Updates](updates.md).
@@ -27,10 +33,15 @@ Saving everything DJINN knows to one file; see
 ## Log
 
 The latest lines DJINN has written since it started, newest at the bottom,
-with times as the DJINN computer's clock shows them. Show only errors,
-warnings and errors, or everything, and search for a word. **Download the
-log** saves the log file to attach to a problem report; it can include song
-names and the addresses of devices on your network.
+with times as the DJINN computer's clock shows them. Set **Record in the
+log** to full tracing, warnings and errors, or errors only. This changes
+what DJINN records immediately. **Show lines** filters what you see without
+changing what is recorded. Search for a word in the recent lines.
+
+DJINN writes one dated file per day and keeps seven days by default. Change
+**Days to keep** from 1 to 365. Use **Download the log** for today's file,
+or pick a date under **Daily logs** for an earlier one. A log can include
+song names and the addresses of devices on your network.
 
 ## Clear and reset
 

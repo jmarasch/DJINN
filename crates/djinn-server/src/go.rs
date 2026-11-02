@@ -23,15 +23,16 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, put};
 use axum::{Json, Router};
 use djinn_store::SignIn;
+use futures_util::StreamExt;
 use ipnet::IpNet;
 use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
 use tower::ServiceExt;
 use tower_http::services::ServeFile;
-use tower_http::trace::TraceLayer;
 
 use crate::auth::{go_refusal, new_token, AdminUser, CurrentSession, Device};
 use crate::error::{ApiError, ApiResult};
+use crate::go_upnp;
 use crate::security::{self, TRUSTED_PROXIES};
 use crate::state::AppState;
 use crate::two_step::{self, ADMIN_TWO_STEP};
@@ -39,6 +40,10 @@ use crate::{api, settings, web};
 
 /// 1 while DJINN GO is on.
 pub const GO_ENABLED: &str = "go_enabled";
+/// 1 when the GO listener accepts requests outside the home network.
+pub const GO_ALLOW_REMOTE: &str = "go_allow_remote";
+pub const GO_HTTPS_HOSTNAME: &str = "go_https_hostname";
+pub const GO_UPNP: &str = "go_upnp";
 /// The default GO address.
 pub const DEFAULT_LISTEN: SocketAddr =
     SocketAddr::new(IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED), 8067);
@@ -58,6 +63,8 @@ pub struct GoState {
     listen: SocketAddr,
     /// Mirrors the `go_enabled` setting.
     enabled: AtomicBool,
+    allow_remote: AtomicBool,
+    upnp: Mutex<Option<go_upnp::Mapping>>,
     /// Mirrors the `trusted_proxies` setting.
     proxies: RwLock<Vec<IpNet>>,
     /// Stops the running listener.
@@ -105,6 +112,8 @@ impl GoState {
         Self {
             listen,
             enabled: AtomicBool::new(false),
+            allow_remote: AtomicBool::new(false),
+            upnp: Mutex::default(),
             proxies: RwLock::default(),
             running: Mutex::default(),
             error: Mutex::default(),
@@ -118,14 +127,30 @@ impl GoState {
         self.proxies.read().map(|p| p.clone()).unwrap_or_default()
     }
 
+    pub fn port(&self) -> u16 {
+        self.listen.port()
+    }
+
     fn enabled(&self) -> bool {
         self.enabled.load(Ordering::Relaxed)
+    }
+
+    fn allow_remote(&self) -> bool {
+        self.allow_remote.load(Ordering::Relaxed)
     }
 
     /// Turns GO on without a listener, for tests of its router.
     #[cfg(test)]
     pub fn enable_for_tests(&self) {
         self.enabled.store(true, Ordering::Relaxed);
+        self.allow_remote.store(true, Ordering::Relaxed);
+    }
+
+    #[cfg(test)]
+    pub fn trust_local_proxy_for_tests(&self) {
+        if let Ok(mut proxies) = self.proxies.write() {
+            *proxies = security::parse_proxies("127.0.0.1");
+        }
     }
 }
 
@@ -138,10 +163,31 @@ pub async fn apply(state: &AppState) -> anyhow::Result<()> {
     }
     let on = settings::flag(&state.store, GO_ENABLED, false).await?;
     state.go.enabled.store(on, Ordering::Relaxed);
+    let allow_remote = settings::flag(&state.store, GO_ALLOW_REMOTE, false).await?;
+    state.go.allow_remote.store(allow_remote, Ordering::Relaxed);
+    let hostname = state
+        .store
+        .get_setting(GO_HTTPS_HOSTNAME)
+        .await?
+        .unwrap_or_default();
+    let upnp = settings::flag(&state.store, GO_UPNP, false).await?;
     if on {
         start(state).await;
     } else {
         stop(state);
+    }
+    let can_map = on && state.go.running.lock().is_ok_and(|r| r.is_some()) && allow_remote && upnp;
+    if let Ok(mut slot) = state.go.upnp.lock() {
+        if let Some(current) = slot.as_ref() {
+            if !can_map || current.hostname != hostname {
+                if let Some(old) = slot.take() {
+                    old.stop();
+                }
+            }
+        }
+        if can_map && slot.is_none() && go_upnp::valid_hostname(&hostname) {
+            *slot = Some(go_upnp::start(hostname, state.shutdown.subscribe()));
+        }
     }
     Ok(())
 }
@@ -204,7 +250,6 @@ pub fn router(state: AppState) -> Router {
         .fallback(web::go_handler)
         .layer(middleware::from_fn_with_state(state.clone(), guard))
         .layer(middleware::from_fn_with_state(state.clone(), headers))
-        .layer(TraceLayer::new_for_http())
         .with_state(state)
 }
 
@@ -330,6 +375,17 @@ async fn check(state: &AppState, request: Request) -> ApiResult<Request> {
             "DJINN GO is off",
         ));
     }
+    let origin = security::origin(
+        security::peer(request.extensions()),
+        request.headers(),
+        &state.go.proxies(),
+    );
+    if !state.go.allow_remote() && !origin.home {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "DJINN GO only accepts home network and Tailscale connections",
+        ));
+    }
     let (mut parts, body) = request.into_parts();
     parts.extensions.insert(GoRequest);
     let path = parts.uri.path().to_owned();
@@ -366,12 +422,25 @@ async fn check(state: &AppState, request: Request) -> ApiResult<Request> {
 
 /// Security headers on everything GO sends.
 async fn headers(State(state): State<AppState>, request: Request, next: Next) -> Response {
+    let started = Instant::now();
+    let method = request.method().clone();
     let origin = security::origin(
         security::peer(request.extensions()),
         request.headers(),
         &state.go.proxies(),
     );
     let mut response = next.run(request).await;
+    let status = response.status();
+    if status.is_server_error() {
+        tracing::error!(ip = ?origin.ip, %method, status = status.as_u16(),
+                        elapsed_ms = started.elapsed().as_millis(), "GO request failed");
+    } else if status.is_client_error() {
+        tracing::warn!(ip = ?origin.ip, %method, status = status.as_u16(),
+                       elapsed_ms = started.elapsed().as_millis(), "GO request refused");
+    } else {
+        tracing::trace!(ip = ?origin.ip, %method, status = status.as_u16(),
+                        elapsed_ms = started.elapsed().as_millis(), "GO request");
+    }
     let h = response.headers_mut();
     h.insert(
         header::CONTENT_SECURITY_POLICY,
@@ -639,7 +708,61 @@ pub async fn send_song(
             h.insert(header::CONTENT_DISPOSITION, value);
         }
     }
-    response
+    let (parts, body) = response.into_parts();
+    let audit = TransferAudit {
+        user_id: who.user_id,
+        session_id: who.session_id,
+        bytes: 0,
+        finished: std::cell::Cell::new(false),
+    };
+    let chunks = futures_util::stream::try_unfold(
+        (Box::pin(body.into_data_stream()), audit),
+        |(mut source, mut audit)| async move {
+            match source.next().await {
+                Some(Ok(chunk)) => {
+                    audit.bytes = audit.bytes.saturating_add(chunk.len() as u64);
+                    Ok(Some((chunk, (source, audit))))
+                }
+                Some(Err(error)) => {
+                    tracing::error!(user_id = audit.user_id, session_id = audit.session_id,
+                        bytes = audit.bytes, %error, "GO stream read failed");
+                    Err(error)
+                }
+                None => {
+                    audit.finished.set(true);
+                    Ok(None)
+                }
+            }
+        },
+    );
+    Response::from_parts(parts, Body::from_stream(chunks))
+}
+
+struct TransferAudit {
+    user_id: i64,
+    session_id: i64,
+    bytes: u64,
+    finished: std::cell::Cell<bool>,
+}
+
+impl Drop for TransferAudit {
+    fn drop(&mut self) {
+        if self.finished.get() {
+            tracing::trace!(
+                user_id = self.user_id,
+                session_id = self.session_id,
+                bytes = self.bytes,
+                "GO stream finished"
+            );
+        } else {
+            tracing::trace!(
+                user_id = self.user_id,
+                session_id = self.session_id,
+                bytes = self.bytes,
+                "GO stream disconnected"
+            );
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -652,6 +775,12 @@ struct Listener {
 #[derive(Serialize)]
 struct Status {
     enabled: bool,
+    allow_remote: bool,
+    https_hostname: String,
+    upnp: bool,
+    upnp_error: Option<String>,
+    upnp_external_ip: Option<String>,
+    upnp_verified: bool,
     running: bool,
     /// Why it couldn't start.
     error: Option<String>,
@@ -701,6 +830,31 @@ async fn status_of(state: &AppState) -> anyhow::Result<Status> {
     let port = go.listen.port();
     Ok(Status {
         enabled: go.enabled(),
+        allow_remote: go.allow_remote(),
+        https_hostname: state
+            .store
+            .get_setting(GO_HTTPS_HOSTNAME)
+            .await?
+            .unwrap_or_default(),
+        upnp: settings::flag(&state.store, GO_UPNP, false).await?,
+        upnp_error: go.upnp.lock().ok().and_then(|m| {
+            m.as_ref()
+                .and_then(|m| m.error.lock().ok().and_then(|e| e.clone()))
+        }),
+        upnp_external_ip: go.upnp.lock().ok().and_then(|m| {
+            m.as_ref().and_then(|m| {
+                m.external_ip
+                    .lock()
+                    .ok()
+                    .and_then(|ip| ip.map(|ip| ip.to_string()))
+            })
+        }),
+        upnp_verified: go
+            .upnp
+            .lock()
+            .ok()
+            .and_then(|m| m.as_ref().map(|m| m.verified.load(Ordering::Relaxed)))
+            .unwrap_or(false),
         running: go.running.lock().is_ok_and(|r| r.is_some()),
         error: go.error.lock().ok().and_then(|e| e.clone()),
         port,
@@ -794,6 +948,12 @@ async fn status(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json<S
 struct GoSettings {
     enabled: bool,
     #[serde(default)]
+    allow_remote: bool,
+    #[serde(default)]
+    https_hostname: String,
+    #[serde(default)]
+    upnp: bool,
+    #[serde(default)]
     trusted_proxies: String,
     #[serde(default)]
     admin_two_step: bool,
@@ -804,8 +964,8 @@ async fn save_settings(
     State(state): State<AppState>,
     Json(body): Json<GoSettings>,
 ) -> ApiResult<Json<Status>> {
-    let proxies = body.trusted_proxies.trim();
-    let parsed = security::parse_proxies(proxies);
+    let mut proxies = body.trusted_proxies.trim().to_owned();
+    let parsed = security::parse_proxies(&proxies);
     let entries = proxies
         .split(|c: char| c == ',' || c.is_whitespace())
         .filter(|s| !s.is_empty())
@@ -820,11 +980,41 @@ async fn save_settings(
             "turn on two-step sign-in for your own account first",
         ));
     }
+    let hostname = body.https_hostname.trim().to_ascii_lowercase();
+    if !hostname.is_empty() && !go_upnp::valid_hostname(&hostname) {
+        return Err(ApiError::bad_request(
+            "enter a DNS hostname such as music.example.com",
+        ));
+    }
+    if body.upnp && body.enabled && body.allow_remote && hostname.is_empty() {
+        return Err(ApiError::bad_request("turn on GO and outside connections, then enter your HTTPS hostname before enabling UPnP"));
+    }
+    let upnp = body.upnp && body.enabled && body.allow_remote;
+    if upnp
+        && !parsed
+            .iter()
+            .any(|net| net.contains(&IpAddr::V4(std::net::Ipv4Addr::LOCALHOST)))
+    {
+        if !proxies.is_empty() {
+            proxies.push(',');
+        }
+        proxies.push_str("127.0.0.1");
+    }
     settings::set_flag(&state.store, GO_ENABLED, body.enabled).await?;
-    state.store.set_setting(TRUSTED_PROXIES, proxies).await?;
+    settings::set_flag(&state.store, GO_ALLOW_REMOTE, body.allow_remote).await?;
+    state
+        .store
+        .set_setting(GO_HTTPS_HOSTNAME, &hostname)
+        .await?;
+    settings::set_flag(&state.store, GO_UPNP, upnp).await?;
+    state.store.set_setting(TRUSTED_PROXIES, &proxies).await?;
     settings::set_flag(&state.store, ADMIN_TWO_STEP, body.admin_two_step).await?;
     apply(&state).await?;
-    tracing::info!(on = body.enabled, "DJINN GO settings changed");
+    tracing::warn!(
+        on = body.enabled,
+        allow_remote = body.allow_remote,
+        "DJINN GO settings changed"
+    );
     Ok(Json(status_of(&state).await?))
 }
 
@@ -889,16 +1079,28 @@ mod tests {
         body: Option<&str>,
         cookie: Option<&str>,
     ) -> (StatusCode, String, Option<String>) {
-        let mut req = Request::builder().method(method).uri(path);
+        // Model a remote client reaching GO through a trusted local HTTPS
+        // proxy. The server still sees the real address for role checks.
+        state.go.trust_local_proxy_for_tests();
+        let mut req = Request::builder()
+            .method(method)
+            .uri(path)
+            .header("x-forwarded-for", "198.51.100.42")
+            .header("x-forwarded-proto", "https");
         if body.is_some() {
             req = req.header(header::CONTENT_TYPE, "application/json");
         }
         if let Some(cookie) = cookie {
             req = req.header(header::COOKIE, cookie);
         }
-        let req = req
+        let mut req = req
             .body(body.map_or_else(Body::empty, |b| Body::from(b.to_owned())))
             .unwrap();
+        req.extensions_mut()
+            .insert(axum::extract::ConnectInfo(SocketAddr::from((
+                [127, 0, 0, 1],
+                50000,
+            ))));
         let res = router(state.clone()).oneshot(req).await.unwrap();
         let status = res.status();
         let cookie = res
@@ -943,14 +1145,103 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn outside_access_needs_switch_but_https_is_optional() {
+        let state = AppState::for_tests().await;
+        state.go.enabled.store(true, Ordering::Relaxed);
+        let call = |ip: [u8; 4], proto: Option<&str>| {
+            let mut request = Request::builder().uri("/api/auth/mode");
+            if let Some(proto) = proto {
+                request = request.header("x-forwarded-proto", proto);
+            }
+            let mut request = request.body(Body::empty()).unwrap();
+            request
+                .extensions_mut()
+                .insert(axum::extract::ConnectInfo(SocketAddr::from((ip, 50000))));
+            request
+        };
+        let res = router(state.clone())
+            .oneshot(call([192, 168, 1, 8], None))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let res = router(state.clone())
+            .oneshot(call([8, 8, 8, 8], None))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::FORBIDDEN);
+        state.go.allow_remote.store(true, Ordering::Relaxed);
+        let res = router(state.clone())
+            .oneshot(call([8, 8, 8, 8], None))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        assert!(!res
+            .headers()
+            .contains_key(header::STRICT_TRANSPORT_SECURITY));
+        let away = djinn_store::Permissions {
+            go: true,
+            go_remote: true,
+            ..djinn_store::Permissions::default()
+        };
+        let role = state.store.create_role("Remote", &away).await.unwrap();
+        account(&state, "alex", role.id).await;
+        let mut request = Request::builder()
+            .method(Method::POST)
+            .uri("/api/auth/login")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(login("alex")))
+            .unwrap();
+        request
+            .extensions_mut()
+            .insert(axum::extract::ConnectInfo(SocketAddr::from((
+                [8, 8, 8, 8],
+                50000,
+            ))));
+        let res = router(state.clone()).oneshot(request).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let cookie = res
+            .headers()
+            .get(header::SET_COOKIE)
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert!(
+            !cookie.contains("; Secure"),
+            "HTTP login must work without TLS"
+        );
+        // A direct client can't claim trusted HTTPS by setting a header.
+        let res = router(state.clone())
+            .oneshot(call([8, 8, 8, 8], Some("https")))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        assert!(!res
+            .headers()
+            .contains_key(header::STRICT_TRANSPORT_SECURITY));
+    }
+
+    #[tokio::test]
     async fn go_port_checks_roles_home_and_two_step() {
         let state = AppState::for_tests().await;
         let (status, _, _) = go(&state, Method::GET, "/api/auth/mode", None, None).await;
         assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "off by default");
         state.go.enabled.store(true, Ordering::Relaxed);
 
-        // Tests have no peer address, so every request is "away from home",
-        // and Listener can't use GO away from home.
+        // Without a peer address, requests are remote. The server-wide
+        // switch blocks every GO surface before sign-in or song grants.
+        for path in [
+            "/api/auth/mode",
+            "/go/stream/missing",
+            "/rest/ping.view",
+            "/go",
+        ] {
+            let (status, _, _) = go(&state, Method::GET, path, None, None).await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{path}");
+        }
+        state.go.allow_remote.store(true, Ordering::Relaxed);
+
+        // The simulated client is away from home, and Listener can't use
+        // GO away from home.
         account(&state, "lee", djinn_store::LISTENER_ROLE).await;
         let (status, text, _) = go(
             &state,
@@ -1105,6 +1396,7 @@ mod tests {
     async fn your_own_library_on_go() {
         let state = AppState::for_tests().await;
         state.go.enabled.store(true, Ordering::Relaxed);
+        state.go.allow_remote.store(true, Ordering::Relaxed);
         let songs: Vec<djinn_store::ScannedTrack> = (0..4)
             .map(|i| djinn_store::ScannedTrack {
                 path: format!("/m/{i}.flac"),
@@ -1219,6 +1511,7 @@ mod tests {
     async fn wrong_passwords_lock_the_account_for_a_while() {
         let state = AppState::for_tests().await;
         state.go.enabled.store(true, Ordering::Relaxed);
+        state.go.allow_remote.store(true, Ordering::Relaxed);
         account(&state, "kim", djinn_store::LISTENER_ROLE).await;
         let wrong = r#"{"username":"kim","password":"not it at all"}"#;
         for _ in 0..5 {

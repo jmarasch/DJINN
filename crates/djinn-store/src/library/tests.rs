@@ -457,6 +457,20 @@ async fn collaborations_count_for_every_artist() {
 }
 
 #[tokio::test]
+async fn albumless_songs_stay_in_the_primary_artist_list() {
+    let store = Store::open_in_memory().await.unwrap();
+    let mut song = scanned("/m/single.flac", "Single", "Solo", "Unused");
+    song.album = None;
+    store.save_scanned(&[song]).await.unwrap();
+
+    let page = store.artists_page_filtered(false, 0, 10).await.unwrap();
+    assert_eq!(page.total, 1);
+    assert_eq!(page.items[0].name, "Solo");
+    assert_eq!(page.items[0].track_count, 1);
+    assert_eq!(store.artist_jumps_filtered(false).await.unwrap().len(), 1);
+}
+
+#[tokio::test]
 async fn compilation_albums_are_grouped_and_filterable() {
     let store = Store::open_in_memory().await.unwrap();
     let mut songs = vec![

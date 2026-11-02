@@ -1,13 +1,25 @@
 <script lang="ts">
   // Admin > System: how DJINN is doing, and restarting or quitting it.
+  import { onMount } from 'svelte'
   import { api } from './api'
   import { reloadAfterRestart } from './restart'
   import { toast } from './state.svelte'
-  import type { SystemStatus } from './types'
+  import type { ServerPorts, SystemStatus } from './types'
 
   let status = $state<SystemStatus | null>(null)
   /** Restarting, or quit: DJINN is going away. */
   let leaving = $state<'restart' | 'quit' | null>(null)
+  let ports = $state<ServerPorts | null>(null)
+  let portForm = $state({ party_port: 8066, go_port: 8067 })
+  let savingPorts = $state(false)
+  let restartTarget = $state<string | undefined>(undefined)
+
+  onMount(() => {
+    api.systemPorts().then((value) => {
+      ports = value
+      portForm = { party_port: value.pending_party_port, go_port: value.pending_go_port }
+    }).catch((e) => toast(e.message, true))
+  })
 
   async function load() {
     try {
@@ -24,12 +36,31 @@
   })
 
   $effect(() => {
-    if (leaving === 'restart') return reloadAfterRestart()
+    if (leaving === 'restart') return reloadAfterRestart(restartTarget)
   })
+
+  async function savePorts() {
+    savingPorts = true
+    try {
+      ports = await api.saveSystemPorts(portForm)
+      portForm = { party_port: ports.pending_party_port, go_port: ports.pending_go_port }
+      toast('Ports saved. Restart DJINN to apply them.')
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not save ports', true)
+    } finally {
+      savingPorts = false
+    }
+  }
 
   async function restart() {
     if (!confirm('Restart DJINN? The music stops for a few seconds, then carries on where it was.')) return
     try {
+      restartTarget = undefined
+      if (ports && ports.pending_party_port !== ports.party_port && Number(location.port) === ports.party_port) {
+        const target = new URL(location.href)
+        target.port = String(ports.pending_party_port)
+        restartTarget = target.href
+      }
       await api.restart()
       leaving = 'restart'
     } catch (e) {
@@ -142,6 +173,22 @@
       {/if}
     </dl>
 
+    {#if ports}
+      <div class="port-settings">
+        <h3>Server ports</h3>
+        <div class="port-fields">
+          <label>Party
+            <input type="number" min="1" max="65535" step="1" bind:value={portForm.party_port} />
+          </label>
+          <label>DJINN GO
+            <input type="number" min="1" max="65535" step="1" bind:value={portForm.go_port} />
+          </label>
+          <button onclick={savePorts} disabled={savingPorts || !Number.isInteger(portForm.party_port) || !Number.isInteger(portForm.go_port) || portForm.party_port < 1 || portForm.go_port < 1 || portForm.party_port > 65535 || portForm.go_port > 65535 || portForm.party_port === portForm.go_port}>Save ports</button>
+        </div>
+        <p class="small muted">Current: party {ports.party_port}, GO {ports.go_port}. Saved changes take effect after a restart. Update any router forwarding or reverse proxy to use the new ports.</p>
+      </div>
+    {/if}
+
     <div class="actions">
       <button onclick={restart}>Restart DJINN</button>
       <button class="danger" onclick={quit}>Quit DJINN</button>
@@ -185,6 +232,12 @@
     flex-wrap: wrap;
     gap: 8px;
   }
+
+  .port-settings { margin: 16px 0; }
+  .port-settings h3 { margin: 0 0 8px; }
+  .port-fields { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; }
+  .port-fields label { display: grid; gap: 4px; font-size: 0.875rem; }
+  .port-fields input { width: 110px; padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); color: var(--text); font: inherit; }
 
   p {
     margin: 8px 0 0;

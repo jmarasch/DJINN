@@ -25,7 +25,10 @@ Who can use it is set per role under Admin > **Users** (see
 - **Download songs:** off unless you turn it on.
 - **Must use two-step sign-in for GO:** see below.
 
-Admins can always use GO.
+Admins can always use GO. Admin > GO > Safety also has a server-wide
+**Allow connections from outside the home network** switch. It is off by
+default. Both this switch and the role permission must be on for internet
+listeners. Tailscale addresses count as home.
 
 ## Listening
 
@@ -206,16 +209,62 @@ account and a domain on Cloudflare.
    DJINN then sees each visitor's real address, so lockouts and the
    home-network check work. Without it, every visitor through the tunnel
    counts as away from home.
-3. Turn on **Use GO away from home** for the roles that should get in, and
-   consider requiring two-step sign-in for them.
+3. Turn on **Allow connections from outside the home network** and **Use GO
+   away from home** for the roles that should get in, and consider requiring
+   two-step sign-in for them.
 
 ### Port forwarding
 
-You can forward port 8067 on your router to the DJINN computer, but GO is
-then plain HTTP on the open internet, and passwords travel unencrypted. Use
-Tailscale or Cloudflare Tunnel instead, or put a reverse proxy with HTTPS
-(like Caddy) in front of GO and add its address to **Trusted proxies**. A
-button that sets this up safely is planned.
+When the admin turns on **Allow connections from outside the home network**
+and a listener's role has **Use GO away from home**, GO accepts direct
+connections over HTTP. To use this without HTTPS, forward TCP port 8067
+on your router to the DJINN computer's LAN IP on port 8067. The Admin page
+shows the exact `IP:PORT`. Passwords, app passwords, and music travel
+without encryption on direct HTTP connections, so HTTPS is recommended
+for internet access.
+
+### Recommended HTTPS setup
+
+For an encrypted public address, run an HTTPS reverse proxy such as
+[Caddy](https://caddyserver.com/docs/) on the DJINN computer. Register a DNS name, such as `music.example.com`,
+and point its A record at your router's public IPv4 address. Add this site
+to Caddy's configuration, replacing the name and GO port as needed:
+
+```caddyfile
+music.example.com {
+    tls {
+        issuer acme {
+            disable_http_challenge
+        }
+    }
+    reverse_proxy 127.0.0.1:8067
+}
+```
+
+Caddy obtains and renews the HTTPS certificate using the TLS challenge on
+port 443. If your public IP changes, keep the DNS record updated with a
+dynamic DNS service. In Admin > GO > Safety,
+enter the public hostname, set **Trusted proxies** to `127.0.0.1`, and turn
+on **Allow connections from outside the home network**. Give the relevant
+roles **Use GO away from home**. Caddy must be running on this computer and
+listening on TCP 443.
+
+For HTTPS, you can then:
+
+- Turn on **Use UPnP to forward HTTPS on the router**. DJINN asks a local
+  UPnP-IGD router to map public TCP 443 to Caddy on this computer. It checks
+  that the router has a public WAN address, DNS points there, and a valid
+  HTTPS certificate serves the hostname. The mapping lasts one hour and is
+  renewed while the option stays on. DJINN removes it when you turn the
+  option off; if removal fails, the lease expires on its own.
+- Leave UPnP off and set up your router manually to forward TCP 443 to the
+  DJINN computer's LAN IP on TCP 443. The Admin page shows the address.
+
+UPnP is offered only for the HTTPS setup; it will not forward HTTP port
+8067. If the router reports a private or carrier-grade NAT WAN address,
+incoming port forwarding cannot
+work until your provider gives you a public address. Tailscale or
+Cloudflare Tunnel still work in that case.
 
 ## Settings file
 

@@ -2,6 +2,69 @@
 //! beside each list, and search.
 
 use super::*;
+use std::time::{Duration, Instant};
+
+/// A cancelled browse request discards its connection, so an unfinished
+/// statement cannot affect the next request using that connection.
+struct TimedBrowse {
+    conn: sqlx::pool::PoolConnection<Sqlite>,
+    clean: bool,
+}
+
+impl TimedBrowse {
+    async fn acquire(pool: &sqlx::SqlitePool) -> Result<Self> {
+        let mut conn = pool.acquire().await?;
+        let deadline = Instant::now() + Duration::from_secs(5);
+        conn.lock_handle()
+            .await?
+            .set_progress_handler(10_000, move || Instant::now() < deadline);
+        Ok(Self { conn, clean: false })
+    }
+
+    async fn finish(mut self) -> Result<()> {
+        self.conn.lock_handle().await?.remove_progress_handler();
+        self.clean = true;
+        Ok(())
+    }
+}
+
+impl Drop for TimedBrowse {
+    fn drop(&mut self) {
+        if !self.clean {
+            self.conn.close_on_drop();
+        }
+    }
+}
+
+// The counted artist list is shared by pages, totals, and jump positions.
+// Keep the normal list free of album classification work. When collaborations
+// are hidden, find artists with a regular album (or an albumless song) once,
+// rather than running album_kind for every track of every artist.
+macro_rules! artist_browse {
+    () => {
+        concat!(
+            " FROM (",
+            artist_counts!(),
+            ") summary WHERE track_count > 0 AND lower(name) NOT IN
+              ('various artists', 'various', 'va', 'v.a.', 'soundtrack', 'soundtracks', 'ost', 'original soundtrack')"
+        )
+    };
+}
+
+macro_rules! primary_artists {
+    () => {
+        concat!(
+            " AND summary.id IN (
+                SELECT al.artist_id FROM albums al JOIN artists ar ON ar.id = al.artist_id
+                WHERE ",
+            album_kind!(),
+            " = 'regular' AND EXISTS (
+                    SELECT 1 FROM tracks t WHERE t.album_id = al.id AND t.removed_at IS NULL)
+                UNION SELECT t.artist_id FROM tracks t
+                WHERE t.album_id IS NULL AND t.removed_at IS NULL)"
+        )
+    };
+}
 
 impl Store {
     /// Artists with playable tracks, A to Z.
@@ -15,45 +78,43 @@ impl Store {
         offset: i64,
         limit: i64,
     ) -> Result<Page<ArtistSummary>> {
-        let items = sqlx::query_as(concat!(
-            "SELECT id, name, art_hash, track_count FROM (",
-            artist_counts!(),
-            ") summary WHERE track_count > 0 AND lower(name) NOT IN
-              ('various artists', 'various', 'va', 'v.a.', 'soundtrack', 'soundtracks', 'ost', 'original soundtrack')
-              AND (? OR EXISTS (
-                SELECT 1 FROM tracks t LEFT JOIN albums al ON al.id = t.album_id
-                LEFT JOIN artists ar ON ar.id = al.artist_id
-                WHERE t.removed_at IS NULL AND
-                  ((t.album_id IS NULL AND t.artist_id = summary.id)
-                    OR (al.artist_id = summary.id AND ",
-            album_kind!(),
-            " = 'regular'))))
-              ORDER BY ",
-            sort_key!("name"),
-            " LIMIT ? OFFSET ?"
-        ))
-        .bind(show_collaborations)
-        .bind(limit)
-        .bind(offset)
-        .fetch_all(&self.pool)
-        .await?;
-        let total = sqlx::query_scalar(concat!(
-            "SELECT count(*) FROM (",
-            artist_counts!(),
-            ") summary WHERE track_count > 0 AND lower(name) NOT IN
-              ('various artists', 'various', 'va', 'v.a.', 'soundtrack', 'soundtracks', 'ost', 'original soundtrack')
-              AND (? OR EXISTS (
-                SELECT 1 FROM tracks t LEFT JOIN albums al ON al.id = t.album_id
-                LEFT JOIN artists ar ON ar.id = al.artist_id
-                WHERE t.removed_at IS NULL AND
-                  ((t.album_id IS NULL AND t.artist_id = summary.id)
-                    OR (al.artist_id = summary.id AND ",
-            album_kind!(),
-            " = 'regular'))))"
-        ))
-        .bind(show_collaborations)
-        .fetch_one(&self.pool)
-        .await?;
+        let list_sql = if show_collaborations {
+            concat!(
+                "SELECT id, name, art_hash, track_count",
+                artist_browse!(),
+                " ORDER BY ",
+                sort_key!("name"),
+                " LIMIT ? OFFSET ?"
+            )
+        } else {
+            concat!(
+                "SELECT id, name, art_hash, track_count",
+                artist_browse!(),
+                primary_artists!(),
+                " ORDER BY ",
+                sort_key!("name"),
+                " LIMIT ? OFFSET ?"
+            )
+        };
+        let mut browse = TimedBrowse::acquire(&self.pool).await?;
+        let items = sqlx::query_as(list_sql)
+            .bind(limit)
+            .bind(offset)
+            .fetch_all(&mut *browse.conn)
+            .await;
+        browse.finish().await?;
+        let items = items?;
+        let count_sql = if show_collaborations {
+            concat!("SELECT count(*)", artist_browse!())
+        } else {
+            concat!("SELECT count(*)", artist_browse!(), primary_artists!())
+        };
+        let mut browse = TimedBrowse::acquire(&self.pool).await?;
+        let total = sqlx::query_scalar(count_sql)
+            .fetch_one(&mut *browse.conn)
+            .await;
+        browse.finish().await?;
+        let total = total?;
         Ok(Page { items, total })
     }
 
@@ -209,27 +270,28 @@ impl Store {
     }
 
     pub async fn artist_jumps_filtered(&self, show_collaborations: bool) -> Result<Vec<Jump>> {
-        let keys = sqlx::query_scalar(concat!(
-            "SELECT ",
-            sort_key!("name"),
-            " FROM (",
-            artist_counts!(),
-            ") summary WHERE track_count > 0 AND lower(name) NOT IN
-              ('various artists', 'various', 'va', 'v.a.', 'soundtrack', 'soundtracks', 'ost', 'original soundtrack')
-              AND (? OR EXISTS (
-                SELECT 1 FROM tracks t LEFT JOIN albums al ON al.id = t.album_id
-                LEFT JOIN artists ar ON ar.id = al.artist_id
-                WHERE t.removed_at IS NULL AND
-                  ((t.album_id IS NULL AND t.artist_id = summary.id)
-                    OR (al.artist_id = summary.id AND ",
-            album_kind!(),
-            " = 'regular'))))
-              ORDER BY ",
-            sort_key!("name")
-        ))
-        .bind(show_collaborations)
-        .fetch_all(&self.pool)
-        .await?;
+        let sql = if show_collaborations {
+            concat!(
+                "SELECT ",
+                sort_key!("name"),
+                artist_browse!(),
+                " ORDER BY ",
+                sort_key!("name")
+            )
+        } else {
+            concat!(
+                "SELECT ",
+                sort_key!("name"),
+                artist_browse!(),
+                primary_artists!(),
+                " ORDER BY ",
+                sort_key!("name")
+            )
+        };
+        let mut browse = TimedBrowse::acquire(&self.pool).await?;
+        let keys = sqlx::query_scalar(sql).fetch_all(&mut *browse.conn).await;
+        browse.finish().await?;
+        let keys = keys?;
         Ok(jumps(keys, false))
     }
 
