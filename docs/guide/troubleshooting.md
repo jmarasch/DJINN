@@ -89,6 +89,7 @@ Another admin can reset it under Admin > Users > **Reset password**.
 
 Admin > System > **Log** shows what DJINN has been doing; pick **Errors** to
 see what went wrong. Admin > About > **Report a problem** opens an issue on
-GitHub; attach the log from **Download the log**. The log file itself
-(`djinn.log`) is next to `djinn.exe` in `%LOCALAPPDATA%\Programs\DJINN` on
-Windows, and in `~/.config/djinn/` on Linux.
+GitHub; attach the log from **Download the log**, or choose an earlier day
+under **Daily logs**. Dated files such as `djinn-2026-11-01.log` are next
+to `djinn.exe` in `%LOCALAPPDATA%\Programs\DJINN` on Windows, and in
+`~/.config/djinn/` on Linux.

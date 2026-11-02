@@ -48,6 +48,7 @@ import type {
   Learned,
   LibraryStatus,
   LibraryRoot,
+  LogSettings,
   Mode,
   NowPlaying,
   OutputConfig,
@@ -75,6 +76,7 @@ import type {
   StartResponse,
   SystemReset,
   SystemStatus,
+  ServerPorts,
   TagChange,
   UploadedBackup,
   Track,
@@ -176,7 +178,7 @@ export const api = {
   saveUploadSettings: (s: UploadSettings) => put<UploadSettings>('/submissions/settings', s),
   goSendToParty: (trackId: number) => post<{ outcome: 'added' | 'backed' }>(`/go/party/${trackId}`),
   goStatus: () => get<GoStatus>('/go/status'),
-  saveGoSettings: (settings: { enabled: boolean; trusted_proxies: string; admin_two_step: boolean }) =>
+  saveGoSettings: (settings: { enabled: boolean; allow_remote: boolean; https_hostname: string; upnp: boolean; trusted_proxies: string; admin_two_step: boolean }) =>
     put<GoStatus>('/go/settings', settings),
   signIns: (limit = 200) => get<SignIn[]>(`/go/sign-ins?limit=${limit}`),
   turnOffUserTwoStep: (id: number) => del<void>(`/users/${id}/two-step`),
@@ -348,8 +350,13 @@ export const api = {
   stopIdentify: () => post<void>('/identify/stop'),
   about: () => get<About>('/about'),
   systemStatus: () => get<SystemStatus>('/system/status'),
+  systemPorts: () => get<ServerPorts>('/system/ports'),
+  saveSystemPorts: (ports: { party_port: number; go_port: number }) => put<ServerPorts>('/system/ports', ports),
   systemLog: (level: string, q: string) =>
     get<{ lines: string[] }>(`/system/log?level=${level}&q=${encodeURIComponent(q)}`),
+  logSettings: () => get<LogSettings>('/system/log/settings'),
+  saveLogSettings: (settings: LogSettings) => put<LogSettings>('/system/log/settings', settings),
+  logFiles: () => get<string[]>('/system/log/files'),
   restart: () => post<void>('/system/restart'),
   quit: () => post<void>('/system/quit'),
   systemReset: (what: SystemReset) => post<{ restarting: boolean }>('/system/reset', { what }),

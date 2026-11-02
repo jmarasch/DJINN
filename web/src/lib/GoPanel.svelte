@@ -10,10 +10,19 @@
   import type { GoStatus, SignIn } from './types'
 
   let status = $state<GoStatus | null>(null)
-  let form = $state({ enabled: false, trusted_proxies: '', admin_two_step: false })
+  let form = $state({ enabled: false, allow_remote: false, https_hostname: '', upnp: false, trusted_proxies: '', admin_two_step: false })
   let signIns = $state<SignIn[]>([])
   let busy = $state(false)
   let timer: ReturnType<typeof setInterval> | undefined
+  let caddyfile = $derived(`${form.https_hostname} {
+    tls {
+        issuer acme {
+            disable_http_challenge
+        }
+    }
+    reverse_proxy 127.0.0.1:${status?.port ?? 8067}
+}`)
+  let lanIp = $derived(status?.addresses[0] ? new URL(status.addresses[0]).hostname : 'the DJINN computer')
 
   onMount(() => {
     load().catch((e) => toast(e.message, true))
@@ -31,17 +40,18 @@
     const [s, log] = await Promise.all([api.goStatus(), api.signIns()])
     status = s
     signIns = log
-    form = { enabled: s.enabled, trusted_proxies: s.trusted_proxies, admin_two_step: s.admin_two_step }
+    form = { enabled: s.enabled, allow_remote: s.allow_remote, https_hostname: s.https_hostname, upnp: s.upnp, trusted_proxies: s.trusted_proxies, admin_two_step: s.admin_two_step }
   }
 
   async function save() {
     busy = true
     try {
       status = await api.saveGoSettings(form)
+      form = { enabled: status.enabled, allow_remote: status.allow_remote, https_hostname: status.https_hostname, upnp: status.upnp, trusted_proxies: status.trusted_proxies, admin_two_step: status.admin_two_step }
       toast(status.enabled ? (status.running ? 'DJINN GO is on' : 'Saved, but GO could not start') : 'Saved')
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Could not save', true)
-      if (status) form = { enabled: status.enabled, trusted_proxies: status.trusted_proxies, admin_two_step: status.admin_two_step }
+      if (status) form = { enabled: status.enabled, allow_remote: status.allow_remote, https_hostname: status.https_hostname, upnp: status.upnp, trusted_proxies: status.trusted_proxies, admin_two_step: status.admin_two_step }
     } finally {
       busy = false
     }
@@ -110,6 +120,38 @@
 
   <section class="card">
     <h2>Safety</h2>
+    <label class="switch big">
+      <input type="checkbox" bind:checked={form.allow_remote} onchange={save} disabled={busy} />
+      <span>Allow connections from outside the home network
+        <span class="small muted block">Off by default. Home network and Tailscale connections still work. Each role also needs its own remote GO permission.</span>
+      </span>
+    </label>
+    {#if form.allow_remote}
+      <div class="remote-setup">
+        <h3>Router port forwarding</h3>
+        <p class="small muted">To connect directly without HTTPS, forward TCP {status.port} on your router to {lanIp}:{status.port}. This uses plain HTTP, so passwords, app passwords, and music travel without encryption.</p>
+        <h3>Recommended: HTTPS</h3>
+        <p class="small muted">Give GO a public DNS name and run an HTTPS reverse proxy on this computer. With Caddy, add this site to its Caddyfile:</p>
+        <label>Public hostname <input type="text" bind:value={form.https_hostname} placeholder="music.example.com" spellcheck="false" /></label>
+        {#if form.https_hostname}
+          <pre class="example">{caddyfile}</pre>
+        {/if}
+        <p class="small muted">Point the DNS name at your public IP. Set Trusted proxies below to <code>127.0.0.1</code> so GO can see the visitor's address and recognize HTTPS. Caddy obtains and renews the certificate.</p>
+        <button class="small-button" onclick={save} disabled={busy}>Save HTTPS setup</button>
+        <label class="switch big">
+          <input type="checkbox" bind:checked={form.upnp} onchange={save} disabled={busy || !form.enabled || !form.https_hostname} />
+          <span>Use UPnP to forward HTTPS on the router
+            <span class="small muted block">Requires the HTTPS setup above. Maps TCP 443 to this computer for one hour at a time and renews it while GO is on. UPnP does not forward GO's HTTP port.</span>
+          </span>
+        </label>
+        {#if status.upnp_error}<p class="error">{status.upnp_error}</p>{/if}
+        {#if form.upnp && !status.upnp_error && !status.upnp_verified}<p class="small muted">Opening the router port and checking the HTTPS certificate...</p>{/if}
+        {#if status.upnp_verified && status.upnp_external_ip}<p class="small muted">HTTPS mapping active at {status.upnp_external_ip}:443.</p>{/if}
+        {#if !form.upnp && form.https_hostname}
+          <p class="small muted">For HTTPS without UPnP, forward TCP 443 on your router to {lanIp}:443.</p>
+        {/if}
+      </div>
+    {/if}
     <label class="switch big">
       <input type="checkbox" bind:checked={form.admin_two_step} onchange={save} disabled={busy || (!app.me?.two_step && !form.admin_two_step)} />
       <span>
@@ -192,4 +234,10 @@
   .small-button {
     align-self: flex-start;
   }
+
+  .remote-setup { display: grid; gap: 10px; margin: 12px 0; }
+  .remote-setup h3 { margin: 0; }
+  .remote-setup label:not(.switch) { display: grid; gap: 4px; }
+  .remote-setup input[type='text'] { padding: 8px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); color: var(--text); font: inherit; }
+  .example { margin: 0; padding: 12px; border-radius: 8px; background: var(--bg); white-space: pre-wrap; }
 </style>

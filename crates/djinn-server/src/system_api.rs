@@ -1,19 +1,22 @@
 //! Admin > System: how DJINN is doing, its log, restarting or quitting it,
 //! and clearing things out.
 
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-use axum::extract::{Query, State};
+use axum::extract::{Path as RoutePath, Query, State};
 use axum::http::{header, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use djinn_library::ScanProgress;
+use djinn_store::Store;
 use serde::{Deserialize, Serialize};
 
 use crate::auth::AdminUser;
-use crate::error::ApiResult;
+use crate::config::Config;
+use crate::error::{ApiError, ApiResult};
 use crate::events::{OutputStatus, PlayState};
 use crate::state::AppState;
 use crate::{folders, library_api, logs};
@@ -83,17 +86,42 @@ struct Startup {
     started_ms: i64,
     database: PathBuf,
     addresses: Vec<String>,
+    party_listen: SocketAddr,
 }
 
 static STARTUP: OnceLock<Startup> = OnceLock::new();
 
 /// Records when DJINN started, its database, and the addresses guests use.
-pub fn started(database: &Path, addresses: Vec<String>) {
+pub fn started(database: &Path, addresses: Vec<String>, party_listen: SocketAddr) {
     let _ = STARTUP.set(Startup {
         started_ms: djinn_store::now_ms(),
         database: database.to_path_buf(),
         addresses,
+        party_listen,
     });
+}
+
+const PARTY_PORT_SETTING: &str = "party_port";
+const GO_PORT_SETTING: &str = "go_port";
+
+/// Admin-selected ports override the config file after the database opens.
+/// They take effect together at the next process start.
+pub async fn apply_ports(store: &Store, config: &mut Config) -> anyhow::Result<()> {
+    let party = saved_port(store, PARTY_PORT_SETTING, config.server.listen.port()).await?;
+    let go = saved_port(store, GO_PORT_SETTING, config.go.listen.port()).await?;
+    anyhow::ensure!(party != go, "party and GO ports must be different");
+    config.server.listen.set_port(party);
+    config.go.listen.set_port(go);
+    Ok(())
+}
+
+async fn saved_port(store: &Store, key: &str, default: u16) -> anyhow::Result<u16> {
+    Ok(store
+        .get_setting(key)
+        .await?
+        .and_then(|value| value.parse::<u16>().ok())
+        .filter(|port| *port != 0)
+        .unwrap_or(default))
 }
 
 /// At start, before the database opens: if a full reset is waiting,
@@ -123,11 +151,95 @@ pub fn reset_if_asked(db: &Path, art_dir: &Path) {
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/system/status", get(status))
+        .route("/system/ports", get(ports).put(save_ports))
         .route("/system/log", get(log))
         .route("/system/log/file", get(log_file))
+        .route("/system/log/files", get(log_files))
+        .route("/system/log/files/{day}", get(log_file_for_day))
+        .route(
+            "/system/log/settings",
+            get(log_settings).put(save_log_settings),
+        )
         .route("/system/restart", post(restart))
         .route("/system/quit", post(quit))
         .route("/system/reset", post(reset))
+}
+
+#[derive(Serialize)]
+struct Ports {
+    party_port: u16,
+    go_port: u16,
+    pending_party_port: u16,
+    pending_go_port: u16,
+}
+
+#[derive(Deserialize)]
+struct PortChange {
+    party_port: u16,
+    go_port: u16,
+}
+
+async fn port_status(state: &AppState) -> anyhow::Result<Ports> {
+    let party_port = STARTUP
+        .get()
+        .map_or(8066, |startup| startup.party_listen.port());
+    let go_port = state.go.port();
+    Ok(Ports {
+        party_port,
+        go_port,
+        pending_party_port: saved_port(&state.store, PARTY_PORT_SETTING, party_port).await?,
+        pending_go_port: saved_port(&state.store, GO_PORT_SETTING, go_port).await?,
+    })
+}
+
+async fn ports(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json<Ports>> {
+    Ok(Json(port_status(&state).await?))
+}
+
+async fn save_ports(
+    _: AdminUser,
+    State(state): State<AppState>,
+    Json(body): Json<PortChange>,
+) -> ApiResult<Json<Ports>> {
+    if body.party_port == 0 || body.go_port == 0 || body.party_port == body.go_port {
+        return Err(ApiError::bad_request(
+            "choose two different ports from 1 to 65535",
+        ));
+    }
+    let active = port_status(&state).await?;
+    let party_ip = STARTUP
+        .get()
+        .map_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED), |startup| {
+            startup.party_listen.ip()
+        });
+    if body.party_port != active.party_port && body.party_port != active.go_port {
+        check_port(party_ip, body.party_port).await?;
+    }
+    if body.go_port != active.go_port && body.go_port != active.party_port {
+        check_port(IpAddr::V4(Ipv4Addr::UNSPECIFIED), body.go_port).await?;
+    }
+    state
+        .store
+        .set_setting(PARTY_PORT_SETTING, &body.party_port.to_string())
+        .await?;
+    state
+        .store
+        .set_setting(GO_PORT_SETTING, &body.go_port.to_string())
+        .await?;
+    tracing::warn!(
+        party_port = body.party_port,
+        go_port = body.go_port,
+        "DJINN ports saved; restart to apply"
+    );
+    Ok(Json(port_status(&state).await?))
+}
+
+async fn check_port(ip: IpAddr, port: u16) -> ApiResult<()> {
+    let address = SocketAddr::new(ip, port);
+    tokio::net::TcpListener::bind(address)
+        .await
+        .map_err(|error| ApiError::conflict(format!("port {port} is unavailable: {error}")))?;
+    Ok(())
 }
 
 #[derive(Serialize)]
@@ -258,15 +370,52 @@ async fn log(_: AdminUser, Query(query): Query<LogQuery>) -> Json<LogLines> {
     })
 }
 
+#[derive(Deserialize, Serialize)]
+struct LogSettings {
+    level: String,
+    keep_days: u16,
+}
+
+async fn log_settings(_: AdminUser) -> Json<LogSettings> {
+    Json(LogSettings {
+        level: logs::record_level().to_owned(),
+        keep_days: logs::keep_days(),
+    })
+}
+
+async fn save_log_settings(
+    _: AdminUser,
+    State(state): State<AppState>,
+    Json(body): Json<LogSettings>,
+) -> ApiResult<Json<LogSettings>> {
+    if !logs::valid_level(&body.level) {
+        return Err(ApiError::bad_request(
+            "choose full tracing, warnings and errors, or errors only",
+        ));
+    }
+    if !(1..=logs::MAX_DAYS).contains(&body.keep_days) {
+        return Err(ApiError::bad_request("keep logs for 1 to 365 days"));
+    }
+    state
+        .store
+        .set_setting(logs::LEVEL_SETTING, &body.level)
+        .await?;
+    state
+        .store
+        .set_setting(logs::DAYS_SETTING, &body.keep_days.to_string())
+        .await?;
+    logs::set_record_level(&body.level);
+    logs::set_keep_days(body.keep_days)?;
+    tracing::warn!(level = %body.level, keep_days = body.keep_days, "log settings changed");
+    Ok(Json(body))
+}
+
 /// The log file (its last few megabytes), or the lines kept in memory.
 async fn log_file(_: AdminUser) -> ApiResult<impl IntoResponse> {
     let text = match logs::file() {
-        Some(path) => {
-            let path = path.to_path_buf();
-            tokio::task::spawn_blocking(move || file_tail(&path, LOG_DOWNLOAD_BYTES))
-                .await
-                .map_err(anyhow::Error::from)??
-        }
+        Some(path) => tokio::task::spawn_blocking(move || file_tail(&path, LOG_DOWNLOAD_BYTES))
+            .await
+            .map_err(anyhow::Error::from)??,
         None => logs::all(),
     };
     Ok((
@@ -275,6 +424,30 @@ async fn log_file(_: AdminUser) -> ApiResult<impl IntoResponse> {
             (
                 header::CONTENT_DISPOSITION,
                 "attachment; filename=\"djinn.log\"",
+            ),
+        ],
+        text,
+    ))
+}
+
+async fn log_files(_: AdminUser) -> ApiResult<Json<Vec<String>>> {
+    Ok(Json(logs::available_days()?))
+}
+
+async fn log_file_for_day(
+    _: AdminUser,
+    RoutePath(day): RoutePath<String>,
+) -> ApiResult<impl IntoResponse> {
+    let path = logs::file_for_day(&day).ok_or_else(ApiError::not_found)?;
+    let text = tokio::task::spawn_blocking(move || file_tail(&path, LOG_DOWNLOAD_BYTES))
+        .await
+        .map_err(anyhow::Error::from)??;
+    Ok((
+        [
+            (header::CONTENT_TYPE, "text/plain; charset=utf-8".to_owned()),
+            (
+                header::CONTENT_DISPOSITION,
+                format!("attachment; filename=\"djinn-{day}.log\""),
             ),
         ],
         text,
@@ -417,6 +590,8 @@ mod tests {
 
         let (status, _) = get_body(&state, "/api/system/status", &user).await;
         assert_eq!(status, StatusCode::FORBIDDEN);
+        let (status, _) = get_body(&state, "/api/system/ports", &user).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
         assert_eq!(
             post(r#"{"what":"queue"}"#, user.clone()).await,
             StatusCode::FORBIDDEN
@@ -437,6 +612,39 @@ mod tests {
         );
         let (status, _) = get_body(&state, "/api/system/log?level=warn", &admin).await;
         assert_eq!(status, StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn admin_ports_apply_after_restart() {
+        let state = AppState::for_tests().await;
+        let admin = session(&state, "admin", Role::Admin).await;
+        let (status, _) = call(
+            &state,
+            Method::PUT,
+            "/api/system/ports",
+            Some(r#"{"party_port":8068,"go_port":8068}"#),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        let (status, _) = call(
+            &state,
+            Method::PUT,
+            "/api/system/ports",
+            Some(r#"{"party_port":18066,"go_port":18067}"#),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let (status, body) = get_body(&state, "/api/system/ports", &admin).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(body.contains("\"pending_party_port\":18066"), "{body}");
+        assert!(body.contains("\"pending_go_port\":18067"), "{body}");
+
+        let mut config = crate::config::Config::default();
+        super::apply_ports(&state.store, &mut config).await.unwrap();
+        assert_eq!(config.server.listen.port(), 18066);
+        assert_eq!(config.go.listen.port(), 18067);
     }
 
     #[test]

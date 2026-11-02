@@ -77,6 +77,20 @@ impl Store {
         Self::init(pool).await
     }
 
+    /// Opens a separate pool for the jukebox after the main store has run
+    /// migrations. Browse requests cannot occupy these connections.
+    pub async fn open_playback(path: &Path) -> Result<Self> {
+        let options = SqliteConnectOptions::new()
+            .filename(path)
+            .journal_mode(SqliteJournalMode::Wal)
+            .synchronous(SqliteSynchronous::Normal);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(2)
+            .connect_with(common(options))
+            .await?;
+        Ok(Self { pool })
+    }
+
     /// A private in-memory database, for tests.
     pub async fn open_in_memory() -> Result<Self> {
         let options = SqliteConnectOptions::from_str("sqlite::memory:")?;
@@ -166,6 +180,49 @@ pub fn now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
+}
+
+#[cfg(test)]
+mod playback_pool_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn playback_pool_works_when_browse_pool_is_full() {
+        let dir = std::env::temp_dir().join(format!(
+            "djinn-playback-pool-{}-{}",
+            std::process::id(),
+            now_ms()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("djinn.db");
+        let browse = Store::open(&path).await.unwrap();
+        let playback = Store::open_playback(&path).await.unwrap();
+
+        let mut held = Vec::new();
+        for _ in 0..8 {
+            held.push(browse.pool().acquire().await.unwrap());
+        }
+        tokio::time::timeout(Duration::from_secs(1), async {
+            playback.set_setting("playback_pool_test", "ready").await?;
+            assert_eq!(
+                playback.get_setting("playback_pool_test").await?,
+                Some("ready".to_owned())
+            );
+            Ok::<(), StoreError>(())
+        })
+        .await
+        .unwrap()
+        .unwrap();
+
+        drop(held);
+        assert_eq!(
+            browse.get_setting("playback_pool_test").await.unwrap(),
+            Some("ready".to_owned())
+        );
+        playback.close().await;
+        browse.close().await;
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }
 
 #[cfg(test)]

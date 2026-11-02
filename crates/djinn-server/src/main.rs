@@ -24,6 +24,7 @@ mod events;
 mod folders;
 mod go;
 mod go_library;
+mod go_upnp;
 mod gpu;
 mod identify_api;
 mod jukebox;
@@ -59,7 +60,6 @@ use djinn_engine::{Engine, EngineConfig};
 use djinn_store::Store;
 use tokio::sync::{broadcast, mpsc, Notify};
 use tower_http::trace::TraceLayer;
-use tracing_subscriber::EnvFilter;
 
 use crate::config::{Config, Source};
 use crate::jukebox::Jukebox;
@@ -115,14 +115,8 @@ async fn run() -> anyhow::Result<()> {
     let has_console = djinn_platform::console::attach_parent_console();
     let cli = Cli::parse();
 
-    // On Windows logs always go to a file (with no console, started from
-    // Explorer or the Start menu, there's nowhere else), and to the console
-    // as well when started from one. Elsewhere, to the console.
-    let log_file = cli.log_file.clone().or_else(|| {
-        (cfg!(windows) || !has_console)
-            .then(default_log_file)
-            .flatten()
-    });
+    // Always keep dated files; also show lines in an attached terminal.
+    let log_file = cli.log_file.clone().or_else(default_log_file);
     init_logging(log_file.as_deref(), has_console && cli.log_file.is_none())?;
     cpu::log();
     if !has_console {
@@ -130,7 +124,7 @@ async fn run() -> anyhow::Result<()> {
         djinn_ai::settle_cache_probe();
     }
 
-    let (config, source) = Config::load(cli.config.as_deref())?;
+    let (mut config, source) = Config::load(cli.config.as_deref())?;
     match &source {
         Source::File(path) => tracing::info!(path = %path.display(), "loaded config"),
         Source::Defaults { looked_at } => tracing::info!(
@@ -167,6 +161,17 @@ async fn run() -> anyhow::Result<()> {
         backup::finish(&store, &config.library.roots, restored).await?;
     }
     tracing::info!(path = %config.database.path.display(), "database ready");
+    logs::apply(&store).await?;
+    system_api::apply_ports(&store, &mut config).await?;
+    tokio::spawn(async {
+        let mut hourly = tokio::time::interval(std::time::Duration::from_secs(60 * 60));
+        loop {
+            hourly.tick().await;
+            if let Err(error) = logs::rotate_today() {
+                tracing::error!(%error, "couldn't rotate the daily log");
+            }
+        }
+    });
     let picture_settings = library_api::PictureSettings::load(&store).await?;
     djinn_library::art::set_cache_limit(
         (picture_settings.cache_mb as u64).saturating_mul(1024 * 1024),
@@ -203,8 +208,9 @@ async fn run() -> anyhow::Result<()> {
     let engine = std::sync::Arc::new(engine);
     let engine_sink = std::sync::Arc::clone(&engine);
     let (events, _) = broadcast::channel(256);
+    let playback_store = Store::open_playback(&config.database.path).await?;
     let jukebox = Jukebox::new(
-        store.clone(),
+        playback_store.clone(),
         Box::new(move |command| {
             if engine_sink.send(command).is_err() {
                 tracing::error!("audio engine stopped");
@@ -214,7 +220,7 @@ async fn run() -> anyhow::Result<()> {
     )
     .await?;
     let urls = banner::urls(config.server.listen);
-    system_api::started(&config.database.path, urls.clone());
+    system_api::started(&config.database.path, urls.clone(), config.server.listen);
     let base_url = urls.first().cloned().unwrap_or_default();
     // Older cache files had no extension; give them one so the folder is
     // easy to browse. Once is enough.
@@ -401,6 +407,12 @@ async fn run() -> anyhow::Result<()> {
     {
         tracing::warn!("the database was still busy; closing anyway");
     }
+    if tokio::time::timeout(stop_wait, playback_store.close())
+        .await
+        .is_err()
+    {
+        tracing::warn!("the playback database was still busy; closing anyway");
+    }
     tracing::info!("shut down");
     // Remove the tray icon before exiting (Windows leaves a ghost icon
     // otherwise). Last, since on Windows it also lets a waiting sign-out or
@@ -433,51 +445,44 @@ async fn bind(addr: std::net::SocketAddr) -> std::io::Result<tokio::net::TcpList
 
 /// Logs to `file` and/or the `console`, and always to memory.
 fn init_logging(file: Option<&std::path::Path>, console: bool) -> anyhow::Result<()> {
+    use tracing_subscriber::filter::dynamic_filter_fn;
     use tracing_subscriber::fmt::time::ChronoLocal;
     use tracing_subscriber::prelude::*;
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(LOG_DEFAULT));
     // Times in this computer's time zone, with the offset.
     let local = ChronoLocal::rfc_3339;
     let to_file = match file {
         Some(path) => {
-            if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
-                std::fs::create_dir_all(dir)?;
-            }
-            let file = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(path)
+            logs::open_file(path)
                 .with_context(|| format!("cannot open log file {}", path.display()))?;
-            logs::set_file(path);
             let layer = tracing_subscriber::fmt::layer()
                 .with_timer(local())
                 .with_ansi(false)
-                .with_writer(std::sync::Mutex::new(file))
+                .with_writer(logs::writer)
+                .with_filter(dynamic_filter_fn(|meta, _| logs::enabled(meta)))
                 .boxed();
             Some(layer)
         }
         None => None,
     };
-    let to_console = (console || to_file.is_none())
-        .then(|| tracing_subscriber::fmt::layer().with_timer(local()).boxed());
+    let to_console = (console || to_file.is_none()).then(|| {
+        tracing_subscriber::fmt::layer()
+            .with_timer(local())
+            .with_filter(dynamic_filter_fn(|meta, _| logs::enabled(meta)))
+            .boxed()
+    });
     // The latest lines also stay in memory, for Admin > System.
     let recent = tracing_subscriber::fmt::layer()
         .with_timer(local())
         .with_ansi(false)
-        .with_writer(|| logs::Recent);
+        .with_writer(|| logs::Recent)
+        .with_filter(dynamic_filter_fn(|meta, _| logs::enabled(meta)));
     tracing_subscriber::registry()
-        .with(filter)
         .with(to_file)
         .with(to_console)
         .with(recent)
         .init();
     Ok(())
 }
-
-/// Log levels unless `RUST_LOG` says otherwise. Symphonia warns about junk
-/// bytes before the audio of many files, every time one is read, which
-/// buried everything else while analysis ran.
-const LOG_DEFAULT: &str = "info,symphonia=warn,symphonia_core::formats::probe=error";
 
 /// `djinn.log` next to the binary on Windows (where its config lives too),
 /// in `~/.config/djinn/` elsewhere.

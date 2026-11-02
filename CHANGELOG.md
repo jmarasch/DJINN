@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026.11.01 (November 1, 2026)
+
+### DJINN GO away from home
+
+- Added **Allow connections from outside the home network** in Admin > GO > Safety. It's off by default and works together with the role's **Use GO away from home** permission. **After updating, anyone using GO from outside your home network needs this switched on.** Tailscale addresses still count as home.
+- Added a guide to public HTTPS with a Caddy reverse proxy, and direct HTTP forwarding for those who choose it. The Admin page shows the address to forward to.
+- Added an optional UPnP switch that forwards HTTPS (port 443) on the router after checking the public address, DNS, and certificate. The one-hour lease renews while the switch is on. GO's HTTP port is never forwarded this way.
+
+### System
+
+- Added **Server ports** in Admin > System to change the party and GO ports. Saved ports apply after a restart and override `config.toml`.
+- Logs now go to one dated file per day, kept for seven days by default (1 to 365).
+- Added a **Record in the log** choice that takes effect immediately, and downloads of earlier days under **Daily logs**.
+
+### Fixes
+
+- Playback has its own database connections, so heavy library browsing can't hold up the music.
+- Cancelled library requests no longer affect the next request.
+- Songs with no album stay in the artist list.
+
 ## 2026.10.31 (October 31, 2026)
 
 ### Interface

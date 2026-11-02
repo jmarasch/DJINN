@@ -149,6 +149,12 @@ export interface GoListener {
 
 export interface GoStatus {
   enabled: boolean
+  allow_remote: boolean
+  https_hostname: string
+  upnp: boolean
+  upnp_error: string | null
+  upnp_external_ip: string | null
+  upnp_verified: boolean
   running: boolean
   error: string | null
   port: number
@@ -941,6 +947,18 @@ export interface SystemStatus {
   art_bytes: number
   models_bytes: number
   log_file: string | null
+}
+
+export interface ServerPorts {
+  party_port: number
+  go_port: number
+  pending_party_port: number
+  pending_go_port: number
+}
+
+export interface LogSettings {
+  level: 'trace' | 'warn' | 'error'
+  keep_days: number
 }
 
 /** What Admin > System can clear out. */

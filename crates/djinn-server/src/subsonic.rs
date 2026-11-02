@@ -1593,10 +1593,18 @@ mod tests {
     /// A GET to the GO port; returns status, content type and body.
     async fn rest(state: &AppState, query: &str) -> (StatusCode, String, String) {
         use tower::ServiceExt;
-        let req = Request::builder()
+        state.go.trust_local_proxy_for_tests();
+        let mut req = Request::builder()
             .uri(format!("/rest/{query}"))
+            .header("x-forwarded-for", "198.51.100.42")
+            .header("x-forwarded-proto", "https")
             .body(Body::empty())
             .unwrap();
+        req.extensions_mut()
+            .insert(axum::extract::ConnectInfo(std::net::SocketAddr::from((
+                [127, 0, 0, 1],
+                50000,
+            ))));
         let res = crate::go::router(state.clone()).oneshot(req).await.unwrap();
         let status = res.status();
         let kind = res

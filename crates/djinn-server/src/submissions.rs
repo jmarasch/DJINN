@@ -470,13 +470,21 @@ mod tests {
         cookie: &str,
     ) -> (StatusCode, String) {
         use axum::http::header;
-        let req = Request::builder()
+        state.go.trust_local_proxy_for_tests();
+        let mut req = Request::builder()
             .method(method)
             .uri(path)
             .header(header::COOKIE, cookie)
             .header(header::CONTENT_TYPE, "application/json")
+            .header("x-forwarded-for", "198.51.100.42")
+            .header("x-forwarded-proto", "https")
             .body(Body::from(body))
             .unwrap();
+        req.extensions_mut()
+            .insert(axum::extract::ConnectInfo(std::net::SocketAddr::from((
+                [127, 0, 0, 1],
+                50000,
+            ))));
         let res = crate::go::router(state.clone()).oneshot(req).await.unwrap();
         let status = res.status();
         let bytes = axum::body::to_bytes(res.into_body(), usize::MAX)
