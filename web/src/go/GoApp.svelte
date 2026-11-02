@@ -164,14 +164,19 @@
           <input type="radio" name="tap" checked={prefs.tap === 'play'} onchange={() => setTap('play')} />
           Play it now
         </label>
-        <label class="switch">
+        <p class="small">Or add it to the queue:</p>
+        <label class="switch indent">
           <input type="radio" name="tap" checked={prefs.tap === 'queue'} onchange={() => setTap('queue')} />
-          Add it to the queue
+          Play it next
+        </label>
+        <label class="switch indent">
+          <input type="radio" name="tap" checked={prefs.tap === 'end'} onchange={() => setTap('end')} />
+          Add it to the end of the queue
         </label>
         <p class="small muted">
-          Songs you add play after the one playing and any you added before, ahead of the rest of the album, playlist or
-          radio. Starting a radio keeps the song playing and lines the radio up after it. This goes for every device
-          you use GO on.
+          Play next goes after the song playing and any you lined up before, ahead of the rest of the album, playlist or
+          radio. The end of the queue is after all of it. Drag songs in Up next to change the order. Starting a radio
+          keeps the song playing and lines the radio up after it. This goes for every device you use GO on.
         </p>
       </section>
       {#if player.canConvert}
@@ -283,5 +288,8 @@
   .signout {
     width: 100%;
     margin: 8px 0 24px;
+  }
+  .indent {
+    margin-left: 22px;
   }
 </style>

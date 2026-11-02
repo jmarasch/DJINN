@@ -155,6 +155,9 @@ class GoApi(private val account: Account) {
     suspend fun offlineLink(id: Long, kbps: Int): OfflineLink =
         get("/api/go/offline/$id" + if (kbps > 0) "?kbps=$kbps&vbr=true" else "")
 
+    suspend fun prefs(): GoPrefs = get("/api/go/prefs")
+    suspend fun setPrefs(prefs: GoPrefs) = write("PUT", "/api/go/prefs", prefs)
+
     suspend fun versions(ids: List<Long>): List<SongVersion> = withContext(Dispatchers.IO) {
         json.decodeFromString(send("POST", "/api/go/offline/versions", json.encodeToString(VersionQuery(ids))))
     }

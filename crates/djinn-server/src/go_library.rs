@@ -384,9 +384,9 @@ async fn set_songs(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// Personal radio from a song: songs that sound like it, skipping ones
-/// you heard in the last few hours and putting ones you skipped lately
-/// last. Without sound analysis, the same artist and genre.
+/// Personal radio from a song: songs that sound like it, more often by its
+/// artist, skipping ones you heard in the last few hours and putting ones you
+/// skipped lately last. Without sound analysis, the same artist and genre.
 async fn radio(
     me: GoUser,
     State(state): State<AppState>,
@@ -402,26 +402,27 @@ async fn radio(
         .store
         .go_listening_since(me.user.id, now - RADIO_FRESH_MS)
         .await?;
-    let (_, skipped) = state
+    let (_, skipped_list) = state
         .store
         .go_listening_since(me.user.id, now - RADIO_SKIPS_MS)
         .await?;
     let heard: HashSet<i64> = fresh_played
-        .into_iter()
+        .iter()
+        .copied()
         .chain(fresh_skipped)
         .chain([id])
         .collect();
-    let skipped: HashSet<i64> = skipped.into_iter().collect();
-    let mut ids = state
-        .sound
-        .read()
-        .map(|index| index.similar_tracks(id, RADIO_SONGS * 3))
-        .unwrap_or_default();
+    let skipped: HashSet<i64> = skipped_list.iter().copied().collect();
+    // Weighted like the party's radio: by sound, leaning on the seed's artist.
+    let mut ids = crate::smart::personal_radio(&state, id, &fresh_played, &skipped_list);
     if ids.is_empty() {
         ids = fallback_radio(&state, &seed).await?;
+    } else {
+        // Skipped songs are out of the draw; better last than a radio that stops.
+        ids.extend(skipped_list.iter().copied().filter(|t| !heard.contains(t)));
     }
     ids.retain(|t| !heard.contains(t));
-    // Stable: keeps sound order within "not skipped" and "skipped".
+    // Stable: keeps the drawn order within "not skipped" and "skipped".
     ids.sort_by_key(|t| skipped.contains(t));
     ids.truncate(RADIO_SONGS);
     let mut songs = vec![seed];

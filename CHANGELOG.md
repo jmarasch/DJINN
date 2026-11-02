@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Radio and the queue
+
+- Radio now favors the artist it started from, both at the party and on GO, while still mixing in other artists that sound alike. GO's radio also stays around that artist as it runs on, instead of drifting away from it.
+- On GO, drag songs in Up next to change the order. Tapping a song or using its menu can now **play it next** or **add it to the end of the queue**.
+
 ### DJINN GO for Android
 
 - Added the official Android app (Android 7 and newer): streaming, downloads and smart cache for offline listening, songs saved as alarm, ringtone and notification sounds, visuals, a widget, voice requests, Android Auto and Cast. See [the guide](docs/guide/djinn-go.md#on-your-phone).

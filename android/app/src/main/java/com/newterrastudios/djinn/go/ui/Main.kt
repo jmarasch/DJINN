@@ -77,6 +77,8 @@ class Nav(
     var tab by mutableStateOf(Tab.Home)
     /** The role lets this account keep songs on the phone. */
     var canKeepSongs by mutableStateOf(false)
+    /** What a tap on a song does: "play", "queue" (next) or "end". */
+    var tapAction by mutableStateOf("play")
     /** Songs on this phone, for the mark beside them. */
     var keptIds by mutableStateOf<Set<Long>>(emptySet())
     /** Something to say briefly. */

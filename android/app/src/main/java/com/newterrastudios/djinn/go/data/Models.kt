@@ -126,6 +126,10 @@ data class PlayLinks(
     @SerialName("can_convert") val canConvert: Boolean = false,
 )
 
+/** What tapping a song does, on every device: "play", "queue" (next) or "end". */
+@Serializable
+data class GoPrefs(val tap: String = "play")
+
 @Serializable
 data class VersionQuery(val ids: List<Long>)
 

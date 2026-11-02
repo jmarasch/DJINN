@@ -4,7 +4,8 @@
 //! closest in sound to the seed, a little pulled toward what just played
 //! all the way through (so it drifts the way the party goes), away from
 //! songs like the ones people skipped, favoring songs that share the
-//! seed's genres and styles, and spread over artists.
+//! seed's genres and styles and songs by the artist it started from, and
+//! spread over the other artists.
 
 use std::collections::{HashMap, HashSet};
 
@@ -19,6 +20,8 @@ pub struct Seeds {
     pub only: Option<HashSet<i64>>,
     /// Genres and styles the seed has, normalized.
     pub genres: HashSet<String>,
+    /// Songs by the artist or artists the radio started from.
+    pub favored: HashSet<i64>,
 }
 
 /// What the party did since the radio started, newest first.
@@ -39,6 +42,12 @@ const LIKE_SKIPPED: usize = 10;
 const SKIPPED_FACTOR: f32 = 0.25;
 /// Each further song by the same artist weighs this much less.
 const SAME_ARTIST_FACTOR: f32 = 0.7;
+/// Songs by the artist the radio started from weigh this much more, worth
+/// about 19 places down the list.
+const FAVORED_FACTOR: f32 = 3.0;
+/// And they thin out far more slowly than other artists do, so the radio comes
+/// back to them, without playing nothing else.
+const FAVORED_SPREAD: f32 = 0.95;
 /// Every this many places down the list, a song's weight halves, so the
 /// closest few dozen songs make up most of the radio.
 const HALF_RANK: f32 = 12.0;
@@ -81,14 +90,17 @@ pub fn rank(
     let placed: HashSet<i64> = near.iter().map(|(id, _)| *id).collect();
     let mut rest: Vec<(usize, i64)> = match &seeds.only {
         Some(only) => only.iter().copied().collect::<Vec<_>>(),
-        None if near.is_empty() => tags.keys().copied().collect(),
-        None => Vec::new(),
+        None if near.is_empty() => tags.keys().chain(&seeds.favored).copied().collect(),
+        // The artist's own songs still count before they've been analyzed.
+        None => seeds.favored.iter().copied().collect(),
     }
     .into_iter()
     .filter(|id| allowed(*id) && !placed.contains(id))
     .map(|id| (overlap_count(tags.get(&id), &seeds.genres), id))
-    .filter(|(shared, _)| seeds.only.is_some() || *shared > 0)
+    .filter(|(shared, id)| seeds.only.is_some() || *shared > 0 || seeds.favored.contains(id))
     .collect();
+    rest.sort_unstable();
+    rest.dedup();
     rest.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
     near.extend(rest.into_iter().map(|(_, id)| (id, None)));
 
@@ -122,9 +134,18 @@ pub fn rank(
             if like_skipped.contains(&id) {
                 weight *= SKIPPED_FACTOR;
             }
+            let favored = seeds.favored.contains(&id);
+            if favored {
+                weight *= FAVORED_FACTOR;
+            }
             if let Some(artist) = artist {
                 let seen = by_artist.entry(artist).or_default();
-                weight *= SAME_ARTIST_FACTOR.powi(*seen);
+                let spread = if favored {
+                    FAVORED_SPREAD
+                } else {
+                    SAME_ARTIST_FACTOR
+                };
+                weight *= spread.powi(*seen);
                 *seen += 1;
             }
             (id, weight)
@@ -165,6 +186,61 @@ mod tests {
 
     fn ids(ranked: &[(i64, f32)]) -> Vec<i64> {
         ranked.iter().map(|(id, _)| *id).collect()
+    }
+
+    #[test]
+    fn the_artist_it_started_from_counts_for_more() {
+        let plain = Seeds {
+            tracks: vec![1],
+            ..Seeds::default()
+        };
+        let favored = Seeds {
+            tracks: vec![1],
+            favored: [1, 2, 3, 4].into_iter().collect(),
+            ..Seeds::default()
+        };
+        let weight = |r: &[(i64, f32)], id| r.iter().find(|x| x.0 == id).unwrap().1;
+        let before = rank(&index(), &plain, &HashMap::new(), &Session::default(), 20);
+        let after = rank(&index(), &favored, &HashMap::new(), &Session::default(), 20);
+        for song in [2, 3, 4] {
+            assert!(
+                weight(&after, song) > weight(&before, song) * 2.0,
+                "song {song} should weigh far more"
+            );
+        }
+        // 4 fell behind 5 for being a third song by one artist; now it leads.
+        assert!(weight(&before, 4) < weight(&before, 5));
+        assert!(weight(&after, 4) > weight(&after, 5));
+        // Other artists stay in the running, as they were.
+        assert_eq!(weight(&after, 5), weight(&before, 5));
+    }
+
+    #[test]
+    fn the_artist_still_comes_first_with_songs_not_analyzed_yet() {
+        let tags: HashMap<i64, Vec<String>> = HashMap::new();
+        let seeds = Seeds {
+            tracks: vec![1],
+            // 77 isn't in the sound index, and has no tags to match on.
+            favored: [1, 77].into_iter().collect(),
+            ..Seeds::default()
+        };
+        let ranked = rank(&index(), &seeds, &tags, &Session::default(), 20);
+        assert!(ids(&ranked).contains(&77));
+    }
+
+    #[test]
+    fn skipped_songs_stay_out_even_by_the_artist() {
+        let seeds = Seeds {
+            tracks: vec![1],
+            favored: [1, 2, 3].into_iter().collect(),
+            ..Seeds::default()
+        };
+        let session = Session {
+            skipped: vec![2],
+            ..Session::default()
+        };
+        let ranked = rank(&index(), &seeds, &HashMap::new(), &session, 20);
+        assert!(!ids(&ranked).contains(&2));
     }
 
     #[test]
@@ -214,6 +290,7 @@ mod tests {
             tracks: vec![1],
             only: None,
             genres: ["dance pop".to_owned()].into_iter().collect(),
+            ..Seeds::default()
         };
         let ranked = rank(&index(), &seeds, &tags, &Session::default(), 20);
         let weight = |id| ranked.iter().find(|x| x.0 == id).map_or(0.0, |x| x.1);
@@ -237,6 +314,7 @@ mod tests {
             tracks: vec![2, 8],
             only: Some([2, 8, 20].into_iter().collect()),
             genres: ["house".to_owned()].into_iter().collect(),
+            ..Seeds::default()
         };
         // Only the genre's songs, the unanalyzed one too.
         let ranked = rank(&index(), &seeds, &tags, &Session::default(), 10);

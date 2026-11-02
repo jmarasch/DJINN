@@ -1812,6 +1812,11 @@ mod tests {
         assert_eq!(status, StatusCode::NO_CONTENT);
         let (_, text, _) = call(Method::GET, "/api/go/prefs".into(), None).await;
         assert_eq!(field(&text, "tap"), "queue");
+        let end = r#"{"tap":"end"}"#.to_owned();
+        let (status, _, _) = call(Method::PUT, "/api/go/prefs".into(), Some(end)).await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        let (_, text, _) = call(Method::GET, "/api/go/prefs".into(), None).await;
+        assert_eq!(field(&text, "tap"), "end");
         let odd = r#"{"tap":"shout"}"#.to_owned();
         let (status, _, _) = call(Method::PUT, "/api/go/prefs".into(), Some(odd)).await;
         assert!(status.is_client_error());
