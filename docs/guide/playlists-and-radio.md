@@ -39,7 +39,8 @@ playlist** to keep the matches. See [Search and AI](search-and-ai.md).
 
 ## Radio
 
-Radio plays songs that sound like where it started, and drifts with the
+Radio plays songs that sound like where it started, more often by the artist
+it started from, and drifts with the
 party: toward songs that play through, away from ones that get skipped.
 
 Start it from:
