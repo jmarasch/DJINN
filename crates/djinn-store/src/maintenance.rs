@@ -15,18 +15,23 @@ impl Store {
     /// Forgets how every song sounds and how loud it is, so the background
     /// analysis measures them all again.
     pub async fn clear_analysis(&self) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
         sqlx::query(
-            "UPDATE tracks SET features = NULL, features_version = NULL, bpm = NULL, \
-                    loudness_lufs = NULL, loudness_peak = NULL, loudness_checked_at = NULL",
+            "UPDATE tracks SET loudness_lufs = NULL, loudness_peak = NULL, \
+                    loudness_checked_at = NULL",
         )
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
+        sqlx::query("UPDATE track_sound SET features = NULL, features_version = NULL, bpm = NULL")
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
         Ok(())
     }
 
     /// Forgets what the AI heard in every song, so it listens again.
     pub async fn clear_listening(&self) -> Result<()> {
-        sqlx::query("UPDATE tracks SET heard = NULL, heard_version = NULL")
+        sqlx::query("UPDATE track_sound SET heard = NULL, heard_version = NULL")
             .execute(&self.pool)
             .await?;
         Ok(())

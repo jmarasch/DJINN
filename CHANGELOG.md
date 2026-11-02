@@ -7,6 +7,11 @@
 - Added the official Android app (Android 7 and newer): streaming, downloads and smart cache for offline listening, songs saved as alarm, ringtone and notification sounds, visuals, a widget, voice requests, Android Auto and Cast. See [the guide](docs/guide/djinn-go.md#on-your-phone).
 - FLAC and WAV songs kept on a phone can be converted to MP3, 128 kbit/s VBR by default, when converting is on. Compressed songs stay as they are.
 
+### Faster library
+
+- The Library tab opens right away and stays quick however far you scroll, on the party app and on GO. Only the rows near the screen are on the page, and lists are worked out once until the library changes.
+- The first start after updating moves sound analysis into its own table and compacts the database, once. This can take a minute or more on a big library and needs free disk space about the size of the database. Nothing needs analyzing again.
+
 ## 2026.11.01 (November 1, 2026)
 
 ### DJINN GO away from home

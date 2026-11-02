@@ -204,7 +204,7 @@ macro_rules! sort_key {
     };
 }
 
-#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, serde::Deserialize)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AlbumSort {
     #[default]
@@ -215,7 +215,7 @@ pub enum AlbumSort {
     Oldest,
 }
 
-#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, serde::Deserialize)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AlbumFilter {
     #[default]
@@ -234,7 +234,7 @@ impl AlbumFilter {
     }
 }
 
-#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, serde::Deserialize)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum TrackSort {
     #[default]
@@ -749,6 +749,7 @@ fn in_order<T>(ids: &[i64], found: Vec<T>, id: impl Fn(&T) -> i64) -> Vec<T> {
 }
 
 mod browse;
+pub(crate) use browse::BrowseMemo;
 mod info;
 mod scan;
 #[cfg(test)]

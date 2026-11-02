@@ -776,3 +776,129 @@ async fn host_pictures_survive_commons_rechecks_and_can_be_managed() {
         .unwrap());
     assert!(!store.art_hash_in_use(&manual.art_hash).await.unwrap());
 }
+
+#[tokio::test]
+async fn kept_lists_follow_every_change() {
+    let store = Store::open_in_memory().await.unwrap();
+    store
+        .save_scanned(&[scanned("/m/1.flac", "First", "Band", "Debut")])
+        .await
+        .unwrap();
+    let titles =
+        |page: Page<Track>| -> Vec<String> { page.items.into_iter().map(|t| t.title).collect() };
+    let songs = store.tracks_page(TrackSort::Title, 0, 10).await.unwrap();
+    assert_eq!(titles(songs), ["First"]);
+    assert_eq!(
+        store.artists_page(0, 10).await.unwrap().items[0].track_count,
+        1
+    );
+
+    // A new song, without any call telling the lists about it.
+    store
+        .save_scanned(&[scanned("/m/2.flac", "Another", "Band", "Debut")])
+        .await
+        .unwrap();
+    let songs = store.tracks_page(TrackSort::Title, 0, 10).await.unwrap();
+    assert_eq!(titles(songs), ["Another", "First"]);
+    assert_eq!(
+        store.artists_page(0, 10).await.unwrap().items[0].track_count,
+        2
+    );
+    let jumps = store.track_jumps(TrackSort::Title).await.unwrap();
+    assert_eq!(jumps.iter().map(|j| j.offset).collect::<Vec<_>>(), [0, 1]);
+
+    // Direct writes count too: a file going away, and a new picture.
+    sqlx::query("UPDATE tracks SET removed_at = 1 WHERE path = '/m/2.flac'")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    let songs = store.tracks_page(TrackSort::Title, 0, 10).await.unwrap();
+    assert_eq!(
+        (titles(songs.clone()), songs.total),
+        (vec!["First".to_owned()], 1)
+    );
+    assert_eq!(
+        store.artists_page(0, 10).await.unwrap().items[0].track_count,
+        1
+    );
+    sqlx::query("UPDATE artists SET art_hash = 'new'")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        store.artists_page(0, 10).await.unwrap().items[0]
+            .art_hash
+            .as_deref(),
+        Some("new")
+    );
+    sqlx::query("UPDATE albums SET art_hash = 'cover'")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        store
+            .albums_page(AlbumSort::Name, 0, 10)
+            .await
+            .unwrap()
+            .items[0]
+            .art_hash
+            .as_deref(),
+        Some("cover")
+    );
+
+    // Past the end is an empty page with the right total.
+    let past = store.tracks_page(TrackSort::Title, 50, 10).await.unwrap();
+    assert!(past.items.is_empty());
+    assert_eq!(past.total, 1);
+}
+
+#[tokio::test]
+async fn a_changed_file_is_analyzed_and_heard_again() {
+    let store = Store::open_in_memory().await.unwrap();
+    let song = scanned("/m/1.flac", "Song", "Band", "Debut");
+    store
+        .save_scanned(std::slice::from_ref(&song))
+        .await
+        .unwrap();
+    let id = store
+        .tracks_page(TrackSort::Title, 0, 1)
+        .await
+        .unwrap()
+        .items[0]
+        .id;
+    store
+        .save_analysis(id, 1, Some((-14.0, 0.9)), Some((&[1.0, 2.0], 120.0)))
+        .await
+        .unwrap();
+    store.save_heard(id, 1, Some(&[3.0])).await.unwrap();
+    assert!(store.tracks_to_analyze(1, 10).await.unwrap().is_empty());
+    assert!(store.tracks_to_hear(1, 10).await.unwrap().is_empty());
+    assert_eq!(store.heard_progress(1).await.unwrap(), (1, 0));
+    assert_eq!(store.sound_rows(1).await.unwrap().len(), 1);
+    assert_eq!(store.heard_rows(1).await.unwrap()[0].1, [3.0]);
+
+    // Read again unchanged: nothing to redo.
+    store
+        .save_scanned(std::slice::from_ref(&song))
+        .await
+        .unwrap();
+    assert!(store.tracks_to_analyze(1, 10).await.unwrap().is_empty());
+
+    let mut changed = song;
+    changed.mtime = 2;
+    store.save_scanned(&[changed]).await.unwrap();
+    assert_eq!(store.tracks_to_analyze(1, 10).await.unwrap().len(), 1);
+    assert_eq!(store.tracks_to_hear(1, 10).await.unwrap().len(), 1);
+    assert_eq!(store.heard_progress(1).await.unwrap(), (0, 1));
+
+    store.clear_analysis().await.unwrap();
+    store.clear_listening().await.unwrap();
+    assert!(store.sound_rows(1).await.unwrap().is_empty());
+    assert!(store.heard_rows(1).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn compaction_runs_once() {
+    let store = Store::open_in_memory().await.unwrap();
+    assert_eq!(store.get_setting("compact_database").await.unwrap(), None);
+}

@@ -71,9 +71,10 @@ impl Store {
     /// `version` of the features. As (id, path).
     pub async fn tracks_to_analyze(&self, version: i64, limit: i64) -> Result<Vec<(i64, String)>> {
         let rows = sqlx::query_as(
-            "SELECT id, path FROM tracks \
-             WHERE removed_at IS NULL AND (features_version IS NULL OR features_version < ?) \
-             ORDER BY id LIMIT ?",
+            "SELECT t.id, t.path FROM tracks t \
+             LEFT JOIN track_sound s ON s.track_id = t.id \
+             WHERE t.removed_at IS NULL AND (s.features_version IS NULL OR s.features_version < ?) \
+             ORDER BY t.id LIMIT ?",
         )
         .bind(version)
         .bind(limit)
@@ -97,19 +98,30 @@ impl Store {
                 .flat_map(|v| v.to_le_bytes())
                 .collect::<Vec<u8>>()
         });
+        let mut tx = self.pool().begin().await?;
         sqlx::query(
-            "UPDATE tracks SET loudness_lufs = ?, loudness_peak = ?, loudness_checked_at = ?, \
-                    features = ?, bpm = ?, features_version = ? WHERE id = ?",
+            "UPDATE tracks SET loudness_lufs = ?, loudness_peak = ?, loudness_checked_at = ? \
+             WHERE id = ?",
         )
         .bind(loudness.map(|l| l.0))
         .bind(loudness.map(|l| l.1))
         .bind(now_ms())
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(
+            "INSERT INTO track_sound (track_id, features, bpm, features_version) \
+             SELECT id, ?, ?, ? FROM tracks WHERE id = ? \
+             ON CONFLICT (track_id) DO UPDATE SET features = excluded.features, \
+                bpm = excluded.bpm, features_version = excluded.features_version",
+        )
         .bind(blob)
         .bind(features.map(|(_, bpm)| bpm))
         .bind(version)
         .bind(id)
-        .execute(self.pool())
+        .execute(&mut *tx)
         .await?;
+        tx.commit().await?;
         Ok(())
     }
 
@@ -118,10 +130,10 @@ impl Store {
         // id, album, features, title, credited artist ids (comma separated).
         type Row = (i64, Option<i64>, Vec<u8>, String, String);
         let rows: Vec<Row> = sqlx::query_as(
-            "SELECT t.id, t.album_id, t.features, t.title, \
+            "SELECT t.id, t.album_id, s.features, t.title, \
                     coalesce((SELECT group_concat(ta.artist_id) FROM track_artists ta WHERE ta.track_id = t.id), '') \
-             FROM tracks t \
-             WHERE t.removed_at IS NULL AND t.features IS NOT NULL AND t.features_version = ?",
+             FROM track_sound s JOIN tracks t ON t.id = s.track_id \
+             WHERE t.removed_at IS NULL AND s.features IS NOT NULL AND s.features_version = ?",
         )
         .bind(version)
         .fetch_all(self.pool())
@@ -147,9 +159,10 @@ impl Store {
     /// as (id, path).
     pub async fn tracks_to_hear(&self, version: i64, limit: i64) -> Result<Vec<(i64, String)>> {
         let rows = sqlx::query_as(
-            "SELECT id, path FROM tracks \
-             WHERE removed_at IS NULL AND (heard_version IS NULL OR heard_version < ?) \
-             ORDER BY id LIMIT ?",
+            "SELECT t.id, t.path FROM tracks t \
+             LEFT JOIN track_sound s ON s.track_id = t.id \
+             WHERE t.removed_at IS NULL AND (s.heard_version IS NULL OR s.heard_version < ?) \
+             ORDER BY t.id LIMIT ?",
         )
         .bind(version)
         .bind(limit)
@@ -161,20 +174,25 @@ impl Store {
     /// Records what the AI model heard; `None` if there was nothing.
     pub async fn save_heard(&self, id: i64, version: i64, heard: Option<&[f32]>) -> Result<()> {
         let blob = heard.map(|v| v.iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<u8>>());
-        sqlx::query("UPDATE tracks SET heard = ?, heard_version = ? WHERE id = ?")
-            .bind(blob)
-            .bind(version)
-            .bind(id)
-            .execute(self.pool())
-            .await?;
+        sqlx::query(
+            "INSERT INTO track_sound (track_id, heard, heard_version) \
+             SELECT id, ?, ? FROM tracks WHERE id = ? \
+             ON CONFLICT (track_id) DO UPDATE SET heard = excluded.heard, \
+                heard_version = excluded.heard_version",
+        )
+        .bind(blob)
+        .bind(version)
+        .bind(id)
+        .execute(self.pool())
+        .await?;
         Ok(())
     }
 
     /// Every playable song the AI model heard with `version`.
     pub async fn heard_rows(&self, version: i64) -> Result<Vec<(i64, Vec<f32>)>> {
         let rows: Vec<(i64, Vec<u8>)> = sqlx::query_as(
-            "SELECT id, heard FROM tracks \
-             WHERE removed_at IS NULL AND heard IS NOT NULL AND heard_version = ?",
+            "SELECT t.id, s.heard FROM track_sound s JOIN tracks t ON t.id = s.track_id \
+             WHERE t.removed_at IS NULL AND s.heard IS NOT NULL AND s.heard_version = ?",
         )
         .bind(version)
         .fetch_all(self.pool())
@@ -196,9 +214,10 @@ impl Store {
     /// (heard, waiting) song counts for the AI model's `version`.
     pub async fn heard_progress(&self, version: i64) -> Result<(i64, i64)> {
         let counts = sqlx::query_as(
-            "SELECT count(*) FILTER (WHERE heard_version >= ?1), \
-                    count(*) FILTER (WHERE heard_version IS NULL OR heard_version < ?1) \
-             FROM tracks WHERE removed_at IS NULL",
+            "SELECT count(*) FILTER (WHERE s.heard_version >= ?1), \
+                    count(*) FILTER (WHERE s.heard_version IS NULL OR s.heard_version < ?1) \
+             FROM tracks t LEFT JOIN track_sound s ON s.track_id = t.id \
+             WHERE t.removed_at IS NULL",
         )
         .bind(version)
         .fetch_one(self.pool())
@@ -275,9 +294,10 @@ impl Store {
         let (known, waiting, analyzed): (i64, i64, i64) = sqlx::query_as(
             "SELECT \
                 count(*) FILTER (WHERE rg_track_gain IS NOT NULL OR loudness_lufs IS NOT NULL), \
-                count(*) FILTER (WHERE features_version IS NULL OR features_version < ?1), \
-                count(*) FILTER (WHERE features_version >= ?1) \
-             FROM tracks WHERE removed_at IS NULL",
+                count(*) FILTER (WHERE s.features_version IS NULL OR s.features_version < ?1), \
+                count(*) FILTER (WHERE s.features_version >= ?1) \
+             FROM tracks t LEFT JOIN track_sound s ON s.track_id = t.id \
+             WHERE t.removed_at IS NULL",
         )
         .bind(version)
         .fetch_one(self.pool())

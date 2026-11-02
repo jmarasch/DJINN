@@ -9,6 +9,9 @@ export const listCache = new Map<string, { items: unknown[]; total: number; star
 /** Where each letter or year starts, per list and sort. */
 export const jumpCache = new Map<string, Jump[]>()
 
+/** How big a list's rows are, per layout, so a list can open at full height. */
+export const rowSizes = new Map<string, { height: number; columns: number }>()
+
 /** Call when the library changes. */
 export function clearListCache() {
   listCache.clear()
