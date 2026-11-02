@@ -16,10 +16,23 @@ android {
         targetSdk = 37
         versionCode = 1
         versionName = "0.1.0"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    // The release key comes from the release workflow; see docs/releasing.md.
+    val keystore = System.getenv("DJINN_ANDROID_KEYSTORE")
+    if (keystore != null) {
+        signingConfigs.create("release") {
+            storeFile = file(keystore)
+            storePassword = System.getenv("DJINN_ANDROID_KEYSTORE_PASSWORD")
+            keyAlias = System.getenv("DJINN_ANDROID_KEY_ALIAS")
+            keyPassword = System.getenv("DJINN_ANDROID_KEY_PASSWORD")
+        }
     }
 
     buildTypes {
         release {
+            if (keystore != null) signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
@@ -66,4 +79,6 @@ dependencies {
     // Cast brings an old one, which lint rejects with the activity result APIs.
     implementation(libs.fragment)
     testImplementation(libs.junit)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.junit)
 }

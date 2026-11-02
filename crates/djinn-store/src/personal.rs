@@ -57,6 +57,8 @@ pub struct Resume {
 pub struct TrackVersion {
     pub id: i64,
     pub version: String,
+    /// The original file's size in bytes.
+    pub size: i64,
 }
 
 /// Plays reported later than this are taken as happening now (ms).
@@ -226,7 +228,7 @@ impl Store {
     pub async fn track_versions(&self, ids: &[i64]) -> Result<Vec<TrackVersion>> {
         let list = crate::library::json_ids(ids);
         let rows = sqlx::query_as(
-            "SELECT id, size || '-' || mtime AS version FROM tracks
+            "SELECT id, size || '-' || mtime AS version, size FROM tracks
              WHERE removed_at IS NULL AND id IN (SELECT value FROM json_each(?))",
         )
         .bind(list)

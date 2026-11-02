@@ -19,6 +19,8 @@ import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
@@ -88,6 +90,15 @@ data class PendingLike(
     val liked: Boolean,
 )
 
+/** A song added to a playlist while the server couldn't be reached. */
+@Entity(tableName = "pending_adds")
+data class PendingAdd(
+    @PrimaryKey(autoGenerate = true) val rowId: Long = 0,
+    val server: String,
+    @ColumnInfo(name = "playlist_id") val playlistId: Long,
+    @ColumnInfo(name = "track_id") val trackId: Long,
+)
+
 @Dao
 interface OfflineDao {
     @Query("SELECT * FROM songs WHERE server = :server ORDER BY kind, artist, album, track_no, title")
@@ -135,6 +146,15 @@ interface OfflineDao {
     @Query("DELETE FROM pending_plays WHERE rowId = :rowId")
     suspend fun deletePlay(rowId: Long)
 
+    @Insert
+    suspend fun addToPlaylist(add: PendingAdd)
+
+    @Query("SELECT * FROM pending_adds ORDER BY rowId")
+    suspend fun adds(): List<PendingAdd>
+
+    @Query("DELETE FROM pending_adds WHERE rowId = :rowId")
+    suspend fun deleteAdd(rowId: Long)
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun putLike(like: PendingLike)
 
@@ -146,16 +166,28 @@ interface OfflineDao {
 }
 
 @Database(
-    entities = [OfflineSong::class, SavedSound::class, PendingPlay::class, PendingLike::class],
-    version = 1,
+    entities = [OfflineSong::class, SavedSound::class, PendingPlay::class, PendingLike::class, PendingAdd::class],
+    version = 2,
     exportSchema = false,
 )
 abstract class OfflineDb : RoomDatabase() {
     abstract fun dao(): OfflineDao
 
     companion object {
+        private val ADD_PENDING_ADDS = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS pending_adds (" +
+                        "rowId INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, server TEXT NOT NULL, " +
+                        "playlist_id INTEGER NOT NULL, track_id INTEGER NOT NULL)",
+                )
+            }
+        }
+
         fun open(context: Context) =
-            Room.databaseBuilder(context, OfflineDb::class.java, "offline.db").build()
+            Room.databaseBuilder(context, OfflineDb::class.java, "offline.db")
+                .addMigrations(ADD_PENDING_ADDS)
+                .build()
     }
 }
 
@@ -182,12 +214,37 @@ class Prefs(context: Context) {
     var likedIds: Set<Long>
         get() = prefs.getStringSet("liked", emptySet()).orEmpty().mapNotNull { it.toLongOrNull() }.toSet()
         set(value) = prefs.edit { putStringSet("liked", value.map { it.toString() }.toSet()) }
+    /** The playlists as last seen, for adding to while offline. */
+    var playlists: String?
+        get() = prefs.getString("playlists", null)
+        set(value) = prefs.edit { putString("playlists", value) }
     var visuals: Int
         get() = prefs.getInt("visuals", 0)
         set(value) = prefs.edit { putInt("visuals", value) }
 
     companion object {
         const val DEFAULT_KBPS = 128
+    }
+}
+
+/** At or over this, a download asks first. */
+const val LARGE_DOWNLOAD_BYTES = 500L * 1000 * 1000
+/** Lower when the songs will stay at full size though smaller was asked for. */
+const val LARGE_UNCONVERTED_BYTES = 100L * 1000 * 1000
+
+/**
+ * What to say before a large download, or null to just start it. Only lossless
+ * songs convert, so with converting on this is the most it could take.
+ */
+fun largeDownloadWarning(bytes: Long, kbps: Int, canConvert: Boolean): String? {
+    val size = if (bytes >= 1_000_000_000) "%.1f GB".format(bytes / 1e9) else "${bytes / 1_000_000} MB"
+    return when {
+        kbps > 0 && !canConvert && bytes >= LARGE_UNCONVERTED_BYTES ->
+            "Your server isn't converting songs for this account, so these stay at full size: $size."
+        kbps > 0 && canConvert && bytes >= LARGE_DOWNLOAD_BYTES ->
+            "Up to $size. FLAC and WAV songs will take less once converted, but converting takes the server a while."
+        kbps == 0 && bytes >= LARGE_DOWNLOAD_BYTES -> "Full quality: $size."
+        else -> null
     }
 }
 
@@ -302,6 +359,14 @@ class OfflineStore(
             }
             dao.deletePlay(play.rowId)
         }
+        for (add in dao.adds().filter { it.server == server }) {
+            try {
+                api.addToPlaylist(add.playlistId, add.trackId)
+            } catch (e: ApiException) {
+                if (e.status == 401) return@withContext
+            }
+            dao.deleteAdd(add.rowId)
+        }
         for (like in dao.likes().filter { it.server == server }) {
             try {
                 api.setLike(like.trackId, like.liked)
@@ -310,6 +375,19 @@ class OfflineStore(
             }
             dao.deleteLike(like.server, like.trackId)
         }
+    }
+
+    /**
+     * Songs whose file changed on the server, to fetch again. A song missing
+     * from the answer is left alone: it may only be a library drive that's
+     * unplugged, and the copy still plays.
+     */
+    suspend fun changed(): List<Track> = withContext(Dispatchers.IO) {
+        val server = account.server ?: return@withContext emptyList()
+        val kept = dao.songs(server)
+        if (kept.isEmpty()) return@withContext emptyList()
+        val current = kept.map { it.id }.chunked(500).flatMap { api.versions(it) }.associateBy { it.id }
+        kept.filter { song -> current[song.id]?.let { it.version != song.version } == true }.map { it.toTrack() }
     }
 
     /**

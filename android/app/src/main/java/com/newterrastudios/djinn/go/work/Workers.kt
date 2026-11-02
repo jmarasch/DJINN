@@ -195,6 +195,9 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
         return try {
             app.offline.sync()
             app.offline.checkAccess()
+            if (app.api.me().permissions.downloads) {
+                DownloadWorker.enqueue(app, app.offline.changed(), app.prefs.wifiOnly)
+            }
             Result.success()
         } catch (_: IOException) {
             Result.retry()

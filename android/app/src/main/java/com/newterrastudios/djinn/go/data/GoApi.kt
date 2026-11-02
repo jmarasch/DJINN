@@ -155,6 +155,25 @@ class GoApi(private val account: Account) {
     suspend fun offlineLink(id: Long, kbps: Int): OfflineLink =
         get("/api/go/offline/$id" + if (kbps > 0) "?kbps=$kbps&vbr=true" else "")
 
+    suspend fun versions(ids: List<Long>): List<SongVersion> = withContext(Dispatchers.IO) {
+        json.decodeFromString(send("POST", "/api/go/offline/versions", json.encodeToString(VersionQuery(ids))))
+    }
+
+    suspend fun createPlaylist(name: String): GoPlaylistDetail = withContext(Dispatchers.IO) {
+        json.decodeFromString(send("POST", "/api/go/playlists", json.encodeToString(NewPlaylist(name))))
+    }
+
+    suspend fun renamePlaylist(id: Long, name: String) = write("PATCH", "/api/go/playlists/$id", PlaylistName(name))
+
+    suspend fun deletePlaylist(id: Long) = withContext(Dispatchers.IO) {
+        send("DELETE", "/api/go/playlists/$id")
+        Unit
+    }
+
+    /** Replaces the songs, for taking one out. */
+    suspend fun setPlaylistSongs(id: Long, songs: List<Long>) =
+        write("PUT", "/api/go/playlists/$id/songs", SongIds(songs))
+
     suspend fun playlists(): List<GoPlaylist> = get("/api/go/playlists")
     suspend fun addToPlaylist(playlist: Long, song: Long) =
         write("POST", "/api/go/playlists/$playlist/songs", SongIds(listOf(song)))

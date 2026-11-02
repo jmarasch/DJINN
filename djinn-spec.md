@@ -381,7 +381,7 @@ The official native app for DJINN GO, in `android/` in this repository: songs as
 - Device sign-in: an API login returns a token sent as `Authorization: Bearer`, stored as a session, so it appears under signed-in devices, can be signed out, and follows the same role, home-network, two-step and lockout rules as the web. Cookies keep working for browsers.
 - Offline copies: a link that fetches a song as a download with a chosen quality, doesn't count toward "streams at once", and doesn't show as listening in Admin > GO. The role's `downloads` is checked when the link is made and when it's used.
 - VBR in the converter: `to_mp3` takes constant or average bit rate, and the converted cache key includes which.
-- Each song has a version (from file size and modified time), so the app can replace copies whose file changed. Song ids can change when a file moves, so the app treats a missing id as a removed song and fetches it again if it's still wanted.
+- Each song has a version (from file size and modified time), so the app can replace copies whose file changed. A song missing from the answer keeps its copy, which still plays: it may only be a library drive that's unplugged.
 - Play reports take an optional time, so offline plays are dated when they happened, within sane limits, not when they synced.
 - All of it goes in GO's fixed route allowlist, with tests.
 

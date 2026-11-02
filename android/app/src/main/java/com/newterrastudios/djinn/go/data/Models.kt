@@ -93,6 +93,8 @@ data class GoPlaylist(
 data class GoPlaylistDetail(
     val id: Long,
     val name: String,
+    /** The account's own: only those can be changed here. */
+    @SerialName("user_id") val userId: Long = 0,
     val songs: List<Track> = emptyList(),
 )
 
@@ -116,7 +118,26 @@ data class GoHome(
 data class LikedIds(val tracks: List<Long> = emptyList())
 
 @Serializable
-data class PlayLinks(val url: String, val mime: String = "audio/mpeg", val gain: Float = 1f)
+data class PlayLinks(
+    val url: String,
+    val mime: String = "audio/mpeg",
+    val gain: Float = 1f,
+    /** The server would convert for this account. */
+    @SerialName("can_convert") val canConvert: Boolean = false,
+)
+
+@Serializable
+data class VersionQuery(val ids: List<Long>)
+
+/** Changes when a song's file does. */
+@Serializable
+data class SongVersion(val id: Long, val version: String, val size: Long = 0)
+
+@Serializable
+data class NewPlaylist(val name: String, val songs: List<Long> = emptyList())
+
+@Serializable
+data class PlaylistName(val name: String)
 
 @Serializable
 data class Permissions(val downloads: Boolean = false, val convert: Boolean = false)

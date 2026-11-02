@@ -13,7 +13,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -85,6 +87,22 @@ fun SettingsScreen(nav: Nav) {
     var wifi by remember { mutableStateOf(prefs.wifiOnly) }
     val downloads = kept.filter { it.kind == KIND_DOWNLOAD }
     val smartSongs = kept.filter { it.kind == KIND_SMART }
+    var confirmSignOut by remember { mutableStateOf(false) }
+
+    if (confirmSignOut) {
+        AlertDialog(
+            onDismissRequest = { confirmSignOut = false },
+            title = { Text("Sign out?") },
+            text = { Text("The songs and system sounds kept on this phone will be deleted. You can download them again after signing back in.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmSignOut = false
+                    nav.signOut()
+                }) { Text("Sign out and delete") }
+            },
+            dismissButton = { TextButton(onClick = { confirmSignOut = false }) { Text("Stay signed in") } },
+        )
+    }
 
     LazyColumn(Modifier.fillMaxSize()) {
         item {
@@ -94,7 +112,10 @@ fun SettingsScreen(nav: Nav) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp),
             )
-            OutlinedButton(onClick = nav.signOut, modifier = Modifier.padding(16.dp)) { Text("Sign out") }
+            OutlinedButton(
+                onClick = { if (kept.isEmpty() && sounds.isEmpty()) nav.signOut() else confirmSignOut = true },
+                modifier = Modifier.padding(16.dp),
+            ) { Text("Sign out") }
         }
         if (nav.canKeepSongs) {
             item {
@@ -121,6 +142,7 @@ fun SettingsScreen(nav: Nav) {
             }
             item {
                 Heading("Storage")
+                DownloadStatus()
                 Toggle("Download on Wi-Fi only", null, wifi) {
                     wifi = it
                     prefs.wifiOnly = it

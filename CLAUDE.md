@@ -31,6 +31,8 @@ Android app, from `android/` (needs Android Studio's JDK as `JAVA_HOME` and its 
 gradlew assembleDebug testDebugUnitTest
 ```
 
+`app/src/androidTest` (what a car, a headset and the widget see of the player) needs the app signed in to a server with a library: install both debug APKs on a device and run `adb shell am instrument -w com.newterrastudios.djinn.go.test/androidx.test.runner.AndroidJUnitRunner`. Not `connectedAndroidTest`, which uninstalls the app first and loses the sign-in.
+
 Installers (current user, no admin; see `docs/releasing.md`):
 
 ```sh

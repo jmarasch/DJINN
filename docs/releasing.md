@@ -110,3 +110,21 @@ the running `djinn.exe` to `djinn.old.exe`, deleted at the next start).
 Then it shuts down cleanly and starts the new version with the same
 arguments. Copies running from a `target/` build folder don't update
 themselves.
+
+## The Android app's key
+
+The release workflow signs `djinn-go-android.apk` when these Actions secrets
+exist; without them, the release goes out without an APK. Make the key once:
+
+```sh
+keytool -genkeypair -v -keystore djinn-go.jks -alias djinn-go -keyalg RSA -keysize 4096 -validity 36500
+base64 -w0 djinn-go.jks
+```
+
+Then add `DJINN_ANDROID_KEYSTORE_BASE64` (the output of the second command),
+`DJINN_ANDROID_KEYSTORE_PASSWORD`, `DJINN_ANDROID_KEY_ALIAS` (`djinn-go`) and
+`DJINN_ANDROID_KEY_PASSWORD`.
+
+Back the key up with the release key. **If it's lost, phones can't update the
+app to a build signed with a new one**; everyone would have to uninstall first,
+which deletes what they've kept on the phone. Never commit it.

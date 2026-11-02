@@ -12,6 +12,11 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.foundation.layout.Box
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
@@ -46,12 +51,17 @@ import com.newterrastudios.djinn.go.data.ApiException
 import com.newterrastudios.djinn.go.data.ArtistDetail
 import com.newterrastudios.djinn.go.data.ArtistSummary
 import com.newterrastudios.djinn.go.data.GoHome
+import com.newterrastudios.djinn.go.data.GoPlaylist
 import com.newterrastudios.djinn.go.data.GoPlaylistDetail
+import com.newterrastudios.djinn.go.data.largeDownloadWarning
 import com.newterrastudios.djinn.go.data.Page
 import com.newterrastudios.djinn.go.data.SearchResults
 import com.newterrastudios.djinn.go.data.Track
+import androidx.work.WorkManager
+import com.newterrastudios.djinn.go.work.DOWNLOAD_TAG
 import com.newterrastudios.djinn.go.work.DownloadWorker
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.io.IOException
 
 /** Loads one thing for a screen, with what to say while it does. */
@@ -220,17 +230,120 @@ private fun KeptSongs(nav: Nav) {
 private fun DownloadAll(songs: List<Track>, nav: Nav) {
     if (!nav.canKeepSongs || songs.isEmpty()) return
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var warning by remember { mutableStateOf<String?>(null) }
+    fun start() {
+        DownloadWorker.enqueue(context, songs, nav.prefs.wifiOnly)
+        nav.message = "Downloading ${songs.size} songs" +
+            if (nav.prefs.wifiOnly) " when on Wi-Fi" else ""
+    }
     FilledTonalButton(
         onClick = {
-            DownloadWorker.enqueue(context, songs, nav.prefs.wifiOnly)
-            nav.message = "Downloading ${songs.size} songs" +
-                if (nav.prefs.wifiOnly) " when on Wi-Fi" else ""
+            scope.launch {
+                warning = try {
+                    val bytes = nav.api.versions(songs.map { it.id }).sumOf { it.size }
+                    val canConvert = nav.api.playLinks(songs.first().id).canConvert
+                    largeDownloadWarning(bytes, nav.prefs.kbps, canConvert)
+                } catch (_: IOException) {
+                    null
+                }
+                if (warning == null) start()
+            }
         },
         modifier = Modifier.padding(top = 8.dp),
     ) {
         Icon(Icons.Default.Download, contentDescription = null)
         Text("Download", modifier = Modifier.padding(start = 8.dp))
     }
+    warning?.let { text ->
+        AlertDialog(
+            onDismissRequest = { warning = null },
+            title = { Text("Download ${songs.size} songs?") },
+            text = { Text(text) },
+            confirmButton = {
+                TextButton(onClick = {
+                    warning = null
+                    start()
+                }) { Text("Download") }
+            },
+            dismissButton = { TextButton(onClick = { warning = null }) { Text("Not now") } },
+        )
+    }
+}
+
+/** How many songs are on their way, with a way to stop. */
+@Composable
+fun DownloadStatus() {
+    val context = LocalContext.current
+    val manager = remember { WorkManager.getInstance(context) }
+    val work by remember { manager.getWorkInfosByTagFlow(DOWNLOAD_TAG) }.collectAsState(emptyList())
+    val waiting = work.count { !it.state.isFinished }
+    if (waiting == 0) return
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(if (waiting == 1) "1 download waiting or running" else "$waiting downloads waiting or running", modifier = Modifier.weight(1f))
+        TextButton(onClick = { manager.cancelAllWorkByTag(DOWNLOAD_TAG) }) { Text("Stop") }
+    }
+}
+
+/** Your playlists, with a way to start a new one. */
+@UnstableApi
+@Composable
+private fun PlaylistsTab(nav: Nav) {
+    var naming by remember { mutableStateOf(false) }
+    var version by remember { mutableStateOf(0) }
+    val scope = rememberCoroutineScope()
+    Loaded(key = "playlists-$version", load = { nav.api.playlists() }) { lists: List<GoPlaylist> ->
+        LazyColumn(Modifier.fillMaxSize()) {
+            item {
+                FilledTonalButton(onClick = { naming = true }, modifier = Modifier.padding(16.dp)) { Text("New playlist") }
+            }
+            if (lists.isEmpty()) item { Note("No playlists yet.") }
+            items(lists) { list ->
+                Row2(
+                    title = list.name,
+                    subtitle = if (list.tracks == 1L) "1 song" else "${list.tracks} songs",
+                    art = { Art(null, 44.dp) },
+                    onClick = { nav.push(Screen.Playlist(list.id)) },
+                )
+            }
+        }
+    }
+    if (naming) {
+        NameDialog("New playlist", "", onDone = { name ->
+            naming = false
+            if (name != null) {
+                scope.launch {
+                    try {
+                        nav.api.createPlaylist(name)
+                        version++
+                    } catch (e: IOException) {
+                        nav.message = if (e is ApiException) e.message else "Couldn't reach the server."
+                    }
+                }
+            }
+        })
+    }
+}
+
+@Composable
+fun NameDialog(title: String, start: String, onDone: (String?) -> Unit) {
+    var name by remember { mutableStateOf(start) }
+    AlertDialog(
+        onDismissRequest = { onDone(null) },
+        title = { Text(title) },
+        text = {
+            OutlinedTextField(value = name, onValueChange = { name = it }, singleLine = true, label = { Text("Name") })
+        },
+        confirmButton = {
+            TextButton(enabled = name.isNotBlank(), onClick = { onDone(name.trim()) }) { Text("Save") }
+        },
+        dismissButton = { TextButton(onClick = { onDone(null) }) { Text("Cancel") } },
+    )
 }
 
 @UnstableApi
@@ -248,7 +361,7 @@ fun LibraryScreen(nav: Nav) {
     var tab by rememberSaveable { mutableStateOf(0) }
     Column(Modifier.fillMaxSize()) {
         SecondaryTabRow(selectedTabIndex = tab) {
-            listOf("Artists", "Albums", "Songs", "On phone").forEachIndexed { index, label ->
+            listOf("Artists", "Albums", "Songs", "Lists", "On phone").forEachIndexed { index, label ->
                 Tab(selected = tab == index, onClick = { tab = index }, text = { Text(label) })
             }
         }
@@ -267,7 +380,11 @@ fun LibraryScreen(nav: Nav) {
             2 -> PagedList<Track>("songs", nav.api::songs) { song, _ ->
                 SongRow(song, nav) { nav.startRadio(song) }
             }
-            else -> KeptSongs(nav)
+            3 -> PlaylistsTab(nav)
+            else -> Column {
+                DownloadStatus()
+                KeptSongs(nav)
+            }
         }
     }
 }
@@ -355,7 +472,21 @@ fun ArtistScreen(id: Long, nav: Nav) {
 @UnstableApi
 @Composable
 fun PlaylistScreen(id: Long, nav: Nav) {
-    Loaded(key = id, load = { nav.api.playlist(id) }) { list: GoPlaylistDetail ->
+    var version by remember { mutableStateOf(0) }
+    var renaming by remember { mutableStateOf(false) }
+    var deleting by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    fun change(action: suspend () -> Unit) {
+        scope.launch {
+            try {
+                action()
+                version++
+            } catch (e: IOException) {
+                nav.message = if (e is ApiException) e.message else "Couldn't reach the server."
+            }
+        }
+    }
+    Loaded(key = "$id-$version", load = { nav.api.playlist(id) }) { list: GoPlaylistDetail ->
         LazyColumn(Modifier.fillMaxSize()) {
             item {
                 Column(Modifier.padding(16.dp)) {
@@ -366,11 +497,52 @@ fun PlaylistScreen(id: Long, nav: Nav) {
                         modifier = Modifier.padding(top = 8.dp),
                     ) { Text("Play") }
                     DownloadAll(list.songs, nav)
+                    Row {
+                        TextButton(onClick = { renaming = true }) { Text("Rename") }
+                        TextButton(onClick = { deleting = true }) { Text("Delete") }
+                    }
                 }
             }
             itemsIndexed(list.songs) { index, song ->
-                SongRow(song, nav) { nav.player.play(list.songs, index) }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.weight(1f)) {
+                        SongRow(song, nav) { nav.player.play(list.songs, index) }
+                    }
+                    IconButton(onClick = {
+                        val rest = list.songs.filterIndexed { i, _ -> i != index }.map { it.id }
+                        change { nav.api.setPlaylistSongs(id, rest) }
+                    }) {
+                        Icon(Icons.Default.Close, "Take ${song.title} out of the playlist")
+                    }
+                }
             }
+        }
+        if (renaming) {
+            NameDialog("Rename playlist", list.name, onDone = { name ->
+                renaming = false
+                if (name != null) change { nav.api.renamePlaylist(id, name) }
+            })
+        }
+        if (deleting) {
+            AlertDialog(
+                onDismissRequest = { deleting = false },
+                title = { Text("Delete ${list.name}?") },
+                text = { Text("Songs stay in the library and on this phone.") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        deleting = false
+                        scope.launch {
+                            try {
+                                nav.api.deletePlaylist(id)
+                                nav.pop()
+                            } catch (e: IOException) {
+                                nav.message = if (e is ApiException) e.message else "Couldn't reach the server."
+                            }
+                        }
+                    }) { Text("Delete") }
+                },
+                dismissButton = { TextButton(onClick = { deleting = false }) { Text("Keep it") } },
+            )
         }
     }
 }

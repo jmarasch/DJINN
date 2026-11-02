@@ -31,6 +31,9 @@ fun Track.toMediaItem(api: GoApi): MediaItem = MediaItem.Builder()
             .setAlbumTitle(album)
             .setDurationMs(durationMs)
             .setArtworkUri(api.artUrl(artHash, 512)?.toUri())
+            // A library list is refused without these.
+            .setIsBrowsable(false)
+            .setIsPlayable(true)
             .build(),
     )
     .build()

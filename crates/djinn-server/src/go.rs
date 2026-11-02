@@ -1716,6 +1716,7 @@ mod tests {
             "removed songs are left out"
         );
         assert_eq!(found[0]["version"], "37-5");
+        assert_eq!(found[0]["size"], 37);
 
         let (status, _, _) = go(
             &state,

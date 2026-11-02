@@ -74,6 +74,34 @@ shows a QR code for GO's address; scan it with the phone's camera. If
 Chrome on Android won't open it (ERR_TOO_MANY_RETRIES), allow Chrome's
 **Nearby devices** permission in the phone's settings.
 
+**The Android app** is DJINN GO's own app, for Android 7 and newer. On top of
+what the web player does, it can:
+
+- **Keep music on the phone.** Download a song from its menu, or a whole album
+  or playlist. **Smart cache** also keeps what you play most and like, on Wi-Fi
+  while charging. Both need the role's **Download songs** permission. Without
+  a connection, Home shows what's on the phone, search finds it, and plays,
+  likes and songs added to playlists reach the server once you're back.
+- **Save space.** FLAC and WAV songs become MP3s of about 128 kbit/s on the way
+  to the phone, if converting is on for your account (below). Settings in the
+  app can choose another rate or full quality. Without converting they stay at
+  full size, and a large download says so first.
+- **Use a song as a sound.** A song's menu saves it as an alarm, ringtone or
+  notification sound, which you then choose in Clock or the phone's sound
+  settings. It works with no connection and with the app closed. DJINN GO isn't
+  listed among the music services inside Google's Clock; those are Google's
+  partners only.
+- **Show visuals.** Tap the cover on Now Playing for bars, then a ring.
+- **Work with the rest of the phone:** lock screen and headset buttons, a home
+  screen widget, voice requests, Android Auto, and Cast to a Chromecast or
+  Google TV.
+
+To sign in, scan the QR code above or type the address from Admin > GO.
+Android may ask about **nearby devices**; that's how newer Android lets an app
+reach a computer on your home network. Signing out deletes what the app kept,
+and so does losing the download permission, or 30 days without reaching the
+server.
+
 **Install it as an app:** open GO in your phone's browser, then use
 **Add to Home Screen** (Safari: the Share button; Chrome: the menu). It
 opens full screen with its own icon, and keeps playing with the screen off.

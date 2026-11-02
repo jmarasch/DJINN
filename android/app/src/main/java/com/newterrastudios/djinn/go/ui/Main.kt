@@ -76,6 +76,8 @@ class Nav(
     var tab by mutableStateOf(Tab.Home)
     /** The role lets this account keep songs on the phone. */
     var canKeepSongs by mutableStateOf(false)
+    /** Songs on this phone, for the mark beside them. */
+    var keptIds by mutableStateOf<Set<Long>>(emptySet())
     /** Something to say briefly. */
     var message by mutableStateOf<String?>(null)
     val stack = mutableStateListOf<Screen>()

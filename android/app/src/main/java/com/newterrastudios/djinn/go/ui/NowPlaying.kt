@@ -74,6 +74,7 @@ import com.newterrastudios.djinn.go.data.OfflineSong
 import com.newterrastudios.djinn.go.data.SoundKind
 import com.newterrastudios.djinn.go.data.Track
 import com.newterrastudios.djinn.go.work.DownloadWorker
+import kotlinx.serialization.encodeToString
 import kotlinx.coroutines.launch
 import java.io.IOException
 
@@ -311,10 +312,11 @@ fun SongMenu(track: Track, nav: Nav) {
         MenuRow("Start radio", Icons.Default.Radio) { then { nav.radioFor = track } }
         MenuRow("Add to playlist", Icons.AutoMirrored.Filled.PlaylistAdd) {
             scope.launch {
-                try {
-                    choosingPlaylist = nav.api.playlists()
+                choosingPlaylist = try {
+                    nav.api.playlists().also { nav.prefs.playlists = nav.api.json.encodeToString(it) }
                 } catch (_: IOException) {
-                    then { nav.message = "Couldn't reach the server." }
+                    // Away from the server: the ones last seen, added when it's back.
+                    nav.prefs.playlists?.let { nav.api.json.decodeFromString<List<GoPlaylist>>(it) }.orEmpty()
                 }
             }
         }
@@ -364,7 +366,7 @@ fun SongMenu(track: Track, nav: Nav) {
             title = { Text("Add to playlist") },
             text = {
                 Column {
-                    if (lists.isEmpty()) Text("You have no playlists yet. Make one in DJINN GO on the web.")
+                    if (lists.isEmpty()) Text("No playlists here yet. Make one under Library > Lists.")
                     lists.forEach { list ->
                         TextButton(onClick = {
                             choosingPlaylist = null
@@ -373,8 +375,18 @@ fun SongMenu(track: Track, nav: Nav) {
                                     nav.message = try {
                                         nav.api.addToPlaylist(list.id, track.id)
                                         "Added to ${list.name}."
+                                    } catch (e: ApiException) {
+                                        e.message
                                     } catch (_: IOException) {
-                                        "Couldn't add it."
+                                        nav.offline.dao.addToPlaylist(
+                                            com.newterrastudios.djinn.go.data.PendingAdd(
+                                                server = nav.server,
+                                                playlistId = list.id,
+                                                trackId = track.id,
+                                            ),
+                                        )
+                                        nav.syncLater()
+                                        "Added to ${list.name}. It reaches the server when you're back online."
                                     }
                                 }
                             }

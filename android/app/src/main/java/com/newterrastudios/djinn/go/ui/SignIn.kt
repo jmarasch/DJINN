@@ -123,7 +123,8 @@ fun ConnectScreen(
 
     Form(
         "DJINN GO",
-        "Enter your server's address. Admin > GO shows it, like 192.168.1.20:8067. " +
+        "Scan the QR code from GO on a computer (Account > Open on your phone), or enter the address " +
+            "Admin > GO shows, like 192.168.1.20:8067. " +
             "Android may ask about nearby devices: that's how it lets an app reach a computer on your home network.",
     ) {
         OutlinedTextField(

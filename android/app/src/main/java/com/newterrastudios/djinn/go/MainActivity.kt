@@ -173,6 +173,15 @@ class MainActivity : ComponentActivity() {
             if (nav.canKeepSongs) SmartCacheWorker.schedule(this@MainActivity)
         }
         LaunchedEffect(Unit) {
+            app.offline.dao.songsFlow(nav.server).collect { songs ->
+                nav.keptIds = songs.map { it.id }.toSet()
+            }
+        }
+        LaunchedEffect(Unit) {
+            // Replaces kept copies of songs whose file changed.
+            SyncWorker.enqueue(this@MainActivity)
+        }
+        LaunchedEffect(Unit) {
             // "Play ... on DJINN GO" from the assistant.
             spokenRequests.collect { query ->
                 val found = try {

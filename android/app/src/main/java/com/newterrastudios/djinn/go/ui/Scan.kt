@@ -67,7 +67,7 @@ private fun ImageProxy.brightness(): ByteArray {
     return out
 }
 
-/** Points the camera at the code in Admin > GO. */
+/** Points the camera at the code GO shows on a computer. */
 @SuppressLint("RestrictedApi")
 @Composable
 fun ScanScreen(onFound: (String) -> Unit, onCancel: () -> Unit) {
@@ -125,7 +125,7 @@ fun ScanScreen(onFound: (String) -> Unit, onCancel: () -> Unit) {
                 .padding(24.dp),
         ) {
             Text(
-                "Point the camera at the QR code in Admin > GO.",
+                "Point the camera at the QR code. In GO on a computer: Account > Open on your phone.",
                 color = MaterialTheme.colorScheme.onPrimary,
                 modifier = Modifier.align(Alignment.TopCenter),
             )

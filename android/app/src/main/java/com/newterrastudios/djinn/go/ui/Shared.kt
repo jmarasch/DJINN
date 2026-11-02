@@ -13,6 +13,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.OfflinePin
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -106,6 +107,14 @@ fun SongRow(track: Track, nav: Nav, onClick: () -> Unit) {
         art = { Art(nav.api.artUrl(track.artHash), 44.dp) },
         onClick = onClick,
         end = {
+            if (track.id in nav.keptIds) {
+                Icon(
+                    Icons.Default.OfflinePin,
+                    contentDescription = "On this phone",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
             IconButton(onClick = { nav.menuFor = track }) {
                 Icon(Icons.Default.MoreVert, contentDescription = "More for ${track.title}")
             }
