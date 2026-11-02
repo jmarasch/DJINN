@@ -45,9 +45,9 @@ const SAME_ARTIST_FACTOR: f32 = 0.7;
 /// Songs by the artist the radio started from weigh this much more, worth
 /// about 19 places down the list.
 const FAVORED_FACTOR: f32 = 3.0;
-/// And they thin out far more slowly than other artists do, so the radio comes
-/// back to them, without playing nothing else.
-const FAVORED_SPREAD: f32 = 0.95;
+/// They thin out more slowly than other artists do, so the radio keeps coming
+/// back to them. Any slower and an artist with many songs takes the radio over.
+const FAVORED_SPREAD: f32 = 0.85;
 /// Every this many places down the list, a song's weight halves, so the
 /// closest few dozen songs make up most of the radio.
 const HALF_RANK: f32 = 12.0;
@@ -213,6 +213,81 @@ mod tests {
         assert!(weight(&after, 4) > weight(&after, 5));
         // Other artists stay in the running, as they were.
         assert_eq!(weight(&after, 5), weight(&before, 5));
+    }
+
+    /// 40 artists of 5 songs, plus one with `songs` of their own, all mixed
+    /// together in sound. Returns that artist's share of the radio's weight.
+    fn favored_share(songs: i64, favored: bool) -> f32 {
+        let star = 1000;
+        let mut rows: Vec<SoundRow> = (0..200)
+            .map(|id| SoundRow {
+                track_id: id,
+                album_id: Some(id),
+                artist_ids: vec![id / 5],
+                title: format!("Song {id}"),
+                features: {
+                    let mut f = vec![0.0; 37];
+                    f[0] = (id * 7 % 200) as f32;
+                    f[5] = (id % 3) as f32 * 0.01;
+                    f
+                },
+            })
+            .collect();
+        let own: Vec<i64> = (0..songs).map(|n| 5000 + n).collect();
+        for (n, &id) in own.iter().enumerate() {
+            rows.push(SoundRow {
+                track_id: id,
+                album_id: Some(id),
+                artist_ids: vec![star],
+                title: format!("Own {id}"),
+                features: {
+                    let mut f = vec![0.0; 37];
+                    f[0] = n as f32 * 200.0 / songs as f32;
+                    f[5] = (n % 3) as f32 * 0.01;
+                    f
+                },
+            });
+        }
+        let seeds = Seeds {
+            tracks: vec![own[0]],
+            favored: if favored {
+                own.iter().copied().collect()
+            } else {
+                HashSet::new()
+            },
+            ..Seeds::default()
+        };
+        let ranked = rank(
+            &SoundIndex::build(rows),
+            &seeds,
+            &HashMap::new(),
+            &Session::default(),
+            150,
+        );
+        let total: f32 = ranked.iter().map(|r| r.1).sum();
+        let mine: f32 = ranked
+            .iter()
+            .filter(|r| own.contains(&r.0))
+            .map(|r| r.1)
+            .sum();
+        mine / total
+    }
+
+    #[test]
+    fn the_artist_gets_a_big_share_but_not_the_whole_radio() {
+        for songs in [10, 40, 200] {
+            let without = favored_share(songs, false);
+            let with = favored_share(songs, true);
+            assert!(
+                with > without * 1.5,
+                "{songs} songs: {without} became {with}"
+            );
+            assert!(with > 0.2, "{songs} songs: only {with}");
+            assert!(
+                with < 0.7,
+                "{songs} songs: {with} leaves too little for anyone else"
+            );
+        }
     }
 
     #[test]
