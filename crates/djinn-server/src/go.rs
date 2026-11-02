@@ -1851,6 +1851,21 @@ mod tests {
 
         // Radio without sound analysis: the seed, then same artist and genre,
         // leaving out what was just heard.
+        // Asking for more leaves out what's already lined up.
+        let (status, text, _) = call(
+            Method::GET,
+            format!("/api/go/radio/{0}?exclude={1},{2}", ids[3], ids[0], ids[2]),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{text}");
+        let more: serde_json::Value = serde_json::from_str(&text).unwrap();
+        for song in more.as_array().unwrap() {
+            assert!(
+                song["id"] != ids[0] && song["id"] != ids[2],
+                "already lined up"
+            );
+        }
         let (status, text, _) = call(Method::GET, format!("/api/go/radio/{}", ids[3]), None).await;
         assert_eq!(status, StatusCode::OK, "{text}");
         let radio: Vec<i64> = serde_json::from_str::<Vec<serde_json::Value>>(&text)

@@ -128,7 +128,9 @@ class GoApi(private val account: Account) {
     suspend fun album(id: Long): AlbumDetail = get("/api/albums/$id")
     suspend fun artist(id: Long): ArtistDetail = get("/api/artists/$id")
     suspend fun playlist(id: Long): GoPlaylistDetail = get("/api/go/playlists/$id")
-    suspend fun radio(id: Long): List<Track> = get("/api/go/radio/$id")
+    /** Songs like this one, leaving out any already lined up. */
+    suspend fun radio(id: Long, exclude: Collection<Long> = emptyList()): List<Track> =
+        get("/api/go/radio/$id" + if (exclude.isEmpty()) "" else "?exclude=" + exclude.joinToString(","))
     suspend fun resume(): GoResume? = home().resume
     suspend fun search(query: String): SearchResults =
         get("/api/search?q=${URLEncoder.encode(query, "UTF-8")}")

@@ -27,6 +27,7 @@ import kotlinx.coroutines.launch
 
 /** Songs left when a radio asks for more. */
 private const val RADIO_LOW = 5
+private const val RADIO_EXCLUDE = 400
 
 fun Track.toMediaItem(api: GoApi): MediaItem = MediaItem.Builder()
     .setMediaId(id.toString())
@@ -200,12 +201,13 @@ class PlayerState(private val api: GoApi) {
         extending = true
         scope.launch {
             try {
-                val known = (0 until player.mediaItemCount).map { player.getMediaItemAt(it).mediaId }.toSet()
-                var more = api.radio(seed).filter { it.id.toString() !in known }
+                val known = (0 until player.mediaItemCount).mapNotNull { player.getMediaItemAt(it).mediaId.toLongOrNull() }
+                // The newest are what matter if the queue has grown very long.
+                val lined = known.takeLast(RADIO_EXCLUDE)
+                var more = api.radio(seed, lined).filter { it.id !in known }
                 if (more.isEmpty()) {
                     // Nothing left around the seed: wander on from the last song.
-                    val last = player.getMediaItemAt(player.mediaItemCount - 1).mediaId.toLong()
-                    more = api.radio(last).filter { it.id.toString() !in known }
+                    more = api.radio(known.last(), lined).filter { it.id !in known }
                 }
                 if (radioSeed == seed) player.addMediaItems(more.map { it.toMediaItem(api) })
             } catch (_: IOException) {

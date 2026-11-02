@@ -474,6 +474,9 @@ export async function playRadio(track: Track) {
 }
 
 let extending = false
+/** How many songs already lined up a request for more radio can name. */
+const RADIO_EXCLUDE = 400
+
 /** The song a personal radio started from. */
 let radioSeed: number | null = null
 
@@ -483,11 +486,13 @@ async function extendRadio() {
   extending = true
   try {
     const known = new Set(player.queue.map((t) => t.id))
+    // The newest are what matter if the queue has grown very long.
+    const lined = [...known].slice(-RADIO_EXCLUDE)
     // From the song it started with, so it stays around that artist. Only when
     // that has nothing left does it wander on from the last song.
-    let more = (await api.goRadio(radioSeed ?? last.id)).filter((t) => !known.has(t.id))
+    let more = (await api.goRadio(radioSeed ?? last.id, lined)).filter((t) => !known.has(t.id))
     if (!more.length && radioSeed !== null) {
-      more = (await api.goRadio(last.id)).filter((t) => !known.has(t.id))
+      more = (await api.goRadio(last.id, lined)).filter((t) => !known.has(t.id))
     }
     player.queue.push(...more)
     unshuffled.push(...more)

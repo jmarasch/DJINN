@@ -384,6 +384,14 @@ async fn set_songs(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[derive(Deserialize)]
+struct RadioQuery {
+    /// Songs already lined up, comma separated, when asking for more: the draw
+    /// favors the same few songs, so without this it soon offers nothing new.
+    #[serde(default)]
+    exclude: String,
+}
+
 /// Personal radio from a song: songs that sound like it, more often by its
 /// artist, skipping ones you heard in the last few hours and putting ones you
 /// skipped lately last. Without sound analysis, the same artist and genre.
@@ -391,6 +399,7 @@ async fn radio(
     me: GoUser,
     State(state): State<AppState>,
     Path(id): Path<i64>,
+    Query(query): Query<RadioQuery>,
 ) -> ApiResult<Json<Vec<Track>>> {
     let seed = state
         .store
@@ -411,6 +420,7 @@ async fn radio(
         .copied()
         .chain(fresh_skipped)
         .chain([id])
+        .chain(query.exclude.split(',').filter_map(|t| t.parse().ok()))
         .collect();
     let skipped: HashSet<i64> = skipped_list.iter().copied().collect();
     // Weighted like the party's radio: by sound, leaning on the seed's artist.
