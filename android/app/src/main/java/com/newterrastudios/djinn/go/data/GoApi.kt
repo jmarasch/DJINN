@@ -144,7 +144,25 @@ class GoApi(private val account: Account) {
 
     suspend fun playLinks(id: Long): PlayLinks = withContext(Dispatchers.IO) { playLinksBlocking(id) }
 
-    suspend fun reportPlay(id: Long, msPlayed: Long) = write("POST", "/api/go/plays", PlayReport(id, msPlayed))
+    suspend fun reportPlay(id: Long, msPlayed: Long, at: Long? = null) =
+        write("POST", "/api/go/plays", PlayReport(id, msPlayed, at))
+
+    suspend fun me(): Me = get("/api/me")
+    suspend fun track(id: Long): Track = get("/api/tracks/$id")
+    suspend fun suggested(): List<Track> = get("/api/go/offline-suggested")
+
+    /** Average bit rate for lossless songs, or the original with 0. */
+    suspend fun offlineLink(id: Long, kbps: Int): OfflineLink =
+        get("/api/go/offline/$id" + if (kbps > 0) "?kbps=$kbps&vbr=true" else "")
+
+    suspend fun playlists(): List<GoPlaylist> = get("/api/go/playlists")
+    suspend fun addToPlaylist(playlist: Long, song: Long) =
+        write("POST", "/api/go/playlists/$playlist/songs", SongIds(listOf(song)))
+
+    suspend fun sendToParty(id: Long) = withContext(Dispatchers.IO) {
+        send("POST", "/api/go/party/$id")
+        Unit
+    }
 
     suspend fun saveResume(save: ResumeSave) = write("PUT", "/api/go/resume", save)
 }

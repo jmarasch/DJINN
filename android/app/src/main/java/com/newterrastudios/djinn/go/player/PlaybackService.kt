@@ -10,20 +10,32 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSourceBitmapLoader
+import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.audio.AudioSink
+import androidx.media3.exoplayer.audio.DefaultAudioSink
+import androidx.media3.exoplayer.audio.TeeAudioProcessor
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.CacheBitmapLoader
+import androidx.media3.session.LibraryResult
+import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
-import androidx.media3.session.MediaSessionService
+import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import com.newterrastudios.djinn.go.DjinnApp
 import com.newterrastudios.djinn.go.MainActivity
 import com.newterrastudios.djinn.go.data.PlayLinks
 import com.newterrastudios.djinn.go.data.ResumeSave
+import com.newterrastudios.djinn.go.data.PendingPlay
+import com.newterrastudios.djinn.go.data.Track
+import com.newterrastudios.djinn.go.work.SyncWorker
+import java.io.File
+import java.io.IOException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -51,14 +63,15 @@ private class HeldLink(val links: PlayLinks, val at: Long)
  * the network. Its cache key is the song, not the link, since links change.
  */
 @UnstableApi
-class PlaybackService : MediaSessionService() {
+class PlaybackService : MediaLibraryService() {
     private val app get() = application as DjinnApp
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     /** Telling the server what happened outlives the service. */
     private val reports = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var reporter: Reporter? = null
     private val links = ConcurrentHashMap<Long, HeldLink>()
-    private var session: MediaSession? = null
+    private var session: MediaLibrarySession? = null
+    private val searches = ConcurrentHashMap<String, List<Track>>()
     private var ticking: Job? = null
 
     /** The song being heard, and how much of it, for the play report. */
@@ -79,8 +92,21 @@ class PlaybackService : MediaSessionService() {
             .setCache(app.recentCache)
             .setUpstreamDataSourceFactory(resolving)
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
-        val player = ExoPlayer.Builder(this)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(this).setDataSourceFactory(caching))
+        // Kept songs are plain files; everything else goes through the cache.
+        val sources = DefaultDataSource.Factory(this, caching)
+        val renderers = object : DefaultRenderersFactory(this) {
+            override fun buildAudioSink(
+                context: android.content.Context,
+                enableFloatOutput: Boolean,
+                enableAudioOutputPlaybackParameters: Boolean,
+            ): AudioSink = DefaultAudioSink.Builder(context)
+                .setEnableFloatOutput(enableFloatOutput)
+                .setEnableAudioOutputPlaybackParameters(enableAudioOutputPlaybackParameters)
+                .setAudioProcessors(arrayOf(TeeAudioProcessor(Spectrum)))
+                .build()
+        }
+        val player = ExoPlayer.Builder(this, renderers)
+            .setMediaSourceFactory(DefaultMediaSourceFactory(this).setDataSourceFactory(sources))
             .setAudioAttributes(
                 AudioAttributes.Builder()
                     .setUsage(C.USAGE_MEDIA)
@@ -98,9 +124,8 @@ class PlaybackService : MediaSessionService() {
             Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_IMMUTABLE,
         )
-        session = MediaSession.Builder(this, player)
+        session = MediaLibrarySession.Builder(this, player, Callback())
             .setSessionActivity(open)
-            .setCallback(Callback())
             .setBitmapLoader(
                 CacheBitmapLoader(
                     DataSourceBitmapLoader.Builder(this).setDataSourceFactory(network).build(),
@@ -147,8 +172,15 @@ class PlaybackService : MediaSessionService() {
             player.volume = held.links.gain.coerceIn(0f, 1f)
             return
         }
-        // Played from the cache, so nothing has asked the server yet.
+        // Played from a kept copy or the cache, so nothing has asked the server yet.
         scope.launch {
+            val kept = app.offline.local(id)
+            if (kept != null) {
+                if (player.currentMediaItem?.mediaId?.toLongOrNull() == id) {
+                    player.volume = kept.gain.coerceIn(0f, 1f)
+                }
+                return@launch
+            }
             val fresh = runCatching { app.api.playLinks(id) }.getOrNull() ?: return@launch
             links[id] = HeldLink(fresh, SystemClock.elapsedRealtime())
             if (player.currentMediaItem?.mediaId?.toLongOrNull() == id) {
@@ -158,6 +190,16 @@ class PlaybackService : MediaSessionService() {
     }
 
     private inner class Reporter(private val player: Player) : Player.Listener {
+        override fun onEvents(player: Player, events: Player.Events) {
+            val item = player.currentMediaItem?.mediaMetadata
+            NowPlayingWidget.show(
+                this@PlaybackService,
+                item?.title?.toString(),
+                item?.artist?.toString(),
+                player.isPlaying,
+            )
+        }
+
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             report()
             hearing = mediaItem?.mediaId?.toLongOrNull()
@@ -206,7 +248,19 @@ class PlaybackService : MediaSessionService() {
             heardMs = 0
             lastTick = if (player.isPlaying) SystemClock.elapsedRealtime() else 0L
             if (id == null || ms <= 0) return
-            reports.launch { runCatching { app.api.reportPlay(id, ms) } }
+            val at = System.currentTimeMillis()
+            val server = app.account.server
+            reports.launch {
+                try {
+                    app.api.reportPlay(id, ms, at)
+                } catch (e: IOException) {
+                    // Not reachable: it goes when it can. The server saying no is final.
+                    if (e !is com.newterrastudios.djinn.go.data.ApiException && server != null) {
+                        app.offline.dao.addPlay(PendingPlay(server = server, trackId = id, msPlayed = ms, at = at))
+                        SyncWorker.enqueue(this@PlaybackService)
+                    }
+                }
+            }
         }
 
         private fun save() {
@@ -220,14 +274,87 @@ class PlaybackService : MediaSessionService() {
         }
     }
 
-    private inner class Callback : MediaSession.Callback {
-        /** Controllers only send which song; here it gets how to fetch it. */
+    private inner class Callback : MediaLibrarySession.Callback {
+        /**
+         * Controllers only send which song; here it gets how to fetch it. A
+         * voice request sends words instead, and plays what they find. The car
+         * sends just an id, so the rest is looked up.
+         */
         override fun onAddMediaItems(
             mediaSession: MediaSession,
             controller: MediaSession.ControllerInfo,
             mediaItems: MutableList<MediaItem>,
-        ): ListenableFuture<MutableList<MediaItem>> =
-            Futures.immediateFuture(mediaItems.map { playable(it) }.toMutableList())
+        ): ListenableFuture<MutableList<MediaItem>> = scope.future {
+            mediaItems.flatMap { item ->
+                val query = item.requestMetadata.searchQuery
+                when {
+                    query != null -> spoken(query).map { playable(it.toMediaItem(app.api)) }
+                    item.mediaMetadata.title == null -> {
+                        val id = item.mediaId.toLongOrNull()
+                        val track = id?.let { runCatching { app.api.track(it) }.getOrNull() }
+                            ?: id?.let { app.offline.local(it)?.toTrack() }
+                        listOfNotNull(track?.let { playable(it.toMediaItem(app.api)) })
+                    }
+                    else -> listOf(playable(item))
+                }
+            }.toMutableList()
+        }
+
+        // What Android Auto browses: lately played, downloads, playlists, albums.
+        override fun onGetLibraryRoot(
+            session: MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            params: LibraryParams?,
+        ) = Futures.immediateFuture(LibraryResult.ofItem(folder(ROOT, "DJINN GO"), params))
+
+        override fun onGetChildren(
+            session: MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            parentId: String,
+            page: Int,
+            pageSize: Int,
+            params: LibraryParams?,
+        ) = scope.future<LibraryResult<ImmutableList<MediaItem>>> {
+            LibraryResult.ofItemList(ImmutableList.copyOf(children(parentId)), params)
+        }
+
+        override fun onGetItem(
+            session: MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            mediaId: String,
+        ) = scope.future<LibraryResult<MediaItem>> {
+            val id = mediaId.toLongOrNull()
+            val track = id?.let { runCatching { app.api.track(it) }.getOrNull() }
+            if (track != null) {
+                LibraryResult.ofItem(track.toMediaItem(app.api), null)
+            } else {
+                LibraryResult.ofError(LibraryResult.RESULT_ERROR_BAD_VALUE)
+            }
+        }
+
+        override fun onSearch(
+            session: MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            query: String,
+            params: LibraryParams?,
+        ) = scope.future<LibraryResult<Void>> {
+            val found = spoken(query)
+            searches[query] = found
+            session.notifySearchResultChanged(browser, query, found.size, params)
+            LibraryResult.ofVoid()
+        }
+
+        override fun onGetSearchResult(
+            session: MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            query: String,
+            page: Int,
+            pageSize: Int,
+            params: LibraryParams?,
+        ) = scope.future<LibraryResult<ImmutableList<MediaItem>>> {
+            val found = searches[query] ?: spoken(query)
+            LibraryResult.ofItemList(ImmutableList.copyOf(found.map { it.toMediaItem(app.api) }), params)
+        }
 
         /** Headphones or the car asking to play with nothing loaded: where GO left off. */
         override fun onPlaybackResumption(
@@ -244,9 +371,80 @@ class PlaybackService : MediaSessionService() {
         }
     }
 
-    private fun playable(item: MediaItem): MediaItem = item.buildUpon()
-        .setUri("$TRACK_SCHEME://track/${item.mediaId}".toUri())
-        // Per server: the same id on another server is another song.
-        .setCustomCacheKey("${app.account.server}|${item.mediaId}")
+    /** Songs for spoken or typed words, or from what's kept without a server. */
+    private suspend fun spoken(query: String): List<Track> {
+        val server = app.account.server ?: return emptyList()
+        return try {
+            val found = app.api.search(query)
+            found.tracks.ifEmpty { found.described?.tracks.orEmpty() }
+        } catch (_: IOException) {
+            app.offline.dao.search(server, "%$query%").map { it.toTrack() }
+        }
+    }
+
+    private fun folder(id: String, title: String): MediaItem = MediaItem.Builder()
+        .setMediaId(id)
+        .setMediaMetadata(
+            androidx.media3.common.MediaMetadata.Builder()
+                .setTitle(title)
+                .setIsBrowsable(true)
+                .setIsPlayable(false)
+                .build(),
+        )
         .build()
+
+    private suspend fun children(parent: String): List<MediaItem> {
+        val api = app.api
+        val server = app.account.server ?: return emptyList()
+        return try {
+            when {
+                parent == ROOT -> listOf(
+                    folder(RECENT, "Lately played"),
+                    folder(KEPT, "On this phone"),
+                    folder(PLAYLISTS, "Playlists"),
+                    folder(ALBUMS, "Albums"),
+                )
+                parent == RECENT -> api.home().recent.map { it.toMediaItem(api) }
+                parent == KEPT -> app.offline.dao.songs(server).map { it.toTrack().toMediaItem(api) }
+                parent == PLAYLISTS -> api.playlists().map { folder("$PLAYLIST_PREFIX${it.id}", it.name) }
+                parent == ALBUMS -> api.albums(0).items.map { folder("$ALBUM_PREFIX${it.id}", it.title) }
+                parent.startsWith(PLAYLIST_PREFIX) ->
+                    api.playlist(parent.removePrefix(PLAYLIST_PREFIX).toLong()).songs.map { it.toMediaItem(api) }
+                parent.startsWith(ALBUM_PREFIX) ->
+                    api.album(parent.removePrefix(ALBUM_PREFIX).toLong()).tracks.map { it.toMediaItem(api) }
+                else -> emptyList()
+            }
+        } catch (_: IOException) {
+            // Away from the server, the car still has what's kept here.
+            when (parent) {
+                ROOT -> listOf(folder(KEPT, "On this phone"))
+                KEPT -> app.offline.dao.songs(server).map { it.toTrack().toMediaItem(api) }
+                else -> emptyList()
+            }
+        }
+    }
+
+    /** A kept copy plays from its file; anything else as a song to fetch. */
+    private suspend fun playable(item: MediaItem): MediaItem {
+        val id = item.mediaId.toLongOrNull()
+        val kept = id?.let { app.offline.local(it) }
+        if (kept != null) {
+            return item.buildUpon().setUri(android.net.Uri.fromFile(File(kept.path))).build()
+        }
+        return item.buildUpon()
+            .setUri("$TRACK_SCHEME://track/${item.mediaId}".toUri())
+            // Per server: the same id on another server is another song.
+            .setCustomCacheKey("${app.account.server}|${item.mediaId}")
+            .build()
+    }
+
+    private companion object {
+        const val ROOT = "root"
+        const val RECENT = "recent"
+        const val KEPT = "kept"
+        const val PLAYLISTS = "playlists"
+        const val ALBUMS = "albums"
+        const val PLAYLIST_PREFIX = "playlist-"
+        const val ALBUM_PREFIX = "album-"
+    }
 }

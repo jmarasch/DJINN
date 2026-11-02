@@ -52,6 +52,16 @@ pub struct Resume {
     pub updated_at: i64,
 }
 
+/// Changes when a song's file does.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, FromRow)]
+pub struct TrackVersion {
+    pub id: i64,
+    pub version: String,
+}
+
+/// Plays reported later than this are taken as happening now (ms).
+const OLDEST_REPORT_MS: i64 = 90 * 24 * 60 * 60 * 1000;
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, FromRow)]
 pub struct GoPlaylist {
     pub id: i64,
@@ -163,18 +173,66 @@ impl Store {
 
     /// Records a song played in GO.
     pub async fn record_go_play(&self, user_id: i64, track_id: i64, ms_played: i64) -> Result<()> {
+        self.record_go_play_at(user_id, track_id, ms_played, None)
+            .await
+    }
+
+    /// Records a play that may have happened earlier, offline. A time in the
+    /// future, or too long ago to be real, counts as now.
+    pub async fn record_go_play_at(
+        &self,
+        user_id: i64,
+        track_id: i64,
+        ms_played: i64,
+        at: Option<i64>,
+    ) -> Result<()> {
+        let now = now_ms();
+        let at = at
+            .filter(|at| (now - OLDEST_REPORT_MS..=now).contains(at))
+            .unwrap_or(now);
         sqlx::query(
             "INSERT INTO go_plays (user_id, track_id, at, ms_played, skipped)
              SELECT ?, id, ?, ?, ? FROM tracks WHERE id = ?",
         )
         .bind(user_id)
-        .bind(now_ms())
+        .bind(at)
         .bind(ms_played.max(0))
         .bind(ms_played < SKIP_BEFORE_MS)
         .bind(track_id)
         .execute(&self.pool)
         .await?;
         Ok(())
+    }
+
+    /// The songs someone would most miss offline: most played through, then
+    /// liked.
+    pub async fn worth_keeping(&self, user_id: i64, limit: i64) -> Result<Vec<Track>> {
+        let ids: Vec<i64> = sqlx::query_scalar(
+            "SELECT track_id FROM (
+                SELECT track_id, count(*) AS plays, max(at) AS last FROM go_plays
+                WHERE user_id = ?1 AND NOT skipped GROUP BY track_id
+                UNION ALL
+                SELECT ref_id, 0, at FROM go_likes WHERE user_id = ?1 AND kind = 'track'
+             ) GROUP BY track_id ORDER BY max(plays) DESC, max(last) DESC LIMIT ?2",
+        )
+        .bind(user_id)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+        self.tracks_by_ids(&ids).await
+    }
+
+    /// Each song's version, for those still in the library.
+    pub async fn track_versions(&self, ids: &[i64]) -> Result<Vec<TrackVersion>> {
+        let list = crate::library::json_ids(ids);
+        let rows = sqlx::query_as(
+            "SELECT id, size || '-' || mtime AS version FROM tracks
+             WHERE removed_at IS NULL AND id IN (SELECT value FROM json_each(?))",
+        )
+        .bind(list)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows)
     }
 
     /// Someone's history, newest first.

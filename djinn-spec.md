@@ -349,7 +349,7 @@ Personal listening, apart from the party, on the same library and database. Same
 
 The official native app for DJINN GO, in `android/` in this repository: songs as alarm and ringtone sounds, offline listening, and caching of what you play most, at the level of YouTube Music or Spotify, on your own server. It talks to GO's listener and API, never the party's or Admin's.
 
-**Stack:** Kotlin, Jetpack Compose, Media3 (ExoPlayer, `MediaLibraryService`, download and cache), Room for what must work offline, WorkManager for background jobs, OkHttp. Minimum Android 6 (API 23), the lowest that current Compose and Media3 support; anything lower would mean staying on old versions of both. The formats DJINN reads (MP3, FLAC, AAC/M4A, Ogg Vorbis, WAV) all play on Android without extra decoders.
+**Stack:** Kotlin, Jetpack Compose, Media3 (ExoPlayer, `MediaLibraryService`, download and cache), Room for what must work offline, WorkManager for background jobs, OkHttp. Minimum Android 7 (API 24), the lowest the Cast library and current WorkManager allow; Compose and Media3 alone would allow API 23. CameraX and ZXing read the QR code, without Google services. The formats DJINN reads (MP3, FLAC, AAC/M4A, Ogg Vorbis, WAV) all play on Android without extra decoders.
 
 **Where music is kept on the phone**
 
@@ -373,6 +373,10 @@ The official native app for DJINN GO, in `android/` in this repository: songs as
 - DJINN has no alarm of its own. Google Clock's music services are partner integrations with no public way in, so a song is chosen in Clock as a sound, not picked from DJINN inside Clock.
 - The app lists the sounds it saved and can remove them. Saving is from a local copy, fetched first if needed, and keeps the song's stored quality.
 
+**Visuals**
+- Now Playing can show the song's sound instead of its cover: tap to go from the cover to bars to a ring. A tap in the player feeds the analysis, so it needs no microphone permission, and the audio passes through untouched.
+- MilkDrop-style presets are separate work, alongside the visualizers planned for 0.5.0.
+
 **Server changes (GO's API)**
 - Device sign-in: an API login returns a token sent as `Authorization: Bearer`, stored as a session, so it appears under signed-in devices, can be signed out, and follows the same role, home-network, two-step and lockout rules as the web. Cookies keep working for browsers.
 - Offline copies: a link that fetches a song as a download with a chosen quality, doesn't count toward "streams at once", and doesn't show as listening in Admin > GO. The role's `downloads` is checked when the link is made and when it's used.
@@ -381,7 +385,7 @@ The official native app for DJINN GO, in `android/` in this repository: songs as
 - Play reports take an optional time, so offline plays are dated when they happened, within sane limits, not when they synced.
 - All of it goes in GO's fixed route allowlist, with tests.
 
-**Stages**, each its own PR, meeting its criteria before the next starts:
+**Stages.** All four are in at a baseline level, built together at the owner's request; each stage's criteria below still have to be met on real phones.
 1. **Player.** Server sign-in. Connect to a server (with its QR code from Phase 7), sign in with two-step, browse and search, stream, lock screen and Bluetooth controls, recent cache, resume across devices, ReplayGain from the play link's `gain`.
    - *Done when:* an album plays through with the screen off for an hour, without gaps other than the album's own; a restart of the phone or the server recovers cleanly; plain HTTP works at home and warns before sending a password anywhere else.
 2. **Offline.** The other server changes, downloads with progress, smart cache, storage settings and limits, offline mode, and syncing plays, likes and playlist edits.

@@ -14,6 +14,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -68,6 +69,7 @@ fun ConnectScreen(
     account: Account,
     api: GoApi,
     askLocalNetwork: suspend () -> Boolean,
+    askCamera: suspend () -> Boolean,
     onConnected: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
@@ -75,6 +77,7 @@ fun ConnectScreen(
     var busy by rememberSaveable { mutableStateOf(false) }
     var problem by rememberSaveable { mutableStateOf<String?>(null) }
     var warnAbout by rememberSaveable { mutableStateOf<String?>(null) }
+    var scanning by rememberSaveable { mutableStateOf(false) }
 
     fun connect(server: String) {
         busy = true
@@ -98,6 +101,26 @@ fun ConnectScreen(
         }
     }
 
+    fun use(server: String?) {
+        when {
+            server == null -> problem = "That doesn't look like a server address."
+            !safeToSignIn(server) -> warnAbout = server
+            else -> connect(server)
+        }
+    }
+
+    if (scanning) {
+        ScanScreen(
+            onFound = { text ->
+                scanning = false
+                address = text
+                use(serverAddress(text))
+            },
+            onCancel = { scanning = false },
+        )
+        return
+    }
+
     Form(
         "DJINN GO",
         "Enter your server's address. Admin > GO shows it, like 192.168.1.20:8067. " +
@@ -115,15 +138,21 @@ fun ConnectScreen(
         Button(
             enabled = !busy && address.isNotBlank(),
             modifier = Modifier.fillMaxWidth(),
+            onClick = { use(serverAddress(address)) },
+        ) { Text(if (busy) "Connecting..." else "Continue") }
+        OutlinedButton(
+            enabled = !busy,
+            modifier = Modifier.fillMaxWidth(),
             onClick = {
-                val server = serverAddress(address)
-                when {
-                    server == null -> problem = "That doesn't look like a server address."
-                    !safeToSignIn(server) -> warnAbout = server
-                    else -> connect(server)
+                scope.launch {
+                    if (askCamera()) {
+                        scanning = true
+                    } else {
+                        problem = "Scanning needs the camera. You can type the address instead."
+                    }
                 }
             },
-        ) { Text(if (busy) "Connecting..." else "Continue") }
+        ) { Text("Scan the QR code") }
     }
 
     warnAbout?.let { server ->

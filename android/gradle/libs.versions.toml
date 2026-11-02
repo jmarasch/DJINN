@@ -11,6 +11,14 @@ serialization = "1.12.0"
 coil = "3.6.3"
 coroutines = "1.10.2"
 junit = "4.13.2"
+ksp = "2.3.13"
+room = "2.8.5"
+work = "2.12.0"
+camerax = "1.6.2"
+zxing = "3.5.4"
+mediarouter = "1.8.1"
+cast = "23.0.0"
+fragment = "1.9.1"
 
 [libraries]
 androidx-core = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
@@ -30,8 +38,20 @@ coil-compose = { module = "io.coil-kt.coil3:coil-compose", version.ref = "coil" 
 coil-okhttp = { module = "io.coil-kt.coil3:coil-network-okhttp", version.ref = "coil" }
 coroutines-guava = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-guava", version.ref = "coroutines" }
 junit = { module = "junit:junit", version.ref = "junit" }
+room-runtime = { module = "androidx.room:room-runtime", version.ref = "room" }
+room-ktx = { module = "androidx.room:room-ktx", version.ref = "room" }
+room-compiler = { module = "androidx.room:room-compiler", version.ref = "room" }
+work = { module = "androidx.work:work-runtime-ktx", version.ref = "work" }
+camerax-camera2 = { module = "androidx.camera:camera-camera2", version.ref = "camerax" }
+camerax-lifecycle = { module = "androidx.camera:camera-lifecycle", version.ref = "camerax" }
+camerax-view = { module = "androidx.camera:camera-view", version.ref = "camerax" }
+zxing = { module = "com.google.zxing:core", version.ref = "zxing" }
+mediarouter = { module = "androidx.mediarouter:mediarouter", version.ref = "mediarouter" }
+fragment = { module = "androidx.fragment:fragment", version.ref = "fragment" }
+cast = { module = "com.google.android.gms:play-services-cast-framework", version.ref = "cast" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }

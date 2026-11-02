@@ -1418,6 +1418,7 @@ async fn stream(
             None => track.title.clone(),
         },
         max_streams: permissions.max_streams,
+        counts: true,
     };
     let original = std::path::PathBuf::from(&path);
     let kbps = if download {

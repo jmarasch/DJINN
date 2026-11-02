@@ -28,6 +28,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -38,27 +39,52 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.util.UnstableApi
 import com.newterrastudios.djinn.go.data.GoApi
+import com.newterrastudios.djinn.go.data.OfflineStore
+import com.newterrastudios.djinn.go.data.Prefs
+import com.newterrastudios.djinn.go.player.CastState
 import com.newterrastudios.djinn.go.data.Track
 import com.newterrastudios.djinn.go.player.PlayerState
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
 
 sealed interface Screen {
     data class Album(val id: Long) : Screen
     data class Artist(val id: Long) : Screen
     data class Playlist(val id: Long) : Screen
     data object NowPlaying : Screen
+    data object Settings : Screen
 }
 
 enum class Tab(val label: String) { Home("Home"), Library("Library"), Search("Search") }
 
 /** Where you are in the app, and what every screen needs. */
 @UnstableApi
-class Nav(val api: GoApi, val player: PlayerState, val signOut: () -> Unit) {
+class Nav(
+    val api: GoApi,
+    val player: PlayerState,
+    val offline: OfflineStore,
+    val prefs: Prefs,
+    val cast: CastState,
+    val server: String,
+    val signOut: () -> Unit,
+    /** For work that must outlive the screen or menu that started it. */
+    val scope: CoroutineScope,
+    /** Asks for what saving a system sound needs on older Android. */
+    val askStorage: suspend () -> Boolean,
+    private val onOfflineChange: () -> Unit,
+) {
     var tab by mutableStateOf(Tab.Home)
+    /** The role lets this account keep songs on the phone. */
+    var canKeepSongs by mutableStateOf(false)
+    /** Something to say briefly. */
+    var message by mutableStateOf<String?>(null)
     val stack = mutableStateListOf<Screen>()
     var menuFor by mutableStateOf<Track?>(null)
     val liked = mutableStateListOf<Long>()
     /** A song to start radio from. */
     var radioFor by mutableStateOf<Track?>(null)
+
+    fun syncLater() = onOfflineChange()
 
     fun push(screen: Screen) {
         stack.add(screen)
@@ -124,18 +150,29 @@ fun MainScreen(nav: Nav) {
                 is Screen.Album -> AlbumScreen(top.id, nav)
                 is Screen.Artist -> ArtistScreen(top.id, nav)
                 is Screen.Playlist -> PlaylistScreen(top.id, nav)
+                Screen.Settings -> SettingsScreen(nav)
                 else -> when (nav.tab) {
                     Tab.Home -> HomeScreen(nav)
                     Tab.Library -> LibraryScreen(nav)
                     Tab.Search -> SearchScreen(nav)
                 }
             }
-            nav.player.error?.let { message ->
+            LaunchedEffect(nav.message) {
+                // Errors stay until read; other messages clear themselves.
+                if (nav.message != null) {
+                    delay(4000)
+                    nav.message = null
+                }
+            }
+            (nav.player.error ?: nav.message)?.let { message ->
                 Snackbar(
                     Modifier
                         .align(Alignment.BottomCenter)
                         .padding(12.dp)
-                        .clickable { nav.player.error = null },
+                        .clickable {
+                            nav.player.error = null
+                            nav.message = null
+                        },
                 ) { Text(message) }
             }
         }

@@ -12,9 +12,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Logout
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -25,6 +26,7 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -35,6 +37,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.util.UnstableApi
 import com.newterrastudios.djinn.go.data.Album
@@ -47,6 +50,7 @@ import com.newterrastudios.djinn.go.data.GoPlaylistDetail
 import com.newterrastudios.djinn.go.data.Page
 import com.newterrastudios.djinn.go.data.SearchResults
 import com.newterrastudios.djinn.go.data.Track
+import com.newterrastudios.djinn.go.work.DownloadWorker
 import kotlinx.coroutines.delay
 import java.io.IOException
 
@@ -55,6 +59,8 @@ import java.io.IOException
 private fun <T : Any> Loaded(
     key: Any,
     load: suspend () -> T,
+    /** What to show instead of an error, when there's something. */
+    away: (@Composable (String?) -> Unit)? = null,
     content: @Composable (T) -> Unit,
 ) {
     var value by remember(key) { mutableStateOf<T?>(null) }
@@ -71,6 +77,7 @@ private fun <T : Any> Loaded(
     val shown = value
     when {
         shown != null -> content(shown)
+        failed != null && away != null -> away(failed)
         failed != null -> Column(Modifier.padding(16.dp)) {
             Text(failed ?: "", color = MaterialTheme.colorScheme.error)
             FilledTonalButton(onClick = { attempt++ }) { Text("Try again") }
@@ -130,21 +137,19 @@ private fun <T> PagedList(
 @UnstableApi
 @Composable
 fun HomeScreen(nav: Nav) {
-    Loaded(key = "home", load = { nav.api.home() }) { home: GoHome ->
-        LazyColumn(Modifier.fillMaxSize()) {
-            item {
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(start = 16.dp, top = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text("DJINN GO", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
-                    IconButton(onClick = nav.signOut) {
-                        Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = "Sign out")
-                    }
-                }
+    Loaded(
+        key = "home",
+        load = { nav.api.home() },
+        away = { reason ->
+            Column(Modifier.fillMaxSize()) {
+                HomeBar(nav)
+                Note("$reason Here's what's on this phone.")
+                KeptSongs(nav)
             }
+        },
+    ) { home: GoHome ->
+        LazyColumn(Modifier.fillMaxSize()) {
+            item { HomeBar(nav) }
             home.resume?.let { resume ->
                 resume.songs.getOrNull(resume.position)?.let { song ->
                     item {
@@ -177,6 +182,58 @@ fun HomeScreen(nav: Nav) {
 }
 
 @UnstableApi
+@Composable
+private fun HomeBar(nav: Nav) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, top = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("DJINN GO", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
+        IconButton(onClick = { nav.push(Screen.Settings) }) {
+            Icon(Icons.Default.Settings, contentDescription = "Settings")
+        }
+    }
+}
+
+/** Everything on the phone, which needs no server. */
+@UnstableApi
+@Composable
+private fun KeptSongs(nav: Nav) {
+    val flow = remember(nav.server) { nav.offline.dao.songsFlow(nav.server) }
+    val kept by flow.collectAsState(emptyList())
+    val songs = kept.map { it.toTrack() }
+    LazyColumn(Modifier.fillMaxSize()) {
+        if (songs.isEmpty()) {
+            item { Note("Nothing here yet. A song's menu can download it, and albums have a download button.") }
+        }
+        itemsIndexed(songs) { index, song ->
+            SongRow(song, nav) { nav.player.play(songs, index) }
+        }
+    }
+}
+
+/** Downloads an album's or playlist's songs, when the role allows. */
+@UnstableApi
+@Composable
+private fun DownloadAll(songs: List<Track>, nav: Nav) {
+    if (!nav.canKeepSongs || songs.isEmpty()) return
+    val context = LocalContext.current
+    FilledTonalButton(
+        onClick = {
+            DownloadWorker.enqueue(context, songs, nav.prefs.wifiOnly)
+            nav.message = "Downloading ${songs.size} songs" +
+                if (nav.prefs.wifiOnly) " when on Wi-Fi" else ""
+        },
+        modifier = Modifier.padding(top = 8.dp),
+    ) {
+        Icon(Icons.Default.Download, contentDescription = null)
+        Text("Download", modifier = Modifier.padding(start = 8.dp))
+    }
+}
+
+@UnstableApi
 private fun LazyListScope.songSection(title: String, songs: List<Track>, nav: Nav) {
     if (songs.isEmpty()) return
     item { Heading(title) }
@@ -191,7 +248,7 @@ fun LibraryScreen(nav: Nav) {
     var tab by rememberSaveable { mutableStateOf(0) }
     Column(Modifier.fillMaxSize()) {
         SecondaryTabRow(selectedTabIndex = tab) {
-            listOf("Artists", "Albums", "Songs").forEachIndexed { index, label ->
+            listOf("Artists", "Albums", "Songs", "On phone").forEachIndexed { index, label ->
                 Tab(selected = tab == index, onClick = { tab = index }, text = { Text(label) })
             }
         }
@@ -207,9 +264,10 @@ fun LibraryScreen(nav: Nav) {
             1 -> PagedList<Album>("albums", nav.api::albums) { album, _ ->
                 AlbumRow(album, nav)
             }
-            else -> PagedList<Track>("songs", nav.api::songs) { song, _ ->
+            2 -> PagedList<Track>("songs", nav.api::songs) { song, _ ->
                 SongRow(song, nav) { nav.startRadio(song) }
             }
+            else -> KeptSongs(nav)
         }
     }
 }
@@ -250,6 +308,7 @@ fun AlbumScreen(id: Long, nav: Nav) {
                         enabled = album.tracks.isNotEmpty(),
                         modifier = Modifier.padding(top = 8.dp),
                     ) { Text("Play album") }
+                    DownloadAll(album.tracks, nav)
                 }
             }
             itemsIndexed(album.tracks) { index, song ->
@@ -306,6 +365,7 @@ fun PlaylistScreen(id: Long, nav: Nav) {
                         enabled = list.songs.isNotEmpty(),
                         modifier = Modifier.padding(top = 8.dp),
                     ) { Text("Play") }
+                    DownloadAll(list.songs, nav)
                 }
             }
             itemsIndexed(list.songs) { index, song ->
@@ -331,8 +391,13 @@ fun SearchScreen(nav: Nav) {
         delay(250)
         try {
             results = nav.api.search(query.trim())
-        } catch (_: IOException) {
+        } catch (e: ApiException) {
             failed = true
+        } catch (_: IOException) {
+            // Away from the server: what's on this phone.
+            results = SearchResults(
+                tracks = nav.offline.dao.search(nav.server, "%${query.trim()}%").map { it.toTrack() },
+            )
         }
     }
     Column(Modifier.fillMaxSize()) {

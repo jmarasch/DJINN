@@ -223,6 +223,16 @@ class PlayerState(private val api: GoApi) {
         }
     }
 
+    /** What casting takes over: the song playing and what follows. */
+    fun queueFromCurrent(): List<MediaItem> {
+        val player = controller ?: return emptyList()
+        return (player.currentMediaItemIndex until player.mediaItemCount).map { player.getMediaItemAt(it) }
+    }
+
+    fun pauseForCast() {
+        controller?.pause()
+    }
+
     fun stop() {
         controller?.run {
             stop()

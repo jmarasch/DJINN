@@ -23,6 +23,9 @@ use crate::state::AppState;
 const MAX_PLAYLIST_NAME: usize = 100;
 const MAX_PLAYLIST_SONGS: usize = 5000;
 const RADIO_SONGS: usize = 30;
+/// How many songs smart cache gets to choose from.
+const OFFLINE_SUGGESTIONS: i64 = 1000;
+
 /// Personal radio avoids songs heard this recently.
 const RADIO_FRESH_MS: i64 = 3 * 60 * 60 * 1000;
 /// ...and leans away from songs skipped this recently.
@@ -35,6 +38,8 @@ pub fn router() -> Router<AppState> {
         .route("/go/likes/ids", get(liked_ids))
         .route("/go/likes/{kind}/{id}", put(like).delete(unlike))
         .route("/go/plays", post(played))
+        .route("/go/offline/versions", post(offline_versions))
+        .route("/go/offline-suggested", get(offline_suggested))
         .route("/go/history", get(history))
         .route("/go/resume", get(resume).put(save_resume))
         .route("/go/prefs", get(prefs).put(set_prefs))
@@ -138,6 +143,46 @@ struct PlayReport {
     track_id: i64,
     /// How much was heard; under 30 seconds counts as a skip.
     ms_played: i64,
+    /// When, for a play reported later (it happened offline). Now without.
+    at: Option<i64>,
+}
+
+#[derive(Deserialize)]
+struct SongIds {
+    ids: Vec<i64>,
+}
+
+/// The current version of each song still in the library, so an app can
+/// replace copies of changed files and notice removed ones.
+async fn offline_versions(
+    me: GoUser,
+    State(state): State<AppState>,
+    Json(body): Json<SongIds>,
+) -> ApiResult<Json<Vec<djinn_store::TrackVersion>>> {
+    downloads_allowed(&state, &me).await?;
+    Ok(Json(state.store.track_versions(&body.ids).await?))
+}
+
+/// What's worth keeping on a device: most played first, then liked.
+async fn offline_suggested(
+    me: GoUser,
+    State(state): State<AppState>,
+) -> ApiResult<Json<Vec<Track>>> {
+    downloads_allowed(&state, &me).await?;
+    Ok(Json(
+        state
+            .store
+            .worth_keeping(me.user.id, OFFLINE_SUGGESTIONS)
+            .await?,
+    ))
+}
+
+async fn downloads_allowed(state: &AppState, me: &GoUser) -> ApiResult<()> {
+    if state.store.permissions(&me.user).await?.downloads {
+        Ok(())
+    } else {
+        Err(ApiError::forbidden())
+    }
 }
 
 /// The player reports each song when it ends or is left.
@@ -148,7 +193,7 @@ async fn played(
 ) -> ApiResult<StatusCode> {
     state
         .store
-        .record_go_play(me.user.id, body.track_id, body.ms_played)
+        .record_go_play_at(me.user.id, body.track_id, body.ms_played, body.at)
         .await?;
     Ok(StatusCode::NO_CONTENT)
 }

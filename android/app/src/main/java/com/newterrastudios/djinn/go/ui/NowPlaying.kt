@@ -1,6 +1,24 @@
 package com.newterrastudios.djinn.go.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
+import androidx.compose.material.icons.filled.Cast
+import androidx.compose.material.icons.filled.CastConnected
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.PhoneInTalk
+import androidx.compose.material.icons.filled.Alarm
+import androidx.compose.material.icons.filled.Celebration
+import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -49,7 +67,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import com.newterrastudios.djinn.go.data.ApiException
+import com.newterrastudios.djinn.go.data.GoPlaylist
+import com.newterrastudios.djinn.go.data.KIND_DOWNLOAD
+import com.newterrastudios.djinn.go.data.OfflineSong
+import com.newterrastudios.djinn.go.data.SoundKind
 import com.newterrastudios.djinn.go.data.Track
+import com.newterrastudios.djinn.go.work.DownloadWorker
 import kotlinx.coroutines.launch
 import java.io.IOException
 
@@ -66,6 +90,17 @@ fun NowPlayingScreen(nav: Nav) {
     val scope = rememberCoroutineScope()
     /** Where the thumb is while being dragged. */
     var dragging by remember { mutableStateOf<Float?>(null) }
+    var visual by remember { mutableIntStateOf(nav.prefs.visuals) }
+    var pickDevice by remember { mutableStateOf(false) }
+    val casting = nav.cast.castingTo
+    DisposableEffect(Unit) {
+        nav.cast.start()
+        onDispose { nav.cast.stopLooking() }
+    }
+    fun nextVisual() {
+        visual = (visual + 1) % VisualStyle.entries.size
+        nav.prefs.visuals = visual
+    }
 
     LazyColumn(
         Modifier
@@ -73,8 +108,18 @@ fun NowPlayingScreen(nav: Nav) {
             .safeDrawingPadding(),
     ) {
         item {
-            IconButton(onClick = nav::pop, modifier = Modifier.padding(4.dp)) {
-                Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Close")
+            Row(Modifier.fillMaxWidth().padding(4.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                IconButton(onClick = nav::pop) {
+                    Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Close")
+                }
+                if (casting != null || nav.cast.devices.isNotEmpty()) {
+                    IconButton(onClick = { pickDevice = true }) {
+                        Icon(
+                            if (casting != null) Icons.Default.CastConnected else Icons.Default.Cast,
+                            contentDescription = "Cast",
+                        )
+                    }
+                }
             }
         }
         item {
@@ -84,7 +129,27 @@ fun NowPlayingScreen(nav: Nav) {
                     .padding(horizontal = 24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Art(item.mediaMetadata.artworkUri?.toString(), 280.dp)
+                if (VisualStyle.entries[visual] == VisualStyle.Art) {
+                    Art(
+                        item.mediaMetadata.artworkUri?.toString(),
+                        280.dp,
+                        modifier = Modifier.clickable(onClick = ::nextVisual),
+                    )
+                } else {
+                    Visualizer(
+                        VisualStyle.entries[visual],
+                        onTap = ::nextVisual,
+                        modifier = Modifier
+                            .size(280.dp),
+                    )
+                }
+                if (casting != null) {
+                    Text(
+                        "Playing on $casting",
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(top = 12.dp),
+                    )
+                }
                 Text(
                     item.mediaMetadata.title?.toString() ?: "",
                     style = MaterialTheme.typography.titleLarge,
@@ -129,14 +194,21 @@ fun NowPlayingScreen(nav: Nav) {
                     IconButton(onClick = player::previous) {
                         Icon(Icons.Default.SkipPrevious, "Previous", Modifier.size(32.dp))
                     }
-                    FilledIconButton(onClick = player::toggle, modifier = Modifier.size(64.dp)) {
+                    val playing = if (casting != null) nav.cast.remotePlaying else player.playing
+                    FilledIconButton(
+                        onClick = { if (casting != null) nav.cast.toggleRemote() else player.toggle() },
+                        modifier = Modifier.size(64.dp),
+                    ) {
                         Icon(
-                            if (player.playing) Icons.Default.Pause else Icons.Default.PlayArrow,
-                            if (player.playing) "Pause" else "Play",
+                            if (playing) Icons.Default.Pause else Icons.Default.PlayArrow,
+                            if (playing) "Pause" else "Play",
                             Modifier.size(36.dp),
                         )
                     }
-                    IconButton(onClick = player::next, enabled = player.upNext.isNotEmpty()) {
+                    IconButton(
+                        onClick = { if (casting != null) nav.cast.nextRemote() else player.next() },
+                        enabled = casting != null || player.upNext.isNotEmpty(),
+                    ) {
                         Icon(Icons.Default.SkipNext, "Next", Modifier.size(32.dp))
                     }
                     IconButton(onClick = player::cycleRepeat) {
@@ -181,14 +253,19 @@ fun NowPlayingScreen(nav: Nav) {
     }
 }
 
-/** Likes change on screen at once, and go back if the server says no. */
+/** Likes change on screen at once, go when they can, and go back if the server says no. */
 @UnstableApi
 suspend fun Nav.setLiked(id: Long, on: Boolean) {
     if (on) liked.add(id) else liked.remove(id)
+    prefs.likedIds = liked.toSet()
     try {
         api.setLike(id, on)
-    } catch (_: IOException) {
+    } catch (_: ApiException) {
         if (on) liked.remove(id) else liked.add(id)
+        prefs.likedIds = liked.toSet()
+    } catch (_: IOException) {
+        offline.dao.putLike(com.newterrastudios.djinn.go.data.PendingLike(server, id, on))
+        syncLater()
     }
 }
 
@@ -196,10 +273,30 @@ suspend fun Nav.setLiked(id: Long, on: Boolean) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SongMenu(track: Track, nav: Nav) {
-    val scope = rememberCoroutineScope()
+    val scope = nav.scope // The menu closes at once; what it started carries on.
+    val context = LocalContext.current
+    var kept by remember { mutableStateOf<OfflineSong?>(null) }
+    var choosingPlaylist by remember { mutableStateOf<List<GoPlaylist>?>(null) }
+    LaunchedEffect(track.id) { kept = nav.offline.local(track.id) }
     fun then(action: () -> Unit) {
         nav.menuFor = null
         action()
+    }
+    fun saveAs(kind: SoundKind) = then {
+        scope.launch {
+            if (!nav.askStorage()) {
+                nav.message = "Saving a sound needs permission to write to storage."
+                return@launch
+            }
+            nav.message = "Saving..."
+            try {
+                val song = nav.offline.local(track.id) ?: nav.offline.fetch(track, KIND_DOWNLOAD)
+                nav.offline.saveSound(song, kind)
+                nav.message = "Saved as a ${kind.label}. Choose it in Clock or your phone's sound settings."
+            } catch (e: IOException) {
+                nav.message = "Couldn't save it: ${e.message}"
+            }
+        }
     }
     ModalBottomSheet(onDismissRequest = { nav.menuFor = null }) {
         Text(
@@ -212,6 +309,44 @@ fun SongMenu(track: Track, nav: Nav) {
         MenuRow("Play next", Icons.Default.SkipNext) { then { nav.player.playNext(track) } }
         MenuRow("Add to queue", Icons.AutoMirrored.Filled.QueueMusic) { then { nav.player.addToQueue(track) } }
         MenuRow("Start radio", Icons.Default.Radio) { then { nav.radioFor = track } }
+        MenuRow("Add to playlist", Icons.AutoMirrored.Filled.PlaylistAdd) {
+            scope.launch {
+                try {
+                    choosingPlaylist = nav.api.playlists()
+                } catch (_: IOException) {
+                    then { nav.message = "Couldn't reach the server." }
+                }
+            }
+        }
+        MenuRow("Send to the party", Icons.Default.Celebration) {
+            then {
+                scope.launch {
+                    nav.message = try {
+                        nav.api.sendToParty(track.id)
+                        "Sent to the party."
+                    } catch (e: IOException) {
+                        if (e is ApiException) e.message else "Couldn't reach the server."
+                    }
+                }
+            }
+        }
+        if (nav.canKeepSongs) {
+            if (kept != null) {
+                MenuRow("Remove from this phone", Icons.Default.Delete) {
+                    then { scope.launch { nav.offline.remove(track.id) } }
+                }
+            } else {
+                MenuRow("Download", Icons.Default.Download) {
+                    then {
+                        DownloadWorker.enqueue(context, listOf(track), nav.prefs.wifiOnly)
+                        nav.message = "Downloading" + if (nav.prefs.wifiOnly) " when on Wi-Fi" else ""
+                    }
+                }
+            }
+            MenuRow("Save as alarm sound", Icons.Default.Alarm) { saveAs(SoundKind.Alarm) }
+            MenuRow("Save as ringtone", Icons.Default.PhoneInTalk) { saveAs(SoundKind.Ringtone) }
+            MenuRow("Save as notification sound", Icons.Default.Notifications) { saveAs(SoundKind.Notification) }
+        }
         val liked = track.id in nav.liked
         MenuRow(if (liked) "Unlike" else "Like", if (liked) Icons.Default.Favorite else Icons.Default.FavoriteBorder) {
             then { scope.launch { nav.setLiked(track.id, !liked) } }
@@ -222,6 +357,33 @@ fun SongMenu(track: Track, nav: Nav) {
         track.artistId?.let { artist ->
             MenuRow("Go to artist", Icons.Default.Person) { then { nav.goTo(Screen.Artist(artist)) } }
         }
+    }
+    choosingPlaylist?.let { lists ->
+        AlertDialog(
+            onDismissRequest = { choosingPlaylist = null },
+            title = { Text("Add to playlist") },
+            text = {
+                Column {
+                    if (lists.isEmpty()) Text("You have no playlists yet. Make one in DJINN GO on the web.")
+                    lists.forEach { list ->
+                        TextButton(onClick = {
+                            choosingPlaylist = null
+                            then {
+                                scope.launch {
+                                    nav.message = try {
+                                        nav.api.addToPlaylist(list.id, track.id)
+                                        "Added to ${list.name}."
+                                    } catch (_: IOException) {
+                                        "Couldn't add it."
+                                    }
+                                }
+                            }
+                        }) { Text(list.name) }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { choosingPlaylist = null }) { Text("Cancel") } },
+        )
     }
 }
 

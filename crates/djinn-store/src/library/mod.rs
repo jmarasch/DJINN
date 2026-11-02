@@ -736,7 +736,7 @@ fn genre_list<'a>(genres: impl Iterator<Item = &'a str>) -> Option<String> {
 
 /// Ids as a JSON array, for `json_each(?)`: one static query for any
 /// number of ids.
-fn json_ids(ids: &[i64]) -> String {
+pub(crate) fn json_ids(ids: &[i64]) -> String {
     let parts: Vec<String> = ids.iter().map(i64::to_string).collect();
     format!("[{}]", parts.join(","))
 }

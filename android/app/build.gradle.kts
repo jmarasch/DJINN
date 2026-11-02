@@ -2,6 +2,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
+    alias(libs.plugins.ksp)
 }
 
 android {
@@ -10,8 +11,8 @@ android {
 
     defaultConfig {
         applicationId = "com.newterrastudios.djinn.go"
-        // The lowest current Compose and Media3 support.
-        minSdk = 23
+        // The lowest the libraries allow: Cast and WorkManager need 24.
+        minSdk = 24
         targetSdk = 37
         versionCode = 1
         versionName = "0.1.0"
@@ -21,7 +22,7 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
 
@@ -52,5 +53,17 @@ dependencies {
     implementation(libs.coil.compose)
     implementation(libs.coil.okhttp)
     implementation(libs.coroutines.guava)
+    implementation(libs.room.runtime)
+    implementation(libs.room.ktx)
+    ksp(libs.room.compiler)
+    implementation(libs.work)
+    implementation(libs.camerax.camera2)
+    implementation(libs.camerax.lifecycle)
+    implementation(libs.camerax.view)
+    implementation(libs.zxing)
+    implementation(libs.mediarouter)
+    implementation(libs.cast)
+    // Cast brings an old one, which lint rejects with the activity result APIs.
+    implementation(libs.fragment)
     testImplementation(libs.junit)
 }

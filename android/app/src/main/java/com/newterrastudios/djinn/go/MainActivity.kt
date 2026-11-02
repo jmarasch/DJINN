@@ -1,6 +1,9 @@
 package com.newterrastudios.djinn.go
 
 import android.Manifest
+import android.app.SearchManager
+import android.content.Intent
+import android.provider.MediaStore
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -22,8 +25,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.util.UnstableApi
+import com.newterrastudios.djinn.go.player.CastState
 import com.newterrastudios.djinn.go.player.PlayerState
+import com.newterrastudios.djinn.go.work.SmartCacheWorker
+import com.newterrastudios.djinn.go.work.SyncWorker
+import kotlinx.coroutines.flow.MutableSharedFlow
 import com.newterrastudios.djinn.go.ui.ConnectScreen
 import com.newterrastudios.djinn.go.ui.DjinnTheme
 import com.newterrastudios.djinn.go.ui.MainScreen
@@ -38,6 +46,8 @@ import java.io.IOException
 class MainActivity : ComponentActivity() {
     private val app get() = application as DjinnApp
     private val player by lazy { PlayerState(app.api) }
+    private val cast by lazy { CastState(this, player) }
+    private val spokenRequests = MutableSharedFlow<String>(replay = 1, extraBufferCapacity = 1)
 
     private var asking: CompletableDeferred<Boolean>? = null
     private val askPermission =
@@ -64,6 +74,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        handle(intent)
         setContent {
             DjinnTheme {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
@@ -80,26 +91,55 @@ class MainActivity : ComponentActivity() {
         val signedIn by account.signedIn.collectAsState()
         var connected by rememberSaveable { mutableStateOf(account.server != null) }
         val scope = rememberCoroutineScope()
+        // The server ended this sign-in, or the account's: kept songs go too.
+        LaunchedEffect(signedIn) {
+            if (!signedIn) app.offline.deleteEverything()
+        }
         if (!signedIn) {
             if (connected) {
-                SignInScreen(account, api, onChangeServer = { connected = false })
+                SignInScreen(account, api, onChangeServer = {
+                    account.forgetServer()
+                    connected = false
+                })
             } else {
-                ConnectScreen(account, api, ::askLocalNetwork, onConnected = { connected = true })
+                ConnectScreen(
+                    account,
+                    api,
+                    ::askLocalNetwork,
+                    askCamera = { ask(Manifest.permission.CAMERA) },
+                    onConnected = { connected = true },
+                )
             }
             return
         }
         val nav = remember {
-            Nav(api, player, signOut = {
-                player.stop()
-                scope.launch {
-                    // Ends it on the server too, when the server can be reached.
-                    try {
-                        api.logout()
-                    } catch (_: IOException) {
+            Nav(
+                api = api,
+                player = player,
+                offline = app.offline,
+                prefs = app.prefs,
+                cast = cast,
+                server = account.server.orEmpty(),
+                scope = lifecycleScope,
+                signOut = {
+                    player.stop()
+                    scope.launch {
+                        // Ends it on the server too, when the server can be reached.
+                        try {
+                            api.logout()
+                        } catch (_: IOException) {
+                        }
+                        // Access ended: what was kept for this account goes with it.
+                        app.offline.deleteEverything()
+                        account.signOut()
                     }
-                    account.signOut()
-                }
-            })
+                },
+                onOfflineChange = { SyncWorker.enqueue(this@MainActivity) },
+                askStorage = {
+                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q ||
+                        ask(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                },
+            )
         }
         LaunchedEffect(Unit) {
             player.connect(this@MainActivity)
@@ -111,10 +151,37 @@ class MainActivity : ComponentActivity() {
         }
         LaunchedEffect(Unit) { player.followPosition() }
         LaunchedEffect(Unit) {
+            nav.liked.addAll(app.prefs.likedIds)
             try {
-                nav.liked.addAll(api.likedIds().tracks)
+                val liked = api.likedIds().tracks
+                nav.liked.clear()
+                nav.liked.addAll(liked)
+                app.prefs.likedIds = liked.toSet()
             } catch (_: IOException) {
-                // Hearts just start empty.
+                // Hearts stay as they were last seen.
+            }
+        }
+        LaunchedEffect(Unit) {
+            // Whether songs may stay on this phone, and anything to send from offline.
+            app.offline.checkAccess()
+            app.offline.sync()
+            nav.canKeepSongs = try {
+                api.me().permissions.downloads
+            } catch (_: IOException) {
+                app.offline.dao.songs(nav.server).isNotEmpty()
+            }
+            if (nav.canKeepSongs) SmartCacheWorker.schedule(this@MainActivity)
+        }
+        LaunchedEffect(Unit) {
+            // "Play ... on DJINN GO" from the assistant.
+            spokenRequests.collect { query ->
+                val found = try {
+                    val results = api.search(query)
+                    results.tracks.ifEmpty { results.described?.tracks.orEmpty() }
+                } catch (_: IOException) {
+                    app.offline.dao.search(nav.server, "%$query%").map { it.toTrack() }
+                }
+                if (found.isEmpty()) nav.message = "Nothing found for \"$query\"." else player.play(found)
             }
         }
         LaunchedEffect(Unit) {
@@ -129,6 +196,19 @@ class MainActivity : ComponentActivity() {
             }
         }
         MainScreen(nav)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handle(intent)
+    }
+
+    private fun handle(intent: Intent?) {
+        if (intent?.action == MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH) {
+            intent.getStringExtra(SearchManager.QUERY)?.takeIf { it.isNotBlank() }?.let {
+                spokenRequests.tryEmit(it)
+            }
+        }
     }
 
     override fun onDestroy() {

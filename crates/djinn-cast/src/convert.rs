@@ -12,15 +12,17 @@ use crate::CastError;
 /// Bit rates offered, in kbit/s.
 pub const BITRATES: &[u32] = &[96, 128, 160, 192, 256, 320];
 
-/// Writes `input` as an MP3 at `kbps` to `output`. Rates MP3 can't carry
-/// (88.2 or 96 kHz, say) become 48 kHz; 32, 44.1 and 48 kHz stay.
-pub fn to_mp3(input: &Path, output: &Path, kbps: u32) -> Result<(), CastError> {
+/// Writes `input` as an MP3 at `kbps` to `output`: that constant rate, or
+/// with `vbr` that average. Rates MP3 can't carry (88.2 or 96 kHz, say)
+/// become 48 kHz; 32, 44.1 and 48 kHz stay.
+pub fn to_mp3(input: &Path, output: &Path, kbps: u32, vbr: bool) -> Result<(), CastError> {
     let mut file = std::io::BufWriter::new(
         std::fs::File::create(output).map_err(|e| CastError::Encoder(e.to_string()))?,
     );
     let mut encoder = Mp3Encoder::new(Mp3EncoderConfig {
         bitrate_kbps: kbps,
-        vbr_quality: None,
+        // Despite the name, the encoder takes a target average bit rate.
+        vbr_quality: vbr.then_some(kbps as f32),
     });
     let mut failed: Option<String> = None;
     let drain = |encoder: &mut Mp3Encoder, file: &mut dyn Write| -> Result<(), String> {
@@ -67,12 +69,14 @@ mod tests {
         let input = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../djinn-engine/tests/fixtures/gapless_a.flac");
         let output = std::env::temp_dir().join(format!("djinn-convert-{}.mp3", std::process::id()));
-        to_mp3(&input, &output, 128).unwrap();
-        let bytes = std::fs::read(&output).unwrap();
-        let _ = std::fs::remove_file(&output);
-        assert!(bytes.len() > 1000, "{} bytes", bytes.len());
-        // MPEG frame sync: 11 set bits.
-        assert_eq!(bytes[0], 0xff);
-        assert_eq!(bytes[1] & 0xe0, 0xe0);
+        for vbr in [false, true] {
+            to_mp3(&input, &output, 128, vbr).unwrap();
+            let bytes = std::fs::read(&output).unwrap();
+            let _ = std::fs::remove_file(&output);
+            assert!(bytes.len() > 1000, "{} bytes", bytes.len());
+            // MPEG frame sync: 11 set bits.
+            assert_eq!(bytes[0], 0xff);
+            assert_eq!(bytes[1] & 0xe0, 0xe0);
+        }
     }
 }

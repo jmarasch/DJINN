@@ -90,6 +90,10 @@ struct Grant {
     downloads: bool,
     /// Play an MP3 at this bit rate instead of the original.
     convert_kbps: Option<u32>,
+    /// That bit rate is an average.
+    vbr: bool,
+    /// A copy to keep, not listening: doesn't count as a stream.
+    offline: bool,
     expires: Instant,
 }
 
@@ -260,6 +264,7 @@ pub fn api_router() -> Router<AppState> {
         .route("/go/settings", put(save_settings))
         .route("/go/sign-ins", get(sign_ins))
         .route("/go/play/{id}", get(play))
+        .route("/go/offline/{id}", get(offline_link))
         .route("/go/address", get(address))
 }
 
@@ -313,6 +318,9 @@ const ROUTES: &[(Method, &str, Access)] = &[
     (Method::GET, "/api/genres", Access::Listener),
     (Method::GET, "/api/genres/*", Access::Listener),
     (Method::GET, "/api/go/play/*", Access::Listener),
+    (Method::GET, "/api/go/offline/*", Access::Listener),
+    (Method::POST, "/api/go/offline/versions", Access::Listener),
+    (Method::GET, "/api/go/offline-suggested", Access::Listener),
     (Method::GET, "/api/go/home", Access::Listener),
     (Method::GET, "/api/go/address", Access::Setup),
     (Method::GET, "/api/go/likes", Access::Listener),
@@ -565,6 +573,8 @@ async fn play(
                 max_streams: permissions.max_streams,
                 downloads: permissions.downloads,
                 convert_kbps: convert_kbps.filter(|_| convert),
+                vbr: false,
+                offline: false,
                 expires: now + GRANT_LIFE,
             },
         );
@@ -577,6 +587,118 @@ async fn play(
         gain,
         converted: convert,
         can_convert: convert_kbps.is_some(),
+    }))
+}
+
+#[derive(Deserialize)]
+struct OfflineQuery {
+    /// An MP3 at about this bit rate for lossless songs; the original without.
+    kbps: Option<u32>,
+    /// `kbps` is an average, not a constant.
+    #[serde(default)]
+    vbr: bool,
+}
+
+#[derive(Serialize)]
+struct OfflineLink {
+    url: String,
+    /// What the file at `url` will be.
+    mime: &'static str,
+    gain: f32,
+    /// `url` is an MP3 made from the original.
+    converted: bool,
+    /// Asked to convert, but this account can't: `url` is the original.
+    convert_refused: bool,
+    /// Changes when the file does, so an old copy can be replaced.
+    version: String,
+}
+
+/// Whether converting a song saves anything: compressed formats stay as
+/// they are.
+fn lossless(path: &std::path::Path) -> bool {
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    ["flac", "wav", "aif", "aiff"]
+        .iter()
+        .any(|l| ext.eq_ignore_ascii_case(l))
+}
+
+/// A link to fetch a copy of a song to keep on a device (the app's downloads
+/// and smart cache). Needs the role's downloads permission, and neither counts
+/// as a stream nor shows as listening. Only on the GO port.
+async fn offline_link(
+    me: CurrentSession,
+    State(state): State<AppState>,
+    device: Device,
+    Path(id): Path<i64>,
+    Query(query): Query<OfflineQuery>,
+) -> ApiResult<Json<OfflineLink>> {
+    if !device.go {
+        return Err(ApiError::not_found());
+    }
+    let permissions = state.store.permissions(&me.user).await?;
+    if !permissions.downloads {
+        return Err(ApiError::forbidden());
+    }
+    let track = state
+        .store
+        .track(id)
+        .await?
+        .ok_or_else(ApiError::not_found)?;
+    let path = PathBuf::from(
+        state
+            .store
+            .track_path(id)
+            .await?
+            .ok_or_else(ApiError::not_found)?,
+    );
+    let version = state
+        .store
+        .track_versions(&[id])
+        .await?
+        .pop()
+        .map(|v| v.version)
+        .ok_or_else(ApiError::not_found)?;
+    let wanted = query.kbps.filter(|_| lossless(&path));
+    let allowed = crate::convert::available(&state, &me.user).await?.is_some();
+    let kbps = wanted.filter(|_| allowed).map(crate::convert::snap);
+    let replay_gain = state.jukebox.lock().await.replay_gain();
+    let gain = match state.store.gain_info(id).await? {
+        Some(info) => replay_gain.linear(&info),
+        None => 1.0,
+    };
+    let mime = if kbps.is_some() {
+        "audio/mpeg"
+    } else {
+        mime_for(&path)
+    };
+    let token = new_token()?;
+    let now = Instant::now();
+    if let Ok(mut grants) = state.go.grants.lock() {
+        grants.retain(|_, g| g.expires > now);
+        grants.insert(
+            token.clone(),
+            Grant {
+                user_id: me.user.id,
+                username: me.user.name().to_owned(),
+                session_id: me.session_id,
+                title: track.title,
+                path,
+                max_streams: 0,
+                downloads: true,
+                convert_kbps: kbps,
+                vbr: query.vbr,
+                offline: true,
+                expires: now + GRANT_LIFE,
+            },
+        );
+    }
+    Ok(Json(OfflineLink {
+        url: format!("/go/stream/{token}"),
+        mime,
+        gain,
+        converted: kbps.is_some(),
+        convert_refused: wanted.is_some() && !allowed,
+        version,
     }))
 }
 
@@ -610,10 +732,12 @@ async fn stream(
     }
     // Downloads are always the original file.
     let path = match grant.convert_kbps.filter(|_| !query.download) {
-        Some(kbps) => match crate::convert::converted(&state, &grant.path, kbps).await {
-            Ok(path) => path,
-            Err(e) => return e.into_response(),
-        },
+        Some(kbps) => {
+            match crate::convert::converted_as(&state, &grant.path, kbps, grant.vbr).await {
+                Ok(path) => path,
+                Err(e) => return e.into_response(),
+            }
+        }
         None => grant.path.clone(),
     };
     send_song(
@@ -624,6 +748,7 @@ async fn stream(
             session_id: grant.session_id,
             title: grant.title,
             max_streams: grant.max_streams,
+            counts: !grant.offline,
         },
         &path,
         query.download,
@@ -640,6 +765,8 @@ pub struct Listening {
     pub session_id: i64,
     pub title: String,
     pub max_streams: i64,
+    /// Someone listening, not a copy being kept.
+    pub counts: bool,
 }
 
 /// Sends a song's file as it is (with ranges, for seeking), unless the
@@ -653,7 +780,7 @@ pub async fn send_song(
     request: Request,
 ) -> Response {
     let now = Instant::now();
-    if let Ok(mut playing) = state.go.playing.lock() {
+    if let Some(mut playing) = state.go.playing.lock().ok().filter(|_| who.counts) {
         playing.retain(|_, p| now.duration_since(p.at) < ACTIVE_FOR);
         let elsewhere = playing
             .iter()
@@ -1488,6 +1615,139 @@ mod tests {
             .unwrap();
         assert_eq!(res.status(), StatusCode::OK);
         assert!(res.headers().contains_key(header::SET_COOKIE));
+    }
+
+    #[tokio::test]
+    async fn offline_copies_need_downloads_and_are_not_streams() {
+        let state = AppState::for_tests().await;
+        state.go.enabled.store(true, Ordering::Relaxed);
+        state.go.allow_remote.store(true, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("djinn-offline-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("song.mp3");
+        std::fs::write(&file, b"not really audio, but served as it is").unwrap();
+        state
+            .store
+            .save_scanned(&[djinn_store::ScannedTrack {
+                path: file.to_string_lossy().into_owned(),
+                size: 37,
+                mtime: 5,
+                title: "Song".to_owned(),
+                ..Default::default()
+            }])
+            .await
+            .unwrap();
+        let id = state
+            .store
+            .tracks_page(djinn_store::TrackSort::Title, 0, 1)
+            .await
+            .unwrap()
+            .items[0]
+            .id;
+        let without = djinn_store::Permissions {
+            go: true,
+            go_remote: true,
+            ..djinn_store::Permissions::default()
+        };
+        let with = djinn_store::Permissions {
+            downloads: true,
+            ..without.clone()
+        };
+        let plain = state.store.create_role("Plain", &without).await.unwrap();
+        let keeper = state.store.create_role("Keeper", &with).await.unwrap();
+        account(&state, "pat", plain.id).await;
+        account(&state, "kim", keeper.id).await;
+        let sign_in = |name: &'static str| {
+            let state = state.clone();
+            async move {
+                let (_, _, cookie) = go(
+                    &state,
+                    Method::POST,
+                    "/api/auth/login",
+                    Some(&login(name)),
+                    None,
+                )
+                .await;
+                cookie.unwrap()
+            }
+        };
+        let (pat, kim) = (sign_in("pat").await, sign_in("kim").await);
+        let path = format!("/api/go/offline/{id}");
+
+        let (status, _, _) = go(&state, Method::GET, &path, None, Some(&pat)).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "no downloads permission");
+
+        let (status, text, _) = go(&state, Method::GET, &path, None, Some(&kim)).await;
+        assert_eq!(status, StatusCode::OK, "{text}");
+        assert_eq!(field(&text, "version"), "37-5");
+        assert_eq!(field(&text, "converted"), false);
+        let url = field(&text, "url").as_str().unwrap().to_owned();
+        let (status, _, _) = go(&state, Method::GET, &url, None, None).await;
+        assert_eq!(status, StatusCode::OK);
+        let listening = state.go.playing.lock().unwrap().len();
+        assert_eq!(listening, 0, "keeping a copy isn't listening");
+
+        // Compressed songs stay as they are, whatever was asked.
+        let (_, text, _) = go(
+            &state,
+            Method::GET,
+            &format!("{path}?kbps=128&vbr=true"),
+            None,
+            Some(&kim),
+        )
+        .await;
+        assert_eq!(field(&text, "converted"), false);
+        assert_eq!(field(&text, "convert_refused"), false);
+
+        let versions = format!(r#"{{"ids":[{id},999999]}}"#);
+        let (status, text, _) = go(
+            &state,
+            Method::POST,
+            "/api/go/offline/versions",
+            Some(&versions),
+            Some(&kim),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{text}");
+        let found: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(
+            found.as_array().unwrap().len(),
+            1,
+            "removed songs are left out"
+        );
+        assert_eq!(found[0]["version"], "37-5");
+
+        let (status, _, _) = go(
+            &state,
+            Method::GET,
+            "/api/go/offline-suggested",
+            None,
+            Some(&pat),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let report = format!(r#"{{"track_id":{id},"ms_played":90000,"at":1000000}}"#);
+        let (status, _, _) = go(
+            &state,
+            Method::POST,
+            "/api/go/plays",
+            Some(&report),
+            Some(&kim),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        let (status, text, _) = go(
+            &state,
+            Method::GET,
+            "/api/go/offline-suggested",
+            None,
+            Some(&kim),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{text}");
+        let found: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(found[0]["id"], id);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]

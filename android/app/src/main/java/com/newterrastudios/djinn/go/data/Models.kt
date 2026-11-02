@@ -116,10 +116,27 @@ data class GoHome(
 data class LikedIds(val tracks: List<Long> = emptyList())
 
 @Serializable
-data class PlayLinks(val url: String, val gain: Float = 1f)
+data class PlayLinks(val url: String, val mime: String = "audio/mpeg", val gain: Float = 1f)
 
 @Serializable
-data class Me(val username: String)
+data class Permissions(val downloads: Boolean = false, val convert: Boolean = false)
+
+@Serializable
+data class Me(val username: String, val permissions: Permissions = Permissions())
+
+/** A link to a copy to keep on this phone. */
+@Serializable
+data class OfflineLink(
+    val url: String,
+    val mime: String,
+    val gain: Float = 1f,
+    val converted: Boolean = false,
+    @SerialName("convert_refused") val convertRefused: Boolean = false,
+    val version: String,
+)
+
+@Serializable
+data class SongIds(val songs: List<Long>)
 
 /** A finished sign-in, or the password was right and a code is needed. */
 @Serializable
@@ -148,6 +165,8 @@ data class TwoStep(
 data class PlayReport(
     @SerialName("track_id") val trackId: Long,
     @SerialName("ms_played") val msPlayed: Long,
+    /** When it was heard, for a play reported later. */
+    val at: Long? = null,
 )
 
 @Serializable

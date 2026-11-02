@@ -11,6 +11,8 @@ import coil3.SingletonImageLoader
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import com.newterrastudios.djinn.go.data.Account
 import com.newterrastudios.djinn.go.data.GoApi
+import com.newterrastudios.djinn.go.data.OfflineStore
+import com.newterrastudios.djinn.go.data.Prefs
 import java.io.File
 
 /** How much the recent cache keeps of what you've played. */
@@ -20,6 +22,8 @@ private const val RECENT_CACHE_BYTES = 2L * 1024 * 1024 * 1024
 class DjinnApp : Application(), SingletonImageLoader.Factory {
     val account by lazy { Account(this) }
     val api by lazy { GoApi(account) }
+    val prefs by lazy { Prefs(this) }
+    val offline by lazy { OfflineStore(this, account, api, prefs) }
 
     /** Songs as they were streamed, oldest dropped past the limit. */
     val recentCache by lazy {
