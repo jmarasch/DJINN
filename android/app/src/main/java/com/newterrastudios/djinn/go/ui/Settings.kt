@@ -105,9 +105,9 @@ fun SettingsScreen(nav: Nav) {
             text = {
                 Text(
                     if (keepsSongs) {
-                        "The songs kept on this phone stay here, locked until you sign back in."
+                        "The songs kept on this phone from this server stay here, locked until you sign back in."
                     } else {
-                        "The songs and system sounds kept on this phone will be deleted. You can download them again after signing back in."
+                        "The songs and system sounds kept on this phone from this server will be deleted. Those from other servers stay. You can download them again after signing back in."
                     },
                 )
             },
