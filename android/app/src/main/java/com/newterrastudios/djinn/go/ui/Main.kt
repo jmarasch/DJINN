@@ -1,5 +1,7 @@
 package com.newterrastudios.djinn.go.ui
 
+import com.newterrastudios.djinn.go.data.AppRelease
+import com.newterrastudios.djinn.go.data.AppUpdater
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -73,6 +75,7 @@ class Nav(
     val address: String,
     val encrypted: Boolean,
     val securityCode: String?,
+    val updater: AppUpdater,
     serverName: String?,
     /** Back to choosing a server, still signed in to this one. */
     val switchServer: () -> Unit,
@@ -90,6 +93,8 @@ class Nav(
     var albumFilter by mutableStateOf(ALBUM_FILTERS.first().first)
     var songSort by mutableStateOf(SONG_SORTS.first().first)
     var keptView by mutableStateOf(KEPT_VIEWS.first().first)
+    /** A newer version of this app that the server carries. */
+    var update by mutableStateOf<AppRelease?>(null)
     /** What the server calls itself. */
     var serverName by mutableStateOf(serverName)
     /** Styles this device can't keep up with. */

@@ -382,6 +382,9 @@ The official native app for DJINN GO, in `android/` in this repository: songs as
 - The cover and visuals go full screen, with controls that appear on a tap and fade. Android Auto draws its own screen, so this doesn't reach the car.
 - Settings choose colors (including RGB rotation), the number and spacing of bars, line thickness and smoothing.
 
+**Getting the app**
+- No Play Store. Each server carries the app (`go_app.rs`, built into the server by the release workflow) and offers it on GO's page, in Admin > GO as a QR code, and to the app itself, which fetches new versions over its pinned connection and hands them to Android's installer. Versions are numbered by release date (2026.11.02 is 20261102), and only newer ones are offered. It's also on each GitHub release.
+
 **Finding a server**
 - The server has a name (Admin > GO) and announces GO over mDNS as `_djinn-go._tcp`, which can be turned off. The app lists what it hears by name and address before sign-in.
 

@@ -200,6 +200,7 @@ fun HomeScreen(nav: Nav) {
     ) { home: GoHome ->
         LazyColumn(Modifier.fillMaxSize()) {
             item { HomeBar(nav) }
+            item { UpdateOffer(nav) }
             home.resume?.let { resume ->
                 resume.songs.getOrNull(resume.position)?.let { song ->
                     item {

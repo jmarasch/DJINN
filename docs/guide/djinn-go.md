@@ -81,6 +81,15 @@ shows a QR code for GO's address; scan it with the phone's camera. If
 Chrome on Android won't open it (ERR_TOO_MANY_RETRIES), allow Chrome's
 **Nearby devices** permission in the phone's settings.
 
+**Getting the Android app:** your server carries it. Open GO on an Android phone
+and choose **Get the Android app** (on the sign-in page, or under Account), or scan
+the QR code in Admin > GO with the phone's camera. Android asks you to allow the
+install and may warn about where it came from. After that, the app offers new
+versions itself when your server has one, and Android checks each is signed by the
+same people. Admin > GO and the download show a SHA-256 checksum, worth comparing
+on a network you don't trust, since that first download can't check itself. It's
+also on each release on GitHub.
+
 **The Android app** is DJINN GO's own app, for Android 7 and newer. On top of
 what the web player does, it can:
 

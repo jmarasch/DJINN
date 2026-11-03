@@ -114,7 +114,11 @@ themselves.
 ## The Android app's key
 
 The release workflow signs `djinn-go-android.apk` when these Actions secrets
-exist; without them, the release goes out without an APK. Make the key once:
+exist; without them, the release goes out without an APK and the server doesn't
+offer one. With them, the APK is built first, published with the release, and
+carried inside the server, which is how most people get the app and its updates.
+It's numbered by the release date, so each release is an upgrade to Android. Make
+the key once:
 
 ```sh
 keytool -genkeypair -v -keystore djinn-go.jks -alias djinn-go -keyalg RSA -keysize 4096 -validity 36500

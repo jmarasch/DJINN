@@ -1,5 +1,7 @@
 package com.newterrastudios.djinn.go.ui
 
+import com.newterrastudios.djinn.go.data.ApiException
+import com.newterrastudios.djinn.go.BuildConfig
 import android.content.Context
 import android.text.format.Formatter
 import androidx.compose.foundation.clickable
@@ -161,6 +163,10 @@ fun SettingsScreen(nav: Nav) {
                 ) { Text("Delete those") }
             }
         }
+        item {
+            UpdateOffer(nav)
+            Note("DJINN GO version ${BuildConfig.VERSION_NAME}")
+        }
         item { TapSettings(nav) }
         item { VisualsSettings(nav) }
         if (nav.canKeepSongs) {
@@ -264,6 +270,35 @@ fun SettingsScreen(nav: Nav) {
         } else {
             item { Note("Your role doesn't include keeping songs on this phone. Ask your host for the download permission.") }
         }
+    }
+}
+
+/** A newer version from the server, when there is one. Android asks before installing it. */
+@UnstableApi
+@Composable
+fun UpdateOffer(nav: Nav) {
+    val release = nav.update ?: return
+    var busy by remember { mutableStateOf(false) }
+    var problem by remember { mutableStateOf<String?>(null) }
+    Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+        Text("Version ${release.version} is available from this server.")
+        problem?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        OutlinedButton(
+            enabled = !busy,
+            onClick = {
+                busy = true
+                problem = null
+                nav.scope.launch {
+                    try {
+                        nav.updater.install(nav.updater.fetch(release))
+                    } catch (e: IOException) {
+                        problem = if (e is ApiException) e.message else e.message ?: "Couldn't reach the server."
+                    } finally {
+                        busy = false
+                    }
+                }
+            },
+        ) { Text(if (busy) "Downloading..." else "Update") }
     }
 }
 

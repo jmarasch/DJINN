@@ -128,6 +128,17 @@
     </section>
   {/if}
 
+  {#if status.android_app}
+    <section class="card">
+      <h2>Android app</h2>
+      <p class="small muted">This server carries the app, so people can install it without a store. They can scan this with a phone's camera, or find it when they open GO on Android. Android asks them to allow the install, and the app offers its own updates after that.</p>
+      <!-- The QR code is an SVG DJINN made itself. -->
+      <div class="app-qr">{@html status.android_app.qr_svg}</div>
+      <p class="small"><a href={status.android_app.url}>{status.android_app.url}</a></p>
+      <p class="small muted app-sum">Version {status.android_app.version}. SHA-256: {status.android_app.sha256}</p>
+    </section>
+  {/if}
+
   <section class="card">
     <h2>Songs kept on devices</h2>
     <p class="small muted">For people whose role can download. The app follows these rules, and learns them each time it reaches this server. A locked song stays on the device but won't play until it's unlocked.</p>
@@ -288,4 +299,21 @@
   .remote-setup label:not(.switch) { display: grid; gap: 4px; }
   .remote-setup input[type='text'] { padding: 8px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); color: var(--text); font: inherit; }
   .example { margin: 0; padding: 12px; border-radius: 8px; background: var(--bg); white-space: pre-wrap; }
+
+  .app-qr {
+    width: 200px;
+    padding: 8px;
+    border-radius: 8px;
+    background: #fff;
+  }
+
+  .app-qr :global(svg) {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+
+  .app-sum {
+    overflow-wrap: anywhere;
+  }
 </style>

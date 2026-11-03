@@ -147,6 +147,14 @@ export interface GoListener {
   seconds_ago: number
 }
 
+/** The Android app a server carries. */
+export interface GoAppRelease {
+  version: string
+  version_code: number
+  sha256: string
+  size: number
+}
+
 export interface GoKeepRules {
   sign_out: 'delete' | 'keep'
   away: 'lock' | 'delete' | 'off'
@@ -154,6 +162,7 @@ export interface GoKeepRules {
 }
 
 export interface GoStatus {
+  android_app: (GoAppRelease & { url: string; qr_svg: string }) | null
   encryption: boolean
   security_code: string | null
   keep: GoKeepRules

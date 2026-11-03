@@ -13,6 +13,7 @@
   import Signup from '../screens/Signup.svelte'
   import AddToPlaylist from './AddToPlaylist.svelte'
   import { loadLikes, loadPrefs, player, prefs, setSaveData, setTap, stop } from './player.svelte'
+  import GetApp from './GetApp.svelte'
   import OpenOnPhone from './OpenOnPhone.svelte'
   import PhoneApps from './PhoneApps.svelte'
   import PlayerBar from './PlayerBar.svelte'
@@ -107,6 +108,7 @@
       {#if app.mode && app.mode.signup !== 'closed'}
         <button class="text-button" onclick={() => (signingUp = true)}>New here? Create an account</button>
       {/if}
+      <GetApp />
     {/if}
     {#if error}<p class="error">{error}</p>{/if}
   </main>
@@ -191,6 +193,7 @@
           </label>
         </section>
       {/if}
+      <GetApp />
       <OpenOnPhone />
       <AccountPanels />
       <PhoneApps />

@@ -1,5 +1,6 @@
 package com.newterrastudios.djinn.go
 
+import com.newterrastudios.djinn.go.data.AppUpdater
 import android.app.Application
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.database.StandaloneDatabaseProvider
@@ -24,6 +25,7 @@ class DjinnApp : Application(), SingletonImageLoader.Factory {
     val api by lazy { GoApi(account) }
     val prefs by lazy { Prefs(this) { account.scope.orEmpty() } }
     val offline by lazy { OfflineStore(this, account, api, prefs) }
+    val updater by lazy { AppUpdater(this, api, account) }
 
     /** Songs as they were streamed, oldest dropped past the limit. */
     val recentCache by lazy {

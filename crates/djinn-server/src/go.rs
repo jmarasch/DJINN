@@ -33,6 +33,7 @@ use tower_http::services::ServeFile;
 use crate::auth::{go_refusal, new_token, AdminUser, CurrentSession, Device};
 use crate::error::{ApiError, ApiResult};
 use crate::go_announce::{self, GO_DISCOVERABLE, SERVER_NAME};
+use crate::go_app;
 use crate::go_upnp;
 use crate::security::{self, TRUSTED_PROXIES};
 use crate::state::AppState;
@@ -341,6 +342,7 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .nest("/api", api::router())
         .route("/go/stream/{token}", get(stream))
+        .route(go_app::APK_PATH, get(go_app::download))
         .merge(crate::subsonic::router())
         .fallback(web::go_handler)
         .layer(middleware::from_fn_with_state(state.clone(), guard))
@@ -358,6 +360,7 @@ pub fn api_router() -> Router<AppState> {
         .route("/go/offline/{id}", get(offline_link))
         .route("/go/address", get(address))
         .route("/go/hello", get(go_announce::hello))
+        .route("/go/app", get(go_app::latest))
         .route("/go/keep-rules", get(keep_rules))
 }
 
@@ -376,6 +379,7 @@ enum Access {
 const ROUTES: &[(Method, &str, Access)] = &[
     (Method::GET, "/api/health", Access::Public),
     (Method::GET, "/api/go/hello", Access::Public),
+    (Method::GET, "/api/go/app", Access::Public),
     (Method::GET, "/api/auth/mode", Access::Public),
     (Method::POST, "/api/auth/login", Access::Public),
     (Method::POST, "/api/auth/two-step", Access::Public),
@@ -996,6 +1000,8 @@ struct Listener {
 
 #[derive(Serialize)]
 struct Status {
+    /// The Android app this server carries, and how to get it.
+    android_app: Option<AndroidApp>,
     /// Encrypted connections are offered.
     encryption: bool,
     /// For comparing with what the app shows.
@@ -1061,6 +1067,7 @@ async fn status_of(state: &AppState) -> anyhow::Result<Status> {
     let mbps = bytes as f64 * 8.0 / SPEED_WINDOW.as_secs_f64() / 1_000_000.0;
     let port = go.listen.port();
     Ok(Status {
+        android_app: android_app(state),
         encryption: settings::flag(&state.store, ENCRYPTION, true).await?,
         security_code: go
             .encryption
@@ -1133,6 +1140,36 @@ struct Address {
     others: Vec<String>,
 }
 
+fn qr_svg(text: &str) -> anyhow::Result<String> {
+    Ok(qrcode::QrCode::new(text.as_bytes())?
+        .render::<qrcode::render::svg::Color>()
+        .min_dimensions(240, 240)
+        .dark_color(qrcode::render::svg::Color("#14111f"))
+        .light_color(qrcode::render::svg::Color("#ffffff"))
+        .build())
+}
+
+#[derive(Serialize)]
+struct AndroidApp {
+    #[serde(flatten)]
+    release: go_app::AppRelease,
+    url: String,
+    qr_svg: String,
+}
+
+/// For Admin > GO: the app, and a QR code for a phone's camera to fetch it.
+fn android_app(state: &AppState) -> Option<AndroidApp> {
+    let release = go_app::release()?;
+    let base = crate::banner::urls(state.go.listen).into_iter().next()?;
+    let url = format!("{base}{}", go_app::APK_PATH);
+    let qr_svg = qr_svg(&url).ok()?;
+    Some(AndroidApp {
+        release,
+        url,
+        qr_svg,
+    })
+}
+
 /// What a QR code says: the address, and the certificate to expect. A phone's
 /// camera opens the address and browsers keep what's after the # to themselves;
 /// the app's scanner remembers the certificate, which makes this the one way
@@ -1168,13 +1205,7 @@ async fn address(
         urls.insert(0, here.to_owned());
     }
     let url = urls.first().cloned().ok_or_else(ApiError::not_found)?;
-    let qr_svg = qrcode::QrCode::new(qr_text(&url, state.go.encryption.fingerprint()).as_bytes())
-        .map_err(anyhow::Error::from)?
-        .render::<qrcode::render::svg::Color>()
-        .min_dimensions(240, 240)
-        .dark_color(qrcode::render::svg::Color("#14111f"))
-        .light_color(qrcode::render::svg::Color("#ffffff"))
-        .build();
+    let qr_svg = qr_svg(&qr_text(&url, state.go.encryption.fingerprint()))?;
     Ok(Json(Address {
         url,
         qr_svg,
@@ -1382,6 +1413,21 @@ async fn sign_ins(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn the_app_can_be_fetched_before_signing_in() {
+        let state = AppState::for_tests().await;
+        state.go.enable_for_tests();
+        let (status, body, _) = go(&state, Method::GET, "/api/go/app", None, None).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let (status, _, _) = go(&state, Method::GET, go_app::APK_PATH, None, None).await;
+        if go_app::release().is_some() {
+            assert_eq!(status, StatusCode::OK);
+        } else {
+            assert_eq!(body, "null");
+            assert_eq!(status, StatusCode::NOT_FOUND);
+        }
+    }
 
     #[test]
     fn qr_codes_carry_the_certificate_when_there_is_one() {

@@ -173,6 +173,15 @@ class GoApi(private val account: Account) {
 
     suspend fun keepRules(): KeepRules = get("/api/go/keep-rules")
 
+    /** The app this server carries, if it does and says so. */
+    suspend fun appRelease(): AppRelease? = try {
+        get<AppRelease?>("/api/go/app")
+    } catch (_: IOException) {
+        null
+    } catch (_: kotlinx.serialization.SerializationException) {
+        null
+    }
+
     /** Who the server says it is. Older servers don't say. */
     suspend fun hello(): ServerHello? = try {
         get("/api/go/hello")

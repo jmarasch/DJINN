@@ -5,6 +5,13 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
+// The app is released with the server and numbered by the same date, so each
+// release is an upgrade to Android and the server can tell what's newer.
+val release: List<Int> = (
+    providers.gradleProperty("djinnVersion").orNull
+        ?: Regex("(?m)^version = \"([0-9.]+)\"").find(rootDir.resolve("../Cargo.toml").readText())!!.groupValues[1]
+    ).split('.').map(String::toInt)
+
 android {
     namespace = "com.newterrastudios.djinn.go"
     compileSdk = 37
@@ -14,8 +21,8 @@ android {
         // The lowest the libraries allow: Cast and WorkManager need 24.
         minSdk = 24
         targetSdk = 37
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = release[0] * 10_000 + release[1] * 100 + release[2]
+        versionName = "%04d.%02d.%02d".format(release[0], release[1], release[2])
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -40,6 +47,7 @@ android {
     }
 
     buildFeatures {
+        buildConfig = true
         compose = true
     }
 

@@ -13,6 +13,7 @@ import type {
   LikedIds,
   PlayLinks,
   Played,
+  GoAppRelease,
   GoKeepRules,
   GoStatus,
   NeedsCode,
@@ -181,6 +182,7 @@ export const api = {
   saveUploadSettings: (s: UploadSettings) => put<UploadSettings>('/submissions/settings', s),
   goSendToParty: (trackId: number) => post<{ outcome: 'added' | 'backed' }>(`/go/party/${trackId}`),
   goStatus: () => get<GoStatus>('/go/status'),
+  goApp: () => get<GoAppRelease | null>('/go/app'),
   saveGoSettings: (settings: { encryption: boolean; keep: GoKeepRules; server_name: string; discoverable: boolean; enabled: boolean; allow_remote: boolean; https_hostname: string; upnp: boolean; trusted_proxies: string; admin_two_step: boolean }) =>
     put<GoStatus>('/go/settings', settings),
   signIns: (limit = 200) => get<SignIn[]>(`/go/sign-ins?limit=${limit}`),

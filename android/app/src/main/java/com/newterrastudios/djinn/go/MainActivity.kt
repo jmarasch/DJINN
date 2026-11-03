@@ -1,5 +1,6 @@
 package com.newterrastudios.djinn.go
 
+import com.newterrastudios.djinn.go.data.offeredUpdate
 import com.newterrastudios.djinn.go.data.securityCode
 import android.Manifest
 import android.app.SearchManager
@@ -125,6 +126,7 @@ class MainActivity : ComponentActivity() {
                 encrypted = account.pin != null || account.server?.startsWith("https://") == true,
                 securityCode = account.pin?.let(::securityCode),
                 serverName = account.serverName,
+                updater = app.updater,
                 switchServer = {
                     player.stop()
                     account.leave()
@@ -159,6 +161,9 @@ class MainActivity : ComponentActivity() {
             }
         }
         LaunchedEffect(Unit) { player.followPosition() }
+        LaunchedEffect(Unit) {
+            nav.update = offeredUpdate(api.appRelease(), BuildConfig.VERSION_CODE.toLong())
+        }
         LaunchedEffect(Unit) {
             // The admin may have renamed it since.
             api.hello()?.let {
