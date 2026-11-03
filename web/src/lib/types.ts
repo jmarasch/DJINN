@@ -601,8 +601,9 @@ export interface ArtistSummary {
 /** Year is newest first, oldest is by year oldest first. */
 export type TrackSort = 'title' | 'artist' | 'added' | 'popular' | 'year' | 'oldest'
 
+export type ArtistSort = 'name' | 'added'
 /** Year is newest first, oldest is by year oldest first. */
-export type AlbumSort = 'name' | 'year' | 'oldest'
+export type AlbumSort = 'name' | 'year' | 'oldest' | 'added'
 export type AlbumFilter = 'all' | 'various' | 'soundtracks'
 
 /** Where a letter or year starts in a sorted list. */

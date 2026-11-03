@@ -13,7 +13,7 @@
   import { jumpCache } from '../lib/listCache'
   import TrackRow from '../lib/TrackRow.svelte'
   import TrackTile from '../lib/TrackTile.svelte'
-  import type { AlbumFilter, AlbumSort, GenreMap, Jump, Track, TrackSort } from '../lib/types'
+  import type { AlbumFilter, AlbumSort, ArtistSort, GenreMap, Jump, Track, TrackSort } from '../lib/types'
 
   let {
     song,
@@ -47,6 +47,7 @@
   let sort = $state((sessionStorage.getItem('djinn-browse-sort') as TrackSort) || 'title')
   let albumSort = $state((sessionStorage.getItem('djinn-browse-album-sort') as AlbumSort) || 'name')
   let albumFilter = $state<AlbumFilter>('all')
+  let artistSort = $state((sessionStorage.getItem('djinn-browse-artist-sort') as ArtistSort) || 'name')
   let view = $state<View>(readView())
   let genreView = $state<GenreView>(readStored('djinn-genre-view') === 'cloud' ? 'cloud' : 'tags')
   let genres = $state<GenreMap | null>(null)
@@ -54,6 +55,7 @@
   $effect(() => sessionStorage.setItem('djinn-browse-tab', tab))
   $effect(() => sessionStorage.setItem('djinn-browse-sort', sort))
   $effect(() => sessionStorage.setItem('djinn-browse-album-sort', albumSort))
+  $effect(() => sessionStorage.setItem('djinn-browse-artist-sort', artistSort))
   $effect(() => store('djinn-browse-view', view))
   $effect(() => store('djinn-genre-view', genreView))
 
@@ -63,9 +65,18 @@
   let list = $state<{ jumpTo: (offset: number) => void }>()
   let lists = $state<HTMLElement>()
   let jumps = $state<Jump[]>([])
-  const jumpKey = $derived(tab === 'albums' ? `albums-${albumSort}-${albumFilter}` : tab === 'songs' ? `songs-${sort}` : tab)
+  const jumpKey = $derived(
+    tab === 'albums'
+      ? `albums-${albumSort}-${albumFilter}`
+      : tab === 'songs'
+        ? `songs-${sort}`
+        : tab === 'artists'
+          ? `artists-${artistSort}`
+          : tab,
+  )
   const byYear = $derived(
-    (tab === 'albums' && albumSort !== 'name') || (tab === 'songs' && (sort === 'year' || sort === 'oldest')),
+    (tab === 'albums' && (albumSort === 'year' || albumSort === 'oldest')) ||
+      (tab === 'songs' && (sort === 'year' || sort === 'oldest')),
   )
   const newestFirst = $derived((tab === 'albums' ? albumSort : sort) === 'year')
   $effect(() => {
@@ -74,7 +85,7 @@
     jumps = cached ?? []
     if (cached || tab === 'genres') return
     const loading =
-      tab === 'artists' ? api.artistJumps() : tab === 'albums' ? api.albumJumps(albumSort, albumFilter) : api.trackJumps(sort)
+      tab === 'artists' ? api.artistJumps(artistSort) : tab === 'albums' ? api.albumJumps(albumSort, albumFilter) : api.trackJumps(sort)
     loading
       .then((found) => {
         jumpCache.set(k, found)
@@ -174,11 +185,18 @@
 
 <div class="lists" class:crowded={indexed && stripInside} bind:this={lists}>
   {#if tab === 'artists'}
+    <label class="sort">
+      <span class="muted small">Sort by</span>
+      <select bind:value={artistSort}>
+        <option value="name">Name</option>
+        <option value="added">Recently added</option>
+      </select>
+    </label>
     <InfiniteList
       bind:this={list}
       inset={STUCK_PX}
-      cacheKey="artists"
-      load={api.artists}
+      cacheKey="artists-{artistSort}"
+      load={(offset) => api.artists(artistSort, offset)}
       key={(a) => a.id}
       count={(n) => plural(n, 'artist', 'artists')}
       {grid}
@@ -240,6 +258,7 @@
         <span class="muted small">Sort by</span>
         <select bind:value={albumSort}>
           <option value="name">Name</option>
+          <option value="added">Recently added</option>
           <option value="year">Year (newest first)</option>
           <option value="oldest">Year (oldest first)</option>
         </select>
@@ -261,7 +280,7 @@
             <a class="tile" href="#/album/{album.id}">
               <div class="cover"><Art hash={album.art_hash} size={160} round={10} /></div>
               <span class="ellipsis">{album.title}</span>
-              <span class="muted small ellipsis">{album.artist}{albumSort !== 'name' && album.year ? ` · ${album.year}` : ''}</span>
+              <span class="muted small ellipsis">{album.artist}{byYear && album.year ? ` · ${album.year}` : ''}</span>
             </a>
             {#if like}<div class="tile-like">{@render like('album', album.id, album.title)}</div>{/if}
           </div>

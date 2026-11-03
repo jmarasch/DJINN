@@ -30,7 +30,7 @@ impl<T> Listed<T> {
 #[derive(Debug, Default)]
 struct Lists {
     version: i64,
-    artists: HashMap<bool, Arc<Listed<ArtistSummary>>>,
+    artists: HashMap<(bool, ArtistSort), Arc<Listed<ArtistSummary>>>,
     albums: HashMap<(AlbumSort, AlbumFilter), Arc<Listed<Album>>>,
     /// Songs are read a page at a time, so only their order is kept.
     tracks: HashMap<TrackSort, Arc<Listed<i64>>>,
@@ -105,6 +105,21 @@ macro_rules! primary_artists {
     };
 }
 
+// Whoever had a song added most recently first. Songs added in one scan share
+// a time, so names settle the rest.
+macro_rules! artists_by_added {
+    () => {
+        concat!(
+            " ORDER BY (SELECT max(t.added_at) FROM tracks t WHERE ",
+            available!(),
+            " AND t.id IN ",
+            artist_songs!("summary.id"),
+            ") DESC, ",
+            sort_key!("name")
+        )
+    };
+}
+
 impl Store {
     /// The kept lists, emptied first if the library has changed.
     async fn lists(&self) -> Result<tokio::sync::MutexGuard<'_, Lists>> {
@@ -121,28 +136,42 @@ impl Store {
         Ok(lists)
     }
 
-    async fn artist_list(&self, show_collaborations: bool) -> Result<Arc<Listed<ArtistSummary>>> {
+    async fn artist_list(
+        &self,
+        sort: ArtistSort,
+        show_collaborations: bool,
+    ) -> Result<Arc<Listed<ArtistSummary>>> {
         let mut lists = self.lists().await?;
-        if let Some(found) = lists.artists.get(&show_collaborations) {
+        if let Some(found) = lists.artists.get(&(show_collaborations, sort)) {
             return Ok(Arc::clone(found));
         }
-        let sql = if show_collaborations {
-            concat!(
+        let sql = match (sort, show_collaborations) {
+            (ArtistSort::Name, true) => concat!(
                 "SELECT id, name, art_hash, track_count, ",
                 sort_key!("name"),
                 artist_browse!(),
                 " ORDER BY ",
                 sort_key!("name")
-            )
-        } else {
-            concat!(
+            ),
+            (ArtistSort::Name, false) => concat!(
                 "SELECT id, name, art_hash, track_count, ",
                 sort_key!("name"),
                 artist_browse!(),
                 primary_artists!(),
                 " ORDER BY ",
                 sort_key!("name")
-            )
+            ),
+            (ArtistSort::Added, true) => concat!(
+                "SELECT id, name, art_hash, track_count, NULL",
+                artist_browse!(),
+                artists_by_added!()
+            ),
+            (ArtistSort::Added, false) => concat!(
+                "SELECT id, name, art_hash, track_count, NULL",
+                artist_browse!(),
+                primary_artists!(),
+                artists_by_added!()
+            ),
         };
         type Row = (i64, String, Option<String>, i64, Option<String>);
         let mut browse = TimedBrowse::acquire(&self.pool).await?;
@@ -165,7 +194,9 @@ impl Store {
             items,
             jumps: jumps(keys, false),
         });
-        lists.artists.insert(show_collaborations, Arc::clone(&list));
+        lists
+            .artists
+            .insert((show_collaborations, sort), Arc::clone(&list));
         Ok(list)
     }
 
@@ -208,6 +239,17 @@ impl Store {
                 " = ?)",
                 " ORDER BY ",
                 album_order!(oldest)
+            ),
+            AlbumSort::Added => concat!(
+                "SELECT ",
+                album_columns!(),
+                ", NULL",
+                listed_albums!(),
+                " AND (? = 'all' OR ",
+                album_kind!(),
+                " = ?)",
+                " ORDER BY ",
+                album_order!(added)
             ),
         };
         type Row = (
@@ -302,16 +344,18 @@ impl Store {
 
     /// Artists with playable tracks, A to Z.
     pub async fn artists_page(&self, offset: i64, limit: i64) -> Result<Page<ArtistSummary>> {
-        self.artists_page_filtered(true, offset, limit).await
+        self.artists_page_filtered(ArtistSort::Name, true, offset, limit)
+            .await
     }
 
     pub async fn artists_page_filtered(
         &self,
+        sort: ArtistSort,
         show_collaborations: bool,
         offset: i64,
         limit: i64,
     ) -> Result<Page<ArtistSummary>> {
-        let list = self.artist_list(show_collaborations).await?;
+        let list = self.artist_list(sort, show_collaborations).await?;
         Ok(Page {
             items: list.page(offset, limit).to_vec(),
             total: list.total(),
@@ -378,11 +422,19 @@ impl Store {
 
     /// Where each letter starts in the artist list.
     pub async fn artist_jumps(&self) -> Result<Vec<Jump>> {
-        self.artist_jumps_filtered(true).await
+        self.artist_jumps_filtered(ArtistSort::Name, true).await
     }
 
-    pub async fn artist_jumps_filtered(&self, show_collaborations: bool) -> Result<Vec<Jump>> {
-        Ok(self.artist_list(show_collaborations).await?.jumps.clone())
+    pub async fn artist_jumps_filtered(
+        &self,
+        sort: ArtistSort,
+        show_collaborations: bool,
+    ) -> Result<Vec<Jump>> {
+        Ok(self
+            .artist_list(sort, show_collaborations)
+            .await?
+            .jumps
+            .clone())
     }
 
     /// Where each letter (or year) starts in the album list.
