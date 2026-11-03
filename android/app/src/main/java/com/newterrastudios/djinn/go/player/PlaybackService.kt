@@ -420,7 +420,7 @@ class PlaybackService : MediaLibraryService() {
                 parent == RECENT -> api.home().recent.map { it.toMediaItem(api) }
                 parent == KEPT -> app.offline.playable(server).map { it.toTrack().toMediaItem(api) }
                 parent == PLAYLISTS -> api.playlists().map { folder("$PLAYLIST_PREFIX${it.id}", it.name) }
-                parent == ALBUMS -> api.albums(0).items.map { folder("$ALBUM_PREFIX${it.id}", it.title) }
+                parent == ALBUMS -> api.albums("name", "all", 0).items.map { folder("$ALBUM_PREFIX${it.id}", it.title) }
                 parent.startsWith(PLAYLIST_PREFIX) ->
                     api.playlist(parent.removePrefix(PLAYLIST_PREFIX).toLong()).songs.map { it.toMediaItem(api) }
                 parent.startsWith(ALBUM_PREFIX) ->
