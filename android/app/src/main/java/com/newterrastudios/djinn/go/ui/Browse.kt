@@ -1,5 +1,9 @@
 package com.newterrastudios.djinn.go.ui
 
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.material3.FilterChip
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -373,25 +377,72 @@ fun LibraryScreen(nav: Nav) {
             }
         }
         when (tab) {
-            0 -> PagedList<ArtistSummary>("artists", nav.api::artists) { artist, _ ->
-                Row2(
-                    title = artist.name,
-                    subtitle = "${artist.trackCount} songs",
-                    art = { Art(nav.api.artUrl(artist.artHash), 44.dp, CircleShape) },
-                    onClick = { nav.push(Screen.Artist(artist.id)) },
-                )
+            0 -> {
+                Choices(ARTIST_SORTS, nav.artistSort) { nav.artistSort = it }
+                val sort = nav.artistSort
+                PagedList<ArtistSummary>("artists-$sort", { nav.api.artists(sort, it) }) { artist, _ ->
+                    Row2(
+                        title = artist.name,
+                        subtitle = "${artist.trackCount} songs",
+                        art = { Art(nav.api.artUrl(artist.artHash), 44.dp, CircleShape) },
+                        onClick = { nav.push(Screen.Artist(artist.id)) },
+                    )
+                }
             }
-            1 -> PagedList<Album>("albums", nav.api::albums) { album, _ ->
-                AlbumRow(album, nav)
+            1 -> {
+                Choices(ALBUM_FILTERS, nav.albumFilter) { nav.albumFilter = it }
+                Choices(ALBUM_SORTS, nav.albumSort) { nav.albumSort = it }
+                val sort = nav.albumSort
+                val filter = nav.albumFilter
+                PagedList<Album>("albums-$sort-$filter", { nav.api.albums(sort, filter, it) }) { album, _ ->
+                    AlbumRow(album, nav)
+                }
             }
-            2 -> PagedList<Track>("songs", nav.api::songs) { song, _ ->
-                SongRow(song, nav) { nav.startRadio(song) }
+            2 -> {
+                Choices(SONG_SORTS, nav.songSort) { nav.songSort = it }
+                val sort = nav.songSort
+                PagedList<Track>("songs-$sort", { nav.api.songs(sort, it) }) { song, _ ->
+                    SongRow(song, nav) { nav.startRadio(song) }
+                }
             }
             3 -> PlaylistsTab(nav)
             else -> Column {
                 DownloadStatus()
                 KeptSongs(nav)
             }
+        }
+    }
+}
+
+val ARTIST_SORTS = listOf("name" to "Name", "added" to "Recently added")
+val ALBUM_SORTS = listOf(
+    "name" to "Name",
+    "added" to "Recently added",
+    "year" to "Newest",
+    "oldest" to "Oldest",
+)
+val ALBUM_FILTERS = listOf("all" to "All albums", "various" to "Various artists", "soundtracks" to "Soundtracks")
+val SONG_SORTS = listOf(
+    "title" to "Title",
+    "artist" to "Artist",
+    "added" to "Recently added",
+    "popular" to "Most popular",
+    "year" to "Newest",
+    "oldest" to "Oldest",
+)
+
+/** A row of choices above a list, which scrolls if they don't all fit. */
+@Composable
+private fun Choices(choices: List<Pair<String, String>>, chosen: String, choose: (String) -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        choices.forEach { (value, label) ->
+            FilterChip(selected = value == chosen, onClick = { choose(value) }, label = { Text(label) })
         }
     }
 }

@@ -179,9 +179,11 @@ class GoApi(private val account: Account) {
     } catch (_: IOException) {
         null
     }
-    suspend fun artists(offset: Int): Page<ArtistSummary> = get("/api/artists?offset=$offset")
-    suspend fun albums(offset: Int): Page<Album> = get("/api/albums?sort=name&filter=all&offset=$offset")
-    suspend fun songs(offset: Int): Page<Track> = get("/api/tracks?sort=title&offset=$offset")
+    suspend fun artists(sort: String, offset: Int): Page<ArtistSummary> =
+        get("/api/artists?sort=$sort&offset=$offset")
+    suspend fun albums(sort: String, filter: String, offset: Int): Page<Album> =
+        get("/api/albums?sort=$sort&filter=$filter&offset=$offset")
+    suspend fun songs(sort: String, offset: Int): Page<Track> = get("/api/tracks?sort=$sort&offset=$offset")
     suspend fun album(id: Long): AlbumDetail = get("/api/albums/$id")
     suspend fun artist(id: Long): ArtistDetail = get("/api/artists/$id")
     suspend fun playlist(id: Long): GoPlaylistDetail = get("/api/go/playlists/$id")

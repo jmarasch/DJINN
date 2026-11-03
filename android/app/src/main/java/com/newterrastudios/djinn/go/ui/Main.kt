@@ -84,6 +84,11 @@ class Nav(
     private val onOfflineChange: () -> Unit,
 ) {
     var tab by mutableStateOf(Tab.Playlist)
+    // How the library's lists are ordered, until the app closes.
+    var artistSort by mutableStateOf(ARTIST_SORTS.first().first)
+    var albumSort by mutableStateOf(ALBUM_SORTS.first().first)
+    var albumFilter by mutableStateOf(ALBUM_FILTERS.first().first)
+    var songSort by mutableStateOf(SONG_SORTS.first().first)
     /** What the server calls itself. */
     var serverName by mutableStateOf(serverName)
     /** Styles this device can't keep up with. */
