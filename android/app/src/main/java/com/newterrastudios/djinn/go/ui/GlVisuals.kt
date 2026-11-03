@@ -6,9 +6,15 @@ import android.opengl.GLSurfaceView
 import android.util.Log
 import androidx.media3.common.util.UnstableApi
 import com.newterrastudios.djinn.go.player.BANDS
+import com.newterrastudios.djinn.go.player.COLORS_CUSTOM
+import com.newterrastudios.djinn.go.player.COLORS_ROTATE
+import com.newterrastudios.djinn.go.player.FramePace
+import com.newterrastudios.djinn.go.player.FrameWatch
 import com.newterrastudios.djinn.go.player.SoundReader
 import com.newterrastudios.djinn.go.player.Spectrum
+import com.newterrastudios.djinn.go.player.VisualMotion
 import com.newterrastudios.djinn.go.player.WAVE_POINTS
+import com.newterrastudios.djinn.go.player.rotatedHue
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
@@ -41,13 +47,22 @@ uniform float uBass;
 uniform float uMid;
 uniform float uTreble;
 uniform float uBeat;
+uniform float uSlowBass;
+uniform float uSlowMid;
+uniform float uSlowTreble;
+uniform float uTravel;
+uniform float uHue;
+uniform float uCustom;
+uniform vec3 uLow;
+uniform vec3 uHigh;
 uniform sampler2D uBands;
 uniform sampler2D uWave;
 uniform sampler2D uPrev;
 const float TAU = 6.2831853;
 
 vec3 palette(float t) {
-    return 0.5 + 0.5 * cos(TAU * (t + vec3(0.72, 0.52, 0.20)));
+    if (uCustom > 0.5) return mix(uLow, uHigh, 0.5 + 0.5 * cos(TAU * t));
+    return 0.5 + 0.5 * cos(TAU * (t + uHue + vec3(0.72, 0.52, 0.20)));
 }
 float band(float x) { return texture2D(uBands, vec2(clamp(x, 0.0, 1.0), 0.5)).r; }
 float wave(float x) { return texture2D(uWave, vec2(clamp(x, 0.0, 1.0), 0.5)).r * 2.0 - 1.0; }
@@ -108,14 +123,15 @@ void main() {
     vec2 p = centered();
     float r = length(p) + 0.001;
     float a = atan(p.y, p.x) / TAU;
-    float depth = 0.45 / r + uTime * (0.35 + 0.5 * uBass);
-    float twist = a * 6.0 + depth * 0.5 + uMid * 0.8;
-    float rings = 0.5 + 0.5 * sin(depth * 8.0 + uBass * 3.0);
+    float depth = 0.45 / r + uTravel;
+    float twist = a * 6.0 + depth * 0.5 + uSlowMid * 0.8;
+    float rings = 0.5 + 0.5 * sin(depth * 8.0 + uSlowBass * 3.0);
     float slats = 0.5 + 0.5 * sin(twist * TAU * 1.0);
     // Angles jump where they wrap, so color and level use forms that meet there.
     float level = band(abs(a) * 2.0);
     vec3 c = palette(depth * 0.09 + 0.15 * sin(a * TAU)) * (rings * 0.55 + slats * 0.35 + level * 0.8);
-    c *= smoothstep(0.0, 0.45, r);
+    // The middle is finer than a pixel, which would shimmer.
+    c *= smoothstep(0.06, 0.5, r);
     c += palette(uTime * 0.11) * smoothstep(0.32, 0.0, r) * (0.25 + uBeat * 0.8);
     gl_FragColor = vec4(c, 1.0);
 }
@@ -123,11 +139,11 @@ void main() {
 
 private const val PLASMA = """
 void main() {
-    vec2 p = centered() * (1.6 + uBass * 0.7);
+    vec2 p = centered() * (1.6 + uSlowBass * 0.7);
     float t = uTime * 0.45;
     float v = sin(p.x * 2.1 + t) + sin(p.y * 2.7 - t * 1.3)
-        + sin((p.x + p.y) * 1.7 + t * 0.7) + sin(length(p) * 3.3 - t * 1.9 + uMid * 3.0);
-    v += 0.8 * sin(p.x * 5.0 * uTreble + p.y * 3.0 + t);
+        + sin((p.x + p.y) * 1.7 + t * 0.7) + sin(length(p) * 3.3 - t * 1.9 + uSlowMid * 3.0);
+    v += 0.8 * sin(p.x * 5.0 * uSlowTreble + p.y * 3.0 + t);
     vec3 c = palette(v * 0.17 + uTime * 0.03);
     c *= 0.55 + 0.45 * sin(v * 2.2 + uBeat * 2.0);
     c += 0.28 * uBeat * palette(v * 0.3);
@@ -145,11 +161,11 @@ void main() {
     a = mod(a + uTime * 0.08, side);
     a = abs(a - side * 0.5);
     vec2 q = r * vec2(cos(a), sin(a));
-    q *= 1.4 + 0.6 * uBass;
+    q *= 1.4 + 0.6 * uSlowBass;
     q += vec2(uTime * 0.11, sin(uTime * 0.13));
     float n = noise(q * 3.0) * 0.6 + noise(q * 7.0 + uTime * 0.2) * 0.3 + noise(q * 15.0) * 0.1;
     float level = band(r * 0.7);
-    float edge = smoothstep(0.02, 0.0, abs(fract(n * 4.0 + uMid) - 0.5) - 0.2);
+    float edge = smoothstep(0.02, 0.0, abs(fract(n * 4.0 + uSlowMid) - 0.5) - 0.2);
     vec3 c = palette(n + r * 0.3 + uTime * 0.04) * (0.25 + edge * 0.7 + level * 0.75);
     c *= smoothstep(1.7, 0.2, r);
     c += uBeat * 0.2 * palette(r + uTime * 0.1);
@@ -172,37 +188,39 @@ void main() {
     vec2 p = centered() * 1.3;
     float t = uTime * 0.07;
     vec2 w = vec2(fbm(p + vec2(t, -t)), fbm(p + vec2(5.2 - t, 1.3 + t)));
-    float n = fbm(p + 2.2 * w + uBass * 0.5);
+    float n = fbm(p + 2.2 * w + uSlowBass * 0.5);
     vec3 c = palette(n * 0.9 + w.x * 0.4 + uTime * 0.015) * smoothstep(0.15, 0.65, n);
-    c *= 0.9 + uMid * 1.1;
+    c *= 0.9 + uSlowMid * 1.1;
     float glow = smoothstep(1.1, 0.0, length(p));
-    c += glow * glow * 0.3 * uBass * palette(uTime * 0.04);
+    c += glow * glow * 0.3 * uSlowBass * palette(uTime * 0.04);
     c += uBeat * 0.14 * palette(n);
     gl_FragColor = vec4(c, 1.0);
 }
 """
 
 private const val STARS = """
-vec3 layer(vec2 p, float z) {
+vec3 layer(vec2 p, float z, float pixel) {
     vec2 cell = floor(p);
     vec2 f = fract(p) - 0.5;
     float id = hash(cell + z);
     vec2 at = vec2(hash(cell + 1.3), hash(cell + 7.7)) - 0.5;
     float d = length(f - at * 0.7);
-    float size = 0.02 + 0.05 * id * (0.5 + uTreble);
+    // Never smaller than a couple of pixels, or a star flickers as it moves.
+    float size = max(0.02 + 0.05 * id * (0.5 + uSlowTreble), pixel * 2.5);
     return palette(id + uTime * 0.02) * smoothstep(size, 0.0, d);
 }
 void main() {
     vec2 p = centered();
     vec3 c = vec3(0.0);
     for (int i = 0; i < 5; i++) {
-        float z = fract(float(i) / 5.0 + uTime * (0.05 + 0.03 * uBass));
+        float z = fract(float(i) / 5.0 + uTravel);
         float scale = mix(9.0, 0.6, z);
         float fade = smoothstep(0.0, 0.35, z) * smoothstep(1.0, 0.8, z);
-        c += layer(p * scale + float(i) * 3.7, float(i)) * fade * 1.6;
+        float pixel = scale * 2.0 / min(uRes.x, uRes.y);
+        c += layer(p * scale + float(i) * 3.7, float(i), pixel) * fade * 1.6;
     }
     float r = length(p);
-    c += palette(uTime * 0.03 + r) * smoothstep(0.9, 0.0, r) * (0.07 + 0.3 * uBass);
+    c += palette(uTime * 0.03 + r) * smoothstep(0.9, 0.0, r) * (0.07 + 0.3 * uSlowBass);
     c += uBeat * 0.12 * palette(uTime * 0.08);
     gl_FragColor = vec4(c, 1.0);
 }
@@ -235,6 +253,14 @@ private class Program(val id: Int) {
     val mid = GLES20.glGetUniformLocation(id, "uMid")
     val treble = GLES20.glGetUniformLocation(id, "uTreble")
     val beat = GLES20.glGetUniformLocation(id, "uBeat")
+    val slowBass = GLES20.glGetUniformLocation(id, "uSlowBass")
+    val slowMid = GLES20.glGetUniformLocation(id, "uSlowMid")
+    val slowTreble = GLES20.glGetUniformLocation(id, "uSlowTreble")
+    val travel = GLES20.glGetUniformLocation(id, "uTravel")
+    val hue = GLES20.glGetUniformLocation(id, "uHue")
+    val custom = GLES20.glGetUniformLocation(id, "uCustom")
+    val low = GLES20.glGetUniformLocation(id, "uLow")
+    val high = GLES20.glGetUniformLocation(id, "uHigh")
     val bands = GLES20.glGetUniformLocation(id, "uBands")
     val wave = GLES20.glGetUniformLocation(id, "uWave")
     val prev = GLES20.glGetUniformLocation(id, "uPrev")
@@ -246,10 +272,18 @@ class VisualsRenderer(initial: VisualStyle) : GLSurfaceView.Renderer {
     @Volatile
     var style = initial
 
+    /** Told, on the drawing thread, when this device can't keep up with a style. */
+    @Volatile
+    var onTooSlow: ((VisualStyle) -> Unit)? = null
+
     /** Why a picture couldn't be built, for the device tests. */
     val failures = mutableListOf<String>()
 
     private val sound = SoundReader(Spectrum.analyzer)
+    private val motion = VisualMotion()
+    private val pace = FrameWatch()
+    private var largestSide = PICTURE_MAX
+    private var lastFrameNanos = 0L
     private val programs = HashMap<VisualStyle, Program?>()
     private var show: Program? = null
     private var width = 1
@@ -306,7 +340,7 @@ class VisualsRenderer(initial: VisualStyle) : GLSurfaceView.Renderer {
             GLES20.glDeleteFramebuffers(2, frameBuffers, 0)
             GLES20.glDeleteTextures(2, frameTextures, 0)
         }
-        val scale = min(1f, FEEDBACK_MAX / maxOf(width, height).toFloat())
+        val scale = min(1f, largestSide / maxOf(width, height).toFloat())
         val w = (width * scale).toInt().coerceAtLeast(1)
         val h = (height * scale).toInt().coerceAtLeast(1)
         GLES20.glGenFramebuffers(2, frameBuffers, 0)
@@ -327,6 +361,8 @@ class VisualsRenderer(initial: VisualStyle) : GLSurfaceView.Renderer {
 
     private var feedbackWidth = 1
     private var feedbackHeight = 1
+    private var travel = 0f
+    private var frameSeconds = 0.0
 
     private fun compile(type: Int, source: String, name: String): Int {
         val shader = GLES20.glCreateShader(type)
@@ -385,11 +421,23 @@ class VisualsRenderer(initial: VisualStyle) : GLSurfaceView.Renderer {
         GLES20.glUseProgram(program.id)
         GLES20.glViewport(0, 0, w, h)
         GLES20.glUniform1f(program.time, seconds)
-        GLES20.glUniform2f(program.res, width.toFloat(), height.toFloat())
+        GLES20.glUniform2f(program.res, w.toFloat(), h.toFloat())
         GLES20.glUniform1f(program.bass, sound.bass)
         GLES20.glUniform1f(program.mid, sound.mid)
         GLES20.glUniform1f(program.treble, sound.treble)
         GLES20.glUniform1f(program.beat, sound.beat)
+        GLES20.glUniform1f(program.slowBass, motion.bass)
+        GLES20.glUniform1f(program.slowMid, motion.mid)
+        GLES20.glUniform1f(program.slowTreble, motion.treble)
+        GLES20.glUniform1f(program.travel, travel)
+        val look = Spectrum.look
+        GLES20.glUniform1f(
+            program.hue,
+            if (look.colors == COLORS_ROTATE) rotatedHue(frameSeconds, look.rotateSeconds) else 0f,
+        )
+        GLES20.glUniform1f(program.custom, if (look.colors == COLORS_CUSTOM) 1f else 0f)
+        setColor(program.low, look.quiet)
+        setColor(program.high, look.loud)
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, previous)
         GLES20.glUniform1i(program.prev, 0)
@@ -401,13 +449,49 @@ class VisualsRenderer(initial: VisualStyle) : GLSurfaceView.Renderer {
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
     }
 
+    private fun setColor(location: Int, rgb: Int) {
+        GLES20.glUniform3f(
+            location,
+            ((rgb shr 16) and 0xFF) / 255f,
+            ((rgb shr 8) and 0xFF) / 255f,
+            (rgb and 0xFF) / 255f,
+        )
+    }
+
+    /** How the picture is doing on this device; smaller first, then giving up on it. */
+    private fun checkPace(now: Long, current: VisualStyle) {
+        when (pace.frame(now, current)) {
+            FramePace.Fine -> Unit
+            FramePace.DrawSmaller -> {
+                Log.i(TAG, "Drawing ${current.name} smaller to keep up")
+                largestSide = PICTURE_SMALL
+                buildFeedback()
+            }
+            FramePace.TooSlow -> {
+                Log.i(TAG, "${current.name} is too much for this device")
+                onTooSlow?.invoke(current)
+            }
+        }
+    }
+
     override fun onDrawFrame(gl: GL10?) {
         val now = System.nanoTime()
-        sound.read(now, Spectrum.leadMs, Spectrum.intensity)
+        val look = Spectrum.look
+        sound.read(now, Spectrum.leadMs, Spectrum.intensity, look.calm)
         upload()
+        val step = if (lastFrameNanos == 0L) 0f else (now - lastFrameNanos) / 1_000_000_000f
+        lastFrameNanos = now
+        motion.step(step, sound.bass, sound.mid, sound.treble)
         // Kept small so precision holds on phones whose shaders have little of it.
         val seconds = (((now - startNanos) / 1_000_000L) % WRAP_MS) / 1000f
+        frameSeconds = (now - startNanos) / 1_000_000_000.0
         val current = style
+        travel = when (current) {
+            VisualStyle.Tunnel -> (motion.tunnel % WRAP_TRAVEL).toFloat()
+            VisualStyle.Stars -> motion.stars.toFloat()
+            else -> 0f
+        }
+        checkPace(now, current)
         val program = program(current)
         if (program == null) {
             GLES20.glClearColor(0f, 0f, 0f, 1f)
@@ -437,9 +521,17 @@ class VisualsRenderer(initial: VisualStyle) : GLSurfaceView.Renderer {
     }
 
     private companion object {
-        const val FEEDBACK_MAX = 720f
+        const val PICTURE_MAX = 720f
+        const val PICTURE_SMALL = 480f
         const val WRAP_MS = 3_600_000L
-        val HEAVY = setOf(VisualStyle.Kaleidoscope, VisualStyle.Nebula, VisualStyle.Stars)
+        const val WRAP_TRAVEL = 3_600.0
+        val HEAVY = setOf(
+            VisualStyle.Tunnel,
+            VisualStyle.Plasma,
+            VisualStyle.Kaleidoscope,
+            VisualStyle.Nebula,
+            VisualStyle.Stars,
+        )
     }
 }
 

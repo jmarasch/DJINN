@@ -77,6 +77,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         Spectrum.leadMs = app.prefs.visualsLeadMs
         Spectrum.intensity = app.prefs.visualsIntensity
+        Spectrum.look = app.prefs.visualLook
         handle(intent)
         setContent {
             DjinnTheme {
@@ -94,10 +95,6 @@ class MainActivity : ComponentActivity() {
         val signedIn by account.signedIn.collectAsState()
         var connected by rememberSaveable { mutableStateOf(account.server != null) }
         val scope = rememberCoroutineScope()
-        // The server ended this sign-in, or the account's: kept songs go too.
-        LaunchedEffect(signedIn) {
-            if (!signedIn) app.offline.deleteEverything()
-        }
         if (!signedIn) {
             if (connected) {
                 SignInScreen(account, api, onChangeServer = {
@@ -123,6 +120,7 @@ class MainActivity : ComponentActivity() {
                 prefs = app.prefs,
                 cast = cast,
                 server = account.server.orEmpty(),
+                serverName = account.serverName,
                 scope = lifecycleScope,
                 signOut = {
                     player.stop()
@@ -132,8 +130,8 @@ class MainActivity : ComponentActivity() {
                             api.logout()
                         } catch (_: IOException) {
                         }
-                        // Access ended: what was kept for this account goes with it.
-                        app.offline.deleteEverything()
+                        // Otherwise they stay, locked, for whoever signs back in.
+                        if (app.prefs.keepRules.signOut != "keep") app.offline.deleteEverything()
                         account.signOut()
                     }
                 },
@@ -153,6 +151,13 @@ class MainActivity : ComponentActivity() {
             }
         }
         LaunchedEffect(Unit) { player.followPosition() }
+        LaunchedEffect(Unit) {
+            // The admin may have renamed it since.
+            api.hello()?.let {
+                account.serverName = it.name
+                nav.serverName = it.name
+            }
+        }
         LaunchedEffect(Unit) {
             nav.liked.addAll(app.prefs.likedIds)
             try {
@@ -198,7 +203,7 @@ class MainActivity : ComponentActivity() {
                     val results = api.search(query)
                     results.tracks.ifEmpty { results.described?.tracks.orEmpty() }
                 } catch (_: IOException) {
-                    app.offline.dao.search(nav.server, "%$query%").map { it.toTrack() }
+                    app.offline.searchPlayable(nav.server, query).map { it.toTrack() }
                 }
                 if (found.isEmpty()) nav.message = "Nothing found for \"$query\"." else player.play(found)
             }

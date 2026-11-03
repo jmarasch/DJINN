@@ -1,5 +1,7 @@
 package com.newterrastudios.djinn.go.data
 
+import com.newterrastudios.djinn.go.player.VisualLook
+import kotlinx.serialization.encodeToString
 import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
@@ -31,7 +33,7 @@ import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 
 /** Without reaching the server this long, songs kept here are deleted. */
-const val OFFLINE_LIMIT_MS = 30L * 24 * 60 * 60 * 1000
+private const val DAY_MS = 24L * 60 * 60 * 1000
 
 const val KIND_DOWNLOAD = "download"
 const val KIND_SMART = "smart"
@@ -225,6 +227,33 @@ class Prefs(context: Context) {
     var visualsAuto: Boolean
         get() = prefs.getBoolean("visuals_auto", false)
         set(value) = prefs.edit { putBoolean("visuals_auto", value) }
+    /** The admin's rules for kept songs, as last heard. */
+    var keepRules: KeepRules
+        get() = prefs.getString("keep_rules", null)
+            ?.let { runCatching { lookJson.decodeFromString<KeepRules>(it) }.getOrNull() }
+            ?: KeepRules()
+        set(value) = prefs.edit { putString("keep_rules", lookJson.encodeToString(value)) }
+    /** Too long away from the server: kept songs wait until it's reached again. */
+    var awayLocked: Boolean
+        get() = prefs.getBoolean("away_locked", false)
+        set(value) = prefs.edit { putBoolean("away_locked", value) }
+    /** Whose songs these are: the server and the account. */
+    var keptFor: String?
+        get() = prefs.getString("kept_for", null)
+        set(value) = prefs.edit { putString("kept_for", value) }
+    /** Now Playing shows visuals rather than the cover. */
+    var visualsOn: Boolean
+        get() = prefs.getBoolean("visuals_on", false)
+        set(value) = prefs.edit { putBoolean("visuals_on", value) }
+    /** Styles this device turned out not to keep up with. */
+    var visualsTooSlow: Set<String>
+        get() = prefs.getStringSet("visuals_too_slow", emptySet()).orEmpty()
+        set(value) = prefs.edit { putStringSet("visuals_too_slow", value) }
+    var visualLook: VisualLook
+        get() = prefs.getString("visual_look", null)
+            ?.let { runCatching { lookJson.decodeFromString<VisualLook>(it) }.getOrNull() }
+            ?: VisualLook()
+        set(value) = prefs.edit { putString("visual_look", lookJson.encodeToString(value)) }
     /** Lines the visuals up with the speaker, in milliseconds. */
     var visualsLeadMs: Int
         get() = prefs.getInt("visuals_lead_ms", DEFAULT_VISUALS_LEAD_MS)
@@ -235,6 +264,7 @@ class Prefs(context: Context) {
         set(value) = prefs.edit { putFloat("visuals_intensity", value) }
 
     companion object {
+        private val lookJson = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
         const val DEFAULT_KBPS = 128
         const val DEFAULT_VISUALS_LEAD_MS = 250
     }
@@ -261,9 +291,21 @@ fun largeDownloadWarning(bytes: Long, kbps: Int, canConvert: Boolean): String? {
     }
 }
 
-/** Whether songs kept here must go: nothing from the server for too long. */
-fun tooLongOffline(lastContact: Long, now: Long): Boolean =
-    lastContact != 0L && now - lastContact > OFFLINE_LIMIT_MS
+enum class WhenAway { Nothing, Lock, Delete }
+
+/** What the admin's rules say to do with kept songs, given the last word from the server. */
+fun whenAway(lastContact: Long, now: Long, rules: KeepRules): WhenAway {
+    // Never having reached the server isn't being away.
+    if (lastContact == 0L || now - lastContact <= rules.awayDays * DAY_MS) return WhenAway.Nothing
+    return when (rules.away) {
+        "off" -> WhenAway.Nothing
+        "delete" -> WhenAway.Delete
+        else -> WhenAway.Lock
+    }
+}
+
+/** Whether kept songs belong to someone else: a different server or account. */
+fun keptForSomeoneElse(keptFor: String?, now: String): Boolean = keptFor != null && keptFor != now
 
 /** Keeps songs on this phone, and tells the server what happened while it couldn't. */
 class OfflineStore(
@@ -283,8 +325,19 @@ class OfflineStore(
         return File(context.filesDir, "offline/$hash").apply { mkdirs() }
     }
 
-    /** The kept copy, if there is one and its file is really there. */
+    /** Kept songs don't play for someone signed out, or too long away from the server. */
+    fun isLocked(): Boolean = account.token == null || prefs.awayLocked
+
+    /** The songs that can be played from this phone right now. */
+    suspend fun playable(server: String): List<OfflineSong> =
+        if (isLocked()) emptyList() else dao.songs(server)
+
+    suspend fun searchPlayable(server: String, query: String): List<OfflineSong> =
+        if (isLocked()) emptyList() else dao.search(server, "%$query%")
+
+    /** The kept copy, if there is one, it may play and its file is really there. */
     suspend fun local(id: Long): OfflineSong? {
+        if (isLocked()) return null
         val server = account.server ?: return null
         return dao.song(server, id)?.takeIf { File(it.path).exists() }
     }
@@ -349,15 +402,31 @@ class OfflineStore(
         dao.everySound().forEach { removeSound(it) }
     }
 
-    /** At each contact: still allowed to keep songs? Also the 30-day limit. */
+    /**
+     * At each contact: whose songs are these, may they stay, and what are the
+     * rules now? Without contact: has it been too long, by the rules last heard?
+     */
     suspend fun checkAccess() = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
         try {
             val me = api.me()
             prefs.lastContact = now
+            prefs.awayLocked = false
+            val owner = "${account.server}|${me.username}"
+            if (keptForSomeoneElse(prefs.keptFor, owner)) deleteEverything()
+            prefs.keptFor = owner
             if (!me.permissions.downloads) deleteEverything()
+            try {
+                prefs.keepRules = api.keepRules()
+            } catch (_: IOException) {
+                // An older server, or a role GO refuses: the rules stay as they were.
+            }
         } catch (_: IOException) {
-            if (tooLongOffline(prefs.lastContact, now)) deleteEverything()
+            when (whenAway(prefs.lastContact, now, prefs.keepRules)) {
+                WhenAway.Nothing -> prefs.awayLocked = false
+                WhenAway.Lock -> prefs.awayLocked = true
+                WhenAway.Delete -> deleteEverything()
+            }
         }
     }
 

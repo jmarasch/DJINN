@@ -58,7 +58,7 @@ private val SMART_LIMITS = listOf(512, 1024, 2048, 5120, 10240)
 fun sizeText(context: Context, bytes: Long): String = Formatter.formatShortFileSize(context, bytes)
 
 @Composable
-private fun Toggle(title: String, note: String?, on: Boolean, change: (Boolean) -> Unit) {
+internal fun Toggle(title: String, note: String?, on: Boolean, change: (Boolean) -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -93,17 +93,26 @@ fun SettingsScreen(nav: Nav) {
     val downloads = kept.filter { it.kind == KIND_DOWNLOAD }
     val smartSongs = kept.filter { it.kind == KIND_SMART }
     var confirmSignOut by remember { mutableStateOf(false) }
+    val keepsSongs = remember { prefs.keepRules.signOut == "keep" }
 
     if (confirmSignOut) {
         AlertDialog(
             onDismissRequest = { confirmSignOut = false },
             title = { Text("Sign out?") },
-            text = { Text("The songs and system sounds kept on this phone will be deleted. You can download them again after signing back in.") },
+            text = {
+                Text(
+                    if (keepsSongs) {
+                        "The songs kept on this phone stay here, locked until you sign back in."
+                    } else {
+                        "The songs and system sounds kept on this phone will be deleted. You can download them again after signing back in."
+                    },
+                )
+            },
             confirmButton = {
                 TextButton(onClick = {
                     confirmSignOut = false
                     nav.signOut()
-                }) { Text("Sign out and delete") }
+                }) { Text(if (keepsSongs) "Sign out" else "Sign out and delete") }
             },
             dismissButton = { TextButton(onClick = { confirmSignOut = false }) { Text("Stay signed in") } },
         )
@@ -113,7 +122,7 @@ fun SettingsScreen(nav: Nav) {
         item {
             Text("Settings", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(16.dp))
             Text(
-                "Signed in to $server",
+                "Signed in to " + (nav.serverName?.let { "$it ($server)" } ?: server),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp),
             )
@@ -274,7 +283,8 @@ private fun VisualsSettings(nav: Nav) {
     var intensity by remember { mutableFloatStateOf(prefs.visualsIntensity) }
     var auto by remember { mutableStateOf(prefs.visualsAuto) }
     Heading("Visuals")
-    Note("On Now Playing, tap the cover to see them. Fancier styles use more battery.")
+    Note("The sparkle button on Now Playing switches between the cover and these. Fancier styles use more battery.")
+    VisualLookSettings(nav)
     Toggle("Change styles by themselves", "In full screen, a new style every 30 seconds.", auto) {
         auto = it
         prefs.visualsAuto = it

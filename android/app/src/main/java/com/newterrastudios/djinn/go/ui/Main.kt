@@ -15,6 +15,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SkipNext
@@ -54,9 +55,10 @@ sealed interface Screen {
     data object NowPlaying : Screen
     data object Settings : Screen
     data object Visuals : Screen
+    data object Cover : Screen
 }
 
-enum class Tab(val label: String) { Home("Home"), Library("Library"), Search("Search") }
+enum class Tab(val label: String) { Playlist("Playlist"), Library("Library"), Search("Search") }
 
 /** Where you are in the app, and what every screen needs. */
 @UnstableApi
@@ -67,6 +69,7 @@ class Nav(
     val prefs: Prefs,
     val cast: CastState,
     val server: String,
+    serverName: String?,
     val signOut: () -> Unit,
     /** For work that must outlive the screen or menu that started it. */
     val scope: CoroutineScope,
@@ -74,7 +77,13 @@ class Nav(
     val askStorage: suspend () -> Boolean,
     private val onOfflineChange: () -> Unit,
 ) {
-    var tab by mutableStateOf(Tab.Home)
+    var tab by mutableStateOf(Tab.Playlist)
+    /** What the server calls itself. */
+    var serverName by mutableStateOf(serverName)
+    /** Styles this device can't keep up with. */
+    var slowStyles by mutableStateOf(prefs.visualsTooSlow)
+    /** The styles to offer here. Shapes are never slow, so it's never empty. */
+    val visualStyles get() = VisualStyle.moving.filter { it.name !in slowStyles }
     /** The role lets this account keep songs on the phone. */
     var canKeepSongs by mutableStateOf(false)
     /** What a tap on a song does: "play", "queue" (next) or "end". */
@@ -99,6 +108,34 @@ class Nav(
         stack.removeLastOrNull()
     }
 
+    /** The style last chosen, or a good one when that's the cover or too slow here. */
+    fun currentStyle(): VisualStyle {
+        val styles = visualStyles
+        val chosen = VisualStyle.at(prefs.visuals)
+        return when {
+            chosen in styles -> chosen
+            VisualStyle.Warp in styles -> VisualStyle.Warp
+            else -> styles.first()
+        }
+    }
+
+    fun styleTooSlow(style: VisualStyle) {
+        slowStyles = slowStyles + style.name
+        prefs.visualsTooSlow = slowStyles
+        message = "${style.label} is too much for this device, so it's been left out. Settings can try it again."
+    }
+
+    fun retrySlowStyles() {
+        slowStyles = emptySet()
+        prefs.visualsTooSlow = emptySet()
+    }
+
+    /** Pulls up the player, from anywhere. */
+    fun showPlayer() {
+        stack.remove(Screen.NowPlaying)
+        stack.add(Screen.NowPlaying)
+    }
+
     /** Leaves Now Playing for another screen. */
     fun goTo(screen: Screen) {
         stack.remove(Screen.NowPlaying)
@@ -111,19 +148,14 @@ class Nav(
 fun MainScreen(nav: Nav) {
     BackHandler(enabled = nav.stack.isNotEmpty()) { nav.pop() }
     val top = nav.stack.lastOrNull()
-    if (top == Screen.Visuals) {
-        FullVisuals(nav)
-        return
-    }
-    if (top == Screen.NowPlaying) {
-        NowPlayingScreen(nav)
-        nav.menuFor?.let { SongMenu(it, nav) }
+    if (top == Screen.Visuals || top == Screen.Cover) {
+        FullScreen(nav, cover = top == Screen.Cover)
         return
     }
     Scaffold(
         bottomBar = {
             Column {
-                MiniPlayer(nav)
+                if (top != Screen.NowPlaying) MiniPlayer(nav)
                 NavigationBar {
                     Tab.entries.forEach { tab ->
                         NavigationBarItem(
@@ -135,7 +167,7 @@ fun MainScreen(nav: Nav) {
                             icon = {
                                 Icon(
                                     when (tab) {
-                                        Tab.Home -> Icons.Default.Home
+                                        Tab.Playlist -> Icons.Default.Home
                                         Tab.Library -> Icons.Default.LibraryMusic
                                         Tab.Search -> Icons.Default.Search
                                     },
@@ -145,6 +177,13 @@ fun MainScreen(nav: Nav) {
                             label = { Text(tab.label) },
                         )
                     }
+                    NavigationBarItem(
+                        selected = top == Screen.NowPlaying,
+                        enabled = nav.player.current != null,
+                        onClick = nav::showPlayer,
+                        icon = { Icon(Icons.Default.PlayCircle, contentDescription = null) },
+                        label = { Text("Playing") },
+                    )
                 }
             }
         },
@@ -160,8 +199,9 @@ fun MainScreen(nav: Nav) {
                 is Screen.Artist -> ArtistScreen(top.id, nav)
                 is Screen.Playlist -> PlaylistScreen(top.id, nav)
                 Screen.Settings -> SettingsScreen(nav)
+                Screen.NowPlaying -> NowPlayingScreen(nav)
                 else -> when (nav.tab) {
-                    Tab.Home -> HomeScreen(nav)
+                    Tab.Playlist -> HomeScreen(nav)
                     Tab.Library -> LibraryScreen(nav)
                     Tab.Search -> SearchScreen(nav)
                 }
@@ -205,7 +245,7 @@ private fun MiniPlayer(nav: Nav) {
         Row(
             Modifier
                 .fillMaxWidth()
-                .clickable { nav.push(Screen.NowPlaying) }
+                .clickable(onClick = nav::showPlayer)
                 .padding(horizontal = 12.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),

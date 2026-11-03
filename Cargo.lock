@@ -1415,6 +1415,7 @@ dependencies = [
  "image",
  "ipnet",
  "md-5",
+ "mdns-sd",
  "notify",
  "num_cpus",
  "open",

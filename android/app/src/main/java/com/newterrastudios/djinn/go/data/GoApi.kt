@@ -34,9 +34,17 @@ class Account(context: Context) {
     val server: String? get() = prefs.getString(SERVER, null)
     val token: String? get() = prefs.getString(TOKEN, null)
 
+    /** What the server calls itself, when it has said. */
+    var serverName: String?
+        get() = prefs.getString(SERVER_NAME, null)
+        set(value) = prefs.edit { putString(SERVER_NAME, value) }
+
     fun setServer(address: String) = prefs.edit { putString(SERVER, address) }
 
-    fun forgetServer() = prefs.edit { remove(SERVER) }
+    fun forgetServer() = prefs.edit {
+        remove(SERVER)
+        remove(SERVER_NAME)
+    }
 
     fun signIn(token: String) {
         prefs.edit { putString(TOKEN, token) }
@@ -50,6 +58,7 @@ class Account(context: Context) {
 
     private companion object {
         const val SERVER = "server"
+        const val SERVER_NAME = "server_name"
         const val TOKEN = "token"
     }
 }
@@ -122,6 +131,15 @@ class GoApi(private val account: Account) {
     suspend fun logout() = withContext(Dispatchers.IO) { send("POST", "/api/auth/logout"); Unit }
 
     suspend fun home(): GoHome = get("/api/go/home")
+
+    suspend fun keepRules(): KeepRules = get("/api/go/keep-rules")
+
+    /** Who the server says it is. Older servers don't say. */
+    suspend fun hello(): ServerHello? = try {
+        get("/api/go/hello")
+    } catch (_: IOException) {
+        null
+    }
     suspend fun artists(offset: Int): Page<ArtistSummary> = get("/api/artists?offset=$offset")
     suspend fun albums(offset: Int): Page<Album> = get("/api/albums?sort=name&filter=all&offset=$offset")
     suspend fun songs(offset: Int): Page<Track> = get("/api/tracks?sort=title&offset=$offset")

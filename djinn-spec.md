@@ -378,6 +378,15 @@ The official native app for DJINN GO, in `android/` in this repository: songs as
 - Styles are shapes (bars, ring, wave, mirror) or original shaders on the phone's graphics chip (warp, tunnel, plasma, kaleidoscope, nebula, stars), OpenGL ES 2 with no native code. Warp feeds each frame into the next, the idea behind MilkDrop.
 - Audio reaches the tap ahead of the speaker and in bursts, so visuals read it through a steady clock, with a timing setting per device.
 - Real MilkDrop presets are separate work, alongside the visualizers planned for 0.5.0.
+- Now Playing shows the cover unless visuals are switched on. Visuals are only offered on devices that can run them: low-RAM devices don't get them, and a style a device can't keep up with is drawn smaller, then left out.
+- The cover and visuals go full screen, with controls that appear on a tap and fade. Android Auto draws its own screen, so this doesn't reach the car.
+- Settings choose colors (including RGB rotation), the number and spacing of bars, line thickness and smoothing.
+
+**Finding a server**
+- The server has a name (Admin > GO) and announces GO over mDNS as `_djinn-go._tcp`, which can be turned off. The app lists what it hears by name and address before sign-in.
+
+**Kept songs**
+- Admin > GO sets what happens to them at sign-out (delete or keep locked) and after too long without reaching the server (lock, delete or nothing; 30 days by default). The app caches the rules. Locking is the app refusing to play them, not encryption.
 
 **Server changes (GO's API)**
 - Device sign-in: an API login returns a token sent as `Authorization: Bearer`, stored as a session, so it appears under signed-in devices, can be signed out, and follows the same role, home-network, two-step and lockout rules as the web. Cookies keep working for browsers.

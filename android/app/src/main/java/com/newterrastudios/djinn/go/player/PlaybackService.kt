@@ -384,7 +384,7 @@ class PlaybackService : MediaLibraryService() {
             val found = app.api.search(query)
             found.tracks.ifEmpty { found.described?.tracks.orEmpty() }
         } catch (_: IOException) {
-            app.offline.dao.search(server, "%$query%").map { it.toTrack() }
+            app.offline.searchPlayable(server, query).map { it.toTrack() }
         }
     }
 
@@ -411,7 +411,7 @@ class PlaybackService : MediaLibraryService() {
                     folder(ALBUMS, "Albums"),
                 )
                 parent == RECENT -> api.home().recent.map { it.toMediaItem(api) }
-                parent == KEPT -> app.offline.dao.songs(server).map { it.toTrack().toMediaItem(api) }
+                parent == KEPT -> app.offline.playable(server).map { it.toTrack().toMediaItem(api) }
                 parent == PLAYLISTS -> api.playlists().map { folder("$PLAYLIST_PREFIX${it.id}", it.name) }
                 parent == ALBUMS -> api.albums(0).items.map { folder("$ALBUM_PREFIX${it.id}", it.title) }
                 parent.startsWith(PLAYLIST_PREFIX) ->
@@ -424,7 +424,7 @@ class PlaybackService : MediaLibraryService() {
             // Away from the server, the car still has what's kept here.
             when (parent) {
                 ROOT -> listOf(folder(KEPT, "On this phone"))
-                KEPT -> app.offline.dao.songs(server).map { it.toTrack().toMediaItem(api) }
+                KEPT -> app.offline.playable(server).map { it.toTrack().toMediaItem(api) }
                 else -> emptyList()
             }
         }

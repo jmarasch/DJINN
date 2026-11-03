@@ -8,6 +8,7 @@ import java.nio.ByteOrder
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.cos
+import kotlin.math.exp
 import kotlin.math.ln
 import kotlin.math.max
 import kotlin.math.pow
@@ -248,9 +249,10 @@ class SoundReader(private val analyzer: SpectrumAnalyzer) {
 
     /**
      * Moves on to `nowNanos` and fills the fields. `leadMs` is how far the
-     * audio here is ahead of the speaker; `gain` scales how strongly it shows.
+     * audio here is ahead of the speaker; `gain` scales how strongly it shows;
+     * `calm` (0 to 1) softens how quickly it jumps up.
      */
-    fun read(nowNanos: Long, leadMs: Int, gain: Float = 1f) {
+    fun read(nowNanos: Long, leadMs: Int, gain: Float = 1f, calm: Float = 0f) {
         val elapsedUs = if (lastNanos == 0L) 0L else ((nowNanos - lastNanos) / 1000).coerceIn(0, 200_000)
         lastNanos = nowNanos
         val newest = analyzer.latest()?.atUs ?: -1L
@@ -269,17 +271,20 @@ class SoundReader(private val analyzer: SpectrumAnalyzer) {
         }
         val frame = if (silent) null else analyzer.at(clockUs)
         val fall = FALL_PER_SECOND * elapsedUs / 1_000_000f
+        val rise = if (calm <= 0f) 1f else 1f - exp(-(elapsedUs / 1_000_000f) / (calm * CALMEST_SECONDS))
+        fun follow(now: Float, level: Float) =
+            if (level > now) now + (level - now) * rise else max(level, now - fall)
         for (i in 0 until BANDS) {
             val level = ((frame?.bands?.get(i) ?: 0f) * gain).coerceIn(0f, 1f)
-            bands[i] = max(level, bands[i] - fall)
+            bands[i] = follow(bands[i], level)
         }
         for (i in 0 until WAVE_POINTS) {
             val point = (frame?.wave?.get(i) ?: 0f) * gain
-            wave[i] += (point - wave[i]) * WAVE_FOLLOW
+            wave[i] += (point - wave[i]) * WAVE_FOLLOW * (1f - calm * WAVE_CALM)
         }
-        bass = max(((frame?.bass ?: 0f) * gain).coerceIn(0f, 1f), bass - fall)
-        mid = max(((frame?.mid ?: 0f) * gain).coerceIn(0f, 1f), mid - fall)
-        treble = max(((frame?.treble ?: 0f) * gain).coerceIn(0f, 1f), treble - fall)
+        bass = follow(bass, ((frame?.bass ?: 0f) * gain).coerceIn(0f, 1f))
+        mid = follow(mid, ((frame?.mid ?: 0f) * gain).coerceIn(0f, 1f))
+        treble = follow(treble, ((frame?.treble ?: 0f) * gain).coerceIn(0f, 1f))
         val since = frame?.atUs ?: -1L
         val fresh = since != lastFrameAt
         lastFrameAt = since
@@ -293,6 +298,8 @@ class SoundReader(private val analyzer: SpectrumAnalyzer) {
         const val FALL_PER_SECOND = 1.6f
         const val BEAT_FALL_PER_SECOND = 4f
         const val WAVE_FOLLOW = 0.6f
+        const val WAVE_CALM = 0.8f
+        const val CALMEST_SECONDS = 0.25f
     }
 }
 
@@ -316,6 +323,10 @@ object Spectrum : TeeAudioProcessor.AudioBufferSink {
     /** How strongly visuals react, from Settings. */
     @Volatile
     var intensity = 1f
+
+    /** Their colors and setup, from Settings. */
+    @Volatile
+    var look = VisualLook()
 
     private var sampleRate = 44100
     private var channels = 2
