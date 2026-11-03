@@ -8,8 +8,8 @@ use std::collections::HashMap;
 
 use djinn_store::WantedSong;
 
-/// One song from a file. A YouTube video id comes with no title: the caller
-/// has to look it up.
+/// One song from a file. A YouTube video id comes with no title, so it names
+/// no song.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ImportedSong {
     pub song: WantedSong,
@@ -31,7 +31,7 @@ pub struct ParsedImport {
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum ImportError {
-    #[error("that's only links: a link doesn't say which songs it holds, so export the playlist to a file first")]
+    #[error("DJINN can only read YouTube playlist links. For other services, export the playlist to a file first")]
     OnlyLinks,
     #[error("no songs found in that")]
     NoSongs,

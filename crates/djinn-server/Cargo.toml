@@ -39,7 +39,7 @@ md-5 = "0.11"
 qrcode = { version = "0.14", default-features = false, features = ["svg", "image"] }
 image = { version = "0.25.10", default-features = false, features = ["png"] }
 rand = "0.10"
-reqwest = { version = "0.13.5", default-features = false, features = ["rustls-no-provider", "stream"] }
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls-no-provider", "query", "stream"] }
 roxmltree = "0.21"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 ruzstd = "0.9.1"

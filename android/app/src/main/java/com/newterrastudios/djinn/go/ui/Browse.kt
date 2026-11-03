@@ -486,8 +486,8 @@ private fun ImportDialog(onFile: () -> Unit, onPaste: (String) -> Unit, onCancel
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
                     "This brings in the list, not the music. Songs you don't have stay in the list, flagged, " +
-                        "and are skipped. To get a file from a streaming service, use Tune My Music or Soundiiz: " +
-                        "a share link alone doesn't say what's in a playlist.",
+                        "and are skipped. Paste a YouTube playlist link if your server has YouTube links on. " +
+                        "For other services, get a file from Tune My Music or Soundiiz.",
                     style = MaterialTheme.typography.bodySmall,
                 )
                 FilledTonalButton(onClick = onFile) { Text("Choose a file") }
@@ -496,7 +496,7 @@ private fun ImportDialog(onFile: () -> Unit, onPaste: (String) -> Unit, onCancel
                     onValueChange = { text = it },
                     minLines = 3,
                     maxLines = 6,
-                    label = { Text("Or paste songs, one per line") },
+                    label = { Text("Or paste songs, or a YouTube link") },
                     placeholder = { Text("Artist - Title") },
                 )
             }

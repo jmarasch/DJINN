@@ -277,6 +277,8 @@ export const api = {
   createPlaylist: (name: string) => post<PlaylistSummary>('/playlists', { name }),
   importPlaylist: (text: string, filename?: string, name?: string) =>
     post<ImportResult>('/playlists/import', { text, filename, name: name?.trim() || undefined }),
+  youtubeKey: () => get<{ has_key: boolean }>('/playlists/youtube-key'),
+  setYoutubeKey: (key: string) => put<void>('/playlists/youtube-key', { key }),
   checkPlaylist: (id: number) => post<void>(`/playlists/${id}/check`),
   playlistCheck: () => get<PlaylistCheck | null>('/playlists/check'),
   shareTargets: () => get<ShareTarget[]>('/playlists/share-targets'),

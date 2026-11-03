@@ -58,16 +58,34 @@ then choose files or paste songs, one per line (`Artist - Title`). The Android
 app has it under Library > Lists. A file holding several playlists makes
 several playlists here.
 
-A share link alone doesn't work, because it doesn't tell DJINN what's in the
-playlist. To get a file:
+**YouTube and YouTube Music links** work if an admin has turned them on (below).
+Paste a public or unlisted playlist's link. Links from other services don't work,
+because they have no dependable official way to read a playlist. To get a file:
 
 | From | How |
 | --- | --- |
 | Spotify, YouTube Music, Pandora, Tidal, Deezer, Amazon and others | [Tune My Music](https://www.tunemymusic.com/) or [Soundiiz](https://soundiiz.com/): choose the service as the source and export to a file. |
 | Spotify | [Exportify](https://exportify.net/), or `Playlist1.json` from your account data. |
-| YouTube Music | Google Takeout. Its playlists list only video ids, so DJINN asks YouTube for each title. This is the one import that goes online. |
 | Apple Music | File > Library > Export Playlist (either format). |
 | Other music players | M3U, M3U8, PLS, XSPF or JSPF files. |
+
+Tune My Music and Soundiiz are outside services, and they'll see your playlists.
+Google Takeout's playlist files don't work: they list video ids rather than song
+names, and DJINN doesn't send those to YouTube to find out.
+
+### Turning on YouTube links
+
+An admin needs a free YouTube Data API key from
+[Google Cloud](https://console.cloud.google.com/apis/library/youtube.googleapis.com).
+Create a project, enable **YouTube Data API v3**, and create an API key. Then go
+to **Import a playlist** > **YouTube links** and paste it in.
+
+DJINN keeps this as private as it can. Without a key it never contacts YouTube.
+With one, an import sends only the key and the playlist's id, plus the page it's
+up to on a long list. It sends nothing about who is asking, and the link's
+tracking code and the link itself aren't sent or kept. YouTube can still see this
+server's internet address, and Google can tie requests to the project the key
+belongs to. Private playlists and your Liked Music can't be read this way.
 
 Matching is careful, because a flagged gap is better than the wrong song at a
 party. "Song (Remastered 2011)" finds "Song", but "Song (Live)" doesn't, and

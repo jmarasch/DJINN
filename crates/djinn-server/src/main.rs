@@ -54,6 +54,7 @@ mod two_step;
 mod update;
 mod watcher;
 mod web;
+mod youtube;
 
 use std::path::PathBuf;
 

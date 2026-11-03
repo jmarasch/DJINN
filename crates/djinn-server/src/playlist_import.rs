@@ -12,7 +12,7 @@ use axum::extract::{DefaultBodyLimit, Path, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use djinn_library::playlist_file::{self, ImportedList, ImportedSong};
+use djinn_library::playlist_file::{self, ImportedList, ParsedImport};
 use djinn_library::playlist_match::SongIndex;
 use djinn_store::{ImportRow, SongFile, Store, WantedSong};
 use futures_util::{stream, StreamExt};
@@ -22,12 +22,11 @@ use crate::auth::AdminUser;
 use crate::error::{ApiError, ApiResult};
 use crate::playlist_api::{validate_name, Member, MAX_NAME};
 use crate::state::AppState;
+use crate::youtube;
 
 /// Big enough for an Apple Music library export.
 const MAX_IMPORT_BYTES: usize = 64 * 1024 * 1024;
 const MAX_SONGS: usize = 20_000;
-/// YouTube title lookups at once.
-const LOOKUPS: usize = 8;
 /// Songs tested at once by a playlist check.
 const CHECKS: usize = 2;
 const NAME_FALLBACK: &str = "Imported playlist";
@@ -37,6 +36,10 @@ pub fn router() -> Router<AppState> {
         .route(
             "/playlists/import",
             post(import).layer(DefaultBodyLimit::max(MAX_IMPORT_BYTES)),
+        )
+        .route(
+            "/playlists/youtube-key",
+            get(youtube_key_status).put(set_youtube_key),
         )
         .route("/playlists/check", get(check_status))
         .route("/playlists/{id}/check", post(start_check))
@@ -72,22 +75,44 @@ async fn import(
     State(state): State<AppState>,
     Json(body): Json<ImportBody>,
 ) -> ApiResult<(StatusCode, Json<ImportResult>)> {
-    let parsed = playlist_file::parse(&body.text, body.filename.as_deref())
-        .map_err(|e| ApiError::bad_request(e.to_string()))?;
+    let parsed = match youtube::playlist_id(&body.text) {
+        Some(list) => from_youtube(&state, &list).await?,
+        None => playlist_file::parse(&body.text, body.filename.as_deref())
+            .map_err(|e| ApiError::bad_request(e.to_string()))?,
+    };
     if parsed.lists.iter().map(|l| l.songs.len()).sum::<usize>() > MAX_SONGS {
         return Err(ApiError::bad_request(format!(
             "that's more than {MAX_SONGS} songs"
         )));
     }
-    let names: Vec<String> = parsed
-        .lists
-        .iter()
-        .map(|list| list_name(list, parsed.lists.len(), &body))
-        .collect();
-    let mut wanted = Vec::with_capacity(parsed.lists.len());
+    // A bare video id names no song, and finding out which would mean telling
+    // YouTube about each one, which DJINN doesn't do.
+    let mut skipped = parsed.skipped;
+    let mut lists = Vec::with_capacity(parsed.lists.len());
     for list in parsed.lists {
-        wanted.push(look_up_videos(list.songs).await);
+        let total = list.songs.len();
+        let songs: Vec<WantedSong> = list
+            .songs
+            .iter()
+            .filter(|s| s.video_id.is_none())
+            .map(|s| s.song.clone())
+            .collect();
+        skipped += total - songs.len();
+        if !songs.is_empty() {
+            lists.push((list, songs));
+        }
     }
+    if lists.is_empty() {
+        return Err(ApiError::bad_request(
+            "that file lists only video ids, not song names. Paste the playlist's YouTube link \
+             instead, or export it to a file with song names",
+        ));
+    }
+    let count = lists.len();
+    let (names, wanted): (Vec<String>, Vec<Vec<WantedSong>>) = lists
+        .into_iter()
+        .map(|(list, songs)| (list_name(&list, count, &body), songs))
+        .unzip();
     let index = library_index(&state.store).await?;
 
     let mut playlists = Vec::with_capacity(wanted.len());
@@ -115,10 +140,7 @@ async fn import(
     }
     Ok((
         StatusCode::CREATED,
-        Json(ImportResult {
-            playlists,
-            skipped: parsed.skipped,
-        }),
+        Json(ImportResult { playlists, skipped }),
     ))
 }
 
@@ -160,96 +182,55 @@ async fn library_index(store: &Store) -> anyhow::Result<SongIndex> {
     Ok(tokio::task::spawn_blocking(move || SongIndex::new(facts)).await?)
 }
 
-/// Google Takeout's playlists list only video ids, so YouTube is asked for
-/// each one's title through its public oEmbed address. One that can't be
-/// found stays as a flagged gap named after its id.
-async fn look_up_videos(songs: Vec<ImportedSong>) -> Vec<WantedSong> {
-    if songs.iter().all(|s| s.video_id.is_none()) {
-        return songs.into_iter().map(|s| s.song).collect();
-    }
-    let _ = rustls::crypto::ring::default_provider().install_default();
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(15))
-        .build();
-    let client = match client {
-        Ok(client) => Some(client),
-        Err(e) => {
-            tracing::warn!(error = %e, "can't look up YouTube titles");
-            None
-        }
+/// Reads a YouTube playlist, if an admin has added a key. Without one nothing
+/// is sent anywhere.
+async fn from_youtube(state: &AppState, list: &str) -> ApiResult<ParsedImport> {
+    let key = state.store.get_setting(youtube::API_KEY).await?;
+    let Some(key) = key.filter(|k| !k.is_empty()) else {
+        return Err(ApiError::bad_request(
+            "reading YouTube links needs an API key, which an admin can add under Import a \
+             playlist. Or export the playlist to a file",
+        ));
     };
-    stream::iter(songs)
-        .map(|song| {
-            let client = client.clone();
-            async move {
-                let Some(id) = song.video_id else {
-                    return song.song;
-                };
-                let found = match &client {
-                    Some(client) => video_song(client, &id).await,
-                    None => None,
-                };
-                found.unwrap_or_else(|| WantedSong {
-                    title: format!("YouTube video {id}"),
-                    ..song.song
-                })
-            }
-        })
-        .buffered(LOOKUPS)
-        .collect()
+    youtube::read_playlist(youtube::API, &key, list, MAX_SONGS)
         .await
+        .map_err(|e| ApiError::bad_request(e.to_string()))
 }
 
-async fn video_song(client: &reqwest::Client, id: &str) -> Option<WantedSong> {
-    let valid = (6..=32).contains(&id.len())
-        && id
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
-    if !valid {
-        return None;
-    }
-    let url = format!(
-        "https://www.youtube.com/oembed?format=json&url=https://www.youtube.com/watch?v={id}"
-    );
-    let response = client.get(url).send().await.ok()?;
-    if !response.status().is_success() {
-        return None;
-    }
-    let body: serde_json::Value = serde_json::from_str(&response.text().await.ok()?).ok()?;
-    Some(song_from_video(
-        body.get("title")?.as_str()?,
-        body.get("author_name").and_then(|a| a.as_str()),
-    ))
+#[derive(Serialize)]
+struct KeyStatus {
+    /// The key itself never leaves the server.
+    has_key: bool,
 }
 
-/// A video's title and channel as a song. YouTube Music's own uploads have
-/// channels like "Rihanna - Topic" and the plain song title; others are
-/// mostly "Artist - Title (Official Video)".
-fn song_from_video(title: &str, author: Option<&str>) -> WantedSong {
-    let topic = author.and_then(|a| a.strip_suffix(" - Topic"));
-    if let Some(artist) = topic {
-        return WantedSong {
-            title: title.trim().to_owned(),
-            artist: Some(artist.trim().to_owned()),
-            ..Default::default()
-        };
+async fn youtube_key_status(
+    _: AdminUser,
+    State(state): State<AppState>,
+) -> ApiResult<Json<KeyStatus>> {
+    let key = state.store.get_setting(youtube::API_KEY).await?;
+    Ok(Json(KeyStatus {
+        has_key: key.is_some_and(|k| !k.is_empty()),
+    }))
+}
+
+#[derive(Deserialize)]
+struct NewKey {
+    key: String,
+}
+
+/// Saves the key, or takes it away when empty.
+async fn set_youtube_key(
+    _: AdminUser,
+    State(state): State<AppState>,
+    Json(body): Json<NewKey>,
+) -> ApiResult<StatusCode> {
+    let key = body.key.trim();
+    let fits = key.len() <= 200 && key.chars().all(|c| c.is_ascii_graphic());
+    if !fits {
+        return Err(ApiError::bad_request("that doesn't look like an API key"));
     }
-    for dash in [" - ", " \u{2013} ", " \u{2014} "] {
-        if let Some((artist, song)) = title.split_once(dash) {
-            return WantedSong {
-                title: song.trim().to_owned(),
-                artist: Some(artist.trim().to_owned()),
-                either_way: true,
-                ..Default::default()
-            };
-        }
-    }
-    let artist = author.map(|a| a.strip_suffix("VEVO").unwrap_or(a).trim().to_owned());
-    WantedSong {
-        title: title.trim().to_owned(),
-        artist,
-        ..Default::default()
-    }
+    state.store.set_setting(youtube::API_KEY, key).await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// What to do about a song that failed. A file that's there gets marked,
@@ -447,23 +428,71 @@ mod tests {
         }
     }
 
-    #[test]
-    fn video_titles_become_songs() {
-        let topic = song_from_video("Numb", Some("Marshmello - Topic"));
-        assert_eq!(topic.title, "Numb");
-        assert_eq!(topic.artist.as_deref(), Some("Marshmello"));
-        assert!(!topic.either_way);
+    #[tokio::test]
+    async fn video_ids_are_never_sent_to_youtube() {
+        let state = AppState::for_tests().await;
+        let admin = session(&state, "admin", Role::Admin).await;
+        let import = |text: &str| serde_json::json!({ "text": text }).to_string();
+        let ids = import("Video ID,Playlist Video Creation Timestamp\ndQw4w9WgXcQ,2024\n");
+        let (status, _) = call(
+            &state,
+            Method::POST,
+            "/api/playlists/import",
+            Some(&ids),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(state.store.playlists().await.unwrap().is_empty());
+    }
 
-        let official = song_from_video(
-            "Rick Astley - Never Gonna Give You Up (Official Video)",
-            Some("Rick Astley"),
-        );
-        assert_eq!(official.artist.as_deref(), Some("Rick Astley"));
-        assert_eq!(official.title, "Never Gonna Give You Up (Official Video)");
-        assert!(official.either_way);
+    #[tokio::test]
+    async fn a_youtube_link_without_a_key_sends_nothing() {
+        let state = AppState::for_tests().await;
+        let sam = session(&state, "sam", Role::User).await;
+        let link = serde_json::json!({
+            "text": "https://music.youtube.com/playlist?list=PL123&si=abc",
+        })
+        .to_string();
+        let (status, _) = call(
+            &state,
+            Method::POST,
+            "/api/playlists/import",
+            Some(&link),
+            Some(&sam),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
 
-        let vevo = song_from_video("Umbrella", Some("RihannaVEVO"));
-        assert_eq!(vevo.artist.as_deref(), Some("Rihanna"));
+    #[tokio::test]
+    async fn only_admins_set_the_key_and_nobody_can_read_it_back() {
+        let state = AppState::for_tests().await;
+        let sam = session(&state, "sam", Role::User).await;
+        let admin = session(&state, "admin", Role::Admin).await;
+        let path = "/api/playlists/youtube-key";
+        let body = Some(r#"{"key":"SECRET-KEY"}"#);
+        let (status, _) = call(&state, Method::PUT, path, body, Some(&sam)).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(get_body(&state, path, &sam).await.0, StatusCode::FORBIDDEN);
+
+        let (status, _) = call(&state, Method::PUT, path, body, Some(&admin)).await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        let (_, seen) = get_body(&state, path, &admin).await;
+        assert_eq!(seen, r#"{"has_key":true}"#);
+        assert!(!seen.contains("SECRET"));
+
+        let (status, _) = call(
+            &state,
+            Method::PUT,
+            path,
+            Some(r#"{"key":""}"#),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        let (_, seen) = get_body(&state, path, &admin).await;
+        assert_eq!(seen, r#"{"has_key":false}"#);
     }
 
     #[tokio::test]

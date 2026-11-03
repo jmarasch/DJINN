@@ -5,7 +5,7 @@
 ### Playlists
 
 - **One set of playlists.** Your playlists are now the same in the jukebox app, on GO and in the Android app. They're private until you share them with everyone or with particular people. Anyone signed in can request from their playlists, and a new role permission lets chosen people start one as the auto mix. Guests don't have playlists. Existing party playlists are shared with everyone, so admins keep them. A song listed twice in a GO playlist now keeps only its first place.
-- **Import playlists** from Spotify, YouTube Music, Pandora, Apple Music and other services, using a file they export or a list of songs you paste. Only the list comes in, never the music. See [the guide](docs/guide/playlists-and-radio.md#importing-playlists).
+- **Import playlists** from Spotify, YouTube Music, Pandora, Apple Music and other services, using a file they export or a list of songs you paste. YouTube and YouTube Music playlist links work too, once an admin adds a YouTube API key: DJINN sends only the key and which playlist. Only the list comes in, never the music. See [the guide](docs/guide/playlists-and-radio.md#importing-playlists).
 - Playlists now **flag songs that can't play** and skip them: imported songs you don't have, files that are missing, and files that are damaged. **Check files** on a playlist looks for damage ahead of time. Songs fill back in by themselves once a library check finds them.
 
 ## 2026.11.02 (November 2, 2026)
