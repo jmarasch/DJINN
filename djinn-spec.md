@@ -360,7 +360,7 @@ The official native app for DJINN GO, in `android/` in this repository: songs as
 | Downloads | Albums, playlists and songs you choose | Only when you remove them | `downloads` |
 
 - Smart cache, downloads and system sounds all count as songs staying on the phone, so one role permission, `downloads`, covers them.
-- When access goes (permission removed, account disabled or deleted), the app deletes smart cache, downloads and the system sounds it saved the next time it reaches the server, and after 30 days without reaching it. The phone then uses its own default sound for anything set to one of them.
+- When a role loses the permission, the app deletes that server's smart cache, downloads and the system sounds it saved the next time it reaches the server. A disabled or deleted account can't sign in, so its songs stay locked. Other rules are under Kept songs below. The phone then uses its own default sound for anything set to one of them.
 
 **Quality**
 - Smart cache and downloads turn FLAC and WAV into MP3, 128 kbit/s VBR by default. Formats already compressed stay as they are.

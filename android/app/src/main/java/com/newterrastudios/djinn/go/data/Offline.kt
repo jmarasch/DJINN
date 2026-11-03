@@ -32,7 +32,6 @@ import java.io.IOException
 import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 
-/** Without reaching the server this long, songs kept here are deleted. */
 private const val DAY_MS = 24L * 60 * 60 * 1000
 
 const val KIND_DOWNLOAD = "download"

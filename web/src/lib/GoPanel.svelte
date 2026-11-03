@@ -149,7 +149,7 @@
         <input type="number" min="1" max="3650" bind:value={form.keep.away_days} onchange={save} disabled={busy} />
       </label>
     {/if}
-    <p class="small muted">If someone else signs in on a device, the songs kept for the last person are deleted. So are all of them if a role loses its download permission.</p>
+    <p class="small muted">These rules only apply to songs kept from this server. Songs belong to one account on one server, so moving to another server, or someone else signing in on the device, leaves them alone. If a role loses its download permission, its songs from this server are deleted.</p>
   </section>
 
   <SubmissionsPanel />
