@@ -148,14 +148,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // The first of each is the cost after the library changes; the rest of
     // the runs (the median) are what every other request costs.
     let deep = songs / 2;
-    time("artists page", || store.artists_page_filtered(true, 0, 50)).await;
-    time("artists page, hide collabs", || {
-        store.artists_page_filtered(false, 0, 50)
+    time("artists page", || {
+        store.artists_page_filtered(djinn_store::ArtistSort::Name, true, 0, 50)
     })
     .await;
-    time("artist jumps", || store.artist_jumps_filtered(true)).await;
+    time("artists page, hide collabs", || {
+        store.artists_page_filtered(djinn_store::ArtistSort::Name, false, 0, 50)
+    })
+    .await;
+    time("artist jumps", || {
+        store.artist_jumps_filtered(djinn_store::ArtistSort::Name, true)
+    })
+    .await;
     time("artist jumps, hide collabs", || {
-        store.artist_jumps_filtered(false)
+        store.artist_jumps_filtered(djinn_store::ArtistSort::Name, false)
     })
     .await;
     time("albums page, name", || {
