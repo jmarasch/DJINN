@@ -605,7 +605,7 @@ fn order_carries_on_past_a_song_that_stopped_working() {
 
 /// Gives a song a real but unplayable file, as a corrupted one would be.
 async fn break_file(h: &Harness, id: i64) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("djinn-broken-{}-{id}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("djinn-broken-{}", rand::random::<u64>()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("broken.flac");
     std::fs::write(&path, b"not audio").unwrap();
