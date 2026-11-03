@@ -10,7 +10,7 @@
   import type { GoKeepRules, GoStatus, SignIn } from './types'
 
   let status = $state<GoStatus | null>(null)
-  let form = $state({ keep: { sign_out: 'delete', away: 'lock', away_days: 30 } as GoKeepRules, server_name: '', discoverable: true, enabled: false, allow_remote: false, https_hostname: '', upnp: false, trusted_proxies: '', admin_two_step: false })
+  let form = $state({ encryption: true, keep: { sign_out: 'delete', away: 'lock', away_days: 30 } as GoKeepRules, server_name: '', discoverable: true, enabled: false, allow_remote: false, https_hostname: '', upnp: false, trusted_proxies: '', admin_two_step: false })
   let signIns = $state<SignIn[]>([])
   let busy = $state(false)
   let timer: ReturnType<typeof setInterval> | undefined
@@ -44,7 +44,7 @@
   }
 
   function formFrom(s: GoStatus) {
-    return { keep: { ...s.keep }, server_name: s.server_name, discoverable: s.discoverable, enabled: s.enabled, allow_remote: s.allow_remote, https_hostname: s.https_hostname, upnp: s.upnp, trusted_proxies: s.trusted_proxies, admin_two_step: s.admin_two_step }
+    return { encryption: s.encryption, keep: { ...s.keep }, server_name: s.server_name, discoverable: s.discoverable, enabled: s.enabled, allow_remote: s.allow_remote, https_hostname: s.https_hostname, upnp: s.upnp, trusted_proxies: s.trusted_proxies, admin_two_step: s.admin_two_step }
   }
 
   async function save() {
@@ -158,6 +158,16 @@
 
   <section class="card">
     <h2>Safety</h2>
+    <label class="switch big">
+      <input type="checkbox" bind:checked={form.encryption} onchange={save} disabled={busy} />
+      <span>Encrypt connections
+        <span class="small muted block">On by default, with nothing to set up: DJINN makes its own certificate. The Android app always uses it and checks it's still the same one. Browsers can use it too by opening an address with <code>https://</code>, but they warn that it isn't from a known authority. Plain addresses keep working, for cast devices and phone apps.</span>
+      </span>
+    </label>
+    {#if status.security_code}
+      <p class="small">Security code: <code>{status.security_code}</code></p>
+      <p class="small muted">The app shows this code too when connecting. If they match, it's talking to this server. Scanning the QR code in GO checks this for you.</p>
+    {/if}
     <label class="switch big">
       <input type="checkbox" bind:checked={form.allow_remote} onchange={save} disabled={busy} />
       <span>Allow connections from outside the home network

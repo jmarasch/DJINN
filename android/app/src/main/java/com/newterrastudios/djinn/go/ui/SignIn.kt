@@ -14,7 +14,17 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import com.newterrastudios.djinn.go.data.FoundServer
+import com.newterrastudios.djinn.go.data.OfflineStore
+import com.newterrastudios.djinn.go.data.Probed
+import com.newterrastudios.djinn.go.data.SavedServer
 import com.newterrastudios.djinn.go.data.ServerFinder
+import com.newterrastudios.djinn.go.data.pinFromQr
+import com.newterrastudios.djinn.go.data.securityCode
 import kotlinx.coroutines.delay
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -84,20 +94,28 @@ private const val LOOKING_MS = 8_000L
 fun ConnectScreen(
     account: Account,
     api: GoApi,
+    offline: OfflineStore,
     askLocalNetwork: suspend () -> Boolean,
     askCamera: suspend () -> Boolean,
-    onConnected: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
-    var address by rememberSaveable { mutableStateOf(account.server ?: "") }
+    var address by rememberSaveable { mutableStateOf("") }
     var busy by rememberSaveable { mutableStateOf(false) }
     var problem by rememberSaveable { mutableStateOf<String?>(null) }
-    var warnAbout by rememberSaveable { mutableStateOf<String?>(null) }
+    /** Reached, but only without encryption. */
+    var unencrypted by remember { mutableStateOf<Probed?>(null) }
+    /** A known server presenting a different certificate. */
+    var changed by remember { mutableStateOf<Pair<SavedServer, Probed>?>(null) }
+    var removing by remember { mutableStateOf<SavedServer?>(null) }
+    val saved by account.servers.collectAsState()
     var scanning by rememberSaveable { mutableStateOf(false) }
     var lookedLong by rememberSaveable { mutableStateOf(false) }
     val context = LocalContext.current
     val finder = remember { ServerFinder(context) }
-    val found by finder.servers.collectAsState()
+    val heard by finder.servers.collectAsState()
+    // A known server may have moved; its certificate proves it's the same one.
+    LaunchedEffect(heard) { heard.forEach { account.moved(it.id, it.address) } }
+    val found = heard.filter { server -> saved.none { it.id == server.id } }
     LaunchedEffect(Unit) {
         // Newer Android only lets an app hear the network with permission.
         askLocalNetwork()
@@ -107,18 +125,39 @@ fun ConnectScreen(
     }
     DisposableEffect(Unit) { onDispose { finder.stop() } }
 
-    fun connect(server: String) {
+    fun accept(probed: Probed, before: SavedServer?) {
+        val sameServer = before?.id == null || before.id == probed.hello?.id
+        account.use(
+            SavedServer(
+                address = probed.address,
+                id = probed.hello?.id ?: before?.id,
+                name = probed.hello?.name ?: before?.name,
+                // A sign-in only goes back to the server it came from.
+                token = before?.token.takeIf { sameServer },
+                accountId = before?.accountId.takeIf { sameServer },
+                pin = probed.pin,
+            ),
+        )
+    }
+
+    /** `expected` is the certificate a QR code or announcement said to look for. */
+    fun connect(server: String, expected: String?, fromQr: Boolean) {
         busy = true
         problem = null
         scope.launch {
             val allowed = askLocalNetwork()
-            account.setServer(server)
             try {
-                api.check()
-                account.serverName = api.hello()?.name
-                onConnected()
+                val probed = api.probe(server)
+                val before = account.saved(probed.hello?.id, server)
+                when {
+                    expected != null && probed.pin != expected -> problem =
+                        (if (fromQr) "That isn't the server the QR code is for" else "That server isn't what it announced") +
+                            ": its certificate is different. Someone on this network may be in the way."
+                    before?.pin != null && probed.pin != before.pin -> changed = before to probed
+                    !probed.encrypted -> unencrypted = probed
+                    else -> accept(probed, before)
+                }
             } catch (e: IOException) {
-                account.forgetServer()
                 problem = explain(e)
                 if (!allowed && e !is ApiException) {
                     problem += " A server at home also needs the Nearby devices permission, " +
@@ -130,11 +169,11 @@ fun ConnectScreen(
         }
     }
 
-    fun use(server: String?) {
-        when {
-            server == null -> problem = "That doesn't look like a server address."
-            !safeToSignIn(server) -> warnAbout = server
-            else -> connect(server)
+    fun use(server: String?, expected: String? = null, fromQr: Boolean = false) {
+        if (server == null) {
+            problem = "That doesn't look like a server address."
+        } else {
+            connect(server, expected, fromQr)
         }
     }
 
@@ -142,8 +181,8 @@ fun ConnectScreen(
         ScanScreen(
             onFound = { text ->
                 scanning = false
-                address = text
-                use(serverAddress(text))
+                address = serverAddress(text) ?: text
+                use(serverAddress(text), pinFromQr(text), fromQr = true)
             },
             onCancel = { scanning = false },
         )
@@ -154,12 +193,40 @@ fun ConnectScreen(
         "DJINN GO",
         "Android may ask about nearby devices: that's how it lets an app find and reach a computer on your network.",
     ) {
+        if (saved.isNotEmpty()) {
+            Text("Your servers", style = MaterialTheme.typography.titleMedium)
+            saved.forEach { server ->
+                Card(
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable(enabled = !busy) { account.use(server) },
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(
+                            Modifier
+                                .weight(1f)
+                                .padding(16.dp),
+                        ) {
+                            Text(server.name ?: server.address, style = MaterialTheme.typography.titleMedium)
+                            Text(
+                                server.address + if (server.token != null) "" else " (sign in needed)",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        IconButton(onClick = { removing = server }) {
+                            Icon(Icons.Default.Close, "Remove ${server.name ?: server.address}")
+                        }
+                    }
+                }
+            }
+        }
         Text("On this network", style = MaterialTheme.typography.titleMedium)
-        found.forEach { server ->
+        found.forEach { server: FoundServer ->
             Card(
                 Modifier
                     .fillMaxWidth()
-                    .clickable(enabled = !busy) { use(server.address) },
+                    .clickable(enabled = !busy) { use(server.address, server.pin) },
             ) {
                 Column(Modifier.padding(16.dp)) {
                     Text(server.name, style = MaterialTheme.typography.titleMedium)
@@ -225,23 +292,68 @@ fun ConnectScreen(
         ) { Text("Scan the QR code") }
     }
 
-    warnAbout?.let { server ->
+    unencrypted?.let { probed ->
         AlertDialog(
-            onDismissRequest = { warnAbout = null },
+            onDismissRequest = { unencrypted = null },
             title = { Text("Not encrypted") },
             text = {
                 Text(
-                    "$server is outside your home network and doesn't use HTTPS. " +
-                        "Your password and music would cross the internet where others could read them.",
+                    if (safeToSignIn(probed.address)) {
+                        "This server isn't offering encryption, so others on this network could see your password " +
+                            "and what you play. Its admin can turn it on under Admin > GO."
+                    } else {
+                        "${probed.address} is outside your home network and isn't offering encryption. " +
+                            "Your password and music would cross the internet where others could read them."
+                    },
                 )
             },
             confirmButton = {
                 TextButton(onClick = {
-                    warnAbout = null
-                    connect(server)
+                    unencrypted = null
+                    accept(probed, account.saved(probed.hello?.id, probed.address))
                 }) { Text("Connect anyway") }
             },
-            dismissButton = { TextButton(onClick = { warnAbout = null }) { Text("Go back") } },
+            dismissButton = { TextButton(onClick = { unencrypted = null }) { Text("Go back") } },
+        )
+    }
+
+    changed?.let { (before, probed) ->
+        AlertDialog(
+            onDismissRequest = { changed = null },
+            title = { Text("This server's certificate changed") },
+            text = {
+                Text(
+                    "${before.name ?: before.address} is presenting a different certificate from last time. " +
+                        "That happens if it was set up again, but it's also what someone in the middle would look like. " +
+                        "Check that Admin > GO shows this code: " + (probed.pin?.let(::securityCode) ?: "none, it's not encrypted"),
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    changed = null
+                    // A password is needed again, so it only goes to the server just checked.
+                    accept(probed, before.copy(token = null, accountId = null))
+                }) { Text("It matches: trust it") }
+            },
+            dismissButton = { TextButton(onClick = { changed = null }) { Text("Go back") } },
+        )
+    }
+
+    removing?.let { server ->
+        AlertDialog(
+            onDismissRequest = { removing = null },
+            title = { Text("Remove ${server.name ?: "this server"}?") },
+            text = { Text("This forgets the server and deletes the songs and system sounds kept on this phone for it.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    removing = null
+                    scope.launch {
+                        offline.deleteForServer(server)
+                        account.forget(server)
+                    }
+                }) { Text("Remove and delete") }
+            },
+            dismissButton = { TextButton(onClick = { removing = null }) { Text("Keep it") } },
         )
     }
 }
@@ -270,7 +382,15 @@ fun SignInScreen(account: Account, api: GoApi, onChangeServer: () -> Unit) {
                 }
                 val token = reply.token
                 when {
-                    token != null -> account.signIn(token)
+                    token != null -> {
+                        // Songs and settings are per account, so find out whose this is first.
+                        account.holdToken(token)
+                        try {
+                            account.signIn(token, api.me().id)
+                        } finally {
+                            account.holdToken(null)
+                        }
+                    }
                     reply.ticket != null -> {
                         ticket = reply.ticket
                         password = ""
@@ -308,7 +428,11 @@ fun SignInScreen(account: Account, api: GoApi, onChangeServer: () -> Unit) {
 
     Form(
         account.serverName?.let { "Sign in to $it" } ?: "Sign in",
-        account.server,
+        account.server + "\n" + when {
+            account.pin != null -> "Encrypted. Security code ${account.pin?.let(::securityCode)}, which Admin > GO shows too."
+            account.server?.startsWith("https://") == true -> "Encrypted."
+            else -> "Not encrypted: others on this network could see your password."
+        },
     ) {
         OutlinedTextField(
             value = username,

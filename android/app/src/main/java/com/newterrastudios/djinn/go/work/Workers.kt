@@ -22,6 +22,7 @@ import com.newterrastudios.djinn.go.DjinnApp
 import com.newterrastudios.djinn.go.R
 import com.newterrastudios.djinn.go.data.ApiException
 import com.newterrastudios.djinn.go.data.KIND_DOWNLOAD
+import com.newterrastudios.djinn.go.data.scopeOf
 import com.newterrastudios.djinn.go.data.KIND_SMART
 import com.newterrastudios.djinn.go.data.Track
 import kotlinx.serialization.encodeToString
@@ -65,6 +66,12 @@ class DownloadWorker(context: Context, params: WorkerParameters) : CoroutineWork
 
     override suspend fun doWork(): Result {
         val track = Json.decodeFromString<Track>(inputData.getString(TRACK) ?: return Result.failure())
+        // Asked for on one server: song numbers mean something else on another, so it waits.
+        val forScope = inputData.getString(SCOPE)
+        if (forScope != app.account.scope) {
+            val stillKnown = app.account.servers.value.any { scopeOf(it) == forScope }
+            return if (stillKnown) Result.retry() else Result.failure()
+        }
         runCatching { setForeground(getForegroundInfo()) }
         return try {
             app.offline.fetch(track, KIND_DOWNLOAD)
@@ -80,23 +87,26 @@ class DownloadWorker(context: Context, params: WorkerParameters) : CoroutineWork
     companion object {
         private const val TRACK = "track"
         private const val TITLE = "title"
+        private const val SCOPE = "scope"
 
         fun enqueue(context: Context, tracks: List<Track>, wifiOnly: Boolean) {
             val network = if (wifiOnly) NetworkType.UNMETERED else NetworkType.CONNECTED
             val constraints = Constraints.Builder().setRequiredNetworkType(network).build()
             val manager = WorkManager.getInstance(context)
+            val scope = (context.applicationContext as DjinnApp).account.scope
             for (track in tracks) {
                 val request = OneTimeWorkRequestBuilder<DownloadWorker>()
                     .setInputData(
                         Data.Builder()
                             .putString(TRACK, Json.encodeToString(track))
                             .putString(TITLE, track.title)
+                            .putString(SCOPE, scope)
                             .build(),
                     )
                     .setConstraints(constraints)
                     .addTag(DOWNLOAD_TAG)
                     .build()
-                manager.enqueueUniqueWork("download-${track.id}", ExistingWorkPolicy.KEEP, request)
+                manager.enqueueUniqueWork("download-$scope-${track.id}", ExistingWorkPolicy.KEEP, request)
             }
         }
     }
@@ -111,8 +121,7 @@ class SmartCacheWorker(context: Context, params: WorkerParameters) : CoroutineWo
         applicationContext.downloadNotice("Keeping your favorites on this phone")
 
     override suspend fun doWork(): Result {
-        val server = app.account.server ?: return Result.success()
-        if (app.account.token == null) return Result.success()
+        val server = app.account.scope ?: return Result.success()
         app.offline.checkAccess()
         if (!app.prefs.smartCache) {
             removeSmart(server, keep = emptySet())

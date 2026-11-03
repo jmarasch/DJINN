@@ -1,10 +1,6 @@
 package com.newterrastudios.djinn.go.data
 
-import android.content.Context
-import androidx.core.content.edit
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -15,6 +11,8 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
+import javax.net.ssl.SSLContext
+import javax.net.ssl.SSLPeerUnverifiedException
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 
@@ -24,44 +22,15 @@ class ApiException(val status: Int, message: String) : IOException(message)
 @Serializable
 private data class ErrorBody(val error: String? = null)
 
-/** Which server and account this phone uses. Private to the app; never backed up. */
-class Account(context: Context) {
-    private val prefs = context.getSharedPreferences("account", Context.MODE_PRIVATE)
-    private val _signedIn = MutableStateFlow(prefs.getString(TOKEN, null) != null)
-
-    val signedIn: StateFlow<Boolean> = _signedIn
-
-    val server: String? get() = prefs.getString(SERVER, null)
-    val token: String? get() = prefs.getString(TOKEN, null)
-
-    /** What the server calls itself, when it has said. */
-    var serverName: String?
-        get() = prefs.getString(SERVER_NAME, null)
-        set(value) = prefs.edit { putString(SERVER_NAME, value) }
-
-    fun setServer(address: String) = prefs.edit { putString(SERVER, address) }
-
-    fun forgetServer() = prefs.edit {
-        remove(SERVER)
-        remove(SERVER_NAME)
-    }
-
-    fun signIn(token: String) {
-        prefs.edit { putString(TOKEN, token) }
-        _signedIn.value = true
-    }
-
-    fun signOut() {
-        prefs.edit { remove(TOKEN) }
-        _signedIn.value = false
-    }
-
-    private companion object {
-        const val SERVER = "server"
-        const val SERVER_NAME = "server_name"
-        const val TOKEN = "token"
-    }
-}
+/** What a first look at a server found. */
+data class Probed(
+    /** Where to reach it: encrypted when it can be. */
+    val address: String,
+    /** The certificate it presented, unless a real authority vouches for it. */
+    val pin: String?,
+    val hello: ServerHello?,
+    val encrypted: Boolean,
+)
 
 /** DJINN GO's API on the server this phone is connected to. */
 class GoApi(private val account: Account) {
@@ -71,15 +40,37 @@ class GoApi(private val account: Account) {
     }
     private val jsonType = "application/json".toMediaType()
 
+    private val pins = { account.servers.value.mapNotNull { it.pin }.toSet() }
+    private val trust = PinnedTrust(pins)
+
     /** Shared with the player and images, so they carry the sign-in too. */
     val http: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
+        .sslSocketFactory(
+            SSLContext.getInstance("TLS").apply { init(null, arrayOf(trust), null) }.socketFactory,
+            trust,
+        )
+        .hostnameVerifier(PinnedHostnames(pins))
+        // After the connection opens and before anything is sent, sign-ins included.
+        .addNetworkInterceptor(Interceptor { chain ->
+            val url = chain.request().url
+            val expected = serverAt(account.servers.value, url.host, url.port)?.pin
+            if (expected != null) {
+                val presented = chain.connection()?.handshake()?.peerCertificates?.firstOrNull()
+                if (presented == null || fingerprint(presented) != expected) {
+                    throw SSLPeerUnverifiedException("${url.host} isn't presenting the certificate it should")
+                }
+            }
+            chain.proceed(chain.request())
+        })
         .addInterceptor(Interceptor { chain ->
             val request = chain.request()
             val token = account.token
             // The token only ever goes to the server it came from.
-            val ours = account.server?.toHttpUrlOrNull()?.host == request.url.host
+            val ours = account.server?.toHttpUrlOrNull()?.let {
+                it.host == request.url.host && it.port == request.url.port
+            } == true
             val named = request.newBuilder().header("User-Agent", "DJINN GO for Android")
             if (token != null && ours) named.header("Authorization", "Bearer $token")
             chain.proceed(named.build())
@@ -119,6 +110,45 @@ class GoApi(private val account: Account) {
     }
 
     suspend fun check() = withContext(Dispatchers.IO) { send("GET", "/api/auth/mode"); Unit }
+
+    /**
+     * Looks at a server before trusting it, sending nothing private. Tries, in
+     * order: HTTPS with a certificate an authority vouches for, HTTPS with the
+     * server's own certificate, and plain HTTP. A failed connection throws.
+     */
+    suspend fun probe(typed: String): Probed = withContext(Dispatchers.IO) {
+        fun hello(text: String) = runCatching { json.decodeFromString<ServerHello>(text) }.getOrNull()
+        fun get(client: OkHttpClient, base: String) =
+            client.newCall(Request.Builder().url("$base/api/go/hello").build()).execute()
+
+        val quick = OkHttpClient.Builder().connectTimeout(6, TimeUnit.SECONDS).readTimeout(6, TimeUnit.SECONDS).build()
+        if (typed.startsWith("https://")) {
+            try {
+                get(quick, typed).use { return@withContext Probed(typed, null, hello(it.body.string()), true) }
+            } catch (_: IOException) {
+                // No authority vouches for it; it may have a certificate of its own.
+            }
+        }
+        val secure = withScheme(typed, "https") ?: throw IOException("Not an address")
+        try {
+            val reading = quick.newBuilder()
+                .sslSocketFactory(
+                    SSLContext.getInstance("TLS").apply { init(null, arrayOf(ReadAnyCertificate), null) }.socketFactory,
+                    ReadAnyCertificate,
+                )
+                .hostnameVerifier { _, _ -> true }
+                .build()
+            get(reading, secure).use { response ->
+                val presented = response.handshake?.peerCertificates?.firstOrNull()
+                    ?: throw IOException("No certificate")
+                return@withContext Probed(secure, fingerprint(presented), hello(response.body.string()), true)
+            }
+        } catch (e: IOException) {
+            if (typed.startsWith("https://")) throw e
+        }
+        val plain = withScheme(typed, "http") ?: throw IOException("Not an address")
+        get(quick, plain).use { Probed(plain, null, hello(it.body.string()), false) }
+    }
 
     suspend fun login(username: String, password: String): SignInReply = withContext(Dispatchers.IO) {
         json.decodeFromString(send("POST", "/api/auth/login", json.encodeToString(Login(username, password))))

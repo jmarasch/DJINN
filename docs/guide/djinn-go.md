@@ -110,6 +110,18 @@ scan the QR code above or type the address from Admin > GO. Anyone on a network
 can give a computer any name, so only sign in to a server you recognize.
 Android may ask about **nearby devices**; that's how newer Android lets an app
 reach a computer on your home network. 
+**Encryption** is on unless an admin turns it off (Admin > GO > **Safety**), with
+nothing to set up: the server makes its own certificate. The app uses it for
+everything, remembers it, and warns if it ever changes. To check you've reached
+the right server the first time, compare the security code in the app with Admin >
+GO, or scan the QR code, which checks for you. Browsers can use it too by opening
+an address with `https://`, but they warn that no authority vouches for it, so
+they keep working with `http://` as well. Cast devices still get songs
+unencrypted, since they won't accept this kind of certificate, and so do other
+phone apps unless they're told to use `https://` and accept it. If the server is
+moved to another computer, copy the `tls` folder beside its database, or the app
+will warn that the certificate changed.
+
 **What happens to kept songs** is the admin's choice, under Admin > GO > **Songs
 kept on devices**:
 
@@ -117,8 +129,13 @@ kept on devices**:
 - **Too long without reaching the server** (30 days unless changed) locks them
   until the phone reconnects, deletes them, or does nothing. The app learns the
   rules each time it reaches the server, and follows them while it's away.
-- **Someone else signing in** on the phone deletes the last person's songs, and
-  so does a role losing the download permission.
+- **A role losing the download permission** deletes them, for that server only.
+
+The phone can use several servers, each with its own sign-in. **Settings > Other
+servers** moves between them without signing out. Songs belong to one account on
+one server, so being on another server, or someone else signing in, leaves them
+alone: time away is counted for each server, and they're there when you come
+back. Removing a server from that list deletes what was kept for it.
 
 A locked song stays on the phone but won't play. Locking is the app refusing to
 play it, not encryption. If a phone has been away long enough for its sign-in to

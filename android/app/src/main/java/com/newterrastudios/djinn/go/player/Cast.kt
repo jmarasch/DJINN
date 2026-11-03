@@ -149,7 +149,8 @@ class CastState(private val context: Context, private val player: PlayerState) {
             putString(CastMetadata.KEY_ARTIST, item.mediaMetadata.artist?.toString() ?: "")
             putString(CastMetadata.KEY_ALBUM_TITLE, item.mediaMetadata.albumTitle?.toString() ?: "")
         }
-        return MediaInfo.Builder(app.account.server + links.url)
+        // Cast devices fetch it themselves, and won't accept the server's own certificate.
+        return MediaInfo.Builder(app.account.plainAddress + links.url)
             .setStreamType(MediaInfo.STREAM_TYPE_BUFFERED)
             .setContentType(links.mime.substringBefore(';'))
             .setMetadata(meta)

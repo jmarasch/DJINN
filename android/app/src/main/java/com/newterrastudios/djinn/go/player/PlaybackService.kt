@@ -83,6 +83,13 @@ class PlaybackService : MediaLibraryService() {
 
     override fun onCreate() {
         super.onCreate()
+        // The same song number is another song on another server.
+        scope.launch {
+            app.account.current.collect {
+                links.clear()
+                searches.clear()
+            }
+        }
         val network = OkHttpDataSource.Factory(app.api.http)
         val resolving = ResolvingDataSource.Factory(network) { spec ->
             if (spec.uri.scheme != TRACK_SCHEME) return@Factory spec
@@ -255,7 +262,7 @@ class PlaybackService : MediaLibraryService() {
             lastTick = if (player.isPlaying) SystemClock.elapsedRealtime() else 0L
             if (id == null || ms <= 0) return
             val at = System.currentTimeMillis()
-            val server = app.account.server
+            val server = app.account.scope
             reports.launch {
                 try {
                     app.api.reportPlay(id, ms, at)
@@ -379,7 +386,7 @@ class PlaybackService : MediaLibraryService() {
 
     /** Songs for spoken or typed words, or from what's kept without a server. */
     private suspend fun spoken(query: String): List<Track> {
-        val server = app.account.server ?: return emptyList()
+        val server = app.account.scope ?: return emptyList()
         return try {
             val found = app.api.search(query)
             found.tracks.ifEmpty { found.described?.tracks.orEmpty() }
@@ -401,7 +408,7 @@ class PlaybackService : MediaLibraryService() {
 
     private suspend fun children(parent: String): List<MediaItem> {
         val api = app.api
-        val server = app.account.server ?: return emptyList()
+        val server = app.account.scope ?: return emptyList()
         return try {
             when {
                 parent == ROOT -> listOf(
@@ -440,7 +447,7 @@ class PlaybackService : MediaLibraryService() {
         return item.buildUpon()
             .setUri("$TRACK_SCHEME://track/${item.mediaId}".toUri())
             // Per server: the same id on another server is another song.
-            .setCustomCacheKey("${app.account.server}|${item.mediaId}")
+            .setCustomCacheKey("${app.account.scope}|${item.mediaId}")
             .build()
     }
 

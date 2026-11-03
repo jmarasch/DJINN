@@ -78,6 +78,8 @@ async fn server_id(store: &Store) -> anyhow::Result<String> {
 pub struct Hello {
     name: String,
     id: String,
+    /// Encrypted connections are offered on this port.
+    encrypted: bool,
 }
 
 /// Who this is, before anyone has signed in: the app shows the name above the
@@ -86,6 +88,7 @@ pub async fn hello(State(state): State<AppState>) -> ApiResult<Json<Hello>> {
     Ok(Json(Hello {
         name: server_name(&state.store).await?,
         id: server_id(&state.store).await?,
+        encrypted: state.go.encryption.is_on(),
     }))
 }
 
@@ -110,17 +113,25 @@ pub struct Announcer {
     fullname: String,
     /// What's being announced, to tell when it needs doing again.
     pub name: String,
+    pub fingerprint: Option<String>,
 }
 
 impl Announcer {
-    pub async fn start(store: &Store, port: u16) -> anyhow::Result<Self> {
+    pub async fn start(
+        store: &Store,
+        port: u16,
+        fingerprint: Option<String>,
+    ) -> anyhow::Result<Self> {
         let name = server_name(store).await?;
         let id = server_id(store).await?;
         let host = format!("{}.local.", host_label(&computer_name()));
-        let properties = HashMap::from([
+        let mut properties = HashMap::from([
             ("name".to_owned(), name.clone()),
             ("id".to_owned(), id.clone()),
         ]);
+        if let Some(fingerprint) = &fingerprint {
+            properties.insert("fp".to_owned(), fingerprint.clone());
+        }
         // Named by id, since two servers may share a name and names can have
         // characters that don't survive every phone's mDNS.
         let info = ServiceInfo::new(SERVICE, &format!("djinn-{id}"), &host, (), port, properties)?
@@ -132,6 +143,7 @@ impl Announcer {
             daemon,
             fullname,
             name,
+            fingerprint,
         })
     }
 
@@ -180,7 +192,7 @@ mod tests {
             .set_setting(SERVER_NAME, "Test ♫ server")
             .await
             .unwrap();
-        let announcer = Announcer::start(&store, 18067).await.unwrap();
+        let announcer = Announcer::start(&store, 18067, None).await.unwrap();
         let listener = ServiceDaemon::new().unwrap();
         let heard = listener.browse(SERVICE).unwrap();
         let found = tokio::task::spawn_blocking(move || {

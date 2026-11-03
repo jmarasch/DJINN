@@ -194,7 +194,10 @@ abstract class OfflineDb : RoomDatabase() {
 }
 
 /** The choices on the Settings screen, kept per device. */
-class Prefs(context: Context) {
+class Prefs(context: Context, private val scope: () -> String = { "" }) {
+    /** A setting belonging to one account on one server, not to the phone. */
+    private fun own(name: String) = "$name@${scope()}"
+
     private val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
 
     /** Bit rate to convert lossless songs to; 0 keeps full quality. */
@@ -211,15 +214,15 @@ class Prefs(context: Context) {
         get() = prefs.getBoolean("wifi_only", true)
         set(value) = prefs.edit { putBoolean("wifi_only", value) }
     var lastContact: Long
-        get() = prefs.getLong("last_contact", 0)
-        set(value) = prefs.edit { putLong("last_contact", value) }
+        get() = prefs.getLong(own("last_contact"), 0)
+        set(value) = prefs.edit { putLong(own("last_contact"), value) }
     var likedIds: Set<Long>
-        get() = prefs.getStringSet("liked", emptySet()).orEmpty().mapNotNull { it.toLongOrNull() }.toSet()
-        set(value) = prefs.edit { putStringSet("liked", value.map { it.toString() }.toSet()) }
+        get() = prefs.getStringSet(own("liked"), emptySet()).orEmpty().mapNotNull { it.toLongOrNull() }.toSet()
+        set(value) = prefs.edit { putStringSet(own("liked"), value.map { it.toString() }.toSet()) }
     /** The playlists as last seen, for adding to while offline. */
     var playlists: String?
-        get() = prefs.getString("playlists", null)
-        set(value) = prefs.edit { putString("playlists", value) }
+        get() = prefs.getString(own("playlists"), null)
+        set(value) = prefs.edit { putString(own("playlists"), value) }
     var visuals: Int
         get() = prefs.getInt("visuals", 0)
         set(value) = prefs.edit { putInt("visuals", value) }
@@ -229,18 +232,14 @@ class Prefs(context: Context) {
         set(value) = prefs.edit { putBoolean("visuals_auto", value) }
     /** The admin's rules for kept songs, as last heard. */
     var keepRules: KeepRules
-        get() = prefs.getString("keep_rules", null)
+        get() = prefs.getString(own("keep_rules"), null)
             ?.let { runCatching { lookJson.decodeFromString<KeepRules>(it) }.getOrNull() }
             ?: KeepRules()
-        set(value) = prefs.edit { putString("keep_rules", lookJson.encodeToString(value)) }
+        set(value) = prefs.edit { putString(own("keep_rules"), lookJson.encodeToString(value)) }
     /** Too long away from the server: kept songs wait until it's reached again. */
     var awayLocked: Boolean
-        get() = prefs.getBoolean("away_locked", false)
-        set(value) = prefs.edit { putBoolean("away_locked", value) }
-    /** Whose songs these are: the server and the account. */
-    var keptFor: String?
-        get() = prefs.getString("kept_for", null)
-        set(value) = prefs.edit { putString("kept_for", value) }
+        get() = prefs.getBoolean(own("away_locked"), false)
+        set(value) = prefs.edit { putBoolean(own("away_locked"), value) }
     /** Now Playing shows visuals rather than the cover. */
     var visualsOn: Boolean
         get() = prefs.getBoolean("visuals_on", false)
@@ -304,9 +303,6 @@ fun whenAway(lastContact: Long, now: Long, rules: KeepRules): WhenAway {
     }
 }
 
-/** Whether kept songs belong to someone else: a different server or account. */
-fun keptForSomeoneElse(keptFor: String?, now: String): Boolean = keptFor != null && keptFor != now
-
 /** Keeps songs on this phone, and tells the server what happened while it couldn't. */
 class OfflineStore(
     private val context: Context,
@@ -338,7 +334,7 @@ class OfflineStore(
     /** The kept copy, if there is one, it may play and its file is really there. */
     suspend fun local(id: Long): OfflineSong? {
         if (isLocked()) return null
-        val server = account.server ?: return null
+        val server = account.scope ?: return null
         return dao.song(server, id)?.takeIf { File(it.path).exists() }
     }
 
@@ -347,7 +343,8 @@ class OfflineStore(
      * download if smart cache asks for it again. Blocks until it's on the phone.
      */
     suspend fun fetch(track: Track, kind: String): OfflineSong = withContext(Dispatchers.IO) {
-        val server = account.server ?: throw ApiException(0, "No server chosen")
+        val server = account.scope ?: throw ApiException(0, "No server chosen")
+        val address = account.server ?: throw ApiException(0, "No server chosen")
         val existing = dao.song(server, track.id)?.takeIf { File(it.path).exists() }
         val link = api.offlineLink(track.id, prefs.kbps)
         val effectiveKind = if (existing?.kind == KIND_DOWNLOAD) KIND_DOWNLOAD else kind
@@ -357,7 +354,7 @@ class OfflineStore(
         val extension = MimeTypeMap.getSingleton().getExtensionFromMimeType(link.mime.substringBefore(';')) ?: "audio"
         val file = File(folder(server), "${track.id}.$extension")
         val part = File(file.path + ".part")
-        val request = Request.Builder().url(server + link.url).build()
+        val request = Request.Builder().url(address + link.url).build()
         slow.newCall(request).execute().use { response ->
             if (!response.isSuccessful) throw ApiException(response.code, "The server answered ${response.code}")
             part.outputStream().use { out -> response.body.byteStream().copyTo(out) }
@@ -388,33 +385,56 @@ class OfflineStore(
     }
 
     suspend fun remove(id: Long) {
-        val server = account.server ?: return
+        val server = account.scope ?: return
         dao.song(server, id)?.let { File(it.path).delete() }
         dao.deleteSong(server, id)
     }
 
-    /** Everything kept, gone: access ended, or nothing heard for too long. */
-    suspend fun deleteEverything() = withContext(Dispatchers.IO) {
-        dao.everySong().forEach {
+    /** Deletes what's kept for the account in use. Other servers and accounts aren't touched. */
+    suspend fun deleteEverything() {
+        val scope = account.scope ?: return
+        deleteWhere { it == scope }
+    }
+
+    /** Deletes what's kept for every account on a server, when it's forgotten. */
+    suspend fun deleteForServer(server: SavedServer) {
+        val scope = serverScope(server)
+        deleteWhere { it.startsWith(scope) }
+    }
+
+    private suspend fun deleteWhere(belongs: (String) -> Boolean) = withContext(Dispatchers.IO) {
+        dao.everySong().filter { belongs(it.server) }.forEach {
             File(it.path).delete()
             dao.deleteSong(it.server, it.id)
         }
-        dao.everySound().forEach { removeSound(it) }
+        dao.everySound().filter { belongs(it.server) }.forEach { removeSound(it) }
+    }
+
+    /** Clears out what's kept for other servers and accounts, when someone asks. */
+    suspend fun deleteElsewhere() {
+        val scope = account.scope ?: return
+        deleteWhere { it != scope }
+    }
+
+    /** What's kept for other servers and accounts. Being elsewhere leaves it alone. */
+    suspend fun keptElsewhere(): List<OfflineSong> = withContext(Dispatchers.IO) {
+        val scope = account.scope
+        dao.everySong().filter { it.server != scope }
     }
 
     /**
-     * At each contact: whose songs are these, may they stay, and what are the
-     * rules now? Without contact: has it been too long, by the rules last heard?
+     * At each contact with the server in use: may its songs stay, and what are
+     * its rules now? Without contact: has it been too long, by the rules last
+     * heard? Being on another server is normal, so other servers' songs wait
+     * until they're next used, and time away is counted for each server.
      */
     suspend fun checkAccess() = withContext(Dispatchers.IO) {
+        if (account.scope == null) return@withContext
         val now = System.currentTimeMillis()
         try {
             val me = api.me()
             prefs.lastContact = now
             prefs.awayLocked = false
-            val owner = "${account.server}|${me.username}"
-            if (keptForSomeoneElse(prefs.keptFor, owner)) deleteEverything()
-            prefs.keptFor = owner
             if (!me.permissions.downloads) deleteEverything()
             try {
                 prefs.keepRules = api.keepRules()
@@ -432,7 +452,7 @@ class OfflineStore(
 
     /** Sends what happened offline. What the server refuses isn't kept. */
     suspend fun sync() = withContext(Dispatchers.IO) {
-        val server = account.server ?: return@withContext
+        val server = account.scope ?: return@withContext
         for (play in dao.plays().filter { it.server == server }) {
             try {
                 api.reportPlay(play.trackId, play.msPlayed, play.at)
@@ -465,7 +485,7 @@ class OfflineStore(
      * unplugged, and the copy still plays.
      */
     suspend fun changed(): List<Track> = withContext(Dispatchers.IO) {
-        val server = account.server ?: return@withContext emptyList()
+        val server = account.scope ?: return@withContext emptyList()
         val kept = dao.songs(server)
         if (kept.isEmpty()) return@withContext emptyList()
         val current = kept.map { it.id }.chunked(500).flatMap { api.versions(it) }.associateBy { it.id }
