@@ -196,8 +196,8 @@ async fn from_youtube(state: &AppState, list: &str) -> ApiResult<ParsedImport> {
     let key = state.store.get_setting(youtube::API_KEY).await?;
     let Some(key) = key.filter(|k| !k.is_empty()) else {
         return Err(ApiError::bad_request(
-            "reading YouTube links needs an API key, which an admin can add under Import a \
-             playlist. Or export the playlist to a file",
+            "reading YouTube links needs an API key, which an admin can add under Admin > \
+             Library. Or export the playlist to a file",
         ));
     };
     youtube::read_playlist(youtube::API, &key, list, MAX_SONGS)
@@ -211,8 +211,9 @@ struct KeyStatus {
     has_key: bool,
 }
 
+/// Whether links work, for anyone who can import, on the jukebox page and GO.
 async fn youtube_key_status(
-    _: AdminUser,
+    _: Member,
     State(state): State<AppState>,
 ) -> ApiResult<Json<KeyStatus>> {
     let key = state.store.get_setting(youtube::API_KEY).await?;
@@ -494,13 +495,15 @@ mod tests {
         let body = Some(r#"{"key":"SECRET-KEY"}"#);
         let (status, _) = call(&state, Method::PUT, path, body, Some(&sam)).await;
         assert_eq!(status, StatusCode::FORBIDDEN);
-        assert_eq!(get_body(&state, path, &sam).await.0, StatusCode::FORBIDDEN);
+        let (_, seen) = get_body(&state, path, &sam).await;
+        assert_eq!(seen, r#"{"has_key":false}"#);
 
         let (status, _) = call(&state, Method::PUT, path, body, Some(&admin)).await;
         assert_eq!(status, StatusCode::NO_CONTENT);
-        let (_, seen) = get_body(&state, path, &admin).await;
-        assert_eq!(seen, r#"{"has_key":true}"#);
-        assert!(!seen.contains("SECRET"));
+        for who in [&sam, &admin] {
+            let (_, seen) = get_body(&state, path, who).await;
+            assert_eq!(seen, r#"{"has_key":true}"#);
+        }
 
         let (status, _) = call(
             &state,

@@ -78,7 +78,9 @@ names, and DJINN doesn't send those to YouTube to find out.
 An admin needs a free YouTube Data API key from
 [Google Cloud](https://console.cloud.google.com/apis/library/youtube.googleapis.com).
 Create a project, enable **YouTube Data API v3**, and create an API key. Then go
-to **Import a playlist** > **YouTube links** and paste it in.
+to **Admin** > **Library** > **YouTube playlist links** and paste it in.
+The key is for the whole server, so links then work for everyone, on GO and the
+Android app too.
 
 DJINN keeps this as private as it can. Without a key it never contacts YouTube.
 With one, an import sends only the key and the playlist's id, plus the page it's

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { api } from './api'
   import Icon from './Icon.svelte'
-  import { isAdmin, toast } from './state.svelte'
+  import { toast } from './state.svelte'
   import type { ImportedPlaylist } from './types'
 
   let { onimported }: { onimported: () => void } = $props()
@@ -14,27 +14,15 @@
   let skipped = $state(0)
   let input = $state<HTMLInputElement>()
   let hasKey = $state(false)
-  let newKey = $state('')
 
   $effect(() => {
-    if (open && isAdmin()) {
+    if (open) {
       api
         .youtubeKey()
         .then((status) => (hasKey = status.has_key))
         .catch(() => {})
     }
   })
-
-  async function saveKey(key: string) {
-    try {
-      await api.setYoutubeKey(key)
-      hasKey = !!key.trim()
-      newKey = ''
-      toast(hasKey ? 'YouTube links can be imported now' : 'Key removed. DJINN no longer contacts YouTube')
-    } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not save the key', true)
-    }
-  }
 
   /** Apple Music's text export is UTF-16; the rest are UTF-8. */
   async function readText(file: File) {
@@ -120,23 +108,10 @@
       </ul>
     </details>
 
-    {#if isAdmin()}
-      <details>
-        <summary>YouTube links: {hasKey ? 'on' : 'off'}</summary>
-        <p class="small muted">
-          To read playlist links, DJINN needs a free YouTube Data API key from
-          <a href="https://console.cloud.google.com/apis/library/youtube.googleapis.com" target="_blank" rel="noreferrer"
-            >Google Cloud</a
-          >. Without one, DJINN never contacts YouTube. With one, it sends only the key and the playlist's id when someone
-          imports a link, nothing about who's asking. YouTube still sees this server's internet address.
-        </p>
-        <div class="key">
-          <input type="password" autocomplete="off" placeholder="API key" aria-label="YouTube API key" bind:value={newKey} />
-          <button disabled={!newKey.trim()} onclick={() => saveKey(newKey)}>Save</button>
-          {#if hasKey}<button onclick={() => saveKey('')}>Remove</button>{/if}
-        </div>
-      </details>
-    {/if}
+    <p class="small muted">
+      YouTube links are {hasKey ? 'on' : 'off'} on this server.{#if !hasKey}
+        An admin can turn them on under Admin &gt; Library.{/if}
+    </p>
 
     {#each results as result (result.id)}
       <a class="result" href="#/playlist/{result.id}">
@@ -179,17 +154,6 @@
 
   .hidden {
     display: none;
-  }
-
-  .key {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-  }
-
-  .key input {
-    flex: 1;
-    min-width: 140px;
   }
 
   textarea {

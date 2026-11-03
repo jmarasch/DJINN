@@ -22,9 +22,7 @@ const PAGE_SIZE: &str = "50";
 pub enum YouTubeError {
     #[error("YouTube can't read that playlist: it may be private. Make it public or unlisted, or export it to a file")]
     NotPublic,
-    #[error(
-        "YouTube refused this server's API key. An admin can check it under Import a playlist"
-    )]
+    #[error("YouTube refused this server's API key. An admin can check it under Admin > Library")]
     BadKey,
     #[error("this server has used up its YouTube allowance for today. Try again tomorrow, or export the playlist to a file")]
     OutOfQuota,
