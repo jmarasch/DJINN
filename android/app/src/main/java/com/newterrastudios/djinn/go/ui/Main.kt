@@ -89,6 +89,7 @@ class Nav(
     var albumSort by mutableStateOf(ALBUM_SORTS.first().first)
     var albumFilter by mutableStateOf(ALBUM_FILTERS.first().first)
     var songSort by mutableStateOf(SONG_SORTS.first().first)
+    var keptView by mutableStateOf(KEPT_VIEWS.first().first)
     /** What the server calls itself. */
     var serverName by mutableStateOf(serverName)
     /** Styles this device can't keep up with. */

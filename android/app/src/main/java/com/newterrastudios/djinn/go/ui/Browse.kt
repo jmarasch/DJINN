@@ -1,5 +1,6 @@
 package com.newterrastudios.djinn.go.ui
 
+import com.newterrastudios.djinn.go.data.KeptEntry
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
@@ -235,6 +236,39 @@ private fun KeptSongs(nav: Nav) {
     }
 }
 
+/** Everything kept on the phone, from every server, that its rules let play. */
+@UnstableApi
+@Composable
+private fun AllKeptSongs(nav: Nav) {
+    var entries by remember { mutableStateOf<List<KeptEntry>?>(null) }
+    var locked by remember { mutableStateOf(0) }
+    LaunchedEffect(nav.keptIds) {
+        val (open, shut) = nav.offline.allKept()
+        entries = open
+        locked = shut
+    }
+    val shown = entries ?: return
+    val songs = shown.map { it.song }
+    LazyColumn(Modifier.fillMaxSize()) {
+        if (shown.isEmpty() && locked == 0) {
+            item { Note("Nothing here yet. A song's menu can download it, and albums have a download button.") }
+        }
+        if (locked > 0) {
+            val count = if (locked == 1) "1 song is" else "$locked songs are"
+            item { Note("$count locked until you sign in to its server, or that server is reached again.") }
+        }
+        itemsIndexed(shown) { index, (song, serverName) ->
+            val here = song.server == nav.server
+            Row2(
+                title = song.title,
+                subtitle = listOfNotNull(song.artist, serverName).joinToString(" · "),
+                art = { Art(if (here) nav.api.artUrl(song.artHash) else null, 44.dp) },
+                onClick = { nav.player.playKept(songs, index, nav.server) },
+            )
+        }
+    }
+}
+
 /** Downloads an album's or playlist's songs, when the role allows. */
 @UnstableApi
 @Composable
@@ -408,12 +442,14 @@ fun LibraryScreen(nav: Nav) {
             3 -> PlaylistsTab(nav)
             else -> Column {
                 DownloadStatus()
-                KeptSongs(nav)
+                Choices(KEPT_VIEWS, nav.keptView) { nav.keptView = it }
+                if (nav.keptView == "all") AllKeptSongs(nav) else KeptSongs(nav)
             }
         }
     }
 }
 
+val KEPT_VIEWS = listOf("here" to "This server", "all" to "All servers")
 val ARTIST_SORTS = listOf("name" to "Name", "added" to "Recently added")
 val ALBUM_SORTS = listOf(
     "name" to "Name",

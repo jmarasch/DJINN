@@ -1,5 +1,7 @@
 package com.newterrastudios.djinn.go.player
 
+import com.newterrastudios.djinn.go.data.OfflineSong
+import com.newterrastudios.djinn.go.data.keptMediaId
 import android.content.ComponentName
 import android.content.Context
 import androidx.compose.runtime.getValue
@@ -39,6 +41,21 @@ fun Track.toMediaItem(api: GoApi): MediaItem = MediaItem.Builder()
             .setDurationMs(durationMs)
             .setArtworkUri(api.artUrl(artHash, 512)?.toUri())
             // A library list is refused without these.
+            .setIsBrowsable(false)
+            .setIsPlayable(true)
+            .build(),
+    )
+    .build()
+
+/** A kept song from another server: no picture, since that server may be out of reach. */
+fun OfflineSong.toKeptItem(): MediaItem = MediaItem.Builder()
+    .setMediaId(keptMediaId(server, id))
+    .setMediaMetadata(
+        MediaMetadata.Builder()
+            .setTitle(title)
+            .setArtist(artist)
+            .setAlbumTitle(album)
+            .setDurationMs(durationMs)
             .setIsBrowsable(false)
             .setIsPlayable(true)
             .build(),
@@ -143,6 +160,18 @@ class PlayerState(private val api: GoApi) {
         addedAhead = 0
         radioSeed = null
         player.setMediaItems(songs.map { it.toMediaItem(api) }, start, 0)
+        player.prepare()
+        player.play()
+    }
+
+    /** Plays kept songs from any server, in order. */
+    fun playKept(songs: List<OfflineSong>, start: Int, currentScope: String) {
+        val player = controller ?: return
+        error = null
+        addedAhead = 0
+        radioSeed = null
+        val items = songs.map { if (it.server == currentScope) it.toTrack().toMediaItem(api) else it.toKeptItem() }
+        player.setMediaItems(items, start, 0)
         player.prepare()
         player.play()
     }

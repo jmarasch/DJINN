@@ -1,5 +1,6 @@
 package com.newterrastudios.djinn.go.player
 
+import com.newterrastudios.djinn.go.data.parseKeptMediaId
 import android.app.PendingIntent
 import android.content.Intent
 import android.os.SystemClock
@@ -77,6 +78,8 @@ class PlaybackService : MediaLibraryService() {
 
     /** The song being heard, and how much of it, for the play report. */
     private var hearing: Long? = null
+    /** Which account that song belongs to, when it's not the one in use. */
+    private var hearingFor: String? = null
     private var heardMs = 0L
     private var lastTick = 0L
     private var lastSave = 0L
@@ -174,7 +177,16 @@ class PlaybackService : MediaLibraryService() {
 
     /** Even loudness from the server's ReplayGain. A device can only turn down. */
     private fun applyGain(player: Player) {
-        val id = player.currentMediaItem?.mediaId?.toLongOrNull() ?: return
+        val mediaId = player.currentMediaItem?.mediaId
+        val elsewhere = mediaId?.let(::parseKeptMediaId)
+        if (elsewhere != null) {
+            scope.launch {
+                val kept = app.offline.keptElsewhere(elsewhere.first, elsewhere.second) ?: return@launch
+                if (player.currentMediaItem?.mediaId == mediaId) player.volume = kept.gain.coerceIn(0f, 1f)
+            }
+            return
+        }
+        val id = mediaId?.toLongOrNull() ?: return
         val held = links[id]
         if (held != null) {
             player.volume = held.links.gain.coerceIn(0f, 1f)
@@ -210,7 +222,7 @@ class PlaybackService : MediaLibraryService() {
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             report()
-            hearing = mediaItem?.mediaId?.toLongOrNull()
+            listen(mediaItem?.mediaId)
             applyGain(player)
             save()
         }
@@ -237,7 +249,7 @@ class PlaybackService : MediaLibraryService() {
                 save()
                 return
             }
-            hearing = player.currentMediaItem?.mediaId?.toLongOrNull()
+            listen(player.currentMediaItem?.mediaId)
             lastTick = SystemClock.elapsedRealtime()
             ticking = scope.launch {
                 while (isActive) {
@@ -246,6 +258,12 @@ class PlaybackService : MediaLibraryService() {
                     if (SystemClock.elapsedRealtime() - lastSave > SAVE_EVERY_MS) save()
                 }
             }
+        }
+
+        private fun listen(mediaId: String?) {
+            val elsewhere = mediaId?.let(::parseKeptMediaId)
+            hearing = elsewhere?.second ?: mediaId?.toLongOrNull()
+            hearingFor = elsewhere?.first
         }
 
         private fun count() {
@@ -262,6 +280,13 @@ class PlaybackService : MediaLibraryService() {
             lastTick = if (player.isPlaying) SystemClock.elapsedRealtime() else 0L
             if (id == null || ms <= 0) return
             val at = System.currentTimeMillis()
+            // Another server's song: it hears about it when that server is next in use.
+            hearingFor?.let { other ->
+                reports.launch {
+                    app.offline.dao.addPlay(PendingPlay(server = other, trackId = id, msPlayed = ms, at = at))
+                }
+                return
+            }
             val server = app.account.scope
             reports.launch {
                 try {
@@ -278,11 +303,12 @@ class PlaybackService : MediaLibraryService() {
 
         private fun save() {
             lastSave = SystemClock.elapsedRealtime()
-            val queue = (0 until player.mediaItemCount).mapNotNull {
-                player.getMediaItemAt(it).mediaId.toLongOrNull()
-            }
-            if (queue.isEmpty()) return
-            val save = ResumeSave(queue, player.currentMediaItemIndex, player.currentPosition)
+            val items = (0 until player.mediaItemCount).map { player.getMediaItemAt(it).mediaId.toLongOrNull() }
+            // Another server's song means nothing to this one, so that's not where to carry on from.
+            if (items.getOrNull(player.currentMediaItemIndex) == null) return
+            val queue = items.filterNotNull()
+            val at = items.take(player.currentMediaItemIndex).count { it != null }
+            val save = ResumeSave(queue, at, player.currentPosition)
             reports.launch { runCatching { app.api.saveResume(save) } }
         }
     }
@@ -302,6 +328,10 @@ class PlaybackService : MediaLibraryService() {
                 val query = item.requestMetadata.searchQuery
                 when {
                     query != null -> spoken(query).map { playable(it.toMediaItem(app.api)) }
+                    parseKeptMediaId(item.mediaId) != null && item.mediaMetadata.title == null -> {
+                        val (other, id) = parseKeptMediaId(item.mediaId) ?: return@flatMap emptyList()
+                        listOfNotNull(app.offline.keptElsewhere(other, id)?.let { playable(it.toKeptItem()) })
+                    }
                     item.mediaMetadata.title == null -> {
                         val id = item.mediaId.toLongOrNull()
                         val track = id?.let { runCatching { app.api.track(it) }.getOrNull() }
@@ -336,9 +366,13 @@ class PlaybackService : MediaLibraryService() {
             browser: MediaSession.ControllerInfo,
             mediaId: String,
         ) = scope.future<LibraryResult<MediaItem>> {
+            val elsewhere = parseKeptMediaId(mediaId)
+            val kept = elsewhere?.let { app.offline.keptElsewhere(it.first, it.second) }
             val id = mediaId.toLongOrNull()
             val track = id?.let { runCatching { app.api.track(it) }.getOrNull() }
-            if (track != null) {
+            if (kept != null) {
+                LibraryResult.ofItem(kept.toKeptItem(), null)
+            } else if (track != null) {
                 LibraryResult.ofItem(track.toMediaItem(app.api), null)
             } else {
                 LibraryResult.ofError(LibraryResult.RESULT_ERROR_BAD_VALUE)
@@ -418,7 +452,7 @@ class PlaybackService : MediaLibraryService() {
                     folder(ALBUMS, "Albums"),
                 )
                 parent == RECENT -> api.home().recent.map { it.toMediaItem(api) }
-                parent == KEPT -> app.offline.playable(server).map { it.toTrack().toMediaItem(api) }
+                parent == KEPT -> keptForCar(server)
                 parent == PLAYLISTS -> api.playlists().map { folder("$PLAYLIST_PREFIX${it.id}", it.name) }
                 parent == ALBUMS -> api.albums("name", "all", 0).items.map { folder("$ALBUM_PREFIX${it.id}", it.title) }
                 parent.startsWith(PLAYLIST_PREFIX) ->
@@ -431,14 +465,25 @@ class PlaybackService : MediaLibraryService() {
             // Away from the server, the car still has what's kept here.
             when (parent) {
                 ROOT -> listOf(folder(KEPT, "On this phone"))
-                KEPT -> app.offline.playable(server).map { it.toTrack().toMediaItem(api) }
+                KEPT -> keptForCar(server)
                 else -> emptyList()
             }
         }
     }
 
+    /** Everything on the phone that may play, from any server. */
+    private suspend fun keptForCar(server: String): List<MediaItem> =
+        app.offline.allKept().first.map { (song, _) ->
+            if (song.server == server) song.toTrack().toMediaItem(app.api) else song.toKeptItem()
+        }
+
     /** A kept copy plays from its file; anything else as a song to fetch. */
     private suspend fun playable(item: MediaItem): MediaItem {
+        parseKeptMediaId(item.mediaId)?.let { (other, number) ->
+            // Locked since it was queued: without a file to play, the player says so.
+            val file = app.offline.keptElsewhere(other, number)?.let { File(it.path) } ?: File("locked")
+            return item.buildUpon().setUri(android.net.Uri.fromFile(file)).build()
+        }
         val id = item.mediaId.toLongOrNull()
         val kept = id?.let { app.offline.local(it) }
         if (kept != null) {
