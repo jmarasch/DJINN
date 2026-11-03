@@ -71,6 +71,9 @@ listeners. Tailscale addresses count as home.
 
 ## On your phone
 
+**Finding your music:** the library lists artists, albums and songs. Each can be
+sorted, including by **Recently added**, here, in the app and on the party page.
+
 **Getting there:** in GO on a computer, **Account > Open on your phone**
 shows a QR code for GO's address; scan it with the phone's camera. If
 Chrome on Android won't open it (ERR_TOO_MANY_RETRIES), allow Chrome's
@@ -110,6 +113,22 @@ scan the QR code above or type the address from Admin > GO. Anyone on a network
 can give a computer any name, so only sign in to a server you recognize.
 Android may ask about **nearby devices**; that's how newer Android lets an app
 reach a computer on your home network. 
+**In the car:** Android Auto only shows apps from the Play Store, so while DJINN
+GO is installed from an APK it won't appear on the car's screen until you allow it:
+
+1. On the phone, open **Settings > Connected devices > Connection preferences >
+   Android Auto**.
+2. Scroll to the bottom and tap **Version** about 10 times, then accept the
+   developer mode prompt.
+3. Open the **⋮** menu at the top right, choose **Developer settings**, and turn
+   on **Unknown sources**.
+4. Unplug from the car and connect again. If DJINN GO still isn't on the car's
+   screen, turn it on under **Customize launcher** on the same Android Auto page.
+
+Sign in on the phone first; the car uses whichever server the phone is on. Android
+Auto draws the screen itself, so the app's full screen view and visuals don't appear
+in the car.
+
 **Encryption** is on unless an admin turns it off (Admin > GO > **Safety**), with
 nothing to set up: the server makes its own certificate. The app uses it for
 everything, remembers it, and warns if it ever changes. To check you've reached
