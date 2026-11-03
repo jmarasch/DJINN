@@ -45,6 +45,13 @@ pub const GO_ENABLED: &str = "go_enabled";
 pub const GO_ALLOW_REMOTE: &str = "go_allow_remote";
 pub const GO_HTTPS_HOSTNAME: &str = "go_https_hostname";
 pub const GO_UPNP: &str = "go_upnp";
+/// What the app does with kept songs at sign-out: "delete" or "keep".
+const GO_SIGN_OUT_SONGS: &str = "go_sign_out_songs";
+/// What it does after too long away from the server: "lock", "delete" or "off".
+const GO_AWAY_ACTION: &str = "go_away_action";
+const GO_AWAY_DAYS: &str = "go_away_days";
+const DEFAULT_AWAY_DAYS: i64 = 30;
+const MAX_AWAY_DAYS: i64 = 3650;
 /// The default GO address.
 pub const DEFAULT_LISTEN: SocketAddr =
     SocketAddr::new(IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED), 8067);
@@ -313,6 +320,7 @@ pub fn api_router() -> Router<AppState> {
         .route("/go/offline/{id}", get(offline_link))
         .route("/go/address", get(address))
         .route("/go/hello", get(go_announce::hello))
+        .route("/go/keep-rules", get(keep_rules))
 }
 
 /// Which API routes GO answers, and who for.
@@ -371,6 +379,7 @@ const ROUTES: &[(Method, &str, Access)] = &[
     (Method::GET, "/api/go/offline-suggested", Access::Listener),
     (Method::GET, "/api/go/home", Access::Listener),
     (Method::GET, "/api/go/address", Access::Setup),
+    (Method::GET, "/api/go/keep-rules", Access::Listener),
     (Method::GET, "/api/go/likes", Access::Listener),
     (Method::GET, "/api/go/likes/ids", Access::Listener),
     (Method::PUT, "/api/go/likes/*/*", Access::Listener),
@@ -949,6 +958,7 @@ struct Listener {
 
 #[derive(Serialize)]
 struct Status {
+    keep: KeepRules,
     /// What the admin named this server; empty means `default_name`.
     server_name: String,
     default_name: String,
@@ -1009,6 +1019,7 @@ async fn status_of(state: &AppState) -> anyhow::Result<Status> {
     let mbps = bytes as f64 * 8.0 / SPEED_WINDOW.as_secs_f64() / 1_000_000.0;
     let port = go.listen.port();
     Ok(Status {
+        keep: keep_rules_of(&state.store).await?,
         server_name: state
             .store
             .get_setting(SERVER_NAME)
@@ -1134,6 +1145,8 @@ async fn status(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json<S
 #[derive(Deserialize)]
 struct GoSettings {
     #[serde(default)]
+    keep: KeepRules,
+    #[serde(default)]
     server_name: String,
     #[serde(default = "yes")]
     discoverable: bool,
@@ -1154,12 +1167,69 @@ fn yes() -> bool {
     true
 }
 
+/// The admin's rules for songs kept on devices. The app gets them at each
+/// contact and follows them while it's away, so they apply from then on.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+struct KeepRules {
+    sign_out: String,
+    away: String,
+    away_days: i64,
+}
+
+impl Default for KeepRules {
+    fn default() -> Self {
+        Self {
+            sign_out: "delete".to_owned(),
+            away: "lock".to_owned(),
+            away_days: DEFAULT_AWAY_DAYS,
+        }
+    }
+}
+
+impl KeepRules {
+    fn check(&self) -> Result<(), &'static str> {
+        if !matches!(self.sign_out.as_str(), "delete" | "keep") {
+            return Err("at sign-out, kept songs are deleted or kept");
+        }
+        if !matches!(self.away.as_str(), "lock" | "delete" | "off") {
+            return Err("after too long away, kept songs are locked, deleted or left alone");
+        }
+        if !(1..=MAX_AWAY_DAYS).contains(&self.away_days) {
+            return Err("the time away must be from 1 to 3650 days");
+        }
+        Ok(())
+    }
+}
+
+async fn keep_rules_of(store: &djinn_store::Store) -> anyhow::Result<KeepRules> {
+    let defaults = KeepRules::default();
+    Ok(KeepRules {
+        sign_out: store
+            .get_setting(GO_SIGN_OUT_SONGS)
+            .await?
+            .unwrap_or(defaults.sign_out),
+        away: store
+            .get_setting(GO_AWAY_ACTION)
+            .await?
+            .unwrap_or(defaults.away),
+        away_days: settings::number(store, GO_AWAY_DAYS, defaults.away_days).await?,
+    })
+}
+
+async fn keep_rules(
+    _: CurrentSession,
+    State(state): State<AppState>,
+) -> ApiResult<Json<KeepRules>> {
+    Ok(Json(keep_rules_of(&state.store).await?))
+}
+
 async fn save_settings(
     AdminUser(admin): AdminUser,
     State(state): State<AppState>,
     Json(body): Json<GoSettings>,
 ) -> ApiResult<Json<Status>> {
     let server_name = go_announce::clean_name(&body.server_name).map_err(ApiError::bad_request)?;
+    body.keep.check().map_err(ApiError::bad_request)?;
     let mut proxies = body.trusted_proxies.trim().to_owned();
     let parsed = security::parse_proxies(&proxies);
     let entries = proxies
@@ -1197,6 +1267,18 @@ async fn save_settings(
         proxies.push_str("127.0.0.1");
     }
     state.store.set_setting(SERVER_NAME, &server_name).await?;
+    state
+        .store
+        .set_setting(GO_SIGN_OUT_SONGS, &body.keep.sign_out)
+        .await?;
+    state
+        .store
+        .set_setting(GO_AWAY_ACTION, &body.keep.away)
+        .await?;
+    state
+        .store
+        .set_setting(GO_AWAY_DAYS, &body.keep.away_days.to_string())
+        .await?;
     settings::set_flag(&state.store, GO_DISCOVERABLE, body.discoverable).await?;
     settings::set_flag(&state.store, GO_ENABLED, body.enabled).await?;
     settings::set_flag(&state.store, GO_ALLOW_REMOTE, body.allow_remote).await?;
@@ -1239,6 +1321,68 @@ async fn sign_ins(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn keep_rules_are_checked() {
+        let good = KeepRules::default();
+        assert_eq!(good.check(), Ok(()));
+        assert_eq!(
+            good.away, "lock",
+            "locked, not deleted, unless the admin says"
+        );
+        for rules in [
+            KeepRules {
+                sign_out: "shred".to_owned(),
+                ..good.clone()
+            },
+            KeepRules {
+                away: "explode".to_owned(),
+                ..good.clone()
+            },
+            KeepRules {
+                away_days: 0,
+                ..good.clone()
+            },
+            KeepRules {
+                away_days: MAX_AWAY_DAYS + 1,
+                ..good.clone()
+            },
+        ] {
+            assert!(rules.check().is_err(), "{rules:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn keep_rules_read_what_was_saved() {
+        let state = AppState::for_tests().await;
+        assert_eq!(
+            keep_rules_of(&state.store).await.unwrap(),
+            KeepRules::default()
+        );
+        state
+            .store
+            .set_setting(GO_AWAY_ACTION, "off")
+            .await
+            .unwrap();
+        state.store.set_setting(GO_AWAY_DAYS, "90").await.unwrap();
+        state
+            .store
+            .set_setting(GO_SIGN_OUT_SONGS, "keep")
+            .await
+            .unwrap();
+        assert_eq!(
+            keep_rules_of(&state.store).await.unwrap(),
+            KeepRules {
+                sign_out: "keep".to_owned(),
+                away: "off".to_owned(),
+                away_days: 90,
+            }
+        );
+        assert_eq!(
+            access(&Method::GET, "/api/go/keep-rules"),
+            Some(Access::Listener)
+        );
+    }
 
     #[tokio::test]
     async fn a_server_says_who_it_is_before_sign_in() {

@@ -109,9 +109,20 @@ If yours isn't listed (some networks block this, and Admin > GO can turn it off)
 scan the QR code above or type the address from Admin > GO. Anyone on a network
 can give a computer any name, so only sign in to a server you recognize.
 Android may ask about **nearby devices**; that's how newer Android lets an app
-reach a computer on your home network. Signing out deletes what the app kept,
-and so does losing the download permission, or 30 days without reaching the
-server.
+reach a computer on your home network. 
+**What happens to kept songs** is the admin's choice, under Admin > GO > **Songs
+kept on devices**:
+
+- **Signing out** deletes them, or keeps them locked until you sign back in.
+- **Too long without reaching the server** (30 days unless changed) locks them
+  until the phone reconnects, deletes them, or does nothing. The app learns the
+  rules each time it reaches the server, and follows them while it's away.
+- **Someone else signing in** on the phone deletes the last person's songs, and
+  so does a role losing the download permission.
+
+A locked song stays on the phone but won't play. Locking is the app refusing to
+play it, not encryption. If a phone has been away long enough for its sign-in to
+end, signing in again unlocks its songs.
 
 **Install it as an app:** open GO in your phone's browser, then use
 **Add to Home Screen** (Safari: the Share button; Chrome: the menu). It

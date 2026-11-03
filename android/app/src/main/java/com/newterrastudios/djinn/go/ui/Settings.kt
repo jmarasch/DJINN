@@ -93,17 +93,26 @@ fun SettingsScreen(nav: Nav) {
     val downloads = kept.filter { it.kind == KIND_DOWNLOAD }
     val smartSongs = kept.filter { it.kind == KIND_SMART }
     var confirmSignOut by remember { mutableStateOf(false) }
+    val keepsSongs = remember { prefs.keepRules.signOut == "keep" }
 
     if (confirmSignOut) {
         AlertDialog(
             onDismissRequest = { confirmSignOut = false },
             title = { Text("Sign out?") },
-            text = { Text("The songs and system sounds kept on this phone will be deleted. You can download them again after signing back in.") },
+            text = {
+                Text(
+                    if (keepsSongs) {
+                        "The songs kept on this phone stay here, locked until you sign back in."
+                    } else {
+                        "The songs and system sounds kept on this phone will be deleted. You can download them again after signing back in."
+                    },
+                )
+            },
             confirmButton = {
                 TextButton(onClick = {
                     confirmSignOut = false
                     nav.signOut()
-                }) { Text("Sign out and delete") }
+                }) { Text(if (keepsSongs) "Sign out" else "Sign out and delete") }
             },
             dismissButton = { TextButton(onClick = { confirmSignOut = false }) { Text("Stay signed in") } },
         )

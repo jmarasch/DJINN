@@ -132,6 +132,8 @@ class GoApi(private val account: Account) {
 
     suspend fun home(): GoHome = get("/api/go/home")
 
+    suspend fun keepRules(): KeepRules = get("/api/go/keep-rules")
+
     /** Who the server says it is. Older servers don't say. */
     suspend fun hello(): ServerHello? = try {
         get("/api/go/hello")

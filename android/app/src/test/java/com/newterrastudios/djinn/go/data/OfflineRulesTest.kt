@@ -11,15 +11,39 @@ class OfflineRulesTest {
     private val day = 24L * 60 * 60 * 1000
 
     @Test
-    fun `kept songs go after 30 days without the server`() {
+    fun `kept songs lock after 30 days without the server, unless told otherwise`() {
         val now = 1_000 * day
-        assertFalse(tooLongOffline(now - 29 * day, now))
-        assertTrue(tooLongOffline(now - 31 * day, now))
+        val rules = KeepRules()
+        assertEquals(WhenAway.Nothing, whenAway(now - 29 * day, now, rules))
+        assertEquals(WhenAway.Lock, whenAway(now - 31 * day, now, rules))
+    }
+
+    @Test
+    fun `the admin chooses the time and what happens`() {
+        val now = 1_000 * day
+        assertEquals(WhenAway.Delete, whenAway(now - 8 * day, now, KeepRules(away = "delete", awayDays = 7)))
+        assertEquals(WhenAway.Nothing, whenAway(now - 6 * day, now, KeepRules(away = "delete", awayDays = 7)))
+        assertEquals(WhenAway.Nothing, whenAway(now - 900 * day, now, KeepRules(away = "off")))
+        assertEquals(WhenAway.Lock, whenAway(now - 91 * day, now, KeepRules(away = "lock", awayDays = 90)))
+    }
+
+    @Test
+    fun `a rule this version doesn't know locks rather than deletes`() {
+        val now = 1_000 * day
+        assertEquals(WhenAway.Lock, whenAway(now - 31 * day, now, KeepRules(away = "something new")))
     }
 
     @Test
     fun `never having reached the server isn't being away`() {
-        assertFalse(tooLongOffline(0, 1_000 * day))
+        assertEquals(WhenAway.Nothing, whenAway(0, 1_000 * day, KeepRules()))
+    }
+
+    @Test
+    fun `kept songs belong to one server and account`() {
+        assertFalse(keptForSomeoneElse(null, "http://a|sam"))
+        assertFalse(keptForSomeoneElse("http://a|sam", "http://a|sam"))
+        assertTrue(keptForSomeoneElse("http://a|sam", "http://a|alex"))
+        assertTrue(keptForSomeoneElse("http://a|sam", "http://b|sam"))
     }
 
     @Test

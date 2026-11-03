@@ -213,9 +213,12 @@ private fun HomeBar(nav: Nav) {
 private fun KeptSongs(nav: Nav) {
     val flow = remember(nav.server) { nav.offline.dao.songsFlow(nav.server) }
     val kept by flow.collectAsState(emptyList())
-    val songs = kept.map { it.toTrack() }
+    val locked = nav.offline.isLocked()
+    val songs = if (locked) emptyList() else kept.map { it.toTrack() }
     LazyColumn(Modifier.fillMaxSize()) {
-        if (songs.isEmpty()) {
+        if (locked && kept.isNotEmpty()) {
+            item { Note("Your ${kept.size} kept songs are locked because this phone hasn't reached the server for a while. They'll unlock when it does.") }
+        } else if (songs.isEmpty()) {
             item { Note("Nothing here yet. A song's menu can download it, and albums have a download button.") }
         }
         itemsIndexed(songs) { index, song ->

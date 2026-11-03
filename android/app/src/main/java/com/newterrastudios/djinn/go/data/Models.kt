@@ -6,6 +6,14 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class ServerHello(val name: String, val id: String)
 
+/** The admin's rules for songs kept here. Used as they were last heard while away. */
+@Serializable
+data class KeepRules(
+    @SerialName("sign_out") val signOut: String = "delete",
+    val away: String = "lock",
+    @SerialName("away_days") val awayDays: Int = 30,
+)
+
 @Serializable
 data class Track(
     val id: Long,

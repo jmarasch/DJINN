@@ -147,7 +147,14 @@ export interface GoListener {
   seconds_ago: number
 }
 
+export interface GoKeepRules {
+  sign_out: 'delete' | 'keep'
+  away: 'lock' | 'delete' | 'off'
+  away_days: number
+}
+
 export interface GoStatus {
+  keep: GoKeepRules
   server_name: string
   default_name: string
   discoverable: boolean

@@ -7,10 +7,10 @@
   import { app, toast } from './state.svelte'
   import ConvertPanel from './ConvertPanel.svelte'
   import SubmissionsPanel from './SubmissionsPanel.svelte'
-  import type { GoStatus, SignIn } from './types'
+  import type { GoKeepRules, GoStatus, SignIn } from './types'
 
   let status = $state<GoStatus | null>(null)
-  let form = $state({ server_name: '', discoverable: true, enabled: false, allow_remote: false, https_hostname: '', upnp: false, trusted_proxies: '', admin_two_step: false })
+  let form = $state({ keep: { sign_out: 'delete', away: 'lock', away_days: 30 } as GoKeepRules, server_name: '', discoverable: true, enabled: false, allow_remote: false, https_hostname: '', upnp: false, trusted_proxies: '', admin_two_step: false })
   let signIns = $state<SignIn[]>([])
   let busy = $state(false)
   let timer: ReturnType<typeof setInterval> | undefined
@@ -44,7 +44,7 @@
   }
 
   function formFrom(s: GoStatus) {
-    return { server_name: s.server_name, discoverable: s.discoverable, enabled: s.enabled, allow_remote: s.allow_remote, https_hostname: s.https_hostname, upnp: s.upnp, trusted_proxies: s.trusted_proxies, admin_two_step: s.admin_two_step }
+    return { keep: { ...s.keep }, server_name: s.server_name, discoverable: s.discoverable, enabled: s.enabled, allow_remote: s.allow_remote, https_hostname: s.https_hostname, upnp: s.upnp, trusted_proxies: s.trusted_proxies, admin_two_step: s.admin_two_step }
   }
 
   async function save() {
@@ -127,6 +127,30 @@
       </p>
     </section>
   {/if}
+
+  <section class="card">
+    <h2>Songs kept on devices</h2>
+    <p class="small muted">For people whose role can download. The app follows these rules, and learns them each time it reaches this server. A locked song stays on the device but won't play until it's unlocked.</p>
+    <label>When someone signs out
+      <select bind:value={form.keep.sign_out} onchange={save} disabled={busy}>
+        <option value="delete">Delete their kept songs</option>
+        <option value="keep">Keep them, locked until they sign back in</option>
+      </select>
+    </label>
+    <label>When a device hasn't reached this server for a while
+      <select bind:value={form.keep.away} onchange={save} disabled={busy}>
+        <option value="lock">Lock kept songs until it reconnects</option>
+        <option value="delete">Delete kept songs</option>
+        <option value="off">Do nothing: they keep playing</option>
+      </select>
+    </label>
+    {#if form.keep.away !== 'off'}
+      <label>After this many days
+        <input type="number" min="1" max="3650" bind:value={form.keep.away_days} onchange={save} disabled={busy} />
+      </label>
+    {/if}
+    <p class="small muted">If someone else signs in on a device, the songs kept for the last person are deleted. So are all of them if a role loses its download permission.</p>
+  </section>
 
   <SubmissionsPanel />
 
