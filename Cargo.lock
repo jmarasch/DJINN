@@ -1376,7 +1376,7 @@ dependencies = [
 
 [[package]]
 name = "djinn-ai"
-version = "2026.11.1"
+version = "2026.11.2"
 dependencies = [
  "candle-core",
  "candle-nn",
@@ -1392,7 +1392,7 @@ dependencies = [
 
 [[package]]
 name = "djinn-cast"
-version = "2026.11.1"
+version = "2026.11.2"
 dependencies = [
  "bytes",
  "djinn-engine",
@@ -1414,7 +1414,7 @@ dependencies = [
 
 [[package]]
 name = "djinn-engine"
-version = "2026.11.1"
+version = "2026.11.2"
 dependencies = [
  "cpal",
  "ebur128",
@@ -1430,7 +1430,7 @@ dependencies = [
 
 [[package]]
 name = "djinn-library"
-version = "2026.11.1"
+version = "2026.11.2"
 dependencies = [
  "djinn-store",
  "image",
@@ -1448,7 +1448,7 @@ dependencies = [
 
 [[package]]
 name = "djinn-platform"
-version = "2026.11.1"
+version = "2026.11.2"
 dependencies = [
  "ed25519-dalek",
  "getrandom 0.4.3",
@@ -1459,7 +1459,7 @@ dependencies = [
 
 [[package]]
 name = "djinn-server"
-version = "2026.11.1"
+version = "2026.11.2"
 dependencies = [
  "anyhow",
  "argon2",
@@ -1514,7 +1514,7 @@ dependencies = [
 
 [[package]]
 name = "djinn-store"
-version = "2026.11.1"
+version = "2026.11.2"
 dependencies = [
  "serde",
  "sqlx",
