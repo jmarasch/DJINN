@@ -14,8 +14,8 @@ use crate::error::ApiResult;
 use crate::state::AppState;
 use crate::{
     accounts, ai, audio_api, auth, backup, cast_api, convert, folders, go, go_library,
-    identify_api, library_api, party_api, player_api, playlist_api, smart, sse, submissions,
-    system_api, tv_api, two_step, update,
+    identify_api, library_api, party_api, player_api, playlist_api, playlist_import, smart, sse,
+    submissions, system_api, tv_api, two_step, update,
 };
 
 pub fn router() -> Router<AppState> {
@@ -34,6 +34,7 @@ pub fn router() -> Router<AppState> {
         .merge(library_api::router())
         .merge(player_api::router())
         .merge(playlist_api::router())
+        .merge(playlist_import::router())
         .merge(party_api::router())
         .merge(audio_api::router())
         .merge(tv_api::router())

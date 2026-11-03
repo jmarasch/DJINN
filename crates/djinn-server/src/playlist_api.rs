@@ -1,6 +1,8 @@
 //! Playlists (admin): create and edit them, and pick the one that plays
 //! when nobody has requested anything.
 
+use std::collections::HashMap;
+
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::routing::{get, patch, post};
@@ -12,7 +14,7 @@ use crate::auth::AdminUser;
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 
-const MAX_NAME: usize = 60;
+pub(crate) const MAX_NAME: usize = 60;
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -36,16 +38,25 @@ struct ListItem {
     playlist: PlaylistSummary,
     /// Plays when the request queue is empty.
     active: bool,
+    /// Songs in it that can't play.
+    problem_songs: i64,
 }
 
 async fn list(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json<Vec<ListItem>>> {
     let active = state.jukebox.lock().await.active_playlist();
     let playlists = state.store.playlists().await?;
+    let problems: HashMap<i64, i64> = state
+        .store
+        .playlist_problem_counts()
+        .await?
+        .into_iter()
+        .collect();
     Ok(Json(
         playlists
             .into_iter()
             .map(|playlist| ListItem {
                 active: Some(playlist.id) == active,
+                problem_songs: problems.get(&playlist.id).copied().unwrap_or(0),
                 playlist,
             })
             .collect(),
@@ -290,7 +301,7 @@ async fn refresh_if_active(state: &AppState, id: i64) -> ApiResult<()> {
     Ok(())
 }
 
-fn validate_name(name: &str) -> ApiResult<String> {
+pub(crate) fn validate_name(name: &str) -> ApiResult<String> {
     let name = name.trim();
     let length = name.chars().count();
     if length == 0 || length > MAX_NAME || name.chars().any(char::is_control) {

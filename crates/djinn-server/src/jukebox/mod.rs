@@ -658,6 +658,10 @@ impl Jukebox {
                 error,
             } => {
                 tracing::warn!(track = id, %error, "track failed");
+                // Flag it so playlists show it and don't pick it again.
+                if let Some(file) = self.store.song_file(id).await? {
+                    crate::playlist_import::note_failure(&self.store, &file, &error).await?;
+                }
                 if let Some(pending) = self.queued.take_if(|q| q.track.id == id) {
                     // Failed to open; drop a broken request so it isn't retried.
                     if let Some(request) = pending.request_id {

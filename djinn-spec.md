@@ -345,6 +345,11 @@ Personal listening, apart from the party, on the same library and database. Same
 ### Phase 8: Library backup and import
 - Back up everything DJINN knows (settings, users, playlists, request history, outputs, casts, artwork cache, analysis) to one file, and restore or import it on another machine, remapping music folder paths. The music files themselves are not part of it.
 
+### Importing playlists
+- Import party playlists from other services' exports (CSV and tab separated tables, Spotify account data, JSPF, XSPF, Apple Music XML, M3U, PLS, pasted lines). Names only, never music. Songs the library lacks stay in the list, flagged, and are skipped; they fill in when a library check finds them.
+- Any playlist flags songs that can't play, because the file is gone or won't decode, and skips them. Damage is noticed when a song fails, or by a check that decodes every file in a playlist. Marks are retried after each library check.
+- Not yet: GO's personal playlists, and importing from a share link.
+
 ### Phase 9: DJINN GO for Android
 
 The official native app for DJINN GO, in `android/` in this repository: songs as alarm and ringtone sounds, offline listening, and caching of what you play most, at the level of YouTube Music or Spotify, on your own server. It talks to GO's listener and API, never the party's or Admin's.

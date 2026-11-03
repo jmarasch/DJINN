@@ -574,7 +574,8 @@ impl Store {
         let ids = sqlx::query_scalar(concat!(
             "SELECT t.id FROM tracks t WHERE ",
             available!(),
-            " ORDER BY t.id"
+            " AND NOT EXISTS (SELECT 1 FROM track_problems tp WHERE tp.track_id = t.id)
+             ORDER BY t.id"
         ))
         .fetch_all(&self.pool)
         .await?;

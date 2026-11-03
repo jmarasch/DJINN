@@ -10,6 +10,7 @@ djinn-store = { path = "../djinn-store" }
 image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "webp", "gif", "bmp"] }
 lofty = "0.25.5"
 reqwest = { version = "0.13.5", default-features = false, features = ["rustls-no-provider", "json", "query", "form", "http2"] }
+roxmltree = "0.21"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 serde.workspace = true
 serde_json = "1.0.154"
@@ -17,6 +18,7 @@ sha2 = "0.11.1"
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+unicode-normalization = "0.1"
 walkdir = "2.5.0"
 
 [lints]

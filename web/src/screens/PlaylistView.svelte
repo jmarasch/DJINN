@@ -4,7 +4,7 @@
   import { byline, duration } from '../lib/format'
   import Icon from '../lib/Icon.svelte'
   import { app, toast } from '../lib/state.svelte'
-  import type { PlaylistDetail, PlaylistEntry } from '../lib/types'
+  import type { PlaylistCheck, PlaylistDetail, PlaylistEntry, UnplayableSong } from '../lib/types'
 
   let { id }: { id: number } = $props()
   let playlist = $state<PlaylistDetail | null>(null)
@@ -23,7 +23,50 @@
 
   const playing = $derived(app.player.playlist?.id === id)
   const totalMs = $derived(playlist?.tracks.reduce((sum, t) => sum + (t.duration_ms ?? 0), 0) ?? 0)
-  const kindLabel = { track: 'Song', album: 'Album', artist: 'Artist' }
+  const kindLabel = { track: 'Song', album: 'Album', artist: 'Artist', wanted: 'Song' }
+  const notInLibrary = $derived(playlist?.entries.filter((e) => e.kind === 'wanted').length ?? 0)
+  const problems = $derived(notInLibrary + (playlist?.unplayable.length ?? 0))
+
+  let check = $state<PlaylistCheck | null>(null)
+  const checking = $derived(check?.running && check.playlist_id === id)
+  let timer: ReturnType<typeof setTimeout> | undefined
+
+  async function followCheck() {
+    check = await api.playlistCheck()
+    if (check?.running) {
+      timer = setTimeout(() => followCheck().catch(() => {}), 1000)
+    } else if (check) {
+      await load()
+      toast(check.problems ? `${check.problems} of ${check.total} files won't play` : `All ${check.total} files play`)
+    }
+  }
+
+  async function startCheck() {
+    try {
+      await api.checkPlaylist(id)
+      await followCheck()
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not check the files', true)
+    }
+  }
+
+  $effect(() => () => clearTimeout(timer))
+
+  function reason(song: UnplayableSong) {
+    return song.removed ? 'File is missing' : `File won't play: ${song.error ?? 'unknown error'}`
+  }
+
+  /** What's wrong with an entry, in words, if anything. */
+  function flagOf(entry: PlaylistEntry) {
+    if (entry.kind === 'wanted') return 'Not in your library'
+    if (entry.name === null) return 'No longer in your library'
+    if (!entry.problem_songs) return null
+    if (entry.kind === 'track') {
+      const song = playlist?.unplayable.find((s) => s.track_id === entry.ref_id)
+      return song ? reason(song) : "Can't play"
+    }
+    return `${entry.problem_songs} ${entry.problem_songs === 1 ? "song can't" : "songs can't"} play`
+  }
 
   async function attempt(action: () => Promise<unknown>, done?: string) {
     try {
@@ -76,6 +119,7 @@
   <p class="muted small">
     {playlist.tracks.length} {playlist.tracks.length === 1 ? 'song' : 'songs'} · {hours(totalMs)}
     {#if playing}· <b class="accent">playing now</b>{/if}
+    {#if problems}· <span class="bad"><Icon name="warning" size={13} /> {problems} can't play and will be skipped</span>{/if}
   </p>
 
   <div class="actions">
@@ -103,9 +147,14 @@
     <button class="stop" onclick={() => attempt(() => api.stopPlaylist(), 'Stopped')}>Stop playing this playlist</button>
   {/if}
 
+  <button class="stop" disabled={checking} onclick={startCheck}>
+    {checking ? `Checking files: ${check?.done ?? 0} of ${check?.total ?? 0}` : 'Check files'}
+  </button>
+
   <h2>What's in it</h2>
   {#each playlist.entries as entry, i (entry.id)}
-    <div class="entry">
+    {@const flag = flagOf(entry)}
+    <div class="entry" class:flagged={flag && (entry.kind === 'track' || entry.kind === 'wanted')}>
       <Art hash={entry.art_hash} size={40} round={entry.kind === 'artist' ? 999 : 6} />
       <div class="text">
         <div class="ellipsis">
@@ -118,6 +167,9 @@
           {/if}
         </div>
         <div class="muted small ellipsis">{kindLabel[entry.kind]}{entry.subtitle ? ` · ${entry.subtitle}` : ''}</div>
+        {#if flag}
+          <div class="bad small ellipsis" title={flag}><Icon name="warning" size={13} /> {flag}</div>
+        {/if}
       </div>
       <div class="order">
         <button aria-label="Move up" disabled={i === 0} onclick={() => move(entry, i - 1)}><Icon name="up" size={18} /></button>
@@ -151,6 +203,20 @@
     {/each}
   {/if}
 
+  {#if playlist.unplayable.length}
+    <h2>Can't play</h2>
+    <p class="muted small">These are skipped. A library check tries them again.</p>
+    {#each playlist.unplayable as song (song.track_id)}
+      <div class="entry flagged">
+        <div class="text">
+          <div class="ellipsis">{song.title}</div>
+          <div class="muted small ellipsis">{byline(song.artist, song.album)}</div>
+          <div class="bad small ellipsis" title={reason(song)}><Icon name="warning" size={13} /> {reason(song)}</div>
+        </div>
+      </div>
+    {/each}
+  {/if}
+
   <button class="delete" onclick={remove}>Delete playlist</button>
 {/if}
 
@@ -181,6 +247,14 @@
 
   .accent {
     color: var(--accent);
+  }
+
+  .bad {
+    color: var(--bad);
+  }
+
+  .flagged .text > div:first-child {
+    color: var(--muted);
   }
 
   .actions {

@@ -60,6 +60,8 @@ import type {
   Page,
   PartyStyle,
   PlayerState,
+  ImportResult,
+  PlaylistCheck,
   PlaylistDetail,
   PlaylistEntry,
   PlaylistListItem,
@@ -272,6 +274,10 @@ export const api = {
   playlists: () => get<PlaylistListItem[]>('/playlists'),
   playlist: (id: number) => get<PlaylistDetail>(`/playlists/${id}`),
   createPlaylist: (name: string) => post<PlaylistSummary>('/playlists', { name }),
+  importPlaylist: (text: string, filename?: string, name?: string) =>
+    post<ImportResult>('/playlists/import', { text, filename, name: name?.trim() || undefined }),
+  checkPlaylist: (id: number) => post<void>(`/playlists/${id}/check`),
+  playlistCheck: () => get<PlaylistCheck | null>('/playlists/check'),
   updatePlaylist: (id: number, changes: { name?: string; shuffle?: boolean }) =>
     patch<void>(`/playlists/${id}`, changes),
   deletePlaylist: (id: number) => del<void>(`/playlists/${id}`),

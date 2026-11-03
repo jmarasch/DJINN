@@ -37,6 +37,47 @@ first. Songs that played through requests count too.
 **From a search:** search by description (like "80s rock") and tap **Save as
 playlist** to keep the matches. See [Search and AI](search-and-ai.md).
 
+## Importing playlists
+
+Bring a playlist over from Spotify, YouTube Music, Pandora or another service.
+This brings in the list, not the music: DJINN never downloads songs.
+
+On the Playlists tab, tap **Import a playlist**, then choose files or paste
+songs, one per line (`Artist - Title`). A file holding several playlists makes
+several playlists here.
+
+A share link alone doesn't work, because it doesn't tell DJINN what's in the
+playlist. To get a file:
+
+| From | How |
+| --- | --- |
+| Spotify, YouTube Music, Pandora, Tidal, Deezer, Amazon and others | [Tune My Music](https://www.tunemymusic.com/) or [Soundiiz](https://soundiiz.com/): choose the service as the source and export to a file. |
+| Spotify | [Exportify](https://exportify.net/), or `Playlist1.json` from your account data. |
+| YouTube Music | Google Takeout. Its playlists list only video ids, so DJINN asks YouTube for each title. This is the one import that goes online. |
+| Apple Music | File > Library > Export Playlist (either format). |
+| Other music players | M3U, M3U8, PLS, XSPF or JSPF files. |
+
+Matching is careful, because a flagged gap is better than the wrong song at a
+party. "Song (Remastered 2011)" finds "Song", but "Song (Live)" doesn't, and
+the artist has to match too.
+
+## Songs that can't play
+
+A playlist flags songs it can't play, and skips them when it plays. That covers:
+
+- **Not in your library:** an imported song you don't have. It keeps its place
+  in the list, and fills in by itself when a library check finds it.
+- **File is missing:** the file was moved or deleted. If the same song turns
+  up somewhere else in your library, the playlist switches to it.
+- **File won't play:** the file is damaged. DJINN notices when a song fails
+  while playing. To look for damage before that, open the playlist and tap
+  **Check files**, which reads every song all the way through.
+
+Each library check tries damaged files again, and replacing a file clears its
+flag. Songs on a drive that's unplugged aren't flagged as missing while it's
+away. A shuffled playlist or wild play won't pick a flagged song, and a playlist
+playing in order carries on from the next song that works.
+
 ## Radio
 
 Radio plays songs that sound like where it started, more often by the artist

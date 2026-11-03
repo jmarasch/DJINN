@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Playlists
+
+- **Import playlists** from Spotify, YouTube Music, Pandora, Apple Music and other services, using a file they export or a list of songs you paste. Only the list comes in, never the music. See [the guide](docs/guide/playlists-and-radio.md#importing-playlists).
+- Playlists now **flag songs that can't play** and skip them: imported songs you don't have, files that are missing, and files that are damaged. **Check files** on a playlist looks for damage ahead of time. Songs fill back in by themselves once a library check finds them.
+
 ## 2026.11.02 (November 2, 2026)
 
 ### Radio and the queue

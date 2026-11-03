@@ -1468,9 +1468,13 @@ pub fn start_scan(state: &AppState) -> bool {
                     secs = started.elapsed().as_secs_f32(),
                     "library check finished"
                 );
+                let changed = summary.read > 0 || summary.removed > 0;
+                if let Err(e) = crate::playlist_import::after_library_check(&state, changed).await {
+                    tracing::error!(error = %format!("{e:#}"), "updating playlists failed");
+                }
                 // Nothing new or gone: no artists to look up, no songs to
                 // measure, and the playlist is the same.
-                if summary.read == 0 && summary.removed == 0 {
+                if !changed {
                     return;
                 }
                 let _ = state.events.send(ServerEvent::LibraryChanged);

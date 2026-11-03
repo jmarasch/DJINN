@@ -2,6 +2,7 @@
   import { onMount } from 'svelte'
   import { api } from '../lib/api'
   import Icon from '../lib/Icon.svelte'
+  import ImportPlaylist from '../lib/ImportPlaylist.svelte'
   import { app, toast } from '../lib/state.svelte'
   import type { PlaylistListItem } from '../lib/types'
 
@@ -85,6 +86,7 @@
   <input placeholder="New playlist, e.g. Chill or Dance" bind:value={name} maxlength="60" />
   <button class="primary" disabled={!name.trim()}>Create</button>
 </form>
+<ImportPlaylist onimported={() => load().catch(() => {})} />
 
 {#each playlists as playlist (playlist.id)}
   <a class="row" href="#/playlist/{playlist.id}">
@@ -94,6 +96,9 @@
       <span class="muted small">
         {playlist.entry_count} {playlist.entry_count === 1 ? 'item' : 'items'} ·
         {playlist.shuffle ? 'shuffle' : 'in order'}
+        {#if playlist.problem_songs}
+          · <span class="flag"><Icon name="warning" size={13} /> {playlist.problem_songs} can't play</span>
+        {/if}
       </span>
     </span>
     {#if playlist.active}<span class="badge">Playing</span>{/if}
@@ -169,6 +174,11 @@
 
   .block {
     display: block;
+  }
+
+  .flag {
+    color: var(--bad);
+    white-space: nowrap;
   }
 
   .badge {

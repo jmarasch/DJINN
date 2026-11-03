@@ -505,21 +505,53 @@ export interface PlaylistSummary {
 
 export interface PlaylistListItem extends PlaylistSummary {
   active: boolean
+  problem_songs: number
+}
+
+export interface ImportedPlaylist {
+  id: number
+  name: string
+  found: number
+  missing: number
+}
+
+export interface ImportResult {
+  playlists: ImportedPlaylist[]
+  skipped: number
+}
+
+export interface PlaylistCheck {
+  playlist_id: number
+  running: boolean
+  done: number
+  total: number
+  problems: number
+}
+
+export interface UnplayableSong {
+  track_id: number
+  title: string
+  artist: string | null
+  album: string | null
+  removed: boolean
+  error: string | null
 }
 
 export interface PlaylistEntry {
   id: number
-  kind: EntryKind
+  kind: EntryKind | 'wanted'
   ref_id: number
   name: string | null
   subtitle: string | null
   art_hash: string | null
   position: number
+  problem_songs: number
 }
 
 export interface PlaylistDetail extends PlaylistSummary {
   entries: PlaylistEntry[]
   tracks: Track[]
+  unplayable: UnplayableSong[]
 }
 
 export interface LibraryRoot {
