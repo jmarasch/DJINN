@@ -48,6 +48,7 @@ import androidx.media3.common.util.UnstableApi
 import com.newterrastudios.djinn.go.data.Album
 import com.newterrastudios.djinn.go.data.AlbumDetail
 import com.newterrastudios.djinn.go.data.ApiException
+import com.newterrastudios.djinn.go.data.CertificateChanged
 import com.newterrastudios.djinn.go.data.ArtistDetail
 import com.newterrastudios.djinn.go.data.ArtistSummary
 import com.newterrastudios.djinn.go.data.GoHome
@@ -81,7 +82,7 @@ private fun <T : Any> Loaded(
         try {
             value = load()
         } catch (e: IOException) {
-            failed = if (e is ApiException) e.message else "Couldn't reach the server."
+            failed = if (e is ApiException || e is CertificateChanged) e.message else "Couldn't reach the server."
         }
     }
     val shown = value
@@ -217,7 +218,10 @@ private fun KeptSongs(nav: Nav) {
     val songs = if (locked) emptyList() else kept.map { it.toTrack() }
     LazyColumn(Modifier.fillMaxSize()) {
         if (locked && kept.isNotEmpty()) {
-            item { Note("Your ${kept.size} kept songs are locked because this phone hasn't reached the server for a while. They'll unlock when it does.") }
+            item {
+                val songs = if (kept.size == 1) "1 kept song is" else "${kept.size} kept songs are"
+                Note("Your $songs locked because this phone hasn't reached the server for a while. They'll unlock when it does.")
+            }
         } else if (songs.isEmpty()) {
             item { Note("Nothing here yet. A song's menu can download it, and albums have a download button.") }
         }
