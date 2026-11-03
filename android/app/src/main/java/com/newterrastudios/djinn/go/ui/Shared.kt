@@ -1,5 +1,6 @@
 package com.newterrastudios.djinn.go.ui
 
+import androidx.media3.common.util.UnstableApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -98,6 +99,7 @@ fun Row2(
 }
 
 /** One song: tap to play, dots for everything else. */
+@UnstableApi
 @Composable
 fun SongRow(track: Track, nav: Nav, onClick: () -> Unit) {
     val line = listOfNotNull(track.artist, track.album).joinToString(" · ")

@@ -2,6 +2,7 @@ package com.newterrastudios.djinn.go.player
 
 import com.newterrastudios.djinn.go.data.parseKeptMediaId
 import android.app.PendingIntent
+import androidx.media3.session.SessionError
 import android.content.Intent
 import android.os.SystemClock
 import androidx.core.net.toUri
@@ -375,7 +376,7 @@ class PlaybackService : MediaLibraryService() {
             } else if (track != null) {
                 LibraryResult.ofItem(track.toMediaItem(app.api), null)
             } else {
-                LibraryResult.ofError(LibraryResult.RESULT_ERROR_BAD_VALUE)
+                LibraryResult.ofError(SessionError.ERROR_BAD_VALUE)
             }
         }
 

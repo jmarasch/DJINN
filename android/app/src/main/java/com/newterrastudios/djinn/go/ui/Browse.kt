@@ -1,5 +1,7 @@
 package com.newterrastudios.djinn.go.ui
 
+import androidx.compose.material3.SecondaryScrollableTabRow
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.material.icons.filled.KeyboardArrowUp
@@ -437,10 +439,22 @@ private fun LazyListScope.songSection(title: String, songs: List<Track>, nav: Na
 fun LibraryScreen(nav: Nav) {
     var tab by rememberSaveable { mutableStateOf(0) }
     Column(Modifier.fillMaxSize()) {
-        SecondaryTabRow(selectedTabIndex = tab) {
-            listOf("Artists", "Albums", "Songs", "Lists", "On phone").forEachIndexed { index, label ->
-                Tab(selected = tab == index, onClick = { tab = index }, text = { Text(label) })
+        val tabs: @Composable () -> Unit = {
+            LIBRARY_TABS.forEachIndexed { index, label ->
+                Tab(
+                    selected = tab == index,
+                    onClick = { tab = index },
+                    text = { Text(label, maxLines = 1, softWrap = false) },
+                )
             }
+        }
+        // Five words only share a phone evenly at small text sizes. Rather than break them, they scroll.
+        val configuration = LocalConfiguration.current
+        if (configuration.screenWidthDp / configuration.fontScale >= ROOM_FOR_EVEN_TABS_DP) {
+            SecondaryTabRow(selectedTabIndex = tab, tabs = tabs)
+        } else {
+            // No minimum width: each tab just fits its word, so the next one shows at the edge when they scroll.
+            SecondaryScrollableTabRow(selectedTabIndex = tab, edgePadding = 0.dp, minTabWidth = 0.dp, tabs = tabs)
         }
         when (tab) {
             0 -> {
@@ -493,6 +507,9 @@ fun LibraryScreen(nav: Nav) {
         }
     }
 }
+
+private val LIBRARY_TABS = listOf("Artists", "Albums", "Songs", "Lists", "On phone")
+private const val ROOM_FOR_EVEN_TABS_DP = 480
 
 val KEPT_VIEWS = listOf("here" to "This server", "all" to "All servers")
 val ARTIST_SORTS = listOf("name" to "Name", "added" to "Recently added")

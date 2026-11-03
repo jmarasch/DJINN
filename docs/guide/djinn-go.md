@@ -115,8 +115,9 @@ scan the QR code above or type the address from Admin > GO. Anyone on a network
 can give a computer any name, so only sign in to a server you recognize.
 Android may ask about **nearby devices**; that's how newer Android lets an app
 reach a computer on your home network. 
-**In the car:** Android Auto only shows apps from the Play Store, so while DJINN
-GO is installed from an APK it won't appear on the car's screen until you allow it:
+**In the car:** Android Auto only shows apps from the Play Store unless told
+otherwise, and DJINN GO isn't on it, so it won't appear on the car's screen until
+you allow it:
 
 1. On the phone, open **Settings > Connected devices > Connection preferences >
    Android Auto**.
