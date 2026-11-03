@@ -215,8 +215,16 @@ class PinnedHostnames(private val pins: () -> Set<String>) : HostnameVerifier {
 
 /** For the one request that reads a certificate before anything is trusted. Sends nothing private. */
 @SuppressLint("CustomX509TrustManager", "TrustAllX509TrustManager")
-internal object ReadAnyCertificate : X509TrustManager {
+internal class CertificateReader : X509TrustManager {
+    @Volatile
+    var seen: X509Certificate? = null
+        private set
+
     override fun checkClientTrusted(chain: Array<out X509Certificate>, authType: String) = Unit
-    override fun checkServerTrusted(chain: Array<out X509Certificate>, authType: String) = Unit
+
+    override fun checkServerTrusted(chain: Array<out X509Certificate>, authType: String) {
+        seen = chain.firstOrNull()
+    }
+
     override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
 }

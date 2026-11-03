@@ -17,6 +17,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.filled.Album
 import androidx.compose.material3.Slider
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.layout.ContentScale
@@ -344,6 +346,14 @@ fun FullScreen(nav: Nav, cover: Boolean) {
         }
         if (cover) {
             val art = player.current?.mediaMetadata?.artworkUri?.toString()
+            Icon(
+                Icons.Default.Album,
+                contentDescription = null,
+                tint = Color.White.copy(alpha = 0.25f),
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .size(160.dp),
+            )
             // The list-sized copy first, which is there even away from the server.
             listOf(art, fullSizeArt(art)).forEach { url ->
                 AsyncImage(

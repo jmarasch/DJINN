@@ -1,5 +1,6 @@
 package com.newterrastudios.djinn.go.data
 
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
@@ -12,7 +13,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
 import javax.net.ssl.SSLContext
-import javax.net.ssl.SSLPeerUnverifiedException
+import javax.net.ssl.SSLSocket
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 
@@ -21,6 +22,11 @@ class ApiException(val status: Int, message: String) : IOException(message)
 
 @Serializable
 private data class ErrorBody(val error: String? = null)
+
+/** A known server isn't presenting its certificate. Nothing was sent to it. */
+class CertificateChanged : IOException(
+    "This server's certificate has changed, so nothing was sent to it. Settings > Other servers can check it.",
+)
 
 /** What a first look at a server found. */
 data class Probed(
@@ -57,9 +63,11 @@ class GoApi(private val account: Account) {
             val url = chain.request().url
             val expected = serverAt(account.servers.value, url.host, url.port)?.pin
             if (expected != null) {
-                val presented = chain.connection()?.handshake()?.peerCertificates?.firstOrNull()
+                // Not handshake().peerCertificates, which is empty for a certificate no authority signed.
+                val socket = chain.connection()?.socket() as? SSLSocket
+                val presented = socket?.session?.peerCertificates?.firstOrNull()
                 if (presented == null || fingerprint(presented) != expected) {
-                    throw SSLPeerUnverifiedException("${url.host} isn't presenting the certificate it should")
+                    throw CertificateChanged()
                 }
             }
             chain.proceed(chain.request())
@@ -131,19 +139,20 @@ class GoApi(private val account: Account) {
         }
         val secure = withScheme(typed, "https") ?: throw IOException("Not an address")
         try {
+            val reader = CertificateReader()
             val reading = quick.newBuilder()
                 .sslSocketFactory(
-                    SSLContext.getInstance("TLS").apply { init(null, arrayOf(ReadAnyCertificate), null) }.socketFactory,
-                    ReadAnyCertificate,
+                    SSLContext.getInstance("TLS").apply { init(null, arrayOf(reader), null) }.socketFactory,
+                    reader,
                 )
                 .hostnameVerifier { _, _ -> true }
                 .build()
             get(reading, secure).use { response ->
-                val presented = response.handshake?.peerCertificates?.firstOrNull()
-                    ?: throw IOException("No certificate")
+                val presented = reader.seen ?: throw IOException("No certificate")
                 return@withContext Probed(secure, fingerprint(presented), hello(response.body.string()), true)
             }
         } catch (e: IOException) {
+            Log.i("DjinnGo", "No encrypted connection to $secure", e)
             if (typed.startsWith("https://")) throw e
         }
         val plain = withScheme(typed, "http") ?: throw IOException("Not an address")
