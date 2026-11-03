@@ -206,6 +206,15 @@ macro_rules! sort_key {
 
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
+pub enum ArtistSort {
+    #[default]
+    Name,
+    /// Whoever had a song added most recently first.
+    Added,
+}
+
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum AlbumSort {
     #[default]
     Name,
@@ -213,6 +222,8 @@ pub enum AlbumSort {
     Year,
     /// Oldest first.
     Oldest,
+    /// The album with a song added most recently first.
+    Added,
 }
 
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash, serde::Deserialize)]
@@ -440,6 +451,14 @@ macro_rules! album_order {
     };
     (oldest) => {
         concat!("al.year IS NULL, al.year, ", sort_key!("al.title"))
+    };
+    (added) => {
+        concat!(
+            "(SELECT max(t.added_at) FROM tracks t WHERE t.album_id = al.id AND ",
+            available!(),
+            ") DESC, ",
+            sort_key!("al.title")
+        )
     };
 }
 

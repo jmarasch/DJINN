@@ -30,6 +30,7 @@ import type {
   AlbumDetail,
   AlbumFilter,
   AlbumSort,
+  ArtistSort,
   ArtistDetail,
   ArtistPicture,
   UnsplashChoice,
@@ -198,10 +199,10 @@ export const api = {
   search: (q: string) => get<SearchResults>(`/search?q=${encodeURIComponent(q)}`),
   /** The query read by the AI reader; takes a few seconds. */
   ask: (q: string) => get<Described | null>(`/search/ask?q=${encodeURIComponent(q)}`),
-  artists: (offset: number) => get<Page<ArtistSummary>>(`/artists?offset=${offset}`),
+  artists: (sort: ArtistSort, offset: number) => get<Page<ArtistSummary>>(`/artists?sort=${sort}&offset=${offset}`),
   albums: (sort: AlbumSort, filter: AlbumFilter, offset: number) => get<Page<Album>>(`/albums?sort=${sort}&filter=${filter}&offset=${offset}`),
   /** Where each letter (or year) starts in a list, for the jump strip. */
-  artistJumps: () => get<Jump[]>('/artists/jumps'),
+  artistJumps: (sort: ArtistSort) => get<Jump[]>(`/artists/jumps?sort=${sort}`),
   albumJumps: (sort: AlbumSort, filter: AlbumFilter) => get<Jump[]>(`/albums/jumps?sort=${sort}&filter=${filter}`),
   trackJumps: (sort: TrackSort) => get<Jump[]>(`/tracks/jumps?sort=${sort}`),
   playWild: () => post<void>('/playlists/wild/play'),

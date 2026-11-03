@@ -316,6 +316,82 @@ async fn jumps_follow_the_list_order() {
 }
 
 #[tokio::test]
+async fn artists_and_albums_sort_by_what_was_added_last() {
+    let store = Store::open_in_memory().await.unwrap();
+    store
+        .save_scanned(&[
+            scanned("/m/1.flac", "Old One", "Abba", "Arrival"),
+            scanned("/m/2.flac", "Old Two", "Zappa", "Apostrophe"),
+        ])
+        .await
+        .unwrap();
+    let added = |path: &'static str, at: i64| {
+        let store = store.clone();
+        async move {
+            sqlx::query("UPDATE tracks SET added_at = ? WHERE path = ?")
+                .bind(at)
+                .bind(path)
+                .execute(&store.pool)
+                .await
+                .unwrap();
+        }
+    };
+    added("/m/1.flac", 1_000).await;
+    added("/m/2.flac", 2_000).await;
+    let artists = |sort| {
+        let store = store.clone();
+        async move {
+            let page = store
+                .artists_page_filtered(sort, true, 0, 10)
+                .await
+                .unwrap();
+            page.items.into_iter().map(|a| a.name).collect::<Vec<_>>()
+        }
+    };
+    let albums = |sort| {
+        let store = store.clone();
+        async move {
+            let page = store.albums_page(sort, 0, 10).await.unwrap();
+            page.items.into_iter().map(|a| a.title).collect::<Vec<_>>()
+        }
+    };
+    assert_eq!(artists(ArtistSort::Name).await, ["Abba", "Zappa"]);
+    assert_eq!(artists(ArtistSort::Added).await, ["Zappa", "Abba"]);
+    assert_eq!(albums(AlbumSort::Name).await, ["Apostrophe", "Arrival"]);
+    assert_eq!(albums(AlbumSort::Added).await, ["Apostrophe", "Arrival"]);
+
+    // A new song on an old album brings the album and its artist back up.
+    store
+        .save_scanned(&[scanned("/m/3.flac", "New Bonus", "Abba", "Arrival")])
+        .await
+        .unwrap();
+    added("/m/3.flac", 3_000).await;
+    assert_eq!(artists(ArtistSort::Added).await, ["Abba", "Zappa"]);
+    assert_eq!(albums(AlbumSort::Added).await, ["Arrival", "Apostrophe"]);
+
+    // A removed song no longer counts.
+    sqlx::query("UPDATE tracks SET removed_at = 1 WHERE path = '/m/3.flac'")
+        .execute(&store.pool)
+        .await
+        .unwrap();
+    assert_eq!(artists(ArtistSort::Added).await, ["Zappa", "Abba"]);
+    assert_eq!(albums(AlbumSort::Added).await, ["Apostrophe", "Arrival"]);
+
+    // No letters or years to jump to in an order like this.
+    assert!(store
+        .artist_jumps_filtered(ArtistSort::Added, true)
+        .await
+        .unwrap()
+        .is_empty());
+    assert!(store
+        .album_jumps(AlbumSort::Added)
+        .await
+        .unwrap()
+        .is_empty());
+    assert!(!store.album_jumps(AlbumSort::Name).await.unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn sorting_skips_leading_articles_and_albums_sort_by_year() {
     let store = Store::open_in_memory().await.unwrap();
     let mut tracks = vec![
@@ -415,10 +491,20 @@ async fn collaborations_count_for_every_artist() {
         [("David Guetta", 2), ("KREAM", 1), ("Zara Larsson", 1)],
         "no combined artist"
     );
-    let visible = store.artists_page_filtered(false, 0, 10).await.unwrap();
+    let visible = store
+        .artists_page_filtered(ArtistSort::Name, false, 0, 10)
+        .await
+        .unwrap();
     let visible_names: Vec<_> = visible.items.iter().map(|a| a.name.as_str()).collect();
     assert_eq!(visible_names, ["David Guetta", "Zara Larsson"]);
-    assert_eq!(store.artist_jumps_filtered(false).await.unwrap().len(), 2);
+    assert_eq!(
+        store
+            .artist_jumps_filtered(ArtistSort::Name, false)
+            .await
+            .unwrap()
+            .len(),
+        2
+    );
     let hidden = store.search("KREAM", 10).await.unwrap().artists;
     assert_eq!(hidden.len(), 1);
     assert!(store.artist(hidden[0].id).await.unwrap().is_some());
@@ -463,11 +549,21 @@ async fn albumless_songs_stay_in_the_primary_artist_list() {
     song.album = None;
     store.save_scanned(&[song]).await.unwrap();
 
-    let page = store.artists_page_filtered(false, 0, 10).await.unwrap();
+    let page = store
+        .artists_page_filtered(ArtistSort::Name, false, 0, 10)
+        .await
+        .unwrap();
     assert_eq!(page.total, 1);
     assert_eq!(page.items[0].name, "Solo");
     assert_eq!(page.items[0].track_count, 1);
-    assert_eq!(store.artist_jumps_filtered(false).await.unwrap().len(), 1);
+    assert_eq!(
+        store
+            .artist_jumps_filtered(ArtistSort::Name, false)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
 }
 
 #[tokio::test]
