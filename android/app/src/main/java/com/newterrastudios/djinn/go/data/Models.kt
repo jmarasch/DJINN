@@ -98,15 +98,73 @@ data class GoPlaylist(
     val id: Long,
     val name: String,
     val tracks: Long = 0,
+    /** Who made it, for shared ones. */
+    val owner: String? = null,
+    val mine: Boolean = true,
+    val shared: Boolean = false,
 )
+
+/** One line of a playlist, in order. Without a song index it can't play. */
+@Serializable
+data class PlaylistRow(
+    @SerialName("entry_id") val entryId: Long,
+    /** Its entry is this one song. A song of an album or artist goes with the whole entry. */
+    val removable: Boolean = false,
+    @SerialName("song_index") val songIndex: Int? = null,
+    val title: String,
+    val artist: String? = null,
+    val problem: String? = null,
+) {
+    /** Why it can't play, in words. */
+    val problemText: String?
+        get() = when (problem) {
+            null -> null
+            "not_in_library" -> "Not in the library"
+            "file_missing" -> "File is missing"
+            else -> "File won't play"
+        }
+}
+
+@Serializable
+data class ShareTarget(val id: Long, val name: String)
+
+@Serializable
+data class ImportRequest(val text: String, val filename: String? = null, val name: String? = null)
+
+@Serializable
+data class ImportedPlaylist(val id: Long, val name: String, val found: Int = 0, val missing: Int = 0)
+
+@Serializable
+data class ImportResult(val playlists: List<ImportedPlaylist> = emptyList(), val skipped: Int = 0)
+
+@Serializable
+data class SharedSetting(val shared: Boolean)
+
+/**
+ * A playlist file's text. Apple Music's export is UTF-16; the rest are UTF-8.
+ * Only a byte order mark says which, and the server doesn't want the mark.
+ */
+fun importText(bytes: ByteArray): String {
+    fun at(i: Int) = bytes.getOrNull(i)?.toInt()?.and(0xff)
+    val charset = when {
+        at(0) == 0xff && at(1) == 0xfe -> Charsets.UTF_16LE
+        at(0) == 0xfe && at(1) == 0xff -> Charsets.UTF_16BE
+        else -> Charsets.UTF_8
+    }
+    return String(bytes, charset).removePrefix("\uFEFF")
+}
 
 @Serializable
 data class GoPlaylistDetail(
     val id: Long,
     val name: String,
     /** The account's own: only those can be changed here. */
-    @SerialName("user_id") val userId: Long = 0,
+    val mine: Boolean = true,
+    val owner: String? = null,
+    val shared: Boolean = false,
     val songs: List<Track> = emptyList(),
+    /** Everything in it, in order, flagged where it can't play. */
+    val rows: List<PlaylistRow> = emptyList(),
 )
 
 @Serializable
@@ -155,7 +213,11 @@ data class NewPlaylist(val name: String, val songs: List<Long> = emptyList())
 data class PlaylistName(val name: String)
 
 @Serializable
-data class Permissions(val downloads: Boolean = false, val convert: Boolean = false)
+data class Permissions(
+    val downloads: Boolean = false,
+    val convert: Boolean = false,
+    @SerialName("share_playlists") val sharePlaylists: Boolean = false,
+)
 
 @Serializable
 data class Me(val id: Long = 0, val username: String, val permissions: Permissions = Permissions())

@@ -4,7 +4,7 @@
   import JoinCard from './lib/JoinCard.svelte'
   import { goBack, navigation, param, route } from './lib/router.svelte'
   import Sheet from './lib/Sheet.svelte'
-  import { app, connect, isAdmin, refreshMe, refreshMode } from './lib/state.svelte'
+  import { app, connect, hasPlaylists, isAdmin, refreshMe, refreshMode } from './lib/state.svelte'
   import Toasts from './lib/Toasts.svelte'
   import Admin from './screens/Admin.svelte'
   import { adminTabFor } from './lib/adminTabs'
@@ -110,8 +110,10 @@
       <span>Queue{app.queue.length ? ` (${app.queue.length})` : ''}</span>
     </a>
     <button class:active={showJoin} onclick={() => (showJoin = true)}><Icon name="qr" /><span>Join</span></button>
-    {#if isAdmin()}
+    {#if hasPlaylists()}
       <a href="#/playlists" class:active={tab === 'playlists'}><Icon name="playlist" /><span>Playlists</span></a>
+    {/if}
+    {#if isAdmin()}
       <a href="#/admin" class:active={tab === 'admin'}><Icon name="settings" /><span>Admin</span></a>
     {/if}
   </nav>
@@ -127,13 +129,13 @@
       <AlbumView id={albumId} />
     {:else if artistId}
       <ArtistView id={artistId} />
-    {:else if playlistId && isAdmin()}
+    {:else if playlistId && hasPlaylists()}
       <PlaylistView id={playlistId} />
     {:else if tab === 'search'}
       <Search />
     {:else if tab === 'queue'}
       <Queue />
-    {:else if tab === 'playlists' && isAdmin()}
+    {:else if tab === 'playlists' && hasPlaylists()}
       <Playlists />
     {:else if tab === 'admin' && isAdmin()}
       <Admin tab={adminTab} />

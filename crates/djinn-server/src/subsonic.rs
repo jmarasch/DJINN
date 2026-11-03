@@ -1772,7 +1772,10 @@ mod tests {
             &format!("createPlaylist?{auth}&name=Car&songId={song}&songId={song}"),
         )
         .await;
-        assert!(body.contains(r#"songCount="2""#), "{body}");
+        assert!(
+            body.contains(r#"songCount="1""#),
+            "a repeat holds one place: {body}"
+        );
         assert_eq!(
             state.store.go_playlists(sam.id).await.unwrap()[0].name,
             "Car"

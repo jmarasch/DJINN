@@ -3,6 +3,7 @@
   import { api } from '../../lib/api'
   import Art from '../../lib/Art.svelte'
   import { app, toast } from '../../lib/state.svelte'
+  import ImportPlaylist from '../../lib/ImportPlaylist.svelte'
   import type { GoPlaylist, Liked, Played } from '../../lib/types'
   import { playList, tapSong } from '../player.svelte'
   import SongList from '../SongList.svelte'
@@ -98,6 +99,11 @@
     <p class="muted">Tap the heart on a song to keep it here.</p>
   {/if}
 {:else if section === 'playlists'}
+  <ImportPlaylist
+    onimported={() => {
+      api.goPlaylists().then((found) => (lists = found))
+    }}
+  />
   <form class="new" onsubmit={create}>
     <input bind:value={name} placeholder="New playlist" maxlength="100" required aria-label="New playlist name" />
     <button class="primary">Make</button>

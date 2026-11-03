@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::auth::AdminUser;
 use crate::error::{ApiError, ApiResult};
-use crate::playlist_api::{validate_name, MAX_NAME};
+use crate::playlist_api::{validate_name, Member, MAX_NAME};
 use crate::state::AppState;
 
 /// Big enough for an Apple Music library export.
@@ -68,7 +68,7 @@ struct ImportResult {
 }
 
 async fn import(
-    AdminUser(admin): AdminUser,
+    Member(user): Member,
     State(state): State<AppState>,
     Json(body): Json<ImportBody>,
 ) -> ApiResult<(StatusCode, Json<ImportResult>)> {
@@ -105,7 +105,7 @@ async fn import(
             .iter()
             .filter(|row| matches!(row, ImportRow::Wanted(_)))
             .count();
-        let playlist = state.store.import_playlist(admin.id, &name, &rows).await?;
+        let playlist = state.store.import_playlist(user.id, &name, &rows).await?;
         playlists.push(ImportedPlaylist {
             id: playlist.id,
             name: playlist.name,
@@ -370,11 +370,11 @@ fn update_check(state: &AppState, change: impl FnOnce(&mut PlaylistCheck)) {
 
 /// Starts playing every song in a playlist through, in the background.
 async fn start_check(
-    _: AdminUser,
+    AdminUser(admin): AdminUser,
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> ApiResult<StatusCode> {
-    if state.store.playlist(id).await?.is_none() {
+    if state.store.playlist_for(admin.id, id).await?.is_none() {
         return Err(ApiError::not_found());
     }
     let files = state.store.playlist_files(id).await?;
@@ -519,20 +519,25 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn only_admins_import_and_links_are_explained() {
+    async fn anyone_signed_in_imports_their_own_and_links_are_explained() {
         let state = AppState::for_tests().await;
-        let user = session(&state, "listener", Role::User).await;
-        let admin = session(&state, "admin", Role::Admin).await;
-        let body = serde_json::json!({ "text": "Rihanna - S&M" }).to_string();
+        let sam = session(&state, "sam", Role::User).await;
+        let jo = session(&state, "jo", Role::User).await;
+        let body = serde_json::json!({ "text": "Rihanna - S&M", "name": "Sam's" }).to_string();
         let (status, _) = call(
             &state,
             Method::POST,
             "/api/playlists/import",
             Some(&body),
-            Some(&user),
+            Some(&sam),
         )
         .await;
-        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(status, StatusCode::CREATED);
+        let (_, mine) = get_body(&state, "/api/playlists", &sam).await;
+        let mine: serde_json::Value = serde_json::from_str(&mine).unwrap();
+        assert_eq!(mine[0]["name"], "Sam's");
+        let (_, others) = get_body(&state, "/api/playlists", &jo).await;
+        assert_eq!(others, "[]", "private to whoever imported it");
 
         let link =
             serde_json::json!({ "text": "https://open.spotify.com/playlist/abc" }).to_string();
@@ -541,7 +546,7 @@ mod tests {
             Method::POST,
             "/api/playlists/import",
             Some(&link),
-            Some(&admin),
+            Some(&sam),
         )
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST);

@@ -1,5 +1,14 @@
 package com.newterrastudios.djinn.go.ui
 
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
+import com.newterrastudios.djinn.go.data.importText
+import com.newterrastudios.djinn.go.data.ShareTarget
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.material3.Checkbox
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.compose.rememberLauncherForActivityResult
+import android.provider.OpenableColumns
 import androidx.compose.material3.SecondaryScrollableTabRow
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.animation.AnimatedVisibility
@@ -377,21 +386,77 @@ private fun PlaylistsTab(nav: Nav) {
     var naming by remember { mutableStateOf(false) }
     var version by remember { mutableStateOf(0) }
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    var pasting by remember { mutableStateOf(false) }
+    fun import(text: String, filename: String?) {
+        // Started from the app's scope: leaving this tab shouldn't lose it.
+        nav.scope.launch {
+            nav.message = "Importing..."
+            try {
+                val result = nav.api.importPlaylist(text, filename)
+                nav.message = result.playlists.joinToString(". ") {
+                    "${it.name}: ${it.found} found" + if (it.missing > 0) ", ${it.missing} not in the library" else ""
+                }
+                version++
+            } catch (e: IOException) {
+                nav.message = if (e is ApiException) e.message else "Couldn't reach the server."
+            }
+        }
+    }
+    val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            nav.scope.launch {
+                val file = withContext(Dispatchers.IO) {
+                    runCatching {
+                        val resolver = context.contentResolver
+                        val name = resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
+                            if (it.moveToFirst()) it.getString(0) else null
+                        }
+                        val bytes = resolver.openInputStream(uri)?.use { it.readBytes() }
+                        bytes?.let { importText(it) to name }
+                    }.getOrNull()
+                }
+                if (file != null) import(file.first, file.second) else nav.message = "Couldn't read that file."
+            }
+        }
+    }
     Loaded(key = "playlists-$version", load = { nav.api.playlists() }) { lists: List<GoPlaylist> ->
         LazyColumn(Modifier.fillMaxSize()) {
             item {
-                FilledTonalButton(onClick = { naming = true }, modifier = Modifier.padding(16.dp)) { Text("New playlist") }
+                Row(
+                    Modifier.padding(16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    FilledTonalButton(onClick = { naming = true }) { Text("New playlist") }
+                    FilledTonalButton(onClick = { pasting = true }) { Text("Import") }
+                }
             }
             if (lists.isEmpty()) item { Note("No playlists yet.") }
             items(lists) { list ->
                 Row2(
                     title = list.name,
-                    subtitle = if (list.tracks == 1L) "1 song" else "${list.tracks} songs",
+                    subtitle = listOfNotNull(
+                        if (list.tracks == 1L) "1 song" else "${list.tracks} songs",
+                        if (list.mine) null else "from ${list.owner}",
+                    ).joinToString(" · "),
                     art = { Art(null, 44.dp) },
                     onClick = { nav.push(Screen.Playlist(list.id)) },
                 )
             }
         }
+    }
+    if (pasting) {
+        ImportDialog(
+            onFile = {
+                pasting = false
+                pick.launch(arrayOf("*/*"))
+            },
+            onPaste = { text ->
+                pasting = false
+                import(text, null)
+            },
+            onCancel = { pasting = false },
+        )
     }
     if (naming) {
         NameDialog("New playlist", "", onDone = { name ->
@@ -408,6 +473,112 @@ private fun PlaylistsTab(nav: Nav) {
             }
         })
     }
+}
+
+/** Bring in a playlist: names only, never music. */
+@Composable
+private fun ImportDialog(onFile: () -> Unit, onPaste: (String) -> Unit, onCancel: () -> Unit) {
+    var text by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onCancel,
+        title = { Text("Import a playlist") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "This brings in the list, not the music. Songs you don't have stay in the list, flagged, " +
+                        "and are skipped. To get a file from a streaming service, use Tune My Music or Soundiiz: " +
+                        "a share link alone doesn't say what's in a playlist.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                FilledTonalButton(onClick = onFile) { Text("Choose a file") }
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    minLines = 3,
+                    maxLines = 6,
+                    label = { Text("Or paste songs, one per line") },
+                    placeholder = { Text("Artist - Title") },
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = text.isNotBlank(), onClick = { onPaste(text) }) { Text("Import") }
+        },
+        dismissButton = { TextButton(onClick = onCancel) { Text("Cancel") } },
+    )
+}
+
+/** Who can see a playlist of yours: only you, everyone, or particular people. */
+@UnstableApi
+@Composable
+private fun SharingDialog(list: GoPlaylistDetail, nav: Nav, onClose: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    var everyone by remember { mutableStateOf(list.shared) }
+    var people by remember { mutableStateOf<List<ShareTarget>?>(null) }
+    val chosen = remember { mutableStateListOf<Long>() }
+    fun change(action: suspend () -> Unit, after: () -> Unit) {
+        scope.launch {
+            try {
+                action()
+                after()
+            } catch (e: IOException) {
+                nav.message = if (e is ApiException) e.message else "Couldn't reach the server."
+            }
+        }
+    }
+    LaunchedEffect(list.id) {
+        try {
+            val shares = nav.api.playlistShares(list.id)
+            chosen.addAll(shares.map { it.id })
+            people = runCatching { nav.api.shareTargets() }.getOrDefault(shares)
+        } catch (e: IOException) {
+            nav.message = if (e is ApiException) e.message else "Couldn't reach the server."
+            onClose()
+        }
+    }
+    AlertDialog(
+        onDismissRequest = onClose,
+        title = { Text("Share ${list.name}") },
+        text = {
+            LazyColumn {
+                item {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(
+                            checked = everyone,
+                            onCheckedChange = { on ->
+                                change({ nav.api.setPlaylistShared(list.id, on) }) { everyone = on }
+                            },
+                        )
+                        Text("Everyone on this server")
+                    }
+                }
+                items(people.orEmpty()) { person ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(
+                            checked = person.id in chosen,
+                            enabled = !everyone,
+                            onCheckedChange = { on ->
+                                if (on) {
+                                    change({ nav.api.sharePlaylist(list.id, person.id) }) { chosen.add(person.id) }
+                                } else {
+                                    change({ nav.api.unsharePlaylist(list.id, person.id) }) { chosen.remove(person.id) }
+                                }
+                            },
+                        )
+                        Text(person.name)
+                    }
+                }
+                item {
+                    Text(
+                        "They can see and play it. Only you can change it.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onClose) { Text("Done") } },
+    )
 }
 
 @Composable
@@ -632,6 +803,7 @@ fun PlaylistScreen(id: Long, nav: Nav) {
     var version by remember { mutableStateOf(0) }
     var renaming by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf(false) }
+    var sharing by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     fun change(action: suspend () -> Unit) {
         scope.launch {
@@ -648,32 +820,80 @@ fun PlaylistScreen(id: Long, nav: Nav) {
             item {
                 Column(Modifier.padding(16.dp)) {
                     Text(list.name, style = MaterialTheme.typography.headlineSmall)
+                    if (!list.mine) {
+                        Text(
+                            "From ${list.owner}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    val flagged = list.rows.count { it.problem != null }
+                    if (flagged > 0) {
+                        Text(
+                            "$flagged can't play and will be skipped",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
                     FilledTonalButton(
                         onClick = { nav.player.play(list.songs) },
                         enabled = list.songs.isNotEmpty(),
                         modifier = Modifier.padding(top = 8.dp),
                     ) { Text("Play") }
                     DownloadAll(list.songs, nav)
-                    Row {
-                        TextButton(onClick = { renaming = true }) { Text("Rename") }
-                        TextButton(onClick = { deleting = true }) { Text("Delete") }
+                    if (list.mine) {
+                        Row {
+                            TextButton(onClick = { renaming = true }) { Text("Rename") }
+                            if (nav.canShare || list.shared) {
+                                TextButton(onClick = { sharing = true }) { Text("Share") }
+                            }
+                            TextButton(onClick = { deleting = true }) { Text("Delete") }
+                        }
                     }
                 }
             }
-            itemsIndexed(list.songs) { index, song ->
+            items(list.rows) { row ->
+                val index = row.songIndex
+                val song = index?.let { list.songs.getOrNull(it) }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.weight(1f)) {
-                        SongRow(song, nav) { nav.player.play(list.songs, index) }
+                        if (song != null && index != null) {
+                            SongRow(song, nav) { nav.player.play(list.songs, index) }
+                        } else {
+                            // Nothing to play, so the only thing to do here is take it out.
+                            Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                                Text(
+                                    row.title,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                row.artist?.let {
+                                    Text(
+                                        it,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                Text(
+                                    row.problemText.orEmpty(),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.error,
+                                )
+                            }
+                        }
                     }
-                    IconButton(onClick = {
-                        val rest = list.songs.filterIndexed { i, _ -> i != index }.map { it.id }
-                        change { nav.api.setPlaylistSongs(id, rest) }
-                    }) {
-                        Icon(Icons.Default.Close, "Take ${song.title} out of the playlist")
+                    if (list.mine && row.removable) {
+                        IconButton(onClick = { change { nav.api.removePlaylistEntry(id, row.entryId) } }) {
+                            Icon(Icons.Default.Close, "Take ${row.title} out of the playlist")
+                        }
                     }
                 }
             }
         }
+        if (sharing) SharingDialog(list, nav) { sharing = false; version++ }
         if (renaming) {
             NameDialog("Rename playlist", list.name, onDone = { name ->
                 renaming = false

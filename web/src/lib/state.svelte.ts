@@ -197,6 +197,16 @@ export function isAdmin(): boolean {
   return app.me?.role === 'admin'
 }
 
+/** Everyone signed in has playlists, except guests. */
+export function hasPlaylists(): boolean {
+  return !!app.me && app.me.role !== 'guest'
+}
+
+/** May choose the playlist the party plays when nobody has requested anything. */
+export function canStartAutoMix(): boolean {
+  return isAdmin() || !!app.me?.permissions?.auto_mix
+}
+
 // Short-lived messages at the bottom of the screen, optionally with one
 // action button (like Undo).
 export interface ToastAction {

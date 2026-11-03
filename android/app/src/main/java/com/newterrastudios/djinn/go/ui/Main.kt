@@ -103,6 +103,8 @@ class Nav(
     val visualStyles get() = VisualStyle.moving.filter { it.name !in slowStyles }
     /** The role lets this account keep songs on the phone. */
     var canKeepSongs by mutableStateOf(false)
+    /** The role lets this account share its playlists. */
+    var canShare by mutableStateOf(false)
     /** What a tap on a song does: "play", "queue" (next) or "end". */
     var tapAction by mutableStateOf("play")
     /** Songs on this phone, for the mark beside them. */

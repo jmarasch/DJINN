@@ -126,17 +126,11 @@ impl Jukebox {
                 name: "Wild play".to_owned(),
                 shuffle: true,
             }),
-            id => self
-                .store
-                .playlists()
-                .await?
-                .into_iter()
-                .find(|p| p.id == id)
-                .map(|p| PlaylistRef {
-                    id: p.id,
-                    name: p.name,
-                    shuffle: p.shuffle,
-                }),
+            id => self.store.playlist_summary(id).await?.map(|p| PlaylistRef {
+                id: p.id,
+                name: p.name,
+                shuffle: p.shuffle,
+            }),
         };
         Ok(())
     }

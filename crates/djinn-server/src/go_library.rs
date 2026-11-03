@@ -21,7 +21,9 @@ use crate::go::GoRequest;
 use crate::state::AppState;
 
 const MAX_PLAYLIST_NAME: usize = 100;
-const MAX_PLAYLIST_SONGS: usize = 5000;
+const MAX_PLAYLIST_SONGS: usize = 20_000;
+/// Songs saved of a queue to carry on from.
+const MAX_RESUME_QUEUE: usize = 5000;
 const RADIO_SONGS: usize = 30;
 /// How many songs smart cache gets to choose from.
 const OFFLINE_SUGGESTIONS: i64 = 1000;
@@ -230,7 +232,7 @@ async fn save_resume(
     State(state): State<AppState>,
     Json(mut body): Json<Resume>,
 ) -> ApiResult<StatusCode> {
-    body.queue.truncate(MAX_PLAYLIST_SONGS);
+    body.queue.truncate(MAX_RESUME_QUEUE);
     state.store.save_resume(me.user.id, &body).await?;
     Ok(StatusCode::NO_CONTENT)
 }

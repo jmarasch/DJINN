@@ -6,7 +6,7 @@
   import Icon from './Icon.svelte'
   import Sheet from './Sheet.svelte'
   import TagEditor from './TagEditor.svelte'
-  import { isAdmin, toast } from './state.svelte'
+  import { hasPlaylists, isAdmin, toast } from './state.svelte'
   import type { TagField, Track, TrackEdit, TrackTags } from './types'
 
   let { track }: { track: Track } = $props()
@@ -108,8 +108,7 @@
       </div>
     {/if}
     <button class="item" onclick={similar}><Icon name="similar" /> More like this</button>
-    {#if isAdmin()}
-      <button class="item" onclick={radio}><Icon name="radio" /> Start radio from this song</button>
+    {#if hasPlaylists()}
       <button
         class="item"
         onclick={() => {
@@ -117,6 +116,9 @@
           playlist = true
         }}><Icon name="playlist" /> Add to playlist</button
       >
+    {/if}
+    {#if isAdmin()}
+      <button class="item" onclick={radio}><Icon name="radio" /> Start radio from this song</button>
       <button class="item" onclick={editTags}><Icon name="edit" /> Edit tags</button>
     {/if}
   </Sheet>

@@ -187,7 +187,9 @@ class MainActivity : ComponentActivity() {
             app.offline.checkAccess()
             app.offline.sync()
             nav.canKeepSongs = try {
-                api.me().permissions.downloads
+                val permissions = api.me().permissions
+                nav.canShare = permissions.sharePlaylists
+                permissions.downloads
             } catch (_: IOException) {
                 app.offline.dao.songs(nav.server).isNotEmpty()
             }

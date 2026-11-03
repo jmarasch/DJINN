@@ -346,9 +346,10 @@ Personal listening, apart from the party, on the same library and database. Same
 - Back up everything DJINN knows (settings, users, playlists, request history, outputs, casts, artwork cache, analysis) to one file, and restore or import it on another machine, remapping music folder paths. The music files themselves are not part of it.
 
 ### Importing playlists
-- Import party playlists from other services' exports (CSV and tab separated tables, Spotify account data, JSPF, XSPF, Apple Music XML, M3U, PLS, pasted lines). Names only, never music. Songs the library lacks stay in the list, flagged, and are skipped; they fill in when a library check finds them.
+- Playlists are one system across the jukebox, GO and Android. Each is private to its signed-in owner, even from admins, unless shared with everyone on the server or with particular users. Guests can't have them. Owners can request from them; a role permission decides who can start one as the auto mix. Only the owner changes one.
+- Import playlists from other services' exports (CSV and tab separated tables, Spotify account data, JSPF, XSPF, Apple Music XML, M3U, PLS, pasted lines). Names only, never music. Songs the library lacks stay in the list, flagged, and are skipped; they fill in when a library check finds them.
 - Any playlist flags songs that can't play, because the file is gone or won't decode, and skips them. Damage is noticed when a song fails, or by a check that decodes every file in a playlist. Marks are retried after each library check.
-- Not yet: GO's personal playlists, and importing from a share link.
+- Not yet: importing from a share link.
 
 ### Phase 9: DJINN GO for Android
 

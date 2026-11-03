@@ -5,6 +5,9 @@ use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
 use crate::library::{album_columns, track_columns};
+use crate::playlists::{
+    PlaylistDetail, PlaylistEntry, PlaylistRow, PlaylistSummary, UnplayableSong,
+};
 use crate::{now_ms, Album, ArtistSummary, Result, Store, Track};
 
 /// What a heart is on.
@@ -73,6 +76,8 @@ pub struct GoPlaylist {
     pub name: String,
     pub shared: bool,
     pub tracks: i64,
+    /// It's the viewer's own, so they can change it.
+    pub mine: bool,
     pub updated_at: i64,
 }
 
@@ -81,14 +86,38 @@ pub struct GoPlaylistDetail {
     #[serde(flatten)]
     pub playlist: GoPlaylist,
     pub songs: Vec<Track>,
+    /// The list as made, including songs that can't play.
+    pub entries: Vec<PlaylistEntry>,
+    pub unplayable: Vec<UnplayableSong>,
+    /// Everything in it, in order, flagged where it can't play.
+    pub rows: Vec<PlaylistRow>,
 }
 
-macro_rules! go_playlist_columns {
-    () => {
-        "p.id, p.user_id, coalesce(u.display_name, u.username) AS owner, p.name, p.shared, \
-         (SELECT count(*) FROM go_playlist_tracks pt WHERE pt.playlist_id = p.id) AS tracks, \
-         p.updated_at"
-    };
+impl From<PlaylistSummary> for GoPlaylist {
+    fn from(p: PlaylistSummary) -> Self {
+        Self {
+            id: p.id,
+            user_id: p.owner_id,
+            owner: p.owner,
+            name: p.name,
+            shared: p.shared,
+            tracks: p.song_count,
+            mine: false,
+            updated_at: p.updated_at,
+        }
+    }
+}
+
+impl From<PlaylistDetail> for GoPlaylistDetail {
+    fn from(d: PlaylistDetail) -> Self {
+        Self {
+            playlist: d.playlist.into(),
+            songs: d.tracks,
+            entries: d.entries,
+            unplayable: d.unplayable,
+            rows: d.rows,
+        }
+    }
 }
 
 /// A play counts as skipped when less than this much was heard.
@@ -350,67 +379,31 @@ impl Store {
         )
     }
 
-    /// Someone's own playlists, then ones others share, by name.
+    /// Someone's own playlists, then those shared with them, by name.
     pub async fn go_playlists(&self, user_id: i64) -> Result<Vec<GoPlaylist>> {
-        let lists = sqlx::query_as(concat!(
-            "SELECT ",
-            go_playlist_columns!(),
-            " FROM go_playlists p JOIN users u ON u.id = p.user_id
-             WHERE p.user_id = ? OR p.shared = 1
-             ORDER BY p.user_id != ?, p.name COLLATE NOCASE"
-        ))
-        .bind(user_id)
-        .bind(user_id)
-        .fetch_all(&self.pool)
-        .await?;
-        Ok(lists)
+        let lists = self.playlists_for(user_id).await?;
+        Ok(lists
+            .into_iter()
+            .map(|list| {
+                let mut list = GoPlaylist::from(list);
+                list.mine = list.user_id == user_id;
+                list
+            })
+            .collect())
     }
 
-    /// A playlist `user_id` may see: their own, or a shared one.
+    /// A playlist `user_id` may see: their own, or one shared with them.
     pub async fn go_playlist(&self, user_id: i64, id: i64) -> Result<Option<GoPlaylistDetail>> {
-        let playlist: Option<GoPlaylist> = sqlx::query_as(concat!(
-            "SELECT ",
-            go_playlist_columns!(),
-            " FROM go_playlists p JOIN users u ON u.id = p.user_id
-             WHERE p.id = ? AND (p.user_id = ? OR p.shared = 1)"
-        ))
-        .bind(id)
-        .bind(user_id)
-        .fetch_optional(&self.pool)
-        .await?;
-        let Some(playlist) = playlist else {
-            return Ok(None);
-        };
-        let ids: Vec<i64> = sqlx::query_scalar(
-            "SELECT track_id FROM go_playlist_tracks WHERE playlist_id = ? ORDER BY position",
-        )
-        .bind(id)
-        .fetch_all(&self.pool)
-        .await?;
-        let found = self.tracks_by_ids(&ids).await?;
-        // Keep repeats and order: tracks_by_ids drops duplicates.
-        let by_id: std::collections::HashMap<i64, &Track> =
-            found.iter().map(|t| (t.id, t)).collect();
-        let songs = ids
-            .iter()
-            .filter_map(|i| by_id.get(i).map(|t| (*t).clone()))
-            .collect();
-        Ok(Some(GoPlaylistDetail { playlist, songs }))
+        let detail = self.playlist_for(user_id, id).await?;
+        Ok(detail.map(|detail| {
+            let mut detail = GoPlaylistDetail::from(detail);
+            detail.playlist.mine = detail.playlist.user_id == user_id;
+            detail
+        }))
     }
 
     pub async fn create_go_playlist(&self, user_id: i64, name: &str) -> Result<i64> {
-        let now = now_ms();
-        let id = sqlx::query_scalar(
-            "INSERT INTO go_playlists (user_id, name, created_at, updated_at)
-             VALUES (?, ?, ?, ?) RETURNING id",
-        )
-        .bind(user_id)
-        .bind(name)
-        .bind(now)
-        .bind(now)
-        .fetch_one(&self.pool)
-        .await?;
-        Ok(id)
+        Ok(self.create_playlist(user_id, name).await?.id)
     }
 
     /// Renames or shares one of `user_id`'s playlists. False if it isn't
@@ -422,69 +415,35 @@ impl Store {
         name: Option<&str>,
         shared: Option<bool>,
     ) -> Result<bool> {
-        let done = sqlx::query(
-            "UPDATE go_playlists SET name = coalesce(?, name), shared = coalesce(?, shared),
-                                     updated_at = ?
-             WHERE id = ? AND user_id = ?",
-        )
-        .bind(name)
-        .bind(shared)
-        .bind(now_ms())
-        .bind(id)
-        .bind(user_id)
-        .execute(&self.pool)
-        .await?;
-        Ok(done.rows_affected() > 0)
+        if self.playlist_owner(id).await? != Some(user_id) {
+            return Ok(false);
+        }
+        self.update_playlist(id, name, None).await?;
+        if let Some(shared) = shared {
+            self.set_playlist_shared(id, shared).await?;
+        }
+        Ok(true)
     }
 
     pub async fn delete_go_playlist(&self, user_id: i64, id: i64) -> Result<bool> {
-        let done = sqlx::query("DELETE FROM go_playlists WHERE id = ? AND user_id = ?")
-            .bind(id)
-            .bind(user_id)
-            .execute(&self.pool)
-            .await?;
-        Ok(done.rows_affected() > 0)
+        if self.playlist_owner(id).await? != Some(user_id) {
+            return Ok(false);
+        }
+        self.delete_playlist(id).await
     }
 
-    /// Replaces the songs of one of `user_id`'s playlists. False if it
-    /// isn't theirs.
+    /// Sets the songs of one of `user_id`'s playlists. False if it isn't
+    /// theirs.
     pub async fn set_go_playlist_tracks(
         &self,
         user_id: i64,
         id: i64,
         track_ids: &[i64],
     ) -> Result<bool> {
-        let mut tx = self.pool.begin().await?;
-        let owned: Option<i64> =
-            sqlx::query_scalar("SELECT id FROM go_playlists WHERE id = ? AND user_id = ?")
-                .bind(id)
-                .bind(user_id)
-                .fetch_optional(&mut *tx)
-                .await?;
-        if owned.is_none() {
+        if self.playlist_owner(id).await? != Some(user_id) {
             return Ok(false);
         }
-        sqlx::query("DELETE FROM go_playlist_tracks WHERE playlist_id = ?")
-            .bind(id)
-            .execute(&mut *tx)
-            .await?;
-        for (position, track_id) in track_ids.iter().enumerate() {
-            sqlx::query(
-                "INSERT INTO go_playlist_tracks (playlist_id, position, track_id)
-                 SELECT ?, ?, id FROM tracks WHERE id = ?",
-            )
-            .bind(id)
-            .bind(i64::try_from(position).unwrap_or(i64::MAX))
-            .bind(track_id)
-            .execute(&mut *tx)
-            .await?;
-        }
-        sqlx::query("UPDATE go_playlists SET updated_at = ? WHERE id = ?")
-            .bind(now_ms())
-            .bind(id)
-            .execute(&mut *tx)
-            .await?;
-        tx.commit().await?;
+        self.set_playlist_songs(id, track_ids).await?;
         Ok(true)
     }
 
@@ -495,15 +454,11 @@ impl Store {
         id: i64,
         track_ids: &[i64],
     ) -> Result<bool> {
-        let Some(current) = self.go_playlist(user_id, id).await? else {
-            return Ok(false);
-        };
-        if current.playlist.user_id != user_id {
+        if self.playlist_owner(id).await? != Some(user_id) {
             return Ok(false);
         }
-        let mut ids: Vec<i64> = current.songs.iter().map(|t| t.id).collect();
-        ids.extend_from_slice(track_ids);
-        self.set_go_playlist_tracks(user_id, id, &ids).await
+        self.add_playlist_songs(id, track_ids).await?;
+        Ok(true)
     }
 }
 
@@ -587,8 +542,8 @@ mod tests {
         let detail = store.go_playlist(sam, list).await.unwrap().unwrap();
         assert_eq!(
             detail.songs.iter().map(|t| t.id).collect::<Vec<_>>(),
-            [ids[2], ids[0], ids[2]],
-            "order and repeats kept"
+            [ids[2], ids[0]],
+            "order kept, a repeat holds its first place"
         );
         // Jo can't see or change it until it's shared.
         assert!(store.go_playlist(jo, list).await.unwrap().is_none());

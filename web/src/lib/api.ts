@@ -61,6 +61,7 @@ import type {
   PartyStyle,
   PlayerState,
   ImportResult,
+  ShareTarget,
   PlaylistCheck,
   PlaylistDetail,
   PlaylistEntry,
@@ -278,7 +279,11 @@ export const api = {
     post<ImportResult>('/playlists/import', { text, filename, name: name?.trim() || undefined }),
   checkPlaylist: (id: number) => post<void>(`/playlists/${id}/check`),
   playlistCheck: () => get<PlaylistCheck | null>('/playlists/check'),
-  updatePlaylist: (id: number, changes: { name?: string; shuffle?: boolean }) =>
+  shareTargets: () => get<ShareTarget[]>('/playlists/share-targets'),
+  playlistShares: (id: number) => get<ShareTarget[]>(`/playlists/${id}/shares`),
+  sharePlaylist: (id: number, user: number) => put<void>(`/playlists/${id}/shares/${user}`, {}),
+  unsharePlaylist: (id: number, user: number) => del<void>(`/playlists/${id}/shares/${user}`),
+  updatePlaylist: (id: number, changes: { name?: string; shuffle?: boolean; shared?: boolean }) =>
     patch<void>(`/playlists/${id}`, changes),
   deletePlaylist: (id: number) => del<void>(`/playlists/${id}`),
   addToPlaylist: (id: number, kind: EntryKind, refId: number) =>

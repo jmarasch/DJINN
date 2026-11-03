@@ -1,8 +1,11 @@
 # Playlists and radio
 
+Everyone signed in has their own playlists, which are the same in the jukebox
+app, on DJINN GO and in the Android app. Guests don't have playlists.
+
 Requests always play first. When the queue runs dry, DJINN keeps the music
-going from the **auto mix**: a playlist, wild play, or radio. Only admins
-choose which. The Playing tab shows what the auto mix is playing from, and the
+going from the **auto mix**: a playlist, wild play, or radio. Admins choose
+which, and a role with **Choose what the party plays** can start a playlist too. The Playing tab shows what the auto mix is playing from, and the
 Playlists tab has a **Stop** button to turn it off.
 
 ## Wild play
@@ -13,7 +16,15 @@ toward what the party likes.
 
 ## Playlists
 
-Make one per mood or kind of party ("Chill", "Dance", "Dinner").
+Make one per mood or kind of party ("Chill", "Dance", "Dinner"). Tap a song in
+a playlist to request it, within the usual request limits.
+
+### Who can see a playlist
+
+A playlist is private to whoever made it, even from admins, until they share
+it. Open it and choose under **Sharing**: everyone on this server, or particular
+people. Sharing needs the **Share playlists** permission on the account's role.
+People you share with can see and play it, but only you can change it.
 
 1. On the Playlists tab, type a name and tap **Create**.
 2. Add music from the Library: open a song, album or artist and tap the
@@ -42,8 +53,9 @@ playlist** to keep the matches. See [Search and AI](search-and-ai.md).
 Bring a playlist over from Spotify, YouTube Music, Pandora or another service.
 This brings in the list, not the music: DJINN never downloads songs.
 
-On the Playlists tab, tap **Import a playlist**, then choose files or paste
-songs, one per line (`Artist - Title`). A file holding several playlists makes
+In the jukebox app or on GO, go to your playlists and tap **Import a playlist**,
+then choose files or paste songs, one per line (`Artist - Title`). The Android
+app has it under Library > Lists. A file holding several playlists makes
 several playlists here.
 
 A share link alone doesn't work, because it doesn't tell DJINN what's in the
@@ -70,8 +82,8 @@ A playlist flags songs it can't play, and skips them when it plays. That covers:
 - **File is missing:** the file was moved or deleted. If the same song turns
   up somewhere else in your library, the playlist switches to it.
 - **File won't play:** the file is damaged. DJINN notices when a song fails
-  while playing. To look for damage before that, open the playlist and tap
-  **Check files**, which reads every song all the way through.
+  while playing. To look for damage before that, an admin can open the playlist
+  and tap **Check files**, which reads every song all the way through.
 
 Each library check tries damaged files again, and replacing a file clears its
 flag. Songs on a drive that's unplugged aren't flagged as missing while it's
