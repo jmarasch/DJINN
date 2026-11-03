@@ -21,6 +21,11 @@ const NOISE: &[&str] = &[
     "explicit",
     "clean",
     "radio edit",
+    "radio mix",
+    "radio version",
+    "hit radio",
+    "original edit",
+    "video edit",
     "album version",
     "single version",
     "original version",
@@ -361,6 +366,22 @@ mod tests {
             Some(9)
         );
         assert_eq!(index.find(&wanted("Teardrop", "Massive Attack")), Some(10));
+        // Notes seen on a real YouTube Music playlist.
+        for title in [
+            "Hey Jude (Radio Mix)",
+            "Hey Jude - Radio Mix",
+            "Hey Jude (Original Edit)",
+            "Hey Jude (Radio Version)",
+            "Hey Jude (Video Edit)",
+            "Hey Jude - Gabry Ponte Video Edit",
+            "Hey Jude (1999 Original Hit Radio)",
+        ] {
+            assert_eq!(
+                index.find(&wanted(title, "The Beatles")),
+                Some(4),
+                "{title}"
+            );
+        }
     }
 
     #[test]

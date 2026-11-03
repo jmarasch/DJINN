@@ -153,8 +153,13 @@ async fn ask(
         (403, "quotaExceeded" | "dailyLimitExceeded" | "rateLimitExceeded") => {
             YouTubeError::OutOfQuota
         }
-        (404, _) | (403, "playlistItemsNotAccessible") => YouTubeError::NotPublic,
-        (400 | 401 | 403, _) => YouTubeError::BadKey,
+        (400 | 401, _)
+        | (
+            403,
+            "accessNotConfigured" | "forbidden" | "ipRefererBlocked" | "keyExpired" | "keyInvalid",
+        ) => YouTubeError::BadKey,
+        // Liked Music answers playlistForbidden, private lists something like it.
+        (403 | 404, _) => YouTubeError::NotPublic,
         _ => YouTubeError::Failed,
     })
 }
@@ -387,6 +392,11 @@ mod tests {
             (refusal(400, "badRequest"), YouTubeError::BadKey),
             (refusal(403, "accessNotConfigured"), YouTubeError::BadKey),
             (refusal(404, "playlistNotFound"), YouTubeError::NotPublic),
+            (refusal(403, "playlistForbidden"), YouTubeError::NotPublic),
+            (
+                refusal(403, "playlistItemsNotAccessible"),
+                YouTubeError::NotPublic,
+            ),
             (refusal(500, "backendError"), YouTubeError::Failed),
         ];
         for (answer, expected) in cases {

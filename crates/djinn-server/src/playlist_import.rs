@@ -167,12 +167,20 @@ fn list_name(list: &ImportedList, lists: usize, body: &ImportBody) -> String {
         .unwrap_or_else(|| NAME_FALLBACK.to_owned())
 }
 
+/// A song listed twice holds its first place, found or not.
 fn match_rows(index: &SongIndex, songs: Vec<WantedSong>) -> Vec<ImportRow> {
+    let mut seen = HashSet::new();
     songs
         .into_iter()
-        .map(|song| match index.find(&song) {
-            Some(id) => ImportRow::Track(id),
-            None => ImportRow::Wanted(song),
+        .filter_map(|song| match index.find(&song) {
+            Some(id) => Some(ImportRow::Track(id)),
+            None => {
+                let name = (
+                    song.title.to_lowercase(),
+                    song.artist.as_deref().map(str::to_lowercase),
+                );
+                seen.insert(name).then_some(ImportRow::Wanted(song))
+            }
         })
         .collect()
 }
@@ -426,6 +434,18 @@ mod tests {
             artist: Some(artist.into()),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn a_missing_song_listed_twice_holds_one_place() {
+        let index = SongIndex::new(Vec::new());
+        let song = |title: &str| WantedSong {
+            title: title.into(),
+            artist: Some("Someone".into()),
+            ..Default::default()
+        };
+        let rows = match_rows(&index, vec![song("Heaven"), song("Other"), song("HEAVEN")]);
+        assert_eq!(rows.len(), 2);
     }
 
     #[tokio::test]
