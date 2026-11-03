@@ -26,6 +26,9 @@
   import Tv from './screens/Tv.svelte'
   import SetupLibrary from './screens/SetupLibrary.svelte'
 
+  /** So what sticks to the top of a page can stick just below this. */
+  let navHeight = $state(0)
+
   const onSetupPage = $state(location.pathname === '/setup')
   // Invite links open /signup; the sign-in screen can switch to it too.
   let signingUp = $state(location.pathname === '/signup')
@@ -96,7 +99,7 @@
     {/if}
   </main>
 {:else}
-  <nav class:admin={isAdmin()} aria-label="Main navigation">
+  <nav class:admin={isAdmin()} aria-label="Main navigation" bind:offsetHeight={navHeight}>
     <button class="back" disabled={!navigation.canGoBack} onclick={goBack} aria-label="Back" title="Back">
       <Icon name="back" size={28} /><span>Back</span>
     </button>
@@ -115,7 +118,7 @@
   {#if !app.connected}
     <div class="offline">Reconnecting to the jukebox...</div>
   {/if}
-  <main class:playing={route.path === '/'}>
+  <main class:playing={route.path === '/'} style:--nav-height="{navHeight}px">
     {#if similarId}
       <Similar id={similarId} />
     {:else if genreName}
