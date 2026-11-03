@@ -197,6 +197,16 @@ class Prefs(context: Context, private val scope: () -> String = { "" }) {
     /** A setting belonging to one account on one server, not to the phone. */
     private fun own(name: String) = "$name@${scope()}"
 
+    /** Those settings for a server other than the one in use. */
+    fun lastContactFor(scope: String) = prefs.getLong("last_contact@$scope", 0)
+
+    fun awayLockedFor(scope: String) = prefs.getBoolean("away_locked@$scope", false)
+
+    fun keepRulesFor(scope: String): KeepRules =
+        prefs.getString("keep_rules@$scope", null)
+            ?.let { runCatching { lookJson.decodeFromString<KeepRules>(it) }.getOrNull() }
+            ?: KeepRules()
+
     private val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
 
     /** Bit rate to convert lossless songs to; 0 keeps full quality. */
@@ -289,6 +299,35 @@ fun largeDownloadWarning(bytes: Long, kbps: Int, canConvert: Boolean): String? {
     }
 }
 
+/** A song kept for one account on one server, and which server to credit it to. */
+data class KeptEntry(val song: OfflineSong, val serverName: String?)
+
+private const val KEPT_PREFIX = "kept|"
+
+/**
+ * How a song from another server is known to the player. A song's number only
+ * means something on its own server, so it can't go by number alone.
+ */
+fun keptMediaId(scope: String, id: Long) = "$KEPT_PREFIX$scope|$id"
+
+/** The account and song number in a `keptMediaId`, or null for an ordinary song. */
+fun parseKeptMediaId(mediaId: String): Pair<String, Long>? {
+    if (!mediaId.startsWith(KEPT_PREFIX)) return null
+    val rest = mediaId.removePrefix(KEPT_PREFIX)
+    val split = rest.lastIndexOf('|')
+    if (split <= 0) return null
+    val id = rest.substring(split + 1).toLongOrNull() ?: return null
+    return rest.substring(0, split) to id
+}
+
+/**
+ * Whether songs from a server other than the one in use may play. By the rules
+ * last heard from it, and only with a sign-in: a server this phone no longer
+ * knows, or has signed out of, stays locked.
+ */
+fun lockedElsewhere(signedIn: Boolean, awayLocked: Boolean, away: WhenAway): Boolean =
+    !signedIn || awayLocked || away != WhenAway.Nothing
+
 enum class WhenAway { Nothing, Lock, Delete }
 
 /** What the admin's rules say to do with kept songs, given the last word from the server. */
@@ -322,6 +361,30 @@ class OfflineStore(
 
     /** Kept songs don't play for someone signed out, or too long away from the server. */
     fun isLocked(): Boolean = account.token == null || prefs.awayLocked
+
+    /** Whether songs kept for this account on this server may play right now. */
+    fun isLockedFor(scope: String): Boolean {
+        if (scope == account.scope) return isLocked()
+        val saved = account.servers.value.firstOrNull { scopeOf(it) == scope }
+        return lockedElsewhere(
+            signedIn = saved?.token != null,
+            awayLocked = prefs.awayLockedFor(scope),
+            away = whenAway(prefs.lastContactFor(scope), System.currentTimeMillis(), prefs.keepRulesFor(scope)),
+        )
+    }
+
+    /** Everything on the phone that may play now, from any server, and how many may not. */
+    suspend fun allKept(): Pair<List<KeptEntry>, Int> = withContext(Dispatchers.IO) {
+        val (open, locked) = dao.everySong().filter { File(it.path).exists() }.partition { !isLockedFor(it.server) }
+        val names = account.servers.value.associate { scopeOf(it) to it.name }
+        open.map { KeptEntry(it, names[it.server]) }.sortedBy { it.song.title.lowercase() } to locked.size
+    }
+
+    /** A song from any server, if it may play now and its file is really there. */
+    suspend fun keptElsewhere(scope: String, id: Long): OfflineSong? {
+        if (isLockedFor(scope)) return null
+        return dao.song(scope, id)?.takeIf { File(it.path).exists() }
+    }
 
     /** The songs that can be played from this phone right now. */
     suspend fun playable(server: String): List<OfflineSong> =

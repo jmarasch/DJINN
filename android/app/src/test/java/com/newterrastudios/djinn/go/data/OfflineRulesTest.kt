@@ -39,6 +39,30 @@ class OfflineRulesTest {
     }
 
     @Test
+    fun `a song from another server knows where it's from`() {
+        val mediaId = keptMediaId("dorm#3", 42)
+        assertEquals("dorm#3" to 42L, parseKeptMediaId(mediaId))
+        assertEquals("https://10.0.0.2:8067#3" to 7L, parseKeptMediaId(keptMediaId("https://10.0.0.2:8067#3", 7)))
+    }
+
+    @Test
+    fun `an ordinary song isn't from another server`() {
+        assertNull(parseKeptMediaId("42"))
+        assertNull(parseKeptMediaId("kept|"))
+        assertNull(parseKeptMediaId("kept|no-number"))
+        assertNull(parseKeptMediaId("kept|dorm#3|not-a-number"))
+    }
+
+    @Test
+    fun `songs from elsewhere only play with a sign-in and within the rules`() {
+        assertFalse(lockedElsewhere(signedIn = true, awayLocked = false, away = WhenAway.Nothing))
+        assertTrue(lockedElsewhere(signedIn = false, awayLocked = false, away = WhenAway.Nothing))
+        assertTrue(lockedElsewhere(signedIn = true, awayLocked = true, away = WhenAway.Nothing))
+        assertTrue(lockedElsewhere(signedIn = true, awayLocked = false, away = WhenAway.Lock))
+        assertTrue(lockedElsewhere(signedIn = true, awayLocked = false, away = WhenAway.Delete))
+    }
+
+    @Test
     fun `small downloads just start`() {
         assertNull(largeDownloadWarning(50_000_000, 128, canConvert = true))
         assertNull(largeDownloadWarning(50_000_000, 128, canConvert = false))

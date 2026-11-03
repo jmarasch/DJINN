@@ -125,7 +125,14 @@ class CastState(private val context: Context, private val player: PlayerState) {
         player.pauseForCast()
         scope.launch {
             try {
-                val queue = items.map { item -> MediaQueueItem.Builder(info(item)).build() }
+                // Another server's kept songs only exist here, so there's nothing to send a TV.
+                val castable = items.filter { it.mediaId.toLongOrNull() != null }
+                if (castable.isEmpty()) {
+                    player.error = "That song is kept from another server, so it can't be cast from here."
+                    stop()
+                    return@launch
+                }
+                val queue = castable.map { item -> MediaQueueItem.Builder(info(item)).build() }
                 val data = MediaQueueData.Builder().setItems(queue).setStartIndex(0).build()
                 val load = MediaLoadRequestData.Builder()
                     .setQueueData(data)

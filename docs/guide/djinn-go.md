@@ -156,6 +156,13 @@ one server, so being on another server, or someone else signing in, leaves them
 alone: time away is counted for each server, and they're there when you come
 back. Removing a server from that list deletes what was kept for it.
 
+**Library > On phone > All servers** lists everything on the phone from every
+server, and plays it whichever server you're on, as long as that server's rules
+allow it. Songs from a server you've signed out of, or that's been out of reach
+past its limit, stay locked and are counted at the top. The car's **On this phone**
+list shows the same songs. Those songs can't be cast, and their covers don't show
+unless you're on their server. Plays reach their server the next time you use it.
+
 A locked song stays on the phone but won't play. Locking is the app refusing to
 play it, not encryption. If a phone has been away long enough for its sign-in to
 end, signing in again unlocks its songs.
