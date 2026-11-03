@@ -148,6 +148,9 @@ export interface GoListener {
 }
 
 export interface GoStatus {
+  server_name: string
+  default_name: string
+  discoverable: boolean
   enabled: boolean
   allow_remote: boolean
   https_hostname: string

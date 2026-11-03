@@ -23,6 +23,7 @@ mod error;
 mod events;
 mod folders;
 mod go;
+mod go_announce;
 mod go_library;
 mod go_upnp;
 mod gpu;

@@ -4,6 +4,9 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
+data class ServerHello(val name: String, val id: String)
+
+@Serializable
 data class Track(
     val id: Long,
     val title: String,

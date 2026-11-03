@@ -113,7 +113,7 @@ fun SettingsScreen(nav: Nav) {
         item {
             Text("Settings", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(16.dp))
             Text(
-                "Signed in to $server",
+                "Signed in to " + (nav.serverName?.let { "$it ($server)" } ?: server),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp),
             )

@@ -69,6 +69,7 @@ class Nav(
     val prefs: Prefs,
     val cast: CastState,
     val server: String,
+    serverName: String?,
     val signOut: () -> Unit,
     /** For work that must outlive the screen or menu that started it. */
     val scope: CoroutineScope,
@@ -77,6 +78,8 @@ class Nav(
     private val onOfflineChange: () -> Unit,
 ) {
     var tab by mutableStateOf(Tab.Playlist)
+    /** What the server calls itself. */
+    var serverName by mutableStateOf(serverName)
     /** Styles this device can't keep up with. */
     var slowStyles by mutableStateOf(prefs.visualsTooSlow)
     /** The styles to offer here. Shapes are never slow, so it's never empty. */

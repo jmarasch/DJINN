@@ -1,8 +1,21 @@
 package com.newterrastudios.djinn.go.ui
 
 import android.util.Log
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.Card
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalContext
+import com.newterrastudios.djinn.go.data.ServerFinder
+import kotlinx.coroutines.delay
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
@@ -63,7 +76,10 @@ private fun Form(title: String, note: String?, content: @Composable () -> Unit) 
     }
 }
 
-/** Which server: the address from Admin > GO. */
+/** How long to look before saying nothing's been heard. */
+private const val LOOKING_MS = 8_000L
+
+/** Which server: one heard on this network, a QR code, or the address from Admin > GO. */
 @Composable
 fun ConnectScreen(
     account: Account,
@@ -78,6 +94,18 @@ fun ConnectScreen(
     var problem by rememberSaveable { mutableStateOf<String?>(null) }
     var warnAbout by rememberSaveable { mutableStateOf<String?>(null) }
     var scanning by rememberSaveable { mutableStateOf(false) }
+    var lookedLong by rememberSaveable { mutableStateOf(false) }
+    val context = LocalContext.current
+    val finder = remember { ServerFinder(context) }
+    val found by finder.servers.collectAsState()
+    LaunchedEffect(Unit) {
+        // Newer Android only lets an app hear the network with permission.
+        askLocalNetwork()
+        finder.start()
+        delay(LOOKING_MS)
+        lookedLong = true
+    }
+    DisposableEffect(Unit) { onDispose { finder.stop() } }
 
     fun connect(server: String) {
         busy = true
@@ -87,6 +115,7 @@ fun ConnectScreen(
             account.setServer(server)
             try {
                 api.check()
+                account.serverName = api.hello()?.name
                 onConnected()
             } catch (e: IOException) {
                 account.forgetServer()
@@ -123,10 +152,50 @@ fun ConnectScreen(
 
     Form(
         "DJINN GO",
-        "Scan the QR code from GO on a computer (Account > Open on your phone), or enter the address " +
-            "Admin > GO shows, like 192.168.1.20:8067. " +
-            "Android may ask about nearby devices: that's how it lets an app reach a computer on your home network.",
+        "Android may ask about nearby devices: that's how it lets an app find and reach a computer on your network.",
     ) {
+        Text("On this network", style = MaterialTheme.typography.titleMedium)
+        found.forEach { server ->
+            Card(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable(enabled = !busy) { use(server.address) },
+            ) {
+                Column(Modifier.padding(16.dp)) {
+                    Text(server.name, style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        server.address,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+        when {
+            found.isNotEmpty() -> Text(
+                "Anyone on a network can give a computer any name, so only sign in to a server you recognize.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            lookedLong -> Text(
+                "No servers heard yet. GO has to be on, on a computer on this network, and some networks block this. " +
+                    "You can still scan or enter the address below.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            else -> Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                Text("Looking for servers...", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        Text("Or connect yourself", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 8.dp))
+        Text(
+            "Scan the QR code from GO on a computer (Account > Open on your phone), or enter the address " +
+                "Admin > GO shows, like 192.168.1.20:8067.",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
         OutlinedTextField(
             value = address,
             onValueChange = { address = it },
@@ -237,7 +306,10 @@ fun SignInScreen(account: Account, api: GoApi, onChangeServer: () -> Unit) {
         return
     }
 
-    Form("Sign in", account.server) {
+    Form(
+        account.serverName?.let { "Sign in to $it" } ?: "Sign in",
+        account.server,
+    ) {
         OutlinedTextField(
             value = username,
             onValueChange = { username = it },

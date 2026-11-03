@@ -32,6 +32,7 @@ use tower_http::services::ServeFile;
 
 use crate::auth::{go_refusal, new_token, AdminUser, CurrentSession, Device};
 use crate::error::{ApiError, ApiResult};
+use crate::go_announce::{self, GO_DISCOVERABLE, SERVER_NAME};
 use crate::go_upnp;
 use crate::security::{self, TRUSTED_PROXIES};
 use crate::state::AppState;
@@ -65,6 +66,8 @@ pub struct GoState {
     enabled: AtomicBool,
     allow_remote: AtomicBool,
     upnp: Mutex<Option<go_upnp::Mapping>>,
+    /// Telling phones on the network about GO, while it's on.
+    announcer: Mutex<Option<go_announce::Announcer>>,
     /// Mirrors the `trusted_proxies` setting.
     proxies: RwLock<Vec<IpNet>>,
     /// Stops the running listener.
@@ -118,6 +121,7 @@ impl GoState {
             enabled: AtomicBool::new(false),
             allow_remote: AtomicBool::new(false),
             upnp: Mutex::default(),
+            announcer: Mutex::default(),
             proxies: RwLock::default(),
             running: Mutex::default(),
             error: Mutex::default(),
@@ -180,6 +184,7 @@ pub async fn apply(state: &AppState) -> anyhow::Result<()> {
     } else {
         stop(state);
     }
+    announce(state, on).await?;
     let can_map = on && state.go.running.lock().is_ok_and(|r| r.is_some()) && allow_remote && upnp;
     if let Ok(mut slot) = state.go.upnp.lock() {
         if let Some(current) = slot.as_ref() {
@@ -191,6 +196,39 @@ pub async fn apply(state: &AppState) -> anyhow::Result<()> {
         }
         if can_map && slot.is_none() && go_upnp::valid_hostname(&hostname) {
             *slot = Some(go_upnp::start(hostname, state.shutdown.subscribe()));
+        }
+    }
+    Ok(())
+}
+
+/// Starts, stops or renews the announcement to match the settings.
+async fn announce(state: &AppState, on: bool) -> anyhow::Result<()> {
+    let go = &state.go;
+    let wanted = on
+        && go.running.lock().is_ok_and(|r| r.is_some())
+        && settings::flag(&state.store, GO_DISCOVERABLE, true).await?;
+    let name = go_announce::server_name(&state.store).await?;
+    let stale = go
+        .announcer
+        .lock()
+        .ok()
+        .and_then(|mut slot| match slot.as_ref() {
+            Some(current) if !wanted || current.name != name => slot.take(),
+            _ => None,
+        });
+    if let Some(old) = stale {
+        old.stop();
+    }
+    let missing = go.announcer.lock().is_ok_and(|slot| slot.is_none());
+    if wanted && missing {
+        match go_announce::Announcer::start(&state.store, go.listen.port()).await {
+            Ok(announcer) => {
+                if let Ok(mut slot) = go.announcer.lock() {
+                    *slot = Some(announcer);
+                }
+            }
+            // GO still works when typed in; finding it is the only thing lost.
+            Err(e) => tracing::warn!(error = %e, "couldn't announce DJINN GO on the network"),
         }
     }
     Ok(())
@@ -213,6 +251,8 @@ async fn start(state: &AppState) {
     };
     let (stop_tx, mut stop_rx) = watch::channel(false);
     let mut shutdown = state.shutdown.subscribe();
+    let shutting_down = state.shutdown.subscribe();
+    let closing = state.clone();
     let app = router(state.clone()).into_make_service_with_connect_info::<SocketAddr>();
     tokio::spawn(async move {
         let stopped = async move {
@@ -226,6 +266,12 @@ async fn start(state: &AppState) {
             .await
         {
             tracing::error!(error = %e, "DJINN GO stopped");
+        }
+        if *shutting_down.borrow() {
+            let announcer = closing.go.announcer.lock().ok().and_then(|mut a| a.take());
+            if let Some(announcer) = announcer {
+                announcer.stop();
+            }
         }
     });
     if let Ok(mut running) = go.running.lock() {
@@ -266,6 +312,7 @@ pub fn api_router() -> Router<AppState> {
         .route("/go/play/{id}", get(play))
         .route("/go/offline/{id}", get(offline_link))
         .route("/go/address", get(address))
+        .route("/go/hello", get(go_announce::hello))
 }
 
 /// Which API routes GO answers, and who for.
@@ -282,6 +329,7 @@ enum Access {
 /// `*` matches one path segment, a trailing `**` any rest.
 const ROUTES: &[(Method, &str, Access)] = &[
     (Method::GET, "/api/health", Access::Public),
+    (Method::GET, "/api/go/hello", Access::Public),
     (Method::GET, "/api/auth/mode", Access::Public),
     (Method::POST, "/api/auth/login", Access::Public),
     (Method::POST, "/api/auth/two-step", Access::Public),
@@ -901,6 +949,11 @@ struct Listener {
 
 #[derive(Serialize)]
 struct Status {
+    /// What the admin named this server; empty means `default_name`.
+    server_name: String,
+    default_name: String,
+    /// Phones on the network can find it.
+    discoverable: bool,
     enabled: bool,
     allow_remote: bool,
     https_hostname: String,
@@ -956,6 +1009,13 @@ async fn status_of(state: &AppState) -> anyhow::Result<Status> {
     let mbps = bytes as f64 * 8.0 / SPEED_WINDOW.as_secs_f64() / 1_000_000.0;
     let port = go.listen.port();
     Ok(Status {
+        server_name: state
+            .store
+            .get_setting(SERVER_NAME)
+            .await?
+            .unwrap_or_default(),
+        default_name: go_announce::computer_name(),
+        discoverable: settings::flag(&state.store, GO_DISCOVERABLE, true).await?,
         enabled: go.enabled(),
         allow_remote: go.allow_remote(),
         https_hostname: state
@@ -1073,6 +1133,10 @@ async fn status(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json<S
 
 #[derive(Deserialize)]
 struct GoSettings {
+    #[serde(default)]
+    server_name: String,
+    #[serde(default = "yes")]
+    discoverable: bool,
     enabled: bool,
     #[serde(default)]
     allow_remote: bool,
@@ -1086,11 +1150,16 @@ struct GoSettings {
     admin_two_step: bool,
 }
 
+fn yes() -> bool {
+    true
+}
+
 async fn save_settings(
     AdminUser(admin): AdminUser,
     State(state): State<AppState>,
     Json(body): Json<GoSettings>,
 ) -> ApiResult<Json<Status>> {
+    let server_name = go_announce::clean_name(&body.server_name).map_err(ApiError::bad_request)?;
     let mut proxies = body.trusted_proxies.trim().to_owned();
     let parsed = security::parse_proxies(&proxies);
     let entries = proxies
@@ -1127,6 +1196,8 @@ async fn save_settings(
         }
         proxies.push_str("127.0.0.1");
     }
+    state.store.set_setting(SERVER_NAME, &server_name).await?;
+    settings::set_flag(&state.store, GO_DISCOVERABLE, body.discoverable).await?;
     settings::set_flag(&state.store, GO_ENABLED, body.enabled).await?;
     settings::set_flag(&state.store, GO_ALLOW_REMOTE, body.allow_remote).await?;
     state
@@ -1168,6 +1239,27 @@ async fn sign_ins(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn a_server_says_who_it_is_before_sign_in() {
+        let state = AppState::for_tests().await;
+        state.go.enable_for_tests();
+        let (status, body, _) = go(&state, Method::GET, "/api/go/hello", None, None).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let first: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(first["name"], go_announce::computer_name());
+        assert_eq!(first["id"].as_str().map(str::len), Some(16));
+
+        state
+            .store
+            .set_setting(SERVER_NAME, "Dorm 4")
+            .await
+            .unwrap();
+        let (_, body, _) = go(&state, Method::GET, "/api/go/hello", None, None).await;
+        let second: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(second["name"], "Dorm 4");
+        assert_eq!(second["id"], first["id"], "the id stays");
+    }
 
     #[test]
     fn route_patterns() {

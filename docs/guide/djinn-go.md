@@ -103,7 +103,11 @@ what the web player does, it can:
   screen widget, voice requests, Android Auto, and Cast to a Chromecast or
   Google TV.
 
-To sign in, scan the QR code above or type the address from Admin > GO.
+To sign in, choose your server from the list the app finds on your network.
+On a network with several, go by the name set under Admin > GO (**Server name**).
+If yours isn't listed (some networks block this, and Admin > GO can turn it off),
+scan the QR code above or type the address from Admin > GO. Anyone on a network
+can give a computer any name, so only sign in to a server you recognize.
 Android may ask about **nearby devices**; that's how newer Android lets an app
 reach a computer on your home network. Signing out deletes what the app kept,
 and so does losing the download permission, or 30 days without reaching the

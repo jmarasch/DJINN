@@ -124,6 +124,7 @@ class MainActivity : ComponentActivity() {
                 prefs = app.prefs,
                 cast = cast,
                 server = account.server.orEmpty(),
+                serverName = account.serverName,
                 scope = lifecycleScope,
                 signOut = {
                     player.stop()
@@ -154,6 +155,13 @@ class MainActivity : ComponentActivity() {
             }
         }
         LaunchedEffect(Unit) { player.followPosition() }
+        LaunchedEffect(Unit) {
+            // The admin may have renamed it since.
+            api.hello()?.let {
+                account.serverName = it.name
+                nav.serverName = it.name
+            }
+        }
         LaunchedEffect(Unit) {
             nav.liked.addAll(app.prefs.likedIds)
             try {
