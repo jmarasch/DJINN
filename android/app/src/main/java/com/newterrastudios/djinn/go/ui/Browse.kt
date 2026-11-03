@@ -1,5 +1,9 @@
 package com.newterrastudios.djinn.go.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material3.SmallFloatingActionButton
 import com.newterrastudios.djinn.go.data.KeptEntry
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -102,17 +106,24 @@ private fun <T : Any> Loaded(
     }
 }
 
+/** How far down a list counts as worth a way back to the top. */
+private const val TO_TOP_AFTER_ROWS = 10
+
 /** A long list from the server, a page at a time as you scroll. */
 @Composable
 private fun <T> PagedList(
     key: String,
     load: suspend (Int) -> Page<T>,
+    /** Options above the list, out of the way until you scroll back up. */
+    options: @Composable () -> Unit = {},
     row: @Composable (T, List<T>) -> Unit,
 ) {
     val items = remember(key) { mutableStateListOf<T>() }
     var total by remember(key) { mutableStateOf<Long?>(null) }
     var failed by remember(key) { mutableStateOf(false) }
-    val state = rememberLazyListState()
+    // Each order starts from its top.
+    val state = remember(key) { LazyListState() }
+    val scope = rememberCoroutineScope()
     val wantMore by remember(key) {
         derivedStateOf {
             val last = state.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
@@ -133,19 +144,40 @@ private fun <T> PagedList(
             }
         }
     }
-    LazyColumn(Modifier.fillMaxSize(), state = state) {
-        items(items) { row(it, items) }
-        if (failed) {
-            item {
-                Column(Modifier.padding(16.dp)) {
-                    Text("Couldn't load more.", color = MaterialTheme.colorScheme.error)
-                    FilledTonalButton(onClick = { failed = false }) { Text("Try again") }
+    val goingBack = state.canScrollBackward && state.lastScrolledBackward
+    Box(Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize()) {
+            AnimatedVisibility(visible = !state.canScrollBackward || goingBack) { options() }
+            LazyColumn(
+                Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                state = state,
+            ) {
+                items(items) { row(it, items) }
+                if (failed) {
+                    item {
+                        Column(Modifier.padding(16.dp)) {
+                            Text("Couldn't load more.", color = MaterialTheme.colorScheme.error)
+                            FilledTonalButton(onClick = { failed = false }) { Text("Try again") }
+                        }
+                    }
+                } else if (total == null) {
+                    item { Note("Loading...") }
+                } else if (total == 0L) {
+                    item { Note("Nothing here yet.") }
                 }
             }
-        } else if (total == null) {
-            item { Note("Loading...") }
-        } else if (total == 0L) {
-            item { Note("Nothing here yet.") }
+        }
+        AnimatedVisibility(
+            visible = goingBack && state.firstVisibleItemIndex >= TO_TOP_AFTER_ROWS,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(16.dp),
+        ) {
+            SmallFloatingActionButton(onClick = { scope.launch { state.scrollToItem(0) } }) {
+                Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Back to top")
+            }
         }
     }
 }
@@ -412,9 +444,12 @@ fun LibraryScreen(nav: Nav) {
         }
         when (tab) {
             0 -> {
-                Choices(ARTIST_SORTS, nav.artistSort) { nav.artistSort = it }
                 val sort = nav.artistSort
-                PagedList<ArtistSummary>("artists-$sort", { nav.api.artists(sort, it) }) { artist, _ ->
+                PagedList<ArtistSummary>(
+                    "artists-$sort",
+                    { nav.api.artists(sort, it) },
+                    options = { Choices(ARTIST_SORTS, nav.artistSort) { nav.artistSort = it } },
+                ) { artist, _ ->
                     Row2(
                         title = artist.name,
                         subtitle = "${artist.trackCount} songs",
@@ -424,18 +459,28 @@ fun LibraryScreen(nav: Nav) {
                 }
             }
             1 -> {
-                Choices(ALBUM_FILTERS, nav.albumFilter) { nav.albumFilter = it }
-                Choices(ALBUM_SORTS, nav.albumSort) { nav.albumSort = it }
                 val sort = nav.albumSort
                 val filter = nav.albumFilter
-                PagedList<Album>("albums-$sort-$filter", { nav.api.albums(sort, filter, it) }) { album, _ ->
+                PagedList<Album>(
+                    "albums-$sort-$filter",
+                    { nav.api.albums(sort, filter, it) },
+                    options = {
+                        Column {
+                            Choices(ALBUM_FILTERS, nav.albumFilter) { nav.albumFilter = it }
+                            Choices(ALBUM_SORTS, nav.albumSort) { nav.albumSort = it }
+                        }
+                    },
+                ) { album, _ ->
                     AlbumRow(album, nav)
                 }
             }
             2 -> {
-                Choices(SONG_SORTS, nav.songSort) { nav.songSort = it }
                 val sort = nav.songSort
-                PagedList<Track>("songs-$sort", { nav.api.songs(sort, it) }) { song, _ ->
+                PagedList<Track>(
+                    "songs-$sort",
+                    { nav.api.songs(sort, it) },
+                    options = { Choices(SONG_SORTS, nav.songSort) { nav.songSort = it } },
+                ) { song, _ ->
                     SongRow(song, nav) { nav.startRadio(song) }
                 }
             }
