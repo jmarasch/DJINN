@@ -93,6 +93,24 @@ data class Described(
     val tracks: List<Track> = emptyList(),
 )
 
+/** Every genre in the library, by name. */
+@Serializable
+data class GenreList(val genres: List<GenreSummary> = emptyList())
+
+@Serializable
+data class GenreSummary(val name: String, val songs: Long = 0)
+
+/** One genre: its most played songs, its artists, and the genres near it. */
+@Serializable
+data class GenrePage(
+    val name: String,
+    /** Songs with it, which can be more than are listed. */
+    val total: Long = 0,
+    val tracks: List<Track> = emptyList(),
+    val artists: List<ArtistSummary> = emptyList(),
+    val related: List<GenreSummary> = emptyList(),
+)
+
 @Serializable
 data class GoPlaylist(
     val id: Long,

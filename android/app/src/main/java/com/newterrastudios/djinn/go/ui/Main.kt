@@ -54,6 +54,7 @@ sealed interface Screen {
     data class Album(val id: Long) : Screen
     data class Artist(val id: Long) : Screen
     data class Playlist(val id: Long) : Screen
+    data class Genre(val name: String) : Screen
     data object NowPlaying : Screen
     data object Settings : Screen
     data object Visuals : Screen
@@ -156,7 +157,8 @@ class Nav(
     /** Leaves Now Playing for another screen. */
     fun goTo(screen: Screen) {
         stack.remove(Screen.NowPlaying)
-        stack.add(screen)
+        // Already what's underneath, so Back shouldn't show it twice.
+        if (stack.lastOrNull() != screen) stack.add(screen)
     }
 }
 
@@ -215,6 +217,7 @@ fun MainScreen(nav: Nav) {
                 is Screen.Album -> AlbumScreen(top.id, nav)
                 is Screen.Artist -> ArtistScreen(top.id, nav)
                 is Screen.Playlist -> PlaylistScreen(top.id, nav)
+                is Screen.Genre -> GenreScreen(top.name, nav)
                 Screen.Settings -> SettingsScreen(nav)
                 Screen.NowPlaying -> NowPlayingScreen(nav)
                 else -> when (nav.tab) {

@@ -69,6 +69,11 @@ import com.newterrastudios.djinn.go.data.largeDownloadWarning
 import com.newterrastudios.djinn.go.data.Page
 import com.newterrastudios.djinn.go.data.SearchResults
 import com.newterrastudios.djinn.go.data.Track
+import com.newterrastudios.djinn.go.data.GenreList
+import com.newterrastudios.djinn.go.data.GenrePage
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.material.icons.filled.Shuffle
+import androidx.compose.material3.AssistChip
 import androidx.work.WorkManager
 import com.newterrastudios.djinn.go.work.DOWNLOAD_TAG
 import com.newterrastudios.djinn.go.work.DownloadWorker
@@ -449,7 +454,7 @@ fun LibraryScreen(nav: Nav) {
                 )
             }
         }
-        // Five words only share a phone evenly at small text sizes. Rather than break them, they scroll.
+        // Six words only share a phone evenly at small text sizes. Rather than break them, they scroll.
         val configuration = LocalConfiguration.current
         if (configuration.screenWidthDp / configuration.fontScale >= ROOM_FOR_EVEN_TABS_DP) {
             SecondaryTabRow(selectedTabIndex = tab, tabs = tabs)
@@ -499,7 +504,8 @@ fun LibraryScreen(nav: Nav) {
                     SongRow(song, nav) { nav.startRadio(song) }
                 }
             }
-            3 -> PlaylistsTab(nav)
+            3 -> GenresTab(nav)
+            4 -> PlaylistsTab(nav)
             else -> Column {
                 DownloadStatus()
                 Choices(KEPT_VIEWS, nav.keptView) { nav.keptView = it }
@@ -509,8 +515,8 @@ fun LibraryScreen(nav: Nav) {
     }
 }
 
-private val LIBRARY_TABS = listOf("Artists", "Albums", "Songs", "Lists", "On phone")
-private const val ROOM_FOR_EVEN_TABS_DP = 480
+private val LIBRARY_TABS = listOf("Artists", "Albums", "Songs", "Genres", "Lists", "On phone")
+private const val ROOM_FOR_EVEN_TABS_DP = 576
 
 val KEPT_VIEWS = listOf("here" to "This server", "all" to "All servers")
 val ARTIST_SORTS = listOf("name" to "Name", "added" to "Recently added")
@@ -622,6 +628,94 @@ fun ArtistScreen(id: Long, nav: Nav) {
                 items(artist.appearsOn) { AlbumRow(it, nav) }
             }
             songSection("Other songs", artist.otherTracks, nav)
+        }
+    }
+}
+
+/** Genre names are stored in lower case. */
+private fun genreTitle(name: String) = name.replaceFirstChar { it.uppercase() }
+
+/** Every genre in the library. */
+@UnstableApi
+@Composable
+private fun GenresTab(nav: Nav) {
+    Loaded(key = "genres", load = { nav.api.genres() }) { list: GenreList ->
+        LazyColumn(Modifier.fillMaxSize()) {
+            if (list.genres.isEmpty()) item { Note("No genres yet.") }
+            items(list.genres) { genre ->
+                Row2(
+                    title = genreTitle(genre.name),
+                    subtitle = if (genre.songs == 1L) "1 song" else "${genre.songs} songs",
+                    art = {},
+                    onClick = { nav.push(Screen.Genre(genre.name)) },
+                )
+            }
+        }
+    }
+}
+
+/** One genre: its songs, artists and related genres. */
+@UnstableApi
+@Composable
+fun GenreScreen(name: String, nav: Nav) {
+    Loaded(key = name, load = { nav.api.genre(name) }) { page: GenrePage ->
+        LazyColumn(Modifier.fillMaxSize()) {
+            item {
+                Column(Modifier.padding(16.dp)) {
+                    Text(genreTitle(name), style = MaterialTheme.typography.headlineSmall)
+                    val shown = page.tracks.size
+                    Text(
+                        (if (page.total == 1L) "1 song" else "${page.total} songs") +
+                            if (page.total > shown) "; the $shown most played here." else ".",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Row(
+                        Modifier.padding(top = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        FilledTonalButton(
+                            onClick = { nav.player.play(page.tracks) },
+                            enabled = page.tracks.isNotEmpty(),
+                        ) {
+                            Icon(Icons.Default.PlayArrow, contentDescription = null)
+                            Text("Play", modifier = Modifier.padding(start = 8.dp))
+                        }
+                        FilledTonalButton(
+                            onClick = { nav.player.playShuffled(page.tracks) },
+                            enabled = page.tracks.isNotEmpty(),
+                        ) {
+                            Icon(Icons.Default.Shuffle, contentDescription = null)
+                            Text("Shuffle", modifier = Modifier.padding(start = 8.dp))
+                        }
+                    }
+                }
+            }
+            if (page.related.isNotEmpty()) {
+                item { Heading("Related genres") }
+                item {
+                    Chips(page.related.map { genreTitle(it.name) to { nav.push(Screen.Genre(it.name)) } })
+                }
+            }
+            if (page.artists.isNotEmpty()) {
+                item { Heading("Artists") }
+                item {
+                    Chips(page.artists.map { it.name to { nav.push(Screen.Artist(it.id)) } })
+                }
+            }
+            songSection("Songs", page.tracks, nav)
+        }
+    }
+}
+
+/** Names that open something, wrapping onto as many lines as they need. */
+@Composable
+private fun Chips(chips: List<Pair<String, () -> Unit>>) {
+    FlowRow(
+        Modifier.padding(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        chips.forEach { (label, open) ->
+            AssistChip(onClick = open, label = { Text(label) })
         }
     }
 }

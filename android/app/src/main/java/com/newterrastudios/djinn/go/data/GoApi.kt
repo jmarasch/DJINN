@@ -38,6 +38,10 @@ data class Probed(
     val encrypted: Boolean,
 )
 
+/** A genre's address. In a path a "+" stays a plus, so spaces have to be %20. */
+internal fun genrePath(name: String) =
+    "/api/genres/" + URLEncoder.encode(name, "UTF-8").replace("+", "%20")
+
 /** DJINN GO's API on the server this phone is connected to. */
 class GoApi(private val account: Account) {
     val json = Json {
@@ -193,6 +197,8 @@ class GoApi(private val account: Account) {
     suspend fun albums(sort: String, filter: String, offset: Int): Page<Album> =
         get("/api/albums?sort=$sort&filter=$filter&offset=$offset")
     suspend fun songs(sort: String, offset: Int): Page<Track> = get("/api/tracks?sort=$sort&offset=$offset")
+    suspend fun genres(): GenreList = get("/api/genres")
+    suspend fun genre(name: String): GenrePage = get(genrePath(name))
     suspend fun album(id: Long): AlbumDetail = get("/api/albums/$id")
     suspend fun artist(id: Long): ArtistDetail = get("/api/artists/$id")
     suspend fun playlist(id: Long): GoPlaylistDetail = get("/api/go/playlists/$id")
