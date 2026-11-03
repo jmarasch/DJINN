@@ -8,9 +8,8 @@
   import SongList from '../SongList.svelte'
   import LikeButton from '../LikeButton.svelte'
   import SongRow from '../SongRow.svelte'
-  import Browse from './Browse.svelte'
 
-  let { section = 'liked' }: { section?: 'liked' | 'playlists' | 'history' | 'artists' | 'albums' | 'songs' } = $props()
+  let { section = 'liked' }: { section?: 'liked' | 'playlists' | 'history' } = $props()
 
   let liked = $state<Liked | null>(null)
   let lists = $state<GoPlaylist[]>([])
@@ -25,7 +24,7 @@
   async function load(which: string) {
     if (which === 'liked') liked = await api.goLiked()
     else if (which === 'playlists') lists = await api.goPlaylists()
-    else if (which === 'history') {
+    else {
       history = await api.goHistory(0)
       more = history.length === 100
     }
@@ -56,15 +55,10 @@
   <a href="#/library" class:active={section === 'liked'}>Liked</a>
   <a href="#/library/playlists" class:active={section === 'playlists'}>Playlists</a>
   <a href="#/library/history" class:active={section === 'history'}>History</a>
-  <a href="#/library/artists" class:active={section === 'artists'}>Artists</a>
-  <a href="#/library/albums" class:active={section === 'albums'}>Albums</a>
-  <a href="#/library/songs" class:active={section === 'songs'}>Songs</a>
   {#if app.me?.permissions?.submit_music}<a href="#/submit">Submit music</a>{/if}
 </nav>
 
-{#if section === 'artists' || section === 'albums' || section === 'songs'}
-  <Browse {section} />
-{:else if section === 'liked' && liked}
+{#if section === 'liked' && liked}
   {#if liked.artists.length}
     <h2>Artists</h2>
     <div class="tiles">
@@ -133,7 +127,6 @@
 <style>
   .sections {
     display: flex;
-    flex-wrap: wrap;
     gap: 6px;
     margin-bottom: 8px;
   }

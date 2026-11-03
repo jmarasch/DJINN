@@ -12,6 +12,8 @@
   import LikeButton from '../LikeButton.svelte'
   import SongTile from '../SongTile.svelte'
 
+  let searchBar = $state<HTMLElement>()
+
   let query = $state(remembered())
   let results = $state<SearchResults | null>(null)
   let error = $state('')
@@ -52,13 +54,13 @@
   const play = (track: Track) => tapSong(track, () => playRadio(track))
 </script>
 
-<div class="search-bar">
+<div class="search-bar" bind:this={searchBar}>
   <input class="search" type="search" placeholder="Search songs, artists, albums" bind:value={query} aria-label="Search" />
 </div>
 {#if error}<p class="error">{error}</p>{/if}
 
 {#if !query.trim()}
-  <Browse progress={false}>
+  <Browse progress={false} stuckBelow={searchBar}>
     {#snippet song(track)}
       <SongRow {track} onplay={() => play(track)} />
     {/snippet}
@@ -110,7 +112,7 @@
 <style>
   .search-bar {
     position: sticky;
-    top: 60px;
+    top: var(--nav-height, 60px);
     z-index: 5;
     padding: 4px 0 8px;
     background: var(--bg);

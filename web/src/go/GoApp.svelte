@@ -27,6 +27,9 @@
   import Search from './views/Search.svelte'
   import Submit from './views/Submit.svelte'
 
+  /** So what sticks to the top of a page can stick just below this. */
+  let headerHeight = $state(0)
+
   let ready = $state(false)
   let signingUp = $state(location.pathname === '/signup')
   let error = $state('')
@@ -88,17 +91,7 @@
             : 'home',
   )
   const librarySection = $derived(
-    route.path === '/library/playlists'
-      ? 'playlists'
-      : route.path === '/library/history'
-        ? 'history'
-        : route.path === '/library/artists'
-          ? 'artists'
-          : route.path === '/library/albums'
-            ? 'albums'
-            : route.path === '/library/songs'
-              ? 'songs'
-              : 'liked',
+    route.path === '/library/playlists' ? 'playlists' : route.path === '/library/history' ? 'history' : 'liked',
   )
 </script>
 
@@ -133,7 +126,7 @@
     <button class="text-button" onclick={signOut}>Sign out</button>
   </main>
 {:else}
-  <header>
+  <header bind:offsetHeight={headerHeight}>
     <a class="brand" href="#/">DJINN GO</a>
     <nav aria-label="Main navigation">
       <button class="back" disabled={!navigation.canGoBack} onclick={goBack} aria-label="Back" title="Back">
@@ -147,7 +140,7 @@
       <a href="#/account" class:active={section === 'account'} aria-label="Account"><Icon name="settings" /><span>Account</span></a>
     </nav>
   </header>
-  <main class="go" class:playing={player.index >= 0 && route.path !== '/playing'}>
+  <main class="go" class:playing={player.index >= 0 && route.path !== '/playing'} style:--nav-height="{headerHeight}px">
     {#if route.path === '/playing'}
       <NowPlaying />
     {:else if genreName}
@@ -279,6 +272,8 @@
 
   .go.playing {
     padding-bottom: 96px;
+    /* The player bar sits over the page's bottom edge. */
+    --clear-of-player: 96px;
   }
 
   .text-button {
