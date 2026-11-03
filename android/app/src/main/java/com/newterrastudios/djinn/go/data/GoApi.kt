@@ -197,6 +197,10 @@ class GoApi(private val account: Account) {
     suspend fun albums(sort: String, filter: String, offset: Int): Page<Album> =
         get("/api/albums?sort=$sort&filter=$filter&offset=$offset")
     suspend fun songs(sort: String, offset: Int): Page<Track> = get("/api/tracks?sort=$sort&offset=$offset")
+    suspend fun artistJumps(sort: String): List<Jump> = get("/api/artists/jumps?sort=$sort")
+    suspend fun albumJumps(sort: String, filter: String): List<Jump> =
+        get("/api/albums/jumps?sort=$sort&filter=$filter")
+    suspend fun songJumps(sort: String): List<Jump> = get("/api/tracks/jumps?sort=$sort")
     suspend fun genres(): GenreList = get("/api/genres")
     suspend fun genre(name: String): GenrePage = get(genrePath(name))
     suspend fun album(id: Long): AlbumDetail = get("/api/albums/$id")

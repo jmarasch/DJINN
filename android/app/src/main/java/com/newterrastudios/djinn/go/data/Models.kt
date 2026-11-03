@@ -111,6 +111,10 @@ data class GenrePage(
     val related: List<GenreSummary> = emptyList(),
 )
 
+/** Where a letter or year starts in a long list. */
+@Serializable
+data class Jump(val label: String, val offset: Int)
+
 @Serializable
 data class GoPlaylist(
     val id: Long,
