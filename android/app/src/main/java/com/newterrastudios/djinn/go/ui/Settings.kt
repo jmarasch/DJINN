@@ -58,7 +58,7 @@ private val SMART_LIMITS = listOf(512, 1024, 2048, 5120, 10240)
 fun sizeText(context: Context, bytes: Long): String = Formatter.formatShortFileSize(context, bytes)
 
 @Composable
-private fun Toggle(title: String, note: String?, on: Boolean, change: (Boolean) -> Unit) {
+internal fun Toggle(title: String, note: String?, on: Boolean, change: (Boolean) -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -274,7 +274,8 @@ private fun VisualsSettings(nav: Nav) {
     var intensity by remember { mutableFloatStateOf(prefs.visualsIntensity) }
     var auto by remember { mutableStateOf(prefs.visualsAuto) }
     Heading("Visuals")
-    Note("On Now Playing, tap the cover to see them. Fancier styles use more battery.")
+    Note("The sparkle button on Now Playing switches between the cover and these. Fancier styles use more battery.")
+    VisualLookSettings(nav)
     Toggle("Change styles by themselves", "In full screen, a new style every 30 seconds.", auto) {
         auto = it
         prefs.visualsAuto = it

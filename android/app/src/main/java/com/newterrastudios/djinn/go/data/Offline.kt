@@ -1,5 +1,7 @@
 package com.newterrastudios.djinn.go.data
 
+import com.newterrastudios.djinn.go.player.VisualLook
+import kotlinx.serialization.encodeToString
 import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
@@ -225,6 +227,19 @@ class Prefs(context: Context) {
     var visualsAuto: Boolean
         get() = prefs.getBoolean("visuals_auto", false)
         set(value) = prefs.edit { putBoolean("visuals_auto", value) }
+    /** Now Playing shows visuals rather than the cover. */
+    var visualsOn: Boolean
+        get() = prefs.getBoolean("visuals_on", false)
+        set(value) = prefs.edit { putBoolean("visuals_on", value) }
+    /** Styles this device turned out not to keep up with. */
+    var visualsTooSlow: Set<String>
+        get() = prefs.getStringSet("visuals_too_slow", emptySet()).orEmpty()
+        set(value) = prefs.edit { putStringSet("visuals_too_slow", value) }
+    var visualLook: VisualLook
+        get() = prefs.getString("visual_look", null)
+            ?.let { runCatching { lookJson.decodeFromString<VisualLook>(it) }.getOrNull() }
+            ?: VisualLook()
+        set(value) = prefs.edit { putString("visual_look", lookJson.encodeToString(value)) }
     /** Lines the visuals up with the speaker, in milliseconds. */
     var visualsLeadMs: Int
         get() = prefs.getInt("visuals_lead_ms", DEFAULT_VISUALS_LEAD_MS)
@@ -235,6 +250,7 @@ class Prefs(context: Context) {
         set(value) = prefs.edit { putFloat("visuals_intensity", value) }
 
     companion object {
+        private val lookJson = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
         const val DEFAULT_KBPS = 128
         const val DEFAULT_VISUALS_LEAD_MS = 250
     }

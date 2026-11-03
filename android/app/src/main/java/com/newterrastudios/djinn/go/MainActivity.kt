@@ -77,6 +77,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         Spectrum.leadMs = app.prefs.visualsLeadMs
         Spectrum.intensity = app.prefs.visualsIntensity
+        Spectrum.look = app.prefs.visualLook
         handle(intent)
         setContent {
             DjinnTheme {

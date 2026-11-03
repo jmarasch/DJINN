@@ -17,6 +17,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.material3.Slider
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.layout.ContentScale
+import coil3.compose.AsyncImage
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.ChevronLeft
@@ -25,6 +29,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -60,7 +65,11 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.media3.common.util.UnstableApi
-import com.newterrastudios.djinn.go.player.BANDS
+import com.newterrastudios.djinn.go.player.COLORS_CUSTOM
+import com.newterrastudios.djinn.go.player.COLORS_ROTATE
+import com.newterrastudios.djinn.go.player.binBands
+import com.newterrastudios.djinn.go.player.hueToRgb
+import com.newterrastudios.djinn.go.player.rotatedHue
 import com.newterrastudios.djinn.go.player.SoundReader
 import com.newterrastudios.djinn.go.player.Spectrum
 import com.newterrastudios.djinn.go.player.WAVE_POINTS
@@ -104,14 +113,20 @@ private const val TITLE_MS = 6_000L
 /** Any moving style, sized by its caller. A tap reaches `onTap`. */
 @UnstableApi
 @Composable
-fun Visual(style: VisualStyle, onTap: () -> Unit, modifier: Modifier = Modifier, onBlack: Boolean = false) {
+fun Visual(
+    style: VisualStyle,
+    onTap: () -> Unit,
+    modifier: Modifier = Modifier,
+    onBlack: Boolean = false,
+    onTooSlow: (VisualStyle) -> Unit = {},
+) {
     DisposableEffect(Unit) {
         Spectrum.watch()
         onDispose { Spectrum.unwatch() }
     }
     Box(modifier) {
         if (style.onGraphicsChip) {
-            ChipVisual(style, Modifier.fillMaxSize())
+            ChipVisual(style, onTooSlow, Modifier.fillMaxSize())
         } else {
             ShapeVisual(style, onBlack, Modifier.fillMaxSize())
         }
@@ -130,10 +145,15 @@ fun Visual(style: VisualStyle, onTap: () -> Unit, modifier: Modifier = Modifier,
 
 @UnstableApi
 @Composable
-private fun ChipVisual(style: VisualStyle, modifier: Modifier) {
+private fun ChipVisual(style: VisualStyle, onTooSlow: (VisualStyle) -> Unit, modifier: Modifier) {
     val context = LocalContext.current
     val owner = LocalLifecycleOwner.current
     val view = remember { VisualsView(context, style) }
+    val tooSlow by rememberUpdatedState(onTooSlow)
+    DisposableEffect(view) {
+        view.visuals.onTooSlow = { slow -> view.post { tooSlow(slow) } }
+        onDispose { view.visuals.onTooSlow = null }
+    }
     DisposableEffect(owner) {
         // Stops drawing when the app isn't showing; a running shader eats battery.
         val watcher = LifecycleEventObserver { _, event ->
@@ -160,7 +180,7 @@ private fun ShapeVisual(style: VisualStyle, onBlack: Boolean, modifier: Modifier
     LaunchedEffect(Unit) {
         while (true) {
             withFrameNanos { now ->
-                sound.read(now, Spectrum.leadMs, Spectrum.intensity)
+                sound.read(now, Spectrum.leadMs, Spectrum.intensity, Spectrum.look.calm)
                 frame = now
             }
         }
@@ -171,25 +191,36 @@ private fun ShapeVisual(style: VisualStyle, onBlack: Boolean, modifier: Modifier
     Canvas(modifier) {
         // Reading it redraws each frame.
         frame.let { }
+        val look = Spectrum.look
+        val seconds = frame / 1_000_000_000.0
+        val barCount = look.bars
         // Music keeps most bands well up the scale; squaring gives the bars room to move.
-        val bands = FloatArray(BANDS) { sound.bands[it] * sound.bands[it] }
+        val bands = binBands(sound.bands, barCount).let { bars -> FloatArray(bars.size) { bars[it] * bars[it] } }
+        // `position` is where along the picture this is, for RGB rotation to spread across.
+        fun paint(position: Float, level: Float): Color = when (look.colors) {
+            COLORS_ROTATE -> lerp(color(hueToRgb(rotatedHue(seconds, look.rotateSeconds, position))), Color.White, level * 0.6f)
+            COLORS_CUSTOM -> lerp(color(look.quiet), color(look.loud), level)
+            else -> lerp(low, high, level)
+        }
+        val corner = { width: Float -> CornerRadius(if (look.rounded) width / 2 else 0f) }
+        val gapShare = look.gap.coerceIn(0f, 0.9f)
         when (style) {
             VisualStyle.Ring -> {
                 val center = Offset(size.width / 2, size.height / 2)
                 val inner = min(size.width, size.height) * (0.22f + 0.04f * sound.beat)
                 val longest = min(size.width, size.height) * 0.26f
                 // Mirrored, so the two sides meet without a jump.
-                val spokes = BANDS * 2
+                val spokes = barCount * 2
                 for (i in 0 until spokes) {
-                    val band = if (i < BANDS) i else spokes - 1 - i
+                    val band = if (i < barCount) i else spokes - 1 - i
                     val angle = 2 * PI * i / spokes - PI / 2
                     val length = inner + 2f + longest * bands[band]
                     drawLine(
-                        color = lerp(low, high, bands[band]),
+                        color = paint(band.toFloat() / barCount, bands[band]),
                         start = center + Offset((cos(angle) * inner).toFloat(), (sin(angle) * inner).toFloat()),
                         end = center + Offset((cos(angle) * length).toFloat(), (sin(angle) * length).toFloat()),
-                        strokeWidth = (2 * PI.toFloat() * inner / spokes) * 0.6f,
-                        cap = StrokeCap.Round,
+                        strokeWidth = (2 * PI.toFloat() * inner / spokes) * (1f - gapShare),
+                        cap = if (look.rounded) StrokeCap.Round else StrokeCap.Butt,
                     )
                 }
             }
@@ -202,32 +233,36 @@ private fun ShapeVisual(style: VisualStyle, onBlack: Boolean, modifier: Modifier
                     val y = middle - sound.wave[i] * reach
                     if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
                 }
-                drawPath(path, lerp(low, high, 0.5f + sound.beat / 2), style = Stroke(width = 4.dp.toPx() + 6.dp.toPx() * sound.bass, cap = StrokeCap.Round))
+                drawPath(
+                    path,
+                    paint(0f, 0.5f + sound.beat / 2),
+                    style = Stroke(width = look.lineWidth.dp.toPx() * (1f + 1.5f * sound.bass), cap = StrokeCap.Round),
+                )
             }
             VisualStyle.Mirror -> {
-                val gap = size.width / BANDS * 0.25f
-                val width = size.width / BANDS - gap
+                val gap = size.width / barCount * gapShare
+                val width = size.width / barCount - gap
                 val middle = size.height / 2
-                for (i in 0 until BANDS) {
+                for (i in 0 until barCount) {
                     val height = (size.height / 2 * bands[i]).coerceAtLeast(width / 2)
                     drawRoundRect(
-                        color = lerp(low, high, bands[i]),
+                        color = paint(i.toFloat() / barCount, bands[i]),
                         topLeft = Offset(i * (width + gap) + gap / 2, middle - height),
                         size = Size(width, height * 2),
-                        cornerRadius = CornerRadius(width / 2),
+                        cornerRadius = corner(width),
                     )
                 }
             }
             else -> {
-                val gap = size.width / BANDS * 0.25f
-                val width = size.width / BANDS - gap
-                for (i in 0 until BANDS) {
+                val gap = size.width / barCount * gapShare
+                val width = size.width / barCount - gap
+                for (i in 0 until barCount) {
                     val height = (size.height * bands[i]).coerceAtLeast(width)
                     drawRoundRect(
-                        color = lerp(low, high, bands[i]),
+                        color = paint(i.toFloat() / barCount, bands[i]),
                         topLeft = Offset(i * (width + gap) + gap / 2, size.height - height),
                         size = Size(width, height),
-                        cornerRadius = CornerRadius(width / 2),
+                        cornerRadius = corner(width),
                     )
                 }
             }
@@ -244,22 +279,24 @@ private fun lerp(a: Color, b: Color, t: Float): Color {
     )
 }
 
+/** The biggest copy of a song's picture, rather than the size lists use. */
+private fun fullSizeArt(url: String?): String? = url?.substringBefore("?size=")
+
 /**
- * The visuals alone, filling the screen, which stays on. A tap brings the
- * controls back for a few seconds; a new song shows its name for a few.
+ * The cover or the visuals alone, filling the screen, which stays on. A tap
+ * brings the controls back for a few seconds, and another puts them away; a new
+ * song shows its name for a few.
  */
 @UnstableApi
 @Composable
-fun FullVisuals(nav: Nav) {
+fun FullScreen(nav: Nav, cover: Boolean) {
     val player = nav.player
-    var index by remember {
-        mutableIntStateOf(VisualStyle.moving.indexOf(VisualStyle.at(nav.prefs.visuals)).coerceAtLeast(0))
-    }
+    var style by remember { mutableStateOf(nav.currentStyle()) }
     var auto by remember { mutableStateOf(nav.prefs.visualsAuto) }
     var controls by remember { mutableStateOf(true) }
     var touched by remember { mutableIntStateOf(0) }
     var showTitle by remember { mutableStateOf(true) }
-    val style = VisualStyle.moving[index % VisualStyle.moving.size]
+    var dragging by remember { mutableStateOf<Float?>(null) }
 
     BackHandler { nav.pop() }
     val view = LocalView.current
@@ -275,9 +312,10 @@ fun FullVisuals(nav: Nav) {
         }
     }
     fun change(by: Int) {
-        val count = VisualStyle.moving.size
-        index = (index + by + count) % count
-        nav.prefs.visuals = VisualStyle.moving[index].ordinal
+        val styles = nav.visualStyles
+        val next = styles[(styles.indexOf(style) + by + styles.size) % styles.size]
+        style = next
+        nav.prefs.visuals = next.ordinal
     }
     LaunchedEffect(touched) {
         controls = true
@@ -285,7 +323,7 @@ fun FullVisuals(nav: Nav) {
         controls = false
     }
     LaunchedEffect(auto) {
-        while (auto) {
+        while (auto && !cover) {
             delay(AUTO_CHANGE_MS)
             change(1)
         }
@@ -301,7 +339,41 @@ fun FullVisuals(nav: Nav) {
             .fillMaxSize()
             .background(Color.Black),
     ) {
-        Visual(style, onTap = { touched++ }, modifier = Modifier.fillMaxSize(), onBlack = true)
+        fun tapped() {
+            if (controls) controls = false else touched++
+        }
+        if (cover) {
+            val art = player.current?.mediaMetadata?.artworkUri?.toString()
+            // The list-sized copy first, which is there even away from the server.
+            listOf(art, fullSizeArt(art)).forEach { url ->
+                AsyncImage(
+                    model = url,
+                    contentDescription = null,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = ::tapped,
+                    ),
+            )
+        } else {
+            Visual(
+                style,
+                onTap = ::tapped,
+                modifier = Modifier.fillMaxSize(),
+                onBlack = true,
+                onTooSlow = { slow ->
+                    nav.styleTooSlow(slow)
+                    if (slow == style) style = nav.currentStyle()
+                },
+            )
+        }
         AnimatedVisibility(
             visible = showTitle || controls,
             enter = fadeIn(),
@@ -341,7 +413,24 @@ fun FullVisuals(nav: Nav) {
                     .padding(8.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Text(if (auto) "${style.label} (changes by itself)" else style.label, color = Color.White)
+                if (!cover) {
+                    Text(if (auto) "${style.label} (changes by itself)" else style.label, color = Color.White)
+                }
+                if (player.durationMs > 0) {
+                    Slider(
+                        value = dragging ?: player.positionMs.toFloat(),
+                        onValueChange = {
+                            dragging = it
+                            touched++
+                        },
+                        onValueChangeFinished = {
+                            dragging?.let { player.seekTo(it.toLong()) }
+                            dragging = null
+                        },
+                        valueRange = 0f..player.durationMs.toFloat(),
+                        modifier = Modifier.padding(horizontal = 8.dp),
+                    )
+                }
                 Row(
                     Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceEvenly,
@@ -349,10 +438,16 @@ fun FullVisuals(nav: Nav) {
                 ) {
                     val tint = Color.White
                     IconButton(onClick = nav::pop) { Icon(Icons.Default.Close, "Leave full screen", tint = tint) }
+                    if (!cover) {
+                        IconButton(onClick = {
+                            change(-1)
+                            touched++
+                        }) { Icon(Icons.Default.ChevronLeft, "Previous style", tint = tint) }
+                    }
                     IconButton(onClick = {
-                        change(-1)
+                        player.previous()
                         touched++
-                    }) { Icon(Icons.Default.ChevronLeft, "Previous style", tint = tint) }
+                    }) { Icon(Icons.Default.SkipPrevious, "Previous song", tint = tint) }
                     IconButton(onClick = {
                         player.toggle()
                         touched++
@@ -369,20 +464,22 @@ fun FullVisuals(nav: Nav) {
                     }, enabled = player.upNext.isNotEmpty()) {
                         Icon(Icons.Default.SkipNext, "Next song", tint = tint.copy(alpha = if (player.upNext.isNotEmpty()) 1f else 0.4f))
                     }
-                    IconButton(onClick = {
-                        change(1)
-                        touched++
-                    }) { Icon(Icons.Default.ChevronRight, "Next style", tint = tint) }
-                    IconButton(onClick = {
-                        auto = !auto
-                        nav.prefs.visualsAuto = auto
-                        touched++
-                    }) {
-                        Icon(
-                            Icons.Default.AutoAwesome,
-                            if (auto) "Stop changing styles" else "Change styles by itself",
-                            tint = if (auto) MaterialTheme.colorScheme.primary else tint,
-                        )
+                    if (!cover) {
+                        IconButton(onClick = {
+                            change(1)
+                            touched++
+                        }) { Icon(Icons.Default.ChevronRight, "Next style", tint = tint) }
+                        IconButton(onClick = {
+                            auto = !auto
+                            nav.prefs.visualsAuto = auto
+                            touched++
+                        }) {
+                            Icon(
+                                Icons.Default.AutoAwesome,
+                                if (auto) "Stop changing styles" else "Change styles by itself",
+                                tint = if (auto) MaterialTheme.colorScheme.primary else tint,
+                            )
+                        }
                     }
                 }
             }

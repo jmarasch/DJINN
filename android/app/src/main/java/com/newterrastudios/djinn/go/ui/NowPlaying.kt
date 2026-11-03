@@ -22,6 +22,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material.icons.filled.Cast
 import androidx.compose.material.icons.filled.CastConnected
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Notifications
@@ -105,35 +106,47 @@ fun NowPlayingScreen(nav: Nav) {
     val scope = rememberCoroutineScope()
     /** Where the thumb is while being dragged. */
     var dragging by remember { mutableStateOf<Float?>(null) }
-    var visual by remember { mutableIntStateOf(nav.prefs.visuals) }
+    var showVisuals by remember { mutableStateOf(nav.prefs.visualsOn) }
+    val context = LocalContext.current
     var pickDevice by remember { mutableStateOf(false) }
     val casting = nav.cast.castingTo
     DisposableEffect(Unit) {
         nav.cast.start()
         onDispose { nav.cast.stopLooking() }
     }
-    fun nextVisual() {
-        visual = (visual + 1) % VisualStyle.entries.size
-        nav.prefs.visuals = visual
-    }
-    val style = VisualStyle.at(visual)
+    // While casting the sound plays elsewhere, so there's nothing here to react to.
+    val canShow = remember { canShowVisuals(context) } && casting == null
+    val visuals = canShow && showVisuals
 
-    LazyColumn(
-        Modifier
-            .fillMaxSize()
-            .safeDrawingPadding(),
-    ) {
+    LazyColumn(Modifier.fillMaxSize()) {
         item {
             Row(Modifier.fillMaxWidth().padding(4.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                 IconButton(onClick = nav::pop) {
                     Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Close")
                 }
-                if (casting != null || nav.cast.devices.isNotEmpty()) {
-                    IconButton(onClick = { pickDevice = true }) {
-                        Icon(
-                            if (casting != null) Icons.Default.CastConnected else Icons.Default.Cast,
-                            contentDescription = "Cast",
-                        )
+                Row {
+                    if (canShow) {
+                        IconButton(onClick = {
+                            showVisuals = !showVisuals
+                            nav.prefs.visualsOn = showVisuals
+                        }) {
+                            Icon(
+                                Icons.Default.AutoAwesome,
+                                contentDescription = if (visuals) "Show the cover" else "Show visuals",
+                                tint = if (visuals) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    IconButton(onClick = { nav.push(if (visuals) Screen.Visuals else Screen.Cover) }) {
+                        Icon(Icons.Default.Fullscreen, contentDescription = "Full screen")
+                    }
+                    if (casting != null || nav.cast.devices.isNotEmpty()) {
+                        IconButton(onClick = { pickDevice = true }) {
+                            Icon(
+                                if (casting != null) Icons.Default.CastConnected else Icons.Default.Cast,
+                                contentDescription = "Cast",
+                            )
+                        }
                     }
                 }
             }
@@ -145,24 +158,19 @@ fun NowPlayingScreen(nav: Nav) {
                     .padding(horizontal = 24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                if (style == VisualStyle.Art) {
+                if (visuals) {
+                    Visual(
+                        nav.currentStyle(),
+                        onTap = { nav.push(Screen.Visuals) },
+                        onTooSlow = nav::styleTooSlow,
+                        modifier = Modifier.size(280.dp),
+                    )
+                } else {
                     Art(
                         item.mediaMetadata.artworkUri?.toString(),
                         280.dp,
-                        modifier = Modifier.clickable(onClick = ::nextVisual),
+                        modifier = Modifier.clickable { nav.push(Screen.Cover) },
                     )
-                } else {
-                    Visual(style, onTap = ::nextVisual, modifier = Modifier.size(280.dp))
-                }
-                TextButton(onClick = {
-                    if (style == VisualStyle.Art) {
-                        visual = VisualStyle.Warp.ordinal
-                        nav.prefs.visuals = visual
-                    }
-                    nav.push(Screen.Visuals)
-                }) {
-                    Icon(Icons.Default.Fullscreen, contentDescription = null)
-                    Text(if (style == VisualStyle.Art) "Visuals" else "${style.label}: full screen", modifier = Modifier.padding(start = 8.dp))
                 }
                 if (casting != null) {
                     Text(
