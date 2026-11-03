@@ -36,6 +36,7 @@
 
 ### Android app
 
+- Your server now carries the app. Open GO on an Android phone, or scan the QR code in Admin > GO, to install it with no store. It offers its own updates when your server has a newer version. **If you installed a test build, uninstall it first**, because this one is signed differently.
 - **Home** is now **Playlist**, and a **Playing** button pulls up the player.
 - Now Playing shows the cover by default, and a button switches to visuals on devices that can run them. The cover and visuals go full screen, with controls that appear on a tap and fade.
 - Visuals no longer shake: Tunnel, Stars and Nebula were following every tiny change in the bass. Settings can now choose colors, RGB rotation, the number and spacing of bars, line thickness and smoothing.
