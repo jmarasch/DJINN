@@ -1,5 +1,6 @@
 package com.newterrastudios.djinn.go
 
+import com.newterrastudios.djinn.go.data.securityCode
 import android.Manifest
 import android.app.SearchManager
 import android.content.Intent
@@ -17,6 +18,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -93,25 +95,24 @@ class MainActivity : ComponentActivity() {
         val account = app.account
         val api = app.api
         val signedIn by account.signedIn.collectAsState()
-        var connected by rememberSaveable { mutableStateOf(account.server != null) }
+        val server by account.current.collectAsState()
         val scope = rememberCoroutineScope()
-        if (!signedIn) {
-            if (connected) {
-                SignInScreen(account, api, onChangeServer = {
-                    account.forgetServer()
-                    connected = false
-                })
-            } else {
-                ConnectScreen(
-                    account,
-                    api,
-                    ::askLocalNetwork,
-                    askCamera = { ask(Manifest.permission.CAMERA) },
-                    onConnected = { connected = true },
-                )
-            }
+        if (server == null) {
+            ConnectScreen(
+                account,
+                api,
+                app.offline,
+                ::askLocalNetwork,
+                askCamera = { ask(Manifest.permission.CAMERA) },
+            )
             return
         }
+        if (!signedIn) {
+            SignInScreen(account, api, onChangeServer = account::leave)
+            return
+        }
+        // Everything below belongs to one account on one server, and starts over on another.
+        key(account.scope) {
         val nav = remember {
             Nav(
                 api = api,
@@ -119,8 +120,15 @@ class MainActivity : ComponentActivity() {
                 offline = app.offline,
                 prefs = app.prefs,
                 cast = cast,
-                server = account.server.orEmpty(),
+                server = account.scope.orEmpty(),
+                address = account.server.orEmpty(),
+                encrypted = account.pin != null || account.server?.startsWith("https://") == true,
+                securityCode = account.pin?.let(::securityCode),
                 serverName = account.serverName,
+                switchServer = {
+                    player.stop()
+                    account.leave()
+                },
                 scope = lifecycleScope,
                 signOut = {
                     player.stop()
@@ -154,7 +162,7 @@ class MainActivity : ComponentActivity() {
         LaunchedEffect(Unit) {
             // The admin may have renamed it since.
             api.hello()?.let {
-                account.serverName = it.name
+                account.setServerName(it.name)
                 nav.serverName = it.name
             }
         }
@@ -220,6 +228,7 @@ class MainActivity : ComponentActivity() {
             }
         }
         MainScreen(nav)
+        }
     }
 
     override fun onNewIntent(intent: Intent) {

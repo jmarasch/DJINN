@@ -387,6 +387,10 @@ The official native app for DJINN GO, in `android/` in this repository: songs as
 
 **Kept songs**
 - Admin > GO sets what happens to them at sign-out (delete or keep locked) and after too long without reaching the server (lock, delete or nothing; 30 days by default). The app caches the rules. Locking is the app refusing to play them, not encryption.
+- People move between servers. The app keeps each server's sign-in, and songs, rules and time away belong to one account on one server (keyed by the server's id, so a new address changes nothing). Leaving a server or signing in as someone else deletes nothing.
+
+**Encryption**
+- On by default, with nothing to set up (Admin > GO can turn it off). The server makes its own certificate (`tls.rs`) and both ports answer TLS and plain HTTP on the same number, told apart by a connection's first byte. The app pins the certificate on first use (QR codes carry it, which is stronger), checks it before sending anything, and warns if it changes. Browsers warn about it, and cast devices can't use it, so plain HTTP stays available.
 
 **Server changes (GO's API)**
 - Device sign-in: an API login returns a token sent as `Authorization: Bearer`, stored as a session, so it appears under signed-in devices, can be signed out, and follows the same role, home-network, two-step and lockout rules as the web. Cookies keep working for browsers.

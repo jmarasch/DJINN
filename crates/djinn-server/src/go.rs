@@ -12,7 +12,7 @@ use std::collections::{HashMap, VecDeque};
 use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Mutex, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
 use axum::body::Body;
@@ -36,6 +36,7 @@ use crate::go_announce::{self, GO_DISCOVERABLE, SERVER_NAME};
 use crate::go_upnp;
 use crate::security::{self, TRUSTED_PROXIES};
 use crate::state::AppState;
+use crate::tls::{self, ENCRYPTION};
 use crate::two_step::{self, ADMIN_TWO_STEP};
 use crate::{api, settings, web};
 
@@ -75,6 +76,8 @@ pub struct GoState {
     upnp: Mutex<Option<go_upnp::Mapping>>,
     /// Telling phones on the network about GO, while it's on.
     announcer: Mutex<Option<go_announce::Announcer>>,
+    /// Shared with the main port's listener.
+    pub encryption: Arc<tls::Encryption>,
     /// Mirrors the `trusted_proxies` setting.
     proxies: RwLock<Vec<IpNet>>,
     /// Stops the running listener.
@@ -129,6 +132,7 @@ impl GoState {
             allow_remote: AtomicBool::new(false),
             upnp: Mutex::default(),
             announcer: Mutex::default(),
+            encryption: Arc::default(),
             proxies: RwLock::default(),
             running: Mutex::default(),
             error: Mutex::default(),
@@ -191,6 +195,7 @@ pub async fn apply(state: &AppState) -> anyhow::Result<()> {
     } else {
         stop(state);
     }
+    apply_encryption(state).await?;
     announce(state, on).await?;
     let can_map = on && state.go.running.lock().is_ok_and(|r| r.is_some()) && allow_remote && upnp;
     if let Ok(mut slot) = state.go.upnp.lock() {
@@ -208,6 +213,27 @@ pub async fn apply(state: &AppState) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Offers encryption or not, to match the setting. Takes effect for each new
+/// connection, on both ports, so nothing has to restart.
+pub async fn apply_encryption(state: &AppState) -> anyhow::Result<()> {
+    let encryption = &state.go.encryption;
+    if !settings::flag(&state.store, ENCRYPTION, true).await? {
+        encryption.set(None);
+    } else if !encryption.is_on() {
+        let dir = state
+            .art_dir
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."))
+            .join("tls");
+        match tls::load_or_make(&dir) {
+            Ok(identity) => encryption.set(Some(identity)),
+            // Without it everything still works as it did, unencrypted.
+            Err(e) => tracing::error!(error = %e, "couldn't set up encrypted connections"),
+        }
+    }
+    Ok(())
+}
+
 /// Starts, stops or renews the announcement to match the settings.
 async fn announce(state: &AppState, on: bool) -> anyhow::Result<()> {
     let go = &state.go;
@@ -215,12 +241,17 @@ async fn announce(state: &AppState, on: bool) -> anyhow::Result<()> {
         && go.running.lock().is_ok_and(|r| r.is_some())
         && settings::flag(&state.store, GO_DISCOVERABLE, true).await?;
     let name = go_announce::server_name(&state.store).await?;
+    let fingerprint = go.encryption.fingerprint();
     let stale = go
         .announcer
         .lock()
         .ok()
         .and_then(|mut slot| match slot.as_ref() {
-            Some(current) if !wanted || current.name != name => slot.take(),
+            Some(current)
+                if !wanted || current.name != name || current.fingerprint != fingerprint =>
+            {
+                slot.take()
+            }
             _ => None,
         });
     if let Some(old) = stale {
@@ -228,7 +259,7 @@ async fn announce(state: &AppState, on: bool) -> anyhow::Result<()> {
     }
     let missing = go.announcer.lock().is_ok_and(|slot| slot.is_none());
     if wanted && missing {
-        match go_announce::Announcer::start(&state.store, go.listen.port()).await {
+        match go_announce::Announcer::start(&state.store, go.listen.port(), fingerprint).await {
             Ok(announcer) => {
                 if let Ok(mut slot) = go.announcer.lock() {
                     *slot = Some(announcer);
@@ -260,6 +291,13 @@ async fn start(state: &AppState) {
     let mut shutdown = state.shutdown.subscribe();
     let shutting_down = state.shutdown.subscribe();
     let closing = state.clone();
+    let listener = match tls::listen(listener, Arc::clone(&go.encryption)) {
+        Ok(listener) => listener,
+        Err(e) => {
+            tracing::error!(error = %e, "DJINN GO couldn't start");
+            return;
+        }
+    };
     let app = router(state.clone()).into_make_service_with_connect_info::<SocketAddr>();
     tokio::spawn(async move {
         let stopped = async move {
@@ -958,6 +996,10 @@ struct Listener {
 
 #[derive(Serialize)]
 struct Status {
+    /// Encrypted connections are offered.
+    encryption: bool,
+    /// For comparing with what the app shows.
+    security_code: Option<String>,
     keep: KeepRules,
     /// What the admin named this server; empty means `default_name`.
     server_name: String,
@@ -1019,6 +1061,11 @@ async fn status_of(state: &AppState) -> anyhow::Result<Status> {
     let mbps = bytes as f64 * 8.0 / SPEED_WINDOW.as_secs_f64() / 1_000_000.0;
     let port = go.listen.port();
     Ok(Status {
+        encryption: settings::flag(&state.store, ENCRYPTION, true).await?,
+        security_code: go
+            .encryption
+            .fingerprint()
+            .map(|fingerprint| tls::security_code(&fingerprint)),
         keep: keep_rules_of(&state.store).await?,
         server_name: state
             .store
@@ -1086,6 +1133,17 @@ struct Address {
     others: Vec<String>,
 }
 
+/// What a QR code says: the address, and the certificate to expect. A phone's
+/// camera opens the address and browsers keep what's after the # to themselves;
+/// the app's scanner remembers the certificate, which makes this the one way
+/// of connecting that someone on the network can't get in the middle of.
+fn qr_text(url: &str, fingerprint: Option<String>) -> String {
+    match fingerprint {
+        Some(fingerprint) => format!("{url}#fp={fingerprint}"),
+        None => url.to_owned(),
+    }
+}
+
 /// GO's address and a QR code for it, for opening GO on a phone.
 async fn address(
     _: CurrentSession,
@@ -1110,7 +1168,7 @@ async fn address(
         urls.insert(0, here.to_owned());
     }
     let url = urls.first().cloned().ok_or_else(ApiError::not_found)?;
-    let qr_svg = qrcode::QrCode::new(url.as_bytes())
+    let qr_svg = qrcode::QrCode::new(qr_text(&url, state.go.encryption.fingerprint()).as_bytes())
         .map_err(anyhow::Error::from)?
         .render::<qrcode::render::svg::Color>()
         .min_dimensions(240, 240)
@@ -1144,6 +1202,8 @@ async fn status(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json<S
 
 #[derive(Deserialize)]
 struct GoSettings {
+    #[serde(default = "yes")]
+    encryption: bool,
     #[serde(default)]
     keep: KeepRules,
     #[serde(default)]
@@ -1266,6 +1326,7 @@ async fn save_settings(
         }
         proxies.push_str("127.0.0.1");
     }
+    settings::set_flag(&state.store, ENCRYPTION, body.encryption).await?;
     state.store.set_setting(SERVER_NAME, &server_name).await?;
     state
         .store
@@ -1321,6 +1382,55 @@ async fn sign_ins(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn qr_codes_carry_the_certificate_when_there_is_one() {
+        assert_eq!(
+            qr_text("http://10.0.0.2:8067", None),
+            "http://10.0.0.2:8067"
+        );
+        assert_eq!(
+            qr_text("http://10.0.0.2:8067", Some("abc".to_owned())),
+            "http://10.0.0.2:8067#fp=abc"
+        );
+    }
+
+    #[tokio::test]
+    async fn encryption_is_on_unless_turned_off() {
+        let dir = std::env::temp_dir().join(format!("djinn-go-tls-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let state = AppState::for_tests_in(&dir).await;
+        apply_encryption(&state).await.unwrap();
+        let fingerprint = state.go.encryption.fingerprint();
+        assert!(fingerprint.is_some());
+        assert!(dir.join("tls").join("djinn.key").exists());
+
+        state.go.enable_for_tests();
+        let (_, body, _) = go(&state, Method::GET, "/api/go/hello", None, None).await;
+        let hello: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(hello["encrypted"], true);
+
+        settings::set_flag(&state.store, ENCRYPTION, false)
+            .await
+            .unwrap();
+        apply_encryption(&state).await.unwrap();
+        assert!(!state.go.encryption.is_on());
+        let (_, body, _) = go(&state, Method::GET, "/api/go/hello", None, None).await;
+        let hello: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(hello["encrypted"], false);
+
+        settings::set_flag(&state.store, ENCRYPTION, true)
+            .await
+            .unwrap();
+        apply_encryption(&state).await.unwrap();
+        assert_eq!(
+            state.go.encryption.fingerprint(),
+            fingerprint,
+            "the same one"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn keep_rules_are_checked() {

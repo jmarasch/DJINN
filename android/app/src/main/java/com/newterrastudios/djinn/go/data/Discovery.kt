@@ -17,7 +17,13 @@ private const val TAG = "DjinnFind"
 private const val SERVICE = "_djinn-go._tcp"
 
 /** A server heard on this network. */
-data class FoundServer(val id: String, val name: String, val address: String)
+data class FoundServer(
+    val id: String,
+    val name: String,
+    val address: String,
+    /** The certificate it claims. Only as good as the network; the QR code is better. */
+    val pin: String? = null,
+)
 
 /** A server's address from what its announcement said. */
 internal fun foundAddress(host: String, port: Int): String =
@@ -143,6 +149,7 @@ class ServerFinder(context: Context) {
         val id = said["id"]?.decodeToString()?.takeIf { it.isNotBlank() } ?: info.serviceName
         val name = said["name"]?.decodeToString()?.takeIf { it.isNotBlank() } ?: info.serviceName
         idByInstance[info.serviceName] = id
-        _servers.value = withServer(_servers.value, FoundServer(id, name, foundAddress(host, info.port)))
+        val pin = said["fp"]?.decodeToString()?.takeIf { it.isNotBlank() }
+        _servers.value = withServer(_servers.value, FoundServer(id, name, foundAddress(host, info.port), pin))
     }
 }

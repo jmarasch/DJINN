@@ -68,8 +68,14 @@ class Nav(
     val offline: OfflineStore,
     val prefs: Prefs,
     val cast: CastState,
+    /** Whose songs and per-server settings: one account on one server. */
     val server: String,
+    val address: String,
+    val encrypted: Boolean,
+    val securityCode: String?,
     serverName: String?,
+    /** Back to choosing a server, still signed in to this one. */
+    val switchServer: () -> Unit,
     val signOut: () -> Unit,
     /** For work that must outlive the screen or menu that started it. */
     val scope: CoroutineScope,

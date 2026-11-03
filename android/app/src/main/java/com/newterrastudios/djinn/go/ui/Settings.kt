@@ -24,6 +24,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -84,6 +85,8 @@ fun SettingsScreen(nav: Nav) {
     val scope = rememberCoroutineScope()
     val prefs = nav.prefs
     val server = nav.server
+    var elsewhere by remember { mutableStateOf(emptyList<OfflineSong>()) }
+    LaunchedEffect(server) { elsewhere = nav.offline.keptElsewhere() }
     val kept by remember(server) { nav.offline.dao.songsFlow(server) }.collectAsState(emptyList())
     val sounds by remember(server) { nav.offline.dao.soundsFlow(server) }.collectAsState(emptyList())
     var kbps by remember { mutableIntStateOf(prefs.kbps) }
@@ -122,14 +125,41 @@ fun SettingsScreen(nav: Nav) {
         item {
             Text("Settings", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(16.dp))
             Text(
-                "Signed in to " + (nav.serverName?.let { "$it ($server)" } ?: server),
+                "Signed in to " + (nav.serverName?.let { "$it (${nav.address})" } ?: nav.address),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp),
             )
-            OutlinedButton(
-                onClick = { if (kept.isEmpty() && sounds.isEmpty()) nav.signOut() else confirmSignOut = true },
-                modifier = Modifier.padding(16.dp),
-            ) { Text("Sign out") }
+            Note(
+                when {
+                    nav.securityCode != null -> "Encrypted. Security code ${nav.securityCode}, which Admin > GO shows too."
+                    nav.encrypted -> "Encrypted."
+                    else -> "Not encrypted: others on this network could see what's sent. The server's admin can turn encryption on."
+                },
+            )
+            Row(
+                Modifier.padding(16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                OutlinedButton(onClick = nav.switchServer) { Text("Other servers") }
+                OutlinedButton(
+                    onClick = { if (kept.isEmpty() && sounds.isEmpty()) nav.signOut() else confirmSignOut = true },
+                ) { Text("Sign out") }
+            }
+            if (elsewhere.isNotEmpty()) {
+                Note(
+                    "This phone also keeps ${songCount(elsewhere.size)} for other servers or accounts, " +
+                        "${sizeText(context, elsewhere.sumOf { it.bytes })}. They're left alone while you're here.",
+                )
+                TextButton(
+                    onClick = {
+                        scope.launch {
+                            nav.offline.deleteElsewhere()
+                            elsewhere = emptyList()
+                        }
+                    },
+                    modifier = Modifier.padding(horizontal = 8.dp),
+                ) { Text("Delete those") }
+            }
         }
         item { TapSettings(nav) }
         item { VisualsSettings(nav) }

@@ -39,14 +39,6 @@ class OfflineRulesTest {
     }
 
     @Test
-    fun `kept songs belong to one server and account`() {
-        assertFalse(keptForSomeoneElse(null, "http://a|sam"))
-        assertFalse(keptForSomeoneElse("http://a|sam", "http://a|sam"))
-        assertTrue(keptForSomeoneElse("http://a|sam", "http://a|alex"))
-        assertTrue(keptForSomeoneElse("http://a|sam", "http://b|sam"))
-    }
-
-    @Test
     fun `small downloads just start`() {
         assertNull(largeDownloadWarning(50_000_000, 128, canConvert = true))
         assertNull(largeDownloadWarning(50_000_000, 128, canConvert = false))

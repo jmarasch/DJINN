@@ -4,7 +4,7 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
-data class ServerHello(val name: String, val id: String)
+data class ServerHello(val name: String, val id: String, val encrypted: Boolean = false)
 
 /** The admin's rules for songs kept here. Used as they were last heard while away. */
 @Serializable
@@ -158,7 +158,7 @@ data class PlaylistName(val name: String)
 data class Permissions(val downloads: Boolean = false, val convert: Boolean = false)
 
 @Serializable
-data class Me(val username: String, val permissions: Permissions = Permissions())
+data class Me(val id: Long = 0, val username: String, val permissions: Permissions = Permissions())
 
 /** A link to a copy to keep on this phone. */
 @Serializable

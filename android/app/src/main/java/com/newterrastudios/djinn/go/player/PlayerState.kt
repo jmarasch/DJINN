@@ -98,6 +98,7 @@ class PlayerState(private val api: GoApi) {
     }
 
     suspend fun connect(context: Context) {
+        if (controller != null) return
         val token = SessionToken(context, ComponentName(context, PlaybackService::class.java))
         val connected = MediaController.Builder(context, token).buildAsync().await()
         connected.addListener(listener)

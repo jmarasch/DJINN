@@ -22,7 +22,7 @@ private const val RECENT_CACHE_BYTES = 2L * 1024 * 1024 * 1024
 class DjinnApp : Application(), SingletonImageLoader.Factory {
     val account by lazy { Account(this) }
     val api by lazy { GoApi(account) }
-    val prefs by lazy { Prefs(this) }
+    val prefs by lazy { Prefs(this) { account.scope.orEmpty() } }
     val offline by lazy { OfflineStore(this, account, api, prefs) }
 
     /** Songs as they were streamed, oldest dropped past the limit. */

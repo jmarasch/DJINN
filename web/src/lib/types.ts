@@ -154,6 +154,8 @@ export interface GoKeepRules {
 }
 
 export interface GoStatus {
+  encryption: boolean
+  security_code: string | null
   keep: GoKeepRules
   server_name: string
   default_name: string
