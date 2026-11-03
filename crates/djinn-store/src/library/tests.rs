@@ -612,7 +612,10 @@ async fn compilation_albums_are_grouped_and_filterable() {
             .offset,
         0
     );
-    let artists = store.artists_page_filtered(false, 0, 20).await.unwrap();
+    let artists = store
+        .artists_page_filtered(ArtistSort::Name, false, 0, 20)
+        .await
+        .unwrap();
     assert_eq!(
         artists
             .items
