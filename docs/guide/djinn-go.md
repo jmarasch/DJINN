@@ -72,7 +72,9 @@ listeners. Tailscale addresses count as home.
 ## On your phone
 
 **Finding your music:** the library lists artists, albums and songs. Each can be
-sorted, including by **Recently added**, here, in the app and on the party page.
+sorted, including by **Recently added**, in the app, in GO on a computer (under
+Search) and on the party page. Scroll down and the options move out of the way;
+start scrolling back up and they return, with a button to jump to the top.
 
 **Getting there:** in GO on a computer, **Account > Open on your phone**
 shows a QR code for GO's address; scan it with the phone's camera. If
