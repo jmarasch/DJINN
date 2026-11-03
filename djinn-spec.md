@@ -23,8 +23,8 @@ This file is the source of truth for the project. Read it fully before writing c
 ## 2. Non-goals (for now)
 
 - Streaming services (Spotify, Apple Music, etc.). Local files only.
-- Native mobile apps. Phones use the web player or existing Subsonic apps (Phase 7).
-- Transcoding. Not needed while audio plays on the host.
+- iPhone app. iPhones use the web player or existing Subsonic apps (Phase 7). Android gets a native app (Phase 9).
+- Transcoding for the party. Not needed while audio plays on the host. GO converts only as described in Phases 7 and 9.
 
 ## 3. Platforms
 
@@ -344,6 +344,77 @@ Personal listening, apart from the party, on the same library and database. Same
 
 ### Phase 8: Library backup and import
 - Back up everything DJINN knows (settings, users, playlists, request history, outputs, casts, artwork cache, analysis) to one file, and restore or import it on another machine, remapping music folder paths. The music files themselves are not part of it.
+
+### Phase 9: DJINN GO for Android
+
+The official native app for DJINN GO, in `android/` in this repository: songs as alarm and ringtone sounds, offline listening, and caching of what you play most, at the level of YouTube Music or Spotify, on your own server. It talks to GO's listener and API, never the party's or Admin's.
+
+**Stack:** Kotlin, Jetpack Compose, Media3 (ExoPlayer, `MediaLibraryService`, download and cache), Room for what must work offline, WorkManager for background jobs, OkHttp. Minimum Android 7 (API 24), the lowest the Cast library and current WorkManager allow; Compose and Media3 alone would allow API 23. CameraX and ZXing read the QR code, without Google services. The formats DJINN reads (MP3, FLAC, AAC/M4A, Ogg Vorbis, WAV) all play on Android without extra decoders.
+
+**Where music is kept on the phone**
+
+| Tier | Holds | Removed | Needs |
+|---|---|---|---|
+| Recent cache | What you played, as it was streamed | Oldest first, past a size limit | Use GO |
+| Smart cache | Most played and liked songs (from GO's plays, so every device counts), fetched on Wi-Fi while charging | Rotates, past its own limit | `downloads` |
+| Downloads | Albums, playlists and songs you choose | Only when you remove them | `downloads` |
+
+- Smart cache, downloads and system sounds all count as songs staying on the phone, so one role permission, `downloads`, covers them.
+- When a role loses the permission, the app deletes that server's smart cache, downloads and the system sounds it saved the next time it reaches the server. A disabled or deleted account can't sign in, so its songs stay locked. Other rules are under Kept songs below. The phone then uses its own default sound for anything set to one of them.
+
+**Quality**
+- Smart cache and downloads turn FLAC and WAV into MP3, 128 kbit/s VBR by default. Formats already compressed stay as they are.
+- The app can instead keep full quality or use another bit rate, per device.
+- Converting happens on the server, through Phase 7's converter: Android has no MP3 encoder. The converter stays an admin choice and a role permission, and keeps its limit on jobs at once. Without it the app keeps the original and says so, with the size, before a large download.
+- The recent cache keeps what was streamed, since converting before playing would delay every first play.
+
+**System sounds**
+- A song's menu can save it as a system alarm, ringtone or notification sound, a real file on the phone that the Clock app and the phone's settings can pick. It keeps working offline and doesn't need DJINN running, so an alarm doesn't depend on the network or on this app.
+- DJINN has no alarm of its own. Google Clock's music services are partner integrations with no public way in, so a song is chosen in Clock as a sound, not picked from DJINN inside Clock.
+- The app lists the sounds it saved and can remove them. Saving is from a local copy, fetched first if needed, and keeps the song's stored quality.
+
+**Visuals**
+- Now Playing can show the song's sound instead of its cover, or fill the screen with it. A tap in the player feeds the analysis (bars, waveform, bass, mid, treble, beats), so it needs no microphone permission, and the audio passes through untouched.
+- Styles are shapes (bars, ring, wave, mirror) or original shaders on the phone's graphics chip (warp, tunnel, plasma, kaleidoscope, nebula, stars), OpenGL ES 2 with no native code. Warp feeds each frame into the next, the idea behind MilkDrop.
+- Audio reaches the tap ahead of the speaker and in bursts, so visuals read it through a steady clock, with a timing setting per device.
+- Real MilkDrop presets are separate work, alongside the visualizers planned for 0.5.0.
+- Now Playing shows the cover unless visuals are switched on. Visuals are only offered on devices that can run them: low-RAM devices don't get them, and a style a device can't keep up with is drawn smaller, then left out.
+- The cover and visuals go full screen, with controls that appear on a tap and fade. Android Auto draws its own screen, so this doesn't reach the car.
+- Settings choose colors (including RGB rotation), the number and spacing of bars, line thickness and smoothing.
+
+**Getting the app**
+- No Play Store. Each server carries the app (`go_app.rs`, built into the server by the release workflow) and offers it on GO's page, in Admin > GO as a QR code, and to the app itself, which fetches new versions over its pinned connection and hands them to Android's installer. Versions are numbered by release date (2026.11.02 is 20261102), and only newer ones are offered. It's also on each GitHub release.
+
+**Finding a server**
+- The server has a name (Admin > GO) and announces GO over mDNS as `_djinn-go._tcp`, which can be turned off. The app lists what it hears by name and address before sign-in.
+
+**Kept songs**
+- Admin > GO sets what happens to them at sign-out (delete or keep locked) and after too long without reaching the server (lock, delete or nothing; 30 days by default). The app caches the rules. Locking is the app refusing to play them, not encryption.
+- People move between servers. The app keeps each server's sign-in, and songs, rules and time away belong to one account on one server (keyed by the server's id, so a new address changes nothing). Leaving a server or signing in as someone else deletes nothing.
+
+**Encryption**
+- On by default, with nothing to set up (Admin > GO can turn it off). The server makes its own certificate (`tls.rs`) and both ports answer TLS and plain HTTP on the same number, told apart by a connection's first byte. The app pins the certificate on first use (QR codes carry it, which is stronger), checks it before sending anything, and warns if it changes. Browsers warn about it, and cast devices can't use it, so plain HTTP stays available.
+
+**Server changes (GO's API)**
+- Device sign-in: an API login returns a token sent as `Authorization: Bearer`, stored as a session, so it appears under signed-in devices, can be signed out, and follows the same role, home-network, two-step and lockout rules as the web. Cookies keep working for browsers.
+- Offline copies: a link that fetches a song as a download with a chosen quality, doesn't count toward "streams at once", and doesn't show as listening in Admin > GO. The role's `downloads` is checked when the link is made and when it's used.
+- VBR in the converter: `to_mp3` takes constant or average bit rate, and the converted cache key includes which.
+- Each song has a version (from file size and modified time), so the app can replace copies whose file changed. A song missing from the answer keeps its copy, which still plays: it may only be a library drive that's unplugged.
+- Play reports take an optional time, so offline plays are dated when they happened, within sane limits, not when they synced.
+- All of it goes in GO's fixed route allowlist, with tests.
+
+**Stages.** All four are in at a baseline level, built together at the owner's request; each stage's criteria below still have to be met on real phones.
+1. **Player.** Server sign-in. Connect to a server (with its QR code from Phase 7), sign in with two-step, browse and search, stream, lock screen and Bluetooth controls, recent cache, resume across devices, ReplayGain from the play link's `gain`.
+   - *Done when:* an album plays through with the screen off for an hour, without gaps other than the album's own; a restart of the phone or the server recovers cleanly; plain HTTP works at home and warns before sending a password anywhere else.
+2. **Offline.** The other server changes, downloads with progress, smart cache, storage settings and limits, offline mode, and syncing plays, likes and playlist edits.
+   - *Done when:* in flight mode downloads play, search finds them, and likes and plays made there reach the server afterward; removing `downloads` from a role deletes the copies at next contact; a large download never makes party audio stutter.
+3. **System sounds.** Saving a song as an alarm, ringtone or notification sound, and managing the saved ones.
+   - *Done when:* a saved song can be picked in Google Clock and in the phone's sound settings, and rings in flight mode with DJINN closed, on at least two phone brands and on the oldest and newest supported Android.
+4. **Deeper Android.** Android Auto, voice search, home screen widgets, Cast and Send to party.
+
+**Distribution:** application id `com.newterrastudios.djinn.go`. Signed APKs on GitHub Releases first, built in CI, with the signing key kept out of the repository; Google Play later. Register for Android developer verification, which goes worldwide in 2027 and also affects installing APKs directly.
+
+**Later:** an iPhone app sharing the same API, lyrics.
 
 ## 16. Coding rules
 

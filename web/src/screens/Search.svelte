@@ -7,6 +7,8 @@
   import { isAdmin, toast } from '../lib/state.svelte'
   import type { SearchResults } from '../lib/types'
 
+  let searchBox = $state<HTMLElement>()
+
   // Remember the last search when coming back from an album or artist.
   let query = $state(sessionStorage.getItem('djinn-search') ?? '')
   let input = $state<HTMLInputElement>()
@@ -147,7 +149,7 @@
   {/if}
 {/snippet}
 
-<div class="search-box">
+<div class="search-box" bind:this={searchBox}>
   <Icon name="search" />
   <div class="field">
     <!-- svelte-ignore a11y_autofocus -->
@@ -212,7 +214,7 @@
   {/if}
   {#if !describedFirst}{@render describedSection()}{/if}
 {:else if !query.trim()}
-  <Browse />
+  <Browse stuckBelow={searchBox} />
 {/if}
 
 <style>
@@ -253,7 +255,7 @@
 
   .search-box {
     position: sticky;
-    top: 0;
+    top: var(--nav-height, 0px);
     z-index: 5;
     display: flex;
     align-items: center;

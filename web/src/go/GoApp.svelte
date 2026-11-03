@@ -13,6 +13,7 @@
   import Signup from '../screens/Signup.svelte'
   import AddToPlaylist from './AddToPlaylist.svelte'
   import { loadLikes, loadPrefs, player, prefs, setSaveData, setTap, stop } from './player.svelte'
+  import GetApp from './GetApp.svelte'
   import OpenOnPhone from './OpenOnPhone.svelte'
   import PhoneApps from './PhoneApps.svelte'
   import PlayerBar from './PlayerBar.svelte'
@@ -26,6 +27,9 @@
   import Playlist from './views/Playlist.svelte'
   import Search from './views/Search.svelte'
   import Submit from './views/Submit.svelte'
+
+  /** So what sticks to the top of a page can stick just below this. */
+  let headerHeight = $state(0)
 
   let ready = $state(false)
   let signingUp = $state(location.pathname === '/signup')
@@ -104,6 +108,7 @@
       {#if app.mode && app.mode.signup !== 'closed'}
         <button class="text-button" onclick={() => (signingUp = true)}>New here? Create an account</button>
       {/if}
+      <GetApp />
     {/if}
     {#if error}<p class="error">{error}</p>{/if}
   </main>
@@ -123,7 +128,7 @@
     <button class="text-button" onclick={signOut}>Sign out</button>
   </main>
 {:else}
-  <header>
+  <header bind:offsetHeight={headerHeight}>
     <a class="brand" href="#/">DJINN GO</a>
     <nav aria-label="Main navigation">
       <button class="back" disabled={!navigation.canGoBack} onclick={goBack} aria-label="Back" title="Back">
@@ -137,7 +142,7 @@
       <a href="#/account" class:active={section === 'account'} aria-label="Account"><Icon name="settings" /><span>Account</span></a>
     </nav>
   </header>
-  <main class="go" class:playing={player.index >= 0 && route.path !== '/playing'}>
+  <main class="go" class:playing={player.index >= 0 && route.path !== '/playing'} style:--nav-height="{headerHeight}px">
     {#if route.path === '/playing'}
       <NowPlaying />
     {:else if genreName}
@@ -164,14 +169,19 @@
           <input type="radio" name="tap" checked={prefs.tap === 'play'} onchange={() => setTap('play')} />
           Play it now
         </label>
-        <label class="switch">
+        <p class="small">Or add it to the queue:</p>
+        <label class="switch indent">
           <input type="radio" name="tap" checked={prefs.tap === 'queue'} onchange={() => setTap('queue')} />
-          Add it to the queue
+          Play it next
+        </label>
+        <label class="switch indent">
+          <input type="radio" name="tap" checked={prefs.tap === 'end'} onchange={() => setTap('end')} />
+          Add it to the end of the queue
         </label>
         <p class="small muted">
-          Songs you add play after the one playing and any you added before, ahead of the rest of the album, playlist or
-          radio. Starting a radio keeps the song playing and lines the radio up after it. This goes for every device
-          you use GO on.
+          Play next goes after the song playing and any you lined up before, ahead of the rest of the album, playlist or
+          radio. The end of the queue is after all of it. Drag songs in Up next to change the order. Starting a radio
+          keeps the song playing and lines the radio up after it. This goes for every device you use GO on.
         </p>
       </section>
       {#if player.canConvert}
@@ -183,6 +193,7 @@
           </label>
         </section>
       {/if}
+      <GetApp />
       <OpenOnPhone />
       <AccountPanels />
       <PhoneApps />
@@ -269,6 +280,8 @@
 
   .go.playing {
     padding-bottom: 96px;
+    /* The player bar sits over the page's bottom edge. */
+    --clear-of-player: 96px;
   }
 
   .text-button {
@@ -283,5 +296,8 @@
   .signout {
     width: 100%;
     margin: 8px 0 24px;
+  }
+  .indent {
+    margin-left: 22px;
   }
 </style>

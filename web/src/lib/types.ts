@@ -79,8 +79,8 @@ export interface GoPlaylistDetail extends GoPlaylist {
 
 /** Your DJINN GO preferences. */
 export interface GoPrefs {
-  /** What tapping a song does: play it now, or add it to the queue. */
-  tap: 'play' | 'queue'
+  /** What tapping a song does: play it now, play it next, or add it to the end. */
+  tap: 'play' | 'queue' | 'end'
 }
 
 export interface GoResume {
@@ -147,7 +147,28 @@ export interface GoListener {
   seconds_ago: number
 }
 
+/** The Android app a server carries. */
+export interface GoAppRelease {
+  version: string
+  version_code: number
+  sha256: string
+  size: number
+}
+
+export interface GoKeepRules {
+  sign_out: 'delete' | 'keep'
+  away: 'lock' | 'delete' | 'off'
+  away_days: number
+}
+
 export interface GoStatus {
+  android_app: (GoAppRelease & { url: string; qr_svg: string }) | null
+  encryption: boolean
+  security_code: string | null
+  keep: GoKeepRules
+  server_name: string
+  default_name: string
+  discoverable: boolean
   enabled: boolean
   allow_remote: boolean
   https_hostname: string
@@ -601,8 +622,9 @@ export interface ArtistSummary {
 /** Year is newest first, oldest is by year oldest first. */
 export type TrackSort = 'title' | 'artist' | 'added' | 'popular' | 'year' | 'oldest'
 
+export type ArtistSort = 'name' | 'added'
 /** Year is newest first, oldest is by year oldest first. */
-export type AlbumSort = 'name' | 'year' | 'oldest'
+export type AlbumSort = 'name' | 'year' | 'oldest' | 'added'
 export type AlbumFilter = 'all' | 'various' | 'soundtracks'
 
 /** Where a letter or year starts in a sorted list. */

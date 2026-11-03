@@ -39,22 +39,24 @@ listeners. Tailscale addresses count as home.
   and sorting), or type to search. Tapping a song in the big lists plays it,
   then songs like it; in search results, an album or a playlist, the songs
   after it follow. To have a tap add the song to your queue instead, set
-  **Your account > Playing > When you tap a song** to "Add it to the queue"
-  (saved on your account, so every device does the same). With nothing
+  **Your account > Playing > When you tap a song** to play it next or add it
+  to the end of the queue (saved on your account, so every device does the same). With nothing
   playing, a tap always plays.
 - **The player** along the bottom opens to Now Playing: seek, shuffle,
   repeat (all, or one song), and **Up next**, where you can jump to a song
   or take it out. The next song loads before the current one ends, so
   albums play on with hardly a gap. Lock-screen and headphone buttons work.
-- **Songs you add go first,** like requests at the party: play next, add to
-  the queue and taps line up after the current song and anything you added
-  earlier, ahead of the rest of the album, playlist or radio. Up next marks
-  them "Added by you", and shuffle keeps them at the front.
-- **A song's menu** (the dots): play next, add to the queue, start radio
+- **Lining up songs:** **Play next** goes after the current song and anything
+  you lined up earlier, ahead of the rest of the album, playlist or radio, so
+  several play in the order you chose them, and shuffle keeps them at the
+  front. **Add to end of queue** goes after everything. Up next marks both
+  "Added by you", and you can **drag songs by their handle** to change the
+  order, or use the arrow keys on it.
+- **A song's menu** (the dots): play next, add to the end of the queue, start radio
   from it, like it, add it to a playlist, go to its album or artist, send it
   to the party, or download it if your role allows.
-- **Radio** plays songs that sound like the one you start from, and keeps
-  going. Starting it while something plays doesn't interrupt: the radio
+- **Radio** plays songs that sound like the one you start from, and more often
+  by that song's artist, and keeps going. Starting it while something plays doesn't interrupt: the radio
   lines up after the current song and anything you added. It leaves out songs you heard in the last few hours and puts ones
   you skipped lately at the end. Without sound analysis, it plays the same
   artist and genre.
@@ -69,10 +71,113 @@ listeners. Tailscale addresses count as home.
 
 ## On your phone
 
+**Finding your music:** the library lists artists, albums and songs. Each can be
+sorted, including by **Recently added**, in the app, in GO on a computer (under
+Search) and on the party page. Scroll down and the options move out of the way;
+start scrolling back up and they return, with a button to jump to the top.
+
 **Getting there:** in GO on a computer, **Account > Open on your phone**
 shows a QR code for GO's address; scan it with the phone's camera. If
 Chrome on Android won't open it (ERR_TOO_MANY_RETRIES), allow Chrome's
 **Nearby devices** permission in the phone's settings.
+
+**Getting the Android app:** your server carries it. Open GO on an Android phone
+and choose **Get the Android app** (on the sign-in page, or under Account), or scan
+the QR code in Admin > GO with the phone's camera. Android asks you to allow the
+install and may warn about where it came from. After that, the app offers new
+versions itself when your server has one, and Android checks each is signed by the
+same people. Admin > GO and the download show a SHA-256 checksum, worth comparing
+on a network you don't trust, since that first download can't check itself. It's
+also on each release on GitHub.
+
+**The Android app** is DJINN GO's own app, for Android 7 and newer. On top of
+what the web player does, it can:
+
+- **Keep music on the phone.** Download a song from its menu, or a whole album
+  or playlist. **Smart cache** also keeps what you play most and like, on Wi-Fi
+  while charging. Both need the role's **Download songs** permission. Without
+  a connection, Home shows what's on the phone, search finds it, and plays,
+  likes and songs added to playlists reach the server once you're back.
+- **Save space.** FLAC and WAV songs become MP3s of about 128 kbit/s on the way
+  to the phone, if converting is on for your account (below). Settings in the
+  app can choose another rate or full quality. Without converting they stay at
+  full size, and a large download says so first.
+- **Use a song as a sound.** A song's menu saves it as an alarm, ringtone or
+  notification sound, which you then choose in Clock or the phone's sound
+  settings. It works with no connection and with the app closed. DJINN GO isn't
+  listed among the music services inside Google's Clock; those are Google's
+  partners only.
+- **Show visuals.** Tap the cover on Now Playing to move through the styles:
+  bars, ring, wave, mirror, warp, tunnel, plasma, kaleidoscope, nebula and
+  stars. **Visuals** or **full screen** fills the screen and keeps it on, in
+  either direction; tap for controls, or let the styles change by themselves.
+  They react to the song's bass, mids, treble and beats. If they seem early or
+  late, **Settings > Visuals > Timing** lines them up with what you hear.
+- **Work with the rest of the phone:** lock screen and headset buttons, a home
+  screen widget, voice requests, Android Auto, and Cast to a Chromecast or
+  Google TV.
+
+To sign in, choose your server from the list the app finds on your network.
+On a network with several, go by the name set under Admin > GO (**Server name**).
+If yours isn't listed (some networks block this, and Admin > GO can turn it off),
+scan the QR code above or type the address from Admin > GO. Anyone on a network
+can give a computer any name, so only sign in to a server you recognize.
+Android may ask about **nearby devices**; that's how newer Android lets an app
+reach a computer on your home network. 
+**In the car:** Android Auto only shows apps from the Play Store unless told
+otherwise, and DJINN GO isn't on it, so it won't appear on the car's screen until
+you allow it:
+
+1. On the phone, open **Settings > Connected devices > Connection preferences >
+   Android Auto**.
+2. Scroll to the bottom and tap **Version** about 10 times, then accept the
+   developer mode prompt.
+3. Open the **⋮** menu at the top right, choose **Developer settings**, and turn
+   on **Unknown sources**.
+4. Unplug from the car and connect again. If DJINN GO still isn't on the car's
+   screen, turn it on under **Customize launcher** on the same Android Auto page.
+
+Sign in on the phone first; the car uses whichever server the phone is on. Android
+Auto draws the screen itself, so the app's full screen view and visuals don't appear
+in the car.
+
+**Encryption** is on unless an admin turns it off (Admin > GO > **Safety**), with
+nothing to set up: the server makes its own certificate. The app uses it for
+everything, remembers it, and warns if it ever changes. To check you've reached
+the right server the first time, compare the security code in the app with Admin >
+GO, or scan the QR code, which checks for you. Browsers can use it too by opening
+an address with `https://`, but they warn that no authority vouches for it, so
+they keep working with `http://` as well. Cast devices still get songs
+unencrypted, since they won't accept this kind of certificate, and so do other
+phone apps unless they're told to use `https://` and accept it. If the server is
+moved to another computer, copy the `tls` folder beside its database, or the app
+will warn that the certificate changed.
+
+**What happens to kept songs** is the admin's choice, under Admin > GO > **Songs
+kept on devices**:
+
+- **Signing out** deletes them, or keeps them locked until you sign back in.
+- **Too long without reaching the server** (30 days unless changed) locks them
+  until the phone reconnects, deletes them, or does nothing. The app learns the
+  rules each time it reaches the server, and follows them while it's away.
+- **A role losing the download permission** deletes them, for that server only.
+
+The phone can use several servers, each with its own sign-in. **Settings > Other
+servers** moves between them without signing out. Songs belong to one account on
+one server, so being on another server, or someone else signing in, leaves them
+alone: time away is counted for each server, and they're there when you come
+back. Removing a server from that list deletes what was kept for it.
+
+**Library > On phone > All servers** lists everything on the phone from every
+server, and plays it whichever server you're on, as long as that server's rules
+allow it. Songs from a server you've signed out of, or that's been out of reach
+past its limit, stay locked and are counted at the top. The car's **On this phone**
+list shows the same songs. Those songs can't be cast, and their covers don't show
+unless you're on their server. Plays reach their server the next time you use it.
+
+A locked song stays on the phone but won't play. Locking is the app refusing to
+play it, not encryption. If a phone has been away long enough for its sign-in to
+end, signing in again unlocks its songs.
 
 **Install it as an app:** open GO in your phone's browser, then use
 **Add to Home Screen** (Safari: the Share button; Chrome: the menu). It

@@ -3,7 +3,7 @@
   import Art from '../../lib/Art.svelte'
   import Icon from '../../lib/Icon.svelte'
   import type { AlbumDetail } from '../../lib/types'
-  import { addToQueue, likes, playList, toggleLike } from '../player.svelte'
+  import { addToEnd, likes, playList, playNext, toggleLike } from '../player.svelte'
   import SongList from '../SongList.svelte'
   import { ui } from '../ui.svelte'
 
@@ -32,7 +32,8 @@
   </header>
   <div class="buttons">
     <button class="primary" onclick={() => album && playList(album.tracks)}><Icon name="play" /> Play</button>
-    <button onclick={() => album && addToQueue(album.tracks)}>Add to queue</button>
+    <button onclick={() => album && playNext(album.tracks)}>Play next</button>
+    <button onclick={() => album && addToEnd(album.tracks)}>Add to end of queue</button>
     <button onclick={() => album && (ui.adding = album.tracks)}>Add to playlist</button>
     <button
       class="icon"

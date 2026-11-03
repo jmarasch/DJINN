@@ -2,7 +2,7 @@
 // plays them. Two audio elements take turns: while one plays, the next
 // song loads in the other, so albums run on with hardly a gap.
 //
-// Songs you add (Add to queue, Play next, or a tap when taps add) wait
+// Songs you line up (Play next, or a tap when taps do that) wait
 // right after the song playing, ahead of the rest of the queue: the album,
 // playlist or radio carries on after them, the way requests go before the
 // party's auto mix.
@@ -107,8 +107,12 @@ let unshuffled: Track[] = []
  * same song elsewhere in the queue isn't mistaken for it. */
 const added = new SvelteSet<Track>()
 
+/** Songs you sent to the end of the queue that haven't played yet, only so
+ * Up next can say so: unlike `added`, they keep no special place. */
+const addedToEnd = new SvelteSet<Track>()
+
 /** You added this song and it hasn't played yet. */
-export const isAdded = (track: Track) => added.has(track)
+export const isAdded = (track: Track) => added.has(track) || addedToEnd.has(track)
 
 /** Where the next song you add goes: after the song playing and the ones
  * you added before. */
@@ -194,6 +198,7 @@ async function start(index: number, autoplay = true) {
   const song = player.queue[index]
   if (!song) return
   added.delete(song)
+  addedToEnd.delete(song)
   const mine = ++generation
   player.loading = true
   try {
@@ -281,12 +286,14 @@ function skipAhead() {
 }
 
 /** Plays `tracks` from `from`, replacing the queue. */
-export function playList(tracks: Track[], from = 0, options: { radio?: boolean } = {}) {
+export function playList(tracks: Track[], from = 0, options: { radio?: boolean; seed?: number } = {}) {
   if (!tracks.length) return
   report()
   preloaded = null
   added.clear()
   player.radio = options.radio ?? false
+  radioSeed = options.seed ?? null
+  addedToEnd.clear()
   unshuffled = [...tracks]
   if (player.shuffle) {
     const first = tracks[from]
@@ -311,28 +318,51 @@ function insertAdded(tracks: Track[], at: number) {
   preloadNext()
 }
 
-/** Right after the song playing, ahead of everything else. */
-export function playNext(track: Track) {
-  if (idle()) return playList([track])
-  insertAdded([track], player.index + 1)
-  toast(`"${track.title}" plays next`)
-}
-
-/** After the song playing and what you added before, ahead of the rest of
- * the album, playlist or radio. */
-export function addToQueue(tracks: Track[]) {
+/** After the song playing and what you lined up before, ahead of the rest of
+ * the album, playlist or radio, so several play in the order you chose them. */
+export function playNext(tracks: Track[]) {
   if (idle()) return playList(tracks)
   const ahead = addSpot() - player.index - 1
   insertAdded(tracks, addSpot())
   const what = tracks.length === 1 ? `"${tracks[0].title}"` : `${tracks.length} songs`
-  toast(ahead ? `Added ${what}; plays after the ${ahead} you added before` : `Added ${what}; plays next`)
+  toast(ahead ? `${what} will play after the ${ahead} you lined up` : `${what} will play next`)
 }
 
-/** A tap on a song: plays it now, or adds it to the queue, as chosen on
- * your account page. With nothing playing, it plays. */
+/** At the very end of the queue, after everything already there. */
+export function addToEnd(tracks: Track[]) {
+  if (idle()) return playList(tracks)
+  const copies = tracks.map((t) => ({ ...t }))
+  player.queue.push(...copies)
+  // The queue's own (reactive) copies are what later code will see.
+  const from = player.queue.length - copies.length
+  for (let i = from; i < player.queue.length; i++) addedToEnd.add(player.queue[i])
+  unshuffled.push(...player.queue.slice(from))
+  preloaded = null
+  preloadNext()
+  toast(`${tracks.length === 1 ? `"${tracks[0].title}"` : `${tracks.length} songs`} added to the end of the queue`)
+}
+
+/** A tap on a song: plays it now, next, or at the end of the queue, as chosen
+ * on your account page. With nothing playing, it plays. */
 export function tapSong(track: Track, playNow: () => void) {
-  if (prefs.tap === 'queue' && !idle()) addToQueue([track])
-  else playNow()
+  if (idle() || prefs.tap === 'play') playNow()
+  else if (prefs.tap === 'queue') playNext([track])
+  else addToEnd([track])
+}
+
+/** Moves a song that's still to come to another place still to come. */
+export function moveInQueue(from: number, to: number) {
+  const last = player.queue.length - 1
+  if (from <= player.index || from > last) return
+  const target = Math.min(Math.max(to, player.index + 1), last)
+  if (target === from) return
+  const [song] = player.queue.splice(from, 1)
+  player.queue.splice(target, 0, song)
+  // Your order wins over the album's if shuffle is later turned off.
+  if (!player.shuffle) unshuffled = player.queue.filter((t) => !added.has(t))
+  preloaded = null
+  preloadNext()
+  saveResume()
 }
 
 export function jumpTo(index: number) {
@@ -344,6 +374,7 @@ export function removeAt(index: number) {
   if (index === player.index) return
   const [gone] = player.queue.splice(index, 1)
   added.delete(gone)
+  addedToEnd.delete(gone)
   if (index < player.index) player.index--
   const at = unshuffled.findIndex((t) => t.id === gone.id)
   if (at >= 0) unshuffled.splice(at, 1)
@@ -414,7 +445,7 @@ export async function startRadio(track: Track) {
   try {
     const songs = await api.goRadio(track.id)
     if (idle()) {
-      playList(songs, 0, { radio: true })
+      playList(songs, 0, { radio: true, seed: track.id })
       toast(`Radio from "${track.title}"`)
       return
     }
@@ -424,6 +455,7 @@ export async function startRadio(track: Track) {
     player.queue = [...keep, ...songs]
     unshuffled = [...keep.filter((t) => !added.has(t)), ...songs]
     player.radio = true
+    radioSeed = track.id
     preloaded = null
     preloadNext()
     toast(`Radio from "${track.title}" comes after this song`)
@@ -435,20 +467,33 @@ export async function startRadio(track: Track) {
 /** Plays a song now, then songs like it. */
 export async function playRadio(track: Track) {
   try {
-    playList(await api.goRadio(track.id), 0, { radio: true })
+    playList(await api.goRadio(track.id), 0, { radio: true, seed: track.id })
   } catch (e) {
     toast(e instanceof Error ? e.message : 'Could not play that song', true)
   }
 }
 
 let extending = false
+/** How many songs already lined up a request for more radio can name. */
+const RADIO_EXCLUDE = 400
+
+/** The song a personal radio started from. */
+let radioSeed: number | null = null
+
 async function extendRadio() {
   const last = player.queue[player.queue.length - 1]
   if (!last || extending) return
   extending = true
   try {
     const known = new Set(player.queue.map((t) => t.id))
-    const more = (await api.goRadio(last.id)).filter((t) => !known.has(t.id))
+    // The newest are what matter if the queue has grown very long.
+    const lined = [...known].slice(-RADIO_EXCLUDE)
+    // From the song it started with, so it stays around that artist. Only when
+    // that has nothing left does it wander on from the last song.
+    let more = (await api.goRadio(radioSeed ?? last.id, lined)).filter((t) => !known.has(t.id))
+    if (!more.length && radioSeed !== null) {
+      more = (await api.goRadio(last.id, lined)).filter((t) => !known.has(t.id))
+    }
     player.queue.push(...more)
     unshuffled.push(...more)
   } catch {
@@ -466,6 +511,8 @@ export function carryOn(songs: Track[], order: number[], position: number, posit
   report()
   preloaded = null
   added.clear()
+  addedToEnd.clear()
+  radioSeed = null
   player.radio = false
   player.shuffle = false
   unshuffled = [...queue]

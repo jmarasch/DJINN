@@ -2,7 +2,46 @@
 //! beside each list, and search.
 
 use super::*;
+use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+/// One list in its order, with where each letter or year starts.
+#[derive(Debug)]
+struct Listed<T> {
+    items: Vec<T>,
+    jumps: Vec<Jump>,
+}
+
+impl<T> Listed<T> {
+    fn page(&self, offset: i64, limit: i64) -> &[T] {
+        let start = usize::try_from(offset).unwrap_or(0).min(self.items.len());
+        let end = start
+            .saturating_add(usize::try_from(limit).unwrap_or(0))
+            .min(self.items.len());
+        &self.items[start..end]
+    }
+
+    fn total(&self) -> i64 {
+        i64::try_from(self.items.len()).unwrap_or(i64::MAX)
+    }
+}
+
+#[derive(Debug, Default)]
+struct Lists {
+    version: i64,
+    artists: HashMap<(bool, ArtistSort), Arc<Listed<ArtistSummary>>>,
+    albums: HashMap<(AlbumSort, AlbumFilter), Arc<Listed<Album>>>,
+    /// Songs are read a page at a time, so only their order is kept.
+    tracks: HashMap<TrackSort, Arc<Listed<i64>>>,
+}
+
+/// Library lists worked out once and kept until `browse_version` says the
+/// library changed, so pages and jumps don't repeat the same counting and
+/// sorting over the whole library. Holding the lock while building means a
+/// page and its jumps arriving together only build a list once.
+#[derive(Debug, Default)]
+pub(crate) struct BrowseMemo(tokio::sync::Mutex<Lists>);
 
 /// A cancelled browse request discards its connection, so an unfinished
 /// statement cannot affect the next request using that connection.
@@ -14,7 +53,7 @@ struct TimedBrowse {
 impl TimedBrowse {
     async fn acquire(pool: &sqlx::SqlitePool) -> Result<Self> {
         let mut conn = pool.acquire().await?;
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + Duration::from_secs(60);
         conn.lock_handle()
             .await?
             .set_progress_handler(10_000, move || Instant::now() < deadline);
@@ -66,56 +105,261 @@ macro_rules! primary_artists {
     };
 }
 
+// Whoever had a song added most recently first. Songs added in one scan share
+// a time, so names settle the rest.
+macro_rules! artists_by_added {
+    () => {
+        concat!(
+            " ORDER BY (SELECT max(t.added_at) FROM tracks t WHERE ",
+            available!(),
+            " AND t.id IN ",
+            artist_songs!("summary.id"),
+            ") DESC, ",
+            sort_key!("name")
+        )
+    };
+}
+
 impl Store {
+    /// The kept lists, emptied first if the library has changed.
+    async fn lists(&self) -> Result<tokio::sync::MutexGuard<'_, Lists>> {
+        let mut lists = self.browse.0.lock().await;
+        let version = sqlx::query_scalar("SELECT version FROM browse_version")
+            .fetch_one(&self.pool)
+            .await?;
+        if lists.version != version {
+            *lists = Lists {
+                version,
+                ..Lists::default()
+            };
+        }
+        Ok(lists)
+    }
+
+    async fn artist_list(
+        &self,
+        sort: ArtistSort,
+        show_collaborations: bool,
+    ) -> Result<Arc<Listed<ArtistSummary>>> {
+        let mut lists = self.lists().await?;
+        if let Some(found) = lists.artists.get(&(show_collaborations, sort)) {
+            return Ok(Arc::clone(found));
+        }
+        let sql = match (sort, show_collaborations) {
+            (ArtistSort::Name, true) => concat!(
+                "SELECT id, name, art_hash, track_count, ",
+                sort_key!("name"),
+                artist_browse!(),
+                " ORDER BY ",
+                sort_key!("name")
+            ),
+            (ArtistSort::Name, false) => concat!(
+                "SELECT id, name, art_hash, track_count, ",
+                sort_key!("name"),
+                artist_browse!(),
+                primary_artists!(),
+                " ORDER BY ",
+                sort_key!("name")
+            ),
+            (ArtistSort::Added, true) => concat!(
+                "SELECT id, name, art_hash, track_count, NULL",
+                artist_browse!(),
+                artists_by_added!()
+            ),
+            (ArtistSort::Added, false) => concat!(
+                "SELECT id, name, art_hash, track_count, NULL",
+                artist_browse!(),
+                primary_artists!(),
+                artists_by_added!()
+            ),
+        };
+        type Row = (i64, String, Option<String>, i64, Option<String>);
+        let mut browse = TimedBrowse::acquire(&self.pool).await?;
+        let rows: std::result::Result<Vec<Row>, _> =
+            sqlx::query_as(sql).fetch_all(&mut *browse.conn).await;
+        browse.finish().await?;
+        let (items, keys) = rows?
+            .into_iter()
+            .map(|(id, name, art_hash, track_count, key)| {
+                let artist = ArtistSummary {
+                    id,
+                    name,
+                    art_hash,
+                    track_count,
+                };
+                (artist, key)
+            })
+            .unzip();
+        let list = Arc::new(Listed {
+            items,
+            jumps: jumps(keys, false),
+        });
+        lists
+            .artists
+            .insert((show_collaborations, sort), Arc::clone(&list));
+        Ok(list)
+    }
+
+    async fn album_list(&self, sort: AlbumSort, filter: AlbumFilter) -> Result<Arc<Listed<Album>>> {
+        let mut lists = self.lists().await?;
+        if let Some(found) = lists.albums.get(&(sort, filter)) {
+            return Ok(Arc::clone(found));
+        }
+        let sql = match sort {
+            AlbumSort::Name => concat!(
+                "SELECT ",
+                album_columns!(),
+                ", ",
+                sort_key!("al.title"),
+                listed_albums!(),
+                " AND (? = 'all' OR ",
+                album_kind!(),
+                " = ?)",
+                " ORDER BY ",
+                album_order!(name)
+            ),
+            AlbumSort::Year => concat!(
+                "SELECT ",
+                album_columns!(),
+                ", CAST(al.year AS TEXT)",
+                listed_albums!(),
+                " AND (? = 'all' OR ",
+                album_kind!(),
+                " = ?)",
+                " ORDER BY ",
+                album_order!(newest)
+            ),
+            AlbumSort::Oldest => concat!(
+                "SELECT ",
+                album_columns!(),
+                ", CAST(al.year AS TEXT)",
+                listed_albums!(),
+                " AND (? = 'all' OR ",
+                album_kind!(),
+                " = ?)",
+                " ORDER BY ",
+                album_order!(oldest)
+            ),
+            AlbumSort::Added => concat!(
+                "SELECT ",
+                album_columns!(),
+                ", NULL",
+                listed_albums!(),
+                " AND (? = 'all' OR ",
+                album_kind!(),
+                " = ?)",
+                " ORDER BY ",
+                album_order!(added)
+            ),
+        };
+        type Row = (
+            i64,
+            String,
+            i64,
+            String,
+            Option<i64>,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+        );
+        let rows: Vec<Row> = sqlx::query_as(sql)
+            .bind(filter.as_str())
+            .bind(filter.as_str())
+            .fetch_all(&self.pool)
+            .await?;
+        let (items, keys) = rows
+            .into_iter()
+            .map(
+                |(id, title, artist_id, artist, year, art_hash, genres, key)| {
+                    let album = Album {
+                        id,
+                        title,
+                        artist_id,
+                        artist,
+                        year,
+                        art_hash,
+                        genres,
+                    };
+                    (album, key)
+                },
+            )
+            .unzip();
+        let list = Arc::new(Listed {
+            items,
+            jumps: jumps(keys, sort != AlbumSort::Name),
+        });
+        lists.albums.insert((sort, filter), Arc::clone(&list));
+        Ok(list)
+    }
+
+    /// The order of every song. `Popular` follows plays and requests, not
+    /// the library, so `tracks_page` works it out each time.
+    async fn track_list(&self, sort: TrackSort) -> Result<Arc<Listed<i64>>> {
+        let mut lists = self.lists().await?;
+        if let Some(found) = lists.tracks.get(&sort) {
+            return Ok(Arc::clone(found));
+        }
+        let sql = match sort {
+            TrackSort::Title => concat!(
+                "SELECT t.id, t.title FROM tracks t WHERE ",
+                available!(),
+                " ORDER BY ",
+                track_order!(title)
+            ),
+            TrackSort::Artist => concat!(
+                "SELECT t.id, ",
+                sort_key!("coalesce(t.album_artist, t.artist)"),
+                " FROM tracks t WHERE ",
+                available!(),
+                " ORDER BY ",
+                track_order!(artist)
+            ),
+            TrackSort::Year => concat!(
+                "SELECT t.id, CAST(t.year AS TEXT) FROM tracks t WHERE ",
+                available!(),
+                " ORDER BY ",
+                track_order!(newest)
+            ),
+            TrackSort::Oldest => concat!(
+                "SELECT t.id, CAST(t.year AS TEXT) FROM tracks t WHERE ",
+                available!(),
+                " ORDER BY ",
+                track_order!(oldest)
+            ),
+            TrackSort::Added | TrackSort::Popular => concat!(
+                "SELECT t.id, NULL FROM tracks t WHERE ",
+                available!(),
+                " ORDER BY t.added_at DESC, t.id DESC"
+            ),
+        };
+        let rows: Vec<(i64, Option<String>)> = sqlx::query_as(sql).fetch_all(&self.pool).await?;
+        let (items, keys) = rows.into_iter().unzip();
+        let list = Arc::new(Listed {
+            items,
+            jumps: jumps(keys, matches!(sort, TrackSort::Year | TrackSort::Oldest)),
+        });
+        lists.tracks.insert(sort, Arc::clone(&list));
+        Ok(list)
+    }
+
     /// Artists with playable tracks, A to Z.
     pub async fn artists_page(&self, offset: i64, limit: i64) -> Result<Page<ArtistSummary>> {
-        self.artists_page_filtered(true, offset, limit).await
+        self.artists_page_filtered(ArtistSort::Name, true, offset, limit)
+            .await
     }
 
     pub async fn artists_page_filtered(
         &self,
+        sort: ArtistSort,
         show_collaborations: bool,
         offset: i64,
         limit: i64,
     ) -> Result<Page<ArtistSummary>> {
-        let list_sql = if show_collaborations {
-            concat!(
-                "SELECT id, name, art_hash, track_count",
-                artist_browse!(),
-                " ORDER BY ",
-                sort_key!("name"),
-                " LIMIT ? OFFSET ?"
-            )
-        } else {
-            concat!(
-                "SELECT id, name, art_hash, track_count",
-                artist_browse!(),
-                primary_artists!(),
-                " ORDER BY ",
-                sort_key!("name"),
-                " LIMIT ? OFFSET ?"
-            )
-        };
-        let mut browse = TimedBrowse::acquire(&self.pool).await?;
-        let items = sqlx::query_as(list_sql)
-            .bind(limit)
-            .bind(offset)
-            .fetch_all(&mut *browse.conn)
-            .await;
-        browse.finish().await?;
-        let items = items?;
-        let count_sql = if show_collaborations {
-            concat!("SELECT count(*)", artist_browse!())
-        } else {
-            concat!("SELECT count(*)", artist_browse!(), primary_artists!())
-        };
-        let mut browse = TimedBrowse::acquire(&self.pool).await?;
-        let total = sqlx::query_scalar(count_sql)
-            .fetch_one(&mut *browse.conn)
-            .await;
-        browse.finish().await?;
-        let total = total?;
-        Ok(Page { items, total })
+        let list = self.artist_list(sort, show_collaborations).await?;
+        Ok(Page {
+            items: list.page(offset, limit).to_vec(),
+            total: list.total(),
+        })
     }
 
     /// Albums with playable tracks, A to Z or newest first.
@@ -136,60 +380,11 @@ impl Store {
         offset: i64,
         limit: i64,
     ) -> Result<Page<Album>> {
-        let sql = match sort {
-            AlbumSort::Name => concat!(
-                "SELECT ",
-                album_columns!(),
-                listed_albums!(),
-                " AND (? = 'all' OR ",
-                album_kind!(),
-                " = ?)",
-                " ORDER BY ",
-                album_order!(name),
-                " LIMIT ? OFFSET ?"
-            ),
-            AlbumSort::Year => concat!(
-                "SELECT ",
-                album_columns!(),
-                listed_albums!(),
-                " AND (? = 'all' OR ",
-                album_kind!(),
-                " = ?)",
-                " ORDER BY ",
-                album_order!(newest),
-                " LIMIT ? OFFSET ?"
-            ),
-            AlbumSort::Oldest => concat!(
-                "SELECT ",
-                album_columns!(),
-                listed_albums!(),
-                " AND (? = 'all' OR ",
-                album_kind!(),
-                " = ?)",
-                " ORDER BY ",
-                album_order!(oldest),
-                " LIMIT ? OFFSET ?"
-            ),
-        };
-        let items = sqlx::query_as(sql)
-            .bind(filter.as_str())
-            .bind(filter.as_str())
-            .bind(limit)
-            .bind(offset)
-            .fetch_all(&self.pool)
-            .await?;
-        let total = sqlx::query_scalar(concat!(
-            "SELECT count(*)",
-            listed_albums!(),
-            " AND (? = 'all' OR ",
-            album_kind!(),
-            " = ?)"
-        ))
-        .bind(filter.as_str())
-        .bind(filter.as_str())
-        .fetch_one(&self.pool)
-        .await?;
-        Ok(Page { items, total })
+        let list = self.album_list(sort, filter).await?;
+        Ok(Page {
+            items: list.page(offset, limit).to_vec(),
+            total: list.total(),
+        })
     }
 
     /// All playable tracks in the given order.
@@ -199,51 +394,8 @@ impl Store {
         offset: i64,
         limit: i64,
     ) -> Result<Page<Track>> {
-        let sql = match sort {
-            TrackSort::Title => concat!(
-                "SELECT ",
-                track_columns!(),
-                " FROM tracks t WHERE ",
-                available!(),
-                " ORDER BY ",
-                track_order!(title),
-                " LIMIT ? OFFSET ?"
-            ),
-            TrackSort::Artist => concat!(
-                "SELECT ",
-                track_columns!(),
-                " FROM tracks t WHERE ",
-                available!(),
-                " ORDER BY ",
-                track_order!(artist),
-                " LIMIT ? OFFSET ?"
-            ),
-            TrackSort::Year => concat!(
-                "SELECT ",
-                track_columns!(),
-                " FROM tracks t WHERE ",
-                available!(),
-                " ORDER BY ",
-                track_order!(newest),
-                " LIMIT ? OFFSET ?"
-            ),
-            TrackSort::Oldest => concat!(
-                "SELECT ",
-                track_columns!(),
-                " FROM tracks t WHERE ",
-                available!(),
-                " ORDER BY ",
-                track_order!(oldest),
-                " LIMIT ? OFFSET ?"
-            ),
-            TrackSort::Added => concat!(
-                "SELECT ",
-                track_columns!(),
-                " FROM tracks t WHERE ",
-                available!(),
-                " ORDER BY t.added_at DESC, t.id DESC LIMIT ? OFFSET ?"
-            ),
-            TrackSort::Popular => concat!(
+        if sort == TrackSort::Popular {
+            let items = sqlx::query_as(concat!(
                 "SELECT ",
                 track_columns!(),
                 " FROM tracks t WHERE ",
@@ -251,48 +403,38 @@ impl Store {
                 " ORDER BY (SELECT count(*) FROM request_events r WHERE r.track_id = t.id) DESC,
                            (SELECT count(*) FROM play_events p WHERE p.track_id = t.id) DESC,
                            t.title COLLATE NOCASE LIMIT ? OFFSET ?"
-            ),
-        };
-        let items = sqlx::query_as(sql)
+            ))
             .bind(limit)
             .bind(offset)
             .fetch_all(&self.pool)
             .await?;
+            return Ok(Page {
+                items,
+                total: self.track_count().await?,
+            });
+        }
+        let list = self.track_list(sort).await?;
         Ok(Page {
-            items,
-            total: self.track_count().await?,
+            items: self.tracks_by_ids(list.page(offset, limit)).await?,
+            total: list.total(),
         })
     }
 
     /// Where each letter starts in the artist list.
     pub async fn artist_jumps(&self) -> Result<Vec<Jump>> {
-        self.artist_jumps_filtered(true).await
+        self.artist_jumps_filtered(ArtistSort::Name, true).await
     }
 
-    pub async fn artist_jumps_filtered(&self, show_collaborations: bool) -> Result<Vec<Jump>> {
-        let sql = if show_collaborations {
-            concat!(
-                "SELECT ",
-                sort_key!("name"),
-                artist_browse!(),
-                " ORDER BY ",
-                sort_key!("name")
-            )
-        } else {
-            concat!(
-                "SELECT ",
-                sort_key!("name"),
-                artist_browse!(),
-                primary_artists!(),
-                " ORDER BY ",
-                sort_key!("name")
-            )
-        };
-        let mut browse = TimedBrowse::acquire(&self.pool).await?;
-        let keys = sqlx::query_scalar(sql).fetch_all(&mut *browse.conn).await;
-        browse.finish().await?;
-        let keys = keys?;
-        Ok(jumps(keys, false))
+    pub async fn artist_jumps_filtered(
+        &self,
+        sort: ArtistSort,
+        show_collaborations: bool,
+    ) -> Result<Vec<Jump>> {
+        Ok(self
+            .artist_list(sort, show_collaborations)
+            .await?
+            .jumps
+            .clone())
     }
 
     /// Where each letter (or year) starts in the album list.
@@ -305,81 +447,16 @@ impl Store {
         sort: AlbumSort,
         filter: AlbumFilter,
     ) -> Result<Vec<Jump>> {
-        let sql = match sort {
-            AlbumSort::Name => concat!(
-                "SELECT ",
-                sort_key!("al.title"),
-                listed_albums!(),
-                " AND (? = 'all' OR ",
-                album_kind!(),
-                " = ?)",
-                " ORDER BY ",
-                album_order!(name)
-            ),
-            AlbumSort::Year => concat!(
-                "SELECT CAST(al.year AS TEXT)",
-                listed_albums!(),
-                " AND (? = 'all' OR ",
-                album_kind!(),
-                " = ?)",
-                " ORDER BY ",
-                album_order!(newest)
-            ),
-            AlbumSort::Oldest => concat!(
-                "SELECT CAST(al.year AS TEXT)",
-                listed_albums!(),
-                " AND (? = 'all' OR ",
-                album_kind!(),
-                " = ?)",
-                " ORDER BY ",
-                album_order!(oldest)
-            ),
-        };
-        let keys = sqlx::query_scalar(sql)
-            .bind(filter.as_str())
-            .bind(filter.as_str())
-            .fetch_all(&self.pool)
-            .await?;
-        Ok(jumps(keys, sort != AlbumSort::Name))
+        Ok(self.album_list(sort, filter).await?.jumps.clone())
     }
 
     /// Where each letter (or year) starts in the song list; none for the
     /// sorts that aren't by name or year.
     pub async fn track_jumps(&self, sort: TrackSort) -> Result<Vec<Jump>> {
-        let sql = match sort {
-            TrackSort::Title => concat!(
-                "SELECT t.title FROM tracks t WHERE ",
-                available!(),
-                " ORDER BY ",
-                track_order!(title)
-            ),
-            TrackSort::Artist => concat!(
-                "SELECT ",
-                sort_key!("coalesce(t.album_artist, t.artist)"),
-                " FROM tracks t WHERE ",
-                available!(),
-                " ORDER BY ",
-                track_order!(artist)
-            ),
-            TrackSort::Year => concat!(
-                "SELECT CAST(t.year AS TEXT) FROM tracks t WHERE ",
-                available!(),
-                " ORDER BY ",
-                track_order!(newest)
-            ),
-            TrackSort::Oldest => concat!(
-                "SELECT CAST(t.year AS TEXT) FROM tracks t WHERE ",
-                available!(),
-                " ORDER BY ",
-                track_order!(oldest)
-            ),
-            TrackSort::Added | TrackSort::Popular => return Ok(Vec::new()),
-        };
-        let keys = sqlx::query_scalar(sql).fetch_all(&self.pool).await?;
-        Ok(jumps(
-            keys,
-            matches!(sort, TrackSort::Year | TrackSort::Oldest),
-        ))
+        if matches!(sort, TrackSort::Added | TrackSort::Popular) {
+            return Ok(Vec::new());
+        }
+        Ok(self.track_list(sort).await?.jumps.clone())
     }
 
     /// Search-as-you-type over tracks, albums, and artists. Every word must

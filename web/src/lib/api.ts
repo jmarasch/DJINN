@@ -13,6 +13,8 @@ import type {
   LikedIds,
   PlayLinks,
   Played,
+  GoAppRelease,
+  GoKeepRules,
   GoStatus,
   NeedsCode,
   SignIn,
@@ -29,6 +31,7 @@ import type {
   AlbumDetail,
   AlbumFilter,
   AlbumSort,
+  ArtistSort,
   ArtistDetail,
   ArtistPicture,
   UnsplashChoice,
@@ -168,7 +171,8 @@ export const api = {
   goDeletePlaylist: (id: number) => del<void>(`/go/playlists/${id}`),
   goAddToPlaylist: (id: number, songs: number[]) => post<void>(`/go/playlists/${id}/songs`, { songs }),
   goSetPlaylistSongs: (id: number, songs: number[]) => put<void>(`/go/playlists/${id}/songs`, { songs }),
-  goRadio: (trackId: number) => get<Track[]>(`/go/radio/${trackId}`),
+  goRadio: (trackId: number, exclude: number[] = []) =>
+    get<Track[]>(`/go/radio/${trackId}${exclude.length ? `?exclude=${exclude.join(',')}` : ''}`),
   mySubmissions: () => get<Submission[]>('/go/submissions'),
   withdrawSubmission: (id: number) => del<void>(`/go/submissions/${id}`),
   waitingSubmissions: () => get<Submission[]>('/submissions'),
@@ -178,7 +182,8 @@ export const api = {
   saveUploadSettings: (s: UploadSettings) => put<UploadSettings>('/submissions/settings', s),
   goSendToParty: (trackId: number) => post<{ outcome: 'added' | 'backed' }>(`/go/party/${trackId}`),
   goStatus: () => get<GoStatus>('/go/status'),
-  saveGoSettings: (settings: { enabled: boolean; allow_remote: boolean; https_hostname: string; upnp: boolean; trusted_proxies: string; admin_two_step: boolean }) =>
+  goApp: () => get<GoAppRelease | null>('/go/app'),
+  saveGoSettings: (settings: { encryption: boolean; keep: GoKeepRules; server_name: string; discoverable: boolean; enabled: boolean; allow_remote: boolean; https_hostname: string; upnp: boolean; trusted_proxies: string; admin_two_step: boolean }) =>
     put<GoStatus>('/go/settings', settings),
   signIns: (limit = 200) => get<SignIn[]>(`/go/sign-ins?limit=${limit}`),
   turnOffUserTwoStep: (id: number) => del<void>(`/users/${id}/two-step`),
@@ -196,10 +201,10 @@ export const api = {
   search: (q: string) => get<SearchResults>(`/search?q=${encodeURIComponent(q)}`),
   /** The query read by the AI reader; takes a few seconds. */
   ask: (q: string) => get<Described | null>(`/search/ask?q=${encodeURIComponent(q)}`),
-  artists: (offset: number) => get<Page<ArtistSummary>>(`/artists?offset=${offset}`),
+  artists: (sort: ArtistSort, offset: number) => get<Page<ArtistSummary>>(`/artists?sort=${sort}&offset=${offset}`),
   albums: (sort: AlbumSort, filter: AlbumFilter, offset: number) => get<Page<Album>>(`/albums?sort=${sort}&filter=${filter}&offset=${offset}`),
   /** Where each letter (or year) starts in a list, for the jump strip. */
-  artistJumps: () => get<Jump[]>('/artists/jumps'),
+  artistJumps: (sort: ArtistSort) => get<Jump[]>(`/artists/jumps?sort=${sort}`),
   albumJumps: (sort: AlbumSort, filter: AlbumFilter) => get<Jump[]>(`/albums/jumps?sort=${sort}&filter=${filter}`),
   trackJumps: (sort: TrackSort) => get<Jump[]>(`/tracks/jumps?sort=${sort}`),
   playWild: () => post<void>('/playlists/wild/play'),

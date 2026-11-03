@@ -23,6 +23,9 @@ use crate::state::AppState;
 const MAX_PLAYLIST_NAME: usize = 100;
 const MAX_PLAYLIST_SONGS: usize = 5000;
 const RADIO_SONGS: usize = 30;
+/// How many songs smart cache gets to choose from.
+const OFFLINE_SUGGESTIONS: i64 = 1000;
+
 /// Personal radio avoids songs heard this recently.
 const RADIO_FRESH_MS: i64 = 3 * 60 * 60 * 1000;
 /// ...and leans away from songs skipped this recently.
@@ -35,6 +38,8 @@ pub fn router() -> Router<AppState> {
         .route("/go/likes/ids", get(liked_ids))
         .route("/go/likes/{kind}/{id}", put(like).delete(unlike))
         .route("/go/plays", post(played))
+        .route("/go/offline/versions", post(offline_versions))
+        .route("/go/offline-suggested", get(offline_suggested))
         .route("/go/history", get(history))
         .route("/go/resume", get(resume).put(save_resume))
         .route("/go/prefs", get(prefs).put(set_prefs))
@@ -138,6 +143,46 @@ struct PlayReport {
     track_id: i64,
     /// How much was heard; under 30 seconds counts as a skip.
     ms_played: i64,
+    /// When, for a play reported later (it happened offline). Now without.
+    at: Option<i64>,
+}
+
+#[derive(Deserialize)]
+struct SongIds {
+    ids: Vec<i64>,
+}
+
+/// The current version of each song still in the library, so an app can
+/// replace copies of changed files and notice removed ones.
+async fn offline_versions(
+    me: GoUser,
+    State(state): State<AppState>,
+    Json(body): Json<SongIds>,
+) -> ApiResult<Json<Vec<djinn_store::TrackVersion>>> {
+    downloads_allowed(&state, &me).await?;
+    Ok(Json(state.store.track_versions(&body.ids).await?))
+}
+
+/// What's worth keeping on a device: most played first, then liked.
+async fn offline_suggested(
+    me: GoUser,
+    State(state): State<AppState>,
+) -> ApiResult<Json<Vec<Track>>> {
+    downloads_allowed(&state, &me).await?;
+    Ok(Json(
+        state
+            .store
+            .worth_keeping(me.user.id, OFFLINE_SUGGESTIONS)
+            .await?,
+    ))
+}
+
+async fn downloads_allowed(state: &AppState, me: &GoUser) -> ApiResult<()> {
+    if state.store.permissions(&me.user).await?.downloads {
+        Ok(())
+    } else {
+        Err(ApiError::forbidden())
+    }
 }
 
 /// The player reports each song when it ends or is left.
@@ -148,7 +193,7 @@ async fn played(
 ) -> ApiResult<StatusCode> {
     state
         .store
-        .record_go_play(me.user.id, body.track_id, body.ms_played)
+        .record_go_play_at(me.user.id, body.track_id, body.ms_played, body.at)
         .await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -339,13 +384,22 @@ async fn set_songs(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// Personal radio from a song: songs that sound like it, skipping ones
-/// you heard in the last few hours and putting ones you skipped lately
-/// last. Without sound analysis, the same artist and genre.
+#[derive(Deserialize)]
+struct RadioQuery {
+    /// Songs already lined up, comma separated, when asking for more: the draw
+    /// favors the same few songs, so without this it soon offers nothing new.
+    #[serde(default)]
+    exclude: String,
+}
+
+/// Personal radio from a song: songs that sound like it, more often by its
+/// artist, skipping ones you heard in the last few hours and putting ones you
+/// skipped lately last. Without sound analysis, the same artist and genre.
 async fn radio(
     me: GoUser,
     State(state): State<AppState>,
     Path(id): Path<i64>,
+    Query(query): Query<RadioQuery>,
 ) -> ApiResult<Json<Vec<Track>>> {
     let seed = state
         .store
@@ -357,26 +411,28 @@ async fn radio(
         .store
         .go_listening_since(me.user.id, now - RADIO_FRESH_MS)
         .await?;
-    let (_, skipped) = state
+    let (_, skipped_list) = state
         .store
         .go_listening_since(me.user.id, now - RADIO_SKIPS_MS)
         .await?;
     let heard: HashSet<i64> = fresh_played
-        .into_iter()
+        .iter()
+        .copied()
         .chain(fresh_skipped)
         .chain([id])
+        .chain(query.exclude.split(',').filter_map(|t| t.parse().ok()))
         .collect();
-    let skipped: HashSet<i64> = skipped.into_iter().collect();
-    let mut ids = state
-        .sound
-        .read()
-        .map(|index| index.similar_tracks(id, RADIO_SONGS * 3))
-        .unwrap_or_default();
+    let skipped: HashSet<i64> = skipped_list.iter().copied().collect();
+    // Weighted like the party's radio: by sound, leaning on the seed's artist.
+    let mut ids = crate::smart::personal_radio(&state, id, &fresh_played, &skipped_list);
     if ids.is_empty() {
         ids = fallback_radio(&state, &seed).await?;
+    } else {
+        // Skipped songs are out of the draw; better last than a radio that stops.
+        ids.extend(skipped_list.iter().copied().filter(|t| !heard.contains(t)));
     }
     ids.retain(|t| !heard.contains(t));
-    // Stable: keeps sound order within "not skipped" and "skipped".
+    // Stable: keeps the drawn order within "not skipped" and "skipped".
     ids.sort_by_key(|t| skipped.contains(t));
     ids.truncate(RADIO_SONGS);
     let mut songs = vec![seed];

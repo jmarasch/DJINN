@@ -12,8 +12,8 @@ use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use djinn_library::{art, ScanProgress};
 use djinn_store::{
-    Album, AlbumDetail, AlbumFilter, AlbumSort, ArtistDetail, ArtistSummary, Jump, Page,
-    SearchResults, TagChange, TagEdit, Track, TrackSort,
+    Album, AlbumDetail, AlbumFilter, AlbumSort, ArtistDetail, ArtistSort, ArtistSummary, Jump,
+    Page, SearchResults, TagChange, TagEdit, Track, TrackSort,
 };
 use serde::{Deserialize, Serialize};
 
@@ -145,17 +145,31 @@ impl PageQuery {
     }
 }
 
+#[derive(Deserialize)]
+struct ArtistQuery {
+    #[serde(default)]
+    offset: i64,
+    limit: Option<i64>,
+    #[serde(default)]
+    sort: ArtistSort,
+}
+
 async fn artists(
     _: CurrentUser,
     State(state): State<AppState>,
-    Query(page): Query<PageQuery>,
+    Query(query): Query<ArtistQuery>,
 ) -> ApiResult<Json<Page<ArtistSummary>>> {
-    let (offset, limit) = page.bounds();
+    let (offset, limit) = PageQuery {
+        offset: query.offset,
+        limit: query.limit,
+        sort: TrackSort::default(),
+    }
+    .bounds();
     let show = settings::flag(&state.store, "show_collaboration_artists", true).await?;
     Ok(Json(
         state
             .store
-            .artists_page_filtered(show, offset, limit)
+            .artists_page_filtered(query.sort, show, offset, limit)
             .await?,
     ))
 }
@@ -191,9 +205,15 @@ async fn albums(
 }
 
 /// Where each letter starts in the artist list, for the jump strip.
-async fn artist_jumps(_: CurrentUser, State(state): State<AppState>) -> ApiResult<Json<Vec<Jump>>> {
+async fn artist_jumps(
+    _: CurrentUser,
+    State(state): State<AppState>,
+    Query(query): Query<ArtistQuery>,
+) -> ApiResult<Json<Vec<Jump>>> {
     let show = settings::flag(&state.store, "show_collaboration_artists", true).await?;
-    Ok(Json(state.store.artist_jumps_filtered(show).await?))
+    Ok(Json(
+        state.store.artist_jumps_filtered(query.sort, show).await?,
+    ))
 }
 
 /// Where each letter or year starts in the album list.

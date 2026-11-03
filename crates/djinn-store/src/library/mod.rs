@@ -204,7 +204,16 @@ macro_rules! sort_key {
     };
 }
 
-#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, serde::Deserialize)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ArtistSort {
+    #[default]
+    Name,
+    /// Whoever had a song added most recently first.
+    Added,
+}
+
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AlbumSort {
     #[default]
@@ -213,9 +222,11 @@ pub enum AlbumSort {
     Year,
     /// Oldest first.
     Oldest,
+    /// The album with a song added most recently first.
+    Added,
 }
 
-#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, serde::Deserialize)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AlbumFilter {
     #[default]
@@ -234,7 +245,7 @@ impl AlbumFilter {
     }
 }
 
-#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, serde::Deserialize)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum TrackSort {
     #[default]
@@ -440,6 +451,14 @@ macro_rules! album_order {
     };
     (oldest) => {
         concat!("al.year IS NULL, al.year, ", sort_key!("al.title"))
+    };
+    (added) => {
+        concat!(
+            "(SELECT max(t.added_at) FROM tracks t WHERE t.album_id = al.id AND ",
+            available!(),
+            ") DESC, ",
+            sort_key!("al.title")
+        )
     };
 }
 
@@ -736,7 +755,7 @@ fn genre_list<'a>(genres: impl Iterator<Item = &'a str>) -> Option<String> {
 
 /// Ids as a JSON array, for `json_each(?)`: one static query for any
 /// number of ids.
-fn json_ids(ids: &[i64]) -> String {
+pub(crate) fn json_ids(ids: &[i64]) -> String {
     let parts: Vec<String> = ids.iter().map(i64::to_string).collect();
     format!("[{}]", parts.join(","))
 }
@@ -749,6 +768,7 @@ fn in_order<T>(ids: &[i64], found: Vec<T>, id: impl Fn(&T) -> i64) -> Vec<T> {
 }
 
 mod browse;
+pub(crate) use browse::BrowseMemo;
 mod info;
 mod scan;
 #[cfg(test)]

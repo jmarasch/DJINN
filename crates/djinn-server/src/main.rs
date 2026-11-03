@@ -23,6 +23,8 @@ mod error;
 mod events;
 mod folders;
 mod go;
+mod go_announce;
+mod go_app;
 mod go_library;
 mod go_upnp;
 mod gpu;
@@ -45,6 +47,7 @@ mod subsonic;
 mod system_api;
 #[cfg(test)]
 mod test_util;
+mod tls;
 mod tv_api;
 mod two_step;
 mod update;
@@ -350,6 +353,7 @@ async fn run() -> anyhow::Result<()> {
     let hurry = move || session_ending.load(std::sync::atomic::Ordering::Acquire);
     let mut stopping = state.shutdown.subscribe();
     let shutdown_request = std::sync::Arc::clone(&state.shutdown_request);
+    let listener = tls::listen(listener, std::sync::Arc::clone(&state.go.encryption))?;
     let server = axum::serve(
         listener,
         // Connection info gives handlers the client's IP (for MAC lookup).

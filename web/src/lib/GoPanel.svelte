@@ -7,10 +7,10 @@
   import { app, toast } from './state.svelte'
   import ConvertPanel from './ConvertPanel.svelte'
   import SubmissionsPanel from './SubmissionsPanel.svelte'
-  import type { GoStatus, SignIn } from './types'
+  import type { GoKeepRules, GoStatus, SignIn } from './types'
 
   let status = $state<GoStatus | null>(null)
-  let form = $state({ enabled: false, allow_remote: false, https_hostname: '', upnp: false, trusted_proxies: '', admin_two_step: false })
+  let form = $state({ encryption: true, keep: { sign_out: 'delete', away: 'lock', away_days: 30 } as GoKeepRules, server_name: '', discoverable: true, enabled: false, allow_remote: false, https_hostname: '', upnp: false, trusted_proxies: '', admin_two_step: false })
   let signIns = $state<SignIn[]>([])
   let busy = $state(false)
   let timer: ReturnType<typeof setInterval> | undefined
@@ -40,18 +40,22 @@
     const [s, log] = await Promise.all([api.goStatus(), api.signIns()])
     status = s
     signIns = log
-    form = { enabled: s.enabled, allow_remote: s.allow_remote, https_hostname: s.https_hostname, upnp: s.upnp, trusted_proxies: s.trusted_proxies, admin_two_step: s.admin_two_step }
+    form = formFrom(s)
+  }
+
+  function formFrom(s: GoStatus) {
+    return { encryption: s.encryption, keep: { ...s.keep }, server_name: s.server_name, discoverable: s.discoverable, enabled: s.enabled, allow_remote: s.allow_remote, https_hostname: s.https_hostname, upnp: s.upnp, trusted_proxies: s.trusted_proxies, admin_two_step: s.admin_two_step }
   }
 
   async function save() {
     busy = true
     try {
       status = await api.saveGoSettings(form)
-      form = { enabled: status.enabled, allow_remote: status.allow_remote, https_hostname: status.https_hostname, upnp: status.upnp, trusted_proxies: status.trusted_proxies, admin_two_step: status.admin_two_step }
+      form = formFrom(status)
       toast(status.enabled ? (status.running ? 'DJINN GO is on' : 'Saved, but GO could not start') : 'Saved')
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Could not save', true)
-      if (status) form = { enabled: status.enabled, allow_remote: status.allow_remote, https_hostname: status.https_hostname, upnp: status.upnp, trusted_proxies: status.trusted_proxies, admin_two_step: status.admin_two_step }
+      if (status) form = formFrom(status)
     } finally {
       busy = false
     }
@@ -81,6 +85,16 @@
       <span>DJINN GO is {form.enabled ? 'on' : 'off'}</span>
     </label>
     {#if status.error}<p class="error">{status.error}</p>{/if}
+    <label>Server name
+      <input type="text" bind:value={form.server_name} placeholder={status.default_name} maxlength="40" onchange={save} disabled={busy} />
+    </label>
+    <p class="small muted">What people see when choosing a server, which helps on a network with more than one.</p>
+    <label class="switch big">
+      <input type="checkbox" bind:checked={form.discoverable} onchange={save} disabled={busy} />
+      <span>Let phones on this network find this server
+        <span class="small muted block">The app lists it by name, and anyone on the network can see that name and address. People still have to sign in.</span>
+      </span>
+    </label>
     {#if status.running}
       <div>
         <p class="small">On your home network, open:</p>
@@ -114,12 +128,57 @@
     </section>
   {/if}
 
+  {#if status.android_app}
+    <section class="card">
+      <h2>Android app</h2>
+      <p class="small muted">This server carries the app, so people can install it without a store. They can scan this with a phone's camera, or find it when they open GO on Android. Android asks them to allow the install, and the app offers its own updates after that.</p>
+      <!-- The QR code is an SVG DJINN made itself. -->
+      <div class="app-qr">{@html status.android_app.qr_svg}</div>
+      <p class="small"><a href={status.android_app.url}>{status.android_app.url}</a></p>
+      <p class="small muted app-sum">Version {status.android_app.version}. SHA-256: {status.android_app.sha256}</p>
+    </section>
+  {/if}
+
+  <section class="card">
+    <h2>Songs kept on devices</h2>
+    <p class="small muted">For people whose role can download. The app follows these rules, and learns them each time it reaches this server. A locked song stays on the device but won't play until it's unlocked.</p>
+    <label>When someone signs out
+      <select bind:value={form.keep.sign_out} onchange={save} disabled={busy}>
+        <option value="delete">Delete their kept songs</option>
+        <option value="keep">Keep them, locked until they sign back in</option>
+      </select>
+    </label>
+    <label>When a device hasn't reached this server for a while
+      <select bind:value={form.keep.away} onchange={save} disabled={busy}>
+        <option value="lock">Lock kept songs until it reconnects</option>
+        <option value="delete">Delete kept songs</option>
+        <option value="off">Do nothing: they keep playing</option>
+      </select>
+    </label>
+    {#if form.keep.away !== 'off'}
+      <label>After this many days
+        <input type="number" min="1" max="3650" bind:value={form.keep.away_days} onchange={save} disabled={busy} />
+      </label>
+    {/if}
+    <p class="small muted">These rules only apply to songs kept from this server. Songs belong to one account on one server, so moving to another server, or someone else signing in on the device, leaves them alone. If a role loses its download permission, its songs from this server are deleted.</p>
+  </section>
+
   <SubmissionsPanel />
 
   <ConvertPanel />
 
   <section class="card">
     <h2>Safety</h2>
+    <label class="switch big">
+      <input type="checkbox" bind:checked={form.encryption} onchange={save} disabled={busy} />
+      <span>Encrypt connections
+        <span class="small muted block">On by default, with nothing to set up: DJINN makes its own certificate. The Android app always uses it and checks it's still the same one. Browsers can use it too by opening an address with <code>https://</code>, but they warn that it isn't from a known authority. Plain addresses keep working, for cast devices and phone apps.</span>
+      </span>
+    </label>
+    {#if status.security_code}
+      <p class="small">Security code: <code>{status.security_code}</code></p>
+      <p class="small muted">The app shows this code too when connecting. If they match, it's talking to this server. Scanning the QR code in GO checks this for you.</p>
+    {/if}
     <label class="switch big">
       <input type="checkbox" bind:checked={form.allow_remote} onchange={save} disabled={busy} />
       <span>Allow connections from outside the home network
@@ -240,4 +299,21 @@
   .remote-setup label:not(.switch) { display: grid; gap: 4px; }
   .remote-setup input[type='text'] { padding: 8px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); color: var(--text); font: inherit; }
   .example { margin: 0; padding: 12px; border-radius: 8px; background: var(--bg); white-space: pre-wrap; }
+
+  .app-qr {
+    width: 200px;
+    padding: 8px;
+    border-radius: 8px;
+    background: #fff;
+  }
+
+  .app-qr :global(svg) {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+
+  .app-sum {
+    overflow-wrap: anywhere;
+  }
 </style>

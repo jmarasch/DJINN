@@ -33,6 +33,7 @@ pub use users::*;
 
 use std::path::Path;
 use std::str::FromStr;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use sqlx::sqlite::{
@@ -53,10 +54,15 @@ pub type Result<T, E = StoreError> = std::result::Result<T, E>;
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../../migrations");
 
+/// Set by a migration that leaves space worth giving back.
+const COMPACT_DATABASE: &str = "compact_database";
+
 /// Handle to the database. Cheap to clone.
 #[derive(Clone, Debug)]
 pub struct Store {
     pool: SqlitePool,
+    /// The library lists, kept while they stay current.
+    browse: Arc<library::BrowseMemo>,
 }
 
 impl Store {
@@ -88,7 +94,10 @@ impl Store {
             .max_connections(2)
             .connect_with(common(options))
             .await?;
-        Ok(Self { pool })
+        Ok(Self {
+            pool,
+            browse: Arc::default(),
+        })
     }
 
     /// A private in-memory database, for tests.
@@ -107,7 +116,32 @@ impl Store {
 
     async fn init(pool: SqlitePool) -> Result<Self> {
         MIGRATOR.run(&pool).await?;
-        Ok(Self { pool })
+        let store = Self {
+            pool,
+            browse: Arc::default(),
+        };
+        store.compact_if_due().await?;
+        Ok(store)
+    }
+
+    /// Gives back space when a migration asked for it. If that fails (not
+    /// enough disk for the copy it makes), everything still works and the
+    /// next start tries again.
+    async fn compact_if_due(&self) -> Result<()> {
+        if self.get_setting(COMPACT_DATABASE).await?.is_none() {
+            return Ok(());
+        }
+        if sqlx::query("VACUUM").execute(&self.pool).await.is_ok() {
+            sqlx::query("DELETE FROM settings WHERE key = ?")
+                .bind(COMPACT_DATABASE)
+                .execute(&self.pool)
+                .await?;
+            // The copy went through the write-ahead log; don't keep it twice.
+            sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
+                .execute(&self.pool)
+                .await?;
+        }
+        Ok(())
     }
 
     pub fn pool(&self) -> &SqlitePool {

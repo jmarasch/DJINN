@@ -1,6 +1,6 @@
 <script lang="ts" generics="T">
   import { tick, untrack, type Snippet } from 'svelte'
-  import { listCache } from './listCache'
+  import { listCache, rowSizes } from './listCache'
   import type { Page } from './types'
 
   let {
@@ -31,8 +31,15 @@
   const PRELOAD_PX = 800
   /** The server's page size, used when loading the stretch above a jump. */
   const PAGE = 50
+  /** Rows kept on the page beyond each edge of the screen. */
+  const OVERSCAN_ROWS = 12
+  /** Items shown before a row has been measured. */
+  const FIRST_RENDER = 30
 
-  let items = $state<T[]>([])
+  // Only the rows near the screen are on the page, with padding standing in
+  // for the rest, so a long list costs the same to open and scroll as a
+  // short one. Raw: items are replaced, never changed in place.
+  let items = $state.raw<T[]>([])
   /** Where `items` starts in the whole list: after a jump, the songs above
    * load as the page scrolls up. */
   let start = $state(0)
@@ -44,6 +51,91 @@
   let topSentinel = $state<HTMLElement>()
   let container = $state<HTMLElement>()
   let generation = 0
+  /** Height of a row including the gap to the next, and items in a row. */
+  let rowHeight = $state(0)
+  let columns = $state(1)
+  /** The rows on the page: from `firstRow`, up to `lastRow`. */
+  let firstRow = $state(0)
+  let lastRow = $state(0)
+
+  const rows = $derived(Math.ceil(items.length / columns))
+  const shown = $derived(
+    rowHeight ? items.slice(firstRow * columns, lastRow * columns) : items.slice(0, FIRST_RENDER),
+  )
+  const paddingTop = $derived(rowHeight ? firstRow * rowHeight : 0)
+  const paddingBottom = $derived(rowHeight ? Math.max(0, rows - lastRow) * rowHeight : 0)
+  const sizeKey = $derived(grid ? 'grid' : 'list')
+
+  /** Works out the rows near the screen from the scroll position. */
+  function place() {
+    if (!container || !rowHeight) return
+    const top = -container.getBoundingClientRect().top
+    const first = Math.floor(top / rowHeight) - OVERSCAN_ROWS
+    const last = Math.ceil((top + innerHeight) / rowHeight) + OVERSCAN_ROWS
+    firstRow = Math.max(0, Math.min(first, Math.max(0, rows - 1)))
+    lastRow = Math.max(firstRow, Math.min(last, rows))
+  }
+
+  /** Measures the rows on the page. They're all the same height. */
+  function measure() {
+    const children = container?.children
+    if (!children?.length) return
+    const top = children[0].getBoundingClientRect().top
+    let across = 1
+    while (across < children.length && children[across].getBoundingClientRect().top === top) across++
+    // With one row showing, the row's own height is the best known.
+    const height =
+      across < children.length
+        ? children[across].getBoundingClientRect().top - top
+        : children[0].getBoundingClientRect().height
+    if (height <= 0) return
+    if (height !== rowHeight || across !== columns) {
+      rowHeight = height
+      columns = across
+      rowSizes.set(sizeKey, { height, columns: across })
+    }
+    place()
+  }
+
+  let framed = false
+  function schedule() {
+    if (framed) return
+    framed = true
+    requestAnimationFrame(() => {
+      framed = false
+      place()
+    })
+  }
+
+  $effect(() => {
+    addEventListener('scroll', schedule, { passive: true })
+    addEventListener('resize', measure, { passive: true })
+    return () => {
+      removeEventListener('scroll', schedule)
+      removeEventListener('resize', measure)
+    }
+  })
+
+  // A size seen before gives the page its full height straight away, so
+  // scrolling back to where it was lands in the right place.
+  $effect(() => {
+    const known = rowSizes.get(sizeKey)
+    untrack(() => {
+      rowHeight = known?.height ?? 0
+      columns = known?.columns ?? 1
+      firstRow = 0
+      lastRow = known ? Math.ceil((innerHeight * 2) / known.height) : 0
+    })
+  })
+
+  // After anything that changes which rows there are or how big they are.
+  $effect(() => {
+    void shown.length
+    void grid
+    untrack(() => {
+      tick().then(measure)
+    })
+  })
 
   $effect(() => {
     const k = cacheKey
@@ -103,15 +195,15 @@
     try {
       const page = await load(from)
       if (gen !== generation) return
-      const first = container?.firstElementChild
-      const before = first?.getBoundingClientRect().top
-      items = [...page.items.slice(0, start - from), ...items]
+      const added = start - from
+      items = [...page.items.slice(0, added), ...items]
       start = from
       remember()
+      // Keeps what's on screen in place (anchoring is off for the list).
+      const moved = (added / columns) * rowHeight
       await tick()
-      // Browsers that anchor scrolling have already kept it in place; this
-      // only moves the difference that's left.
-      if (first && before !== undefined) scrollBy(0, first.getBoundingClientRect().top - before)
+      scrollBy(0, moved)
+      place()
     } catch {
       // Scrolling up again retries.
       return
@@ -153,8 +245,10 @@
   }
 
   function reveal(index: number) {
-    const entry = container?.children[index]
-    if (entry) scrollTo({ top: entry.getBoundingClientRect().top + scrollY - inset })
+    if (!container) return
+    const row = Math.floor(index / columns)
+    scrollTo({ top: container.getBoundingClientRect().top + scrollY + row * rowHeight - inset })
+    place()
   }
 
   $effect(() => {
@@ -195,8 +289,14 @@
 {#if total === 0}
   <p class="muted">{empty}</p>
 {:else}
-  <div class:grid bind:this={container}>
-    {#each items as entry (key(entry))}
+  <div
+    class="rows"
+    class:grid
+    bind:this={container}
+    style:padding-top="{paddingTop}px"
+    style:padding-bottom="{paddingBottom}px"
+  >
+    {#each shown as entry (key(entry))}
       {@render item(entry)}
     {/each}
   </div>
@@ -212,6 +312,11 @@
 <style>
   .count {
     margin: 4px 0 8px;
+  }
+
+  .rows {
+    /* Rows come and go while scrolling; the padding keeps everything put. */
+    overflow-anchor: none;
   }
 
   .grid {

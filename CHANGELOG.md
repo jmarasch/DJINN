@@ -1,5 +1,47 @@
 # Changelog
 
+## 2026.11.02 (November 2, 2026)
+
+### Radio and the queue
+
+- Radio now favors the artist it started from, both at the party and on GO, while still mixing in other artists that sound alike. GO's radio also stays around that artist as it runs on, instead of drifting away from it.
+- On GO, drag songs in Up next to change the order. Tapping a song or using its menu can now **play it next** or **add it to the end of the queue**.
+
+### DJINN GO for Android
+
+- Added the official Android app (Android 7 and newer): streaming, downloads and smart cache for offline listening, songs saved as alarm, ringtone and notification sounds, visuals, a widget, voice requests, Android Auto and Cast. See [the guide](docs/guide/djinn-go.md#on-your-phone).
+- FLAC and WAV songs kept on a phone can be converted to MP3, 128 kbit/s VBR by default, when converting is on. Compressed songs stay as they are.
+
+### Faster library
+
+- The Library tab opens right away and stays quick however far you scroll, on the party app and on GO. Only the rows near the screen are on the page, and lists are worked out once until the library changes.
+- The first start after updating moves sound analysis into its own table and compacts the database, once. This can take a minute or more on a big library and needs free disk space about the size of the database. Nothing needs analyzing again.
+
+### Encryption and finding servers
+
+- Connections are now encrypted, on by default with nothing to set up: DJINN makes its own certificate. The Android app uses it, remembers it, and warns if it ever changes. Admin > GO shows a security code to compare, and scanning the QR code checks it for you. Browsers can use `https://` but warn about the certificate, so plain addresses keep working for them, cast devices and Subsonic apps. Turn it off in Admin > GO > Safety.
+- Servers can be named in Admin > GO and announce themselves on the network (this can be turned off). The app lists what it finds, so nobody has to type an address.
+
+### Keeping songs across servers
+
+- The app remembers several servers, each with its own sign-in. **Settings > Other servers** moves between them without signing out.
+- Kept songs belong to one account on one server, and moving to another server or someone else signing in leaves them alone. **Library > On phone > All servers** plays them whichever server you're on.
+- Admin > GO > **Songs kept on devices** chooses what happens at sign-out (delete, or keep locked) and after too long away from the server (lock, delete or nothing, 30 days by default). Too long away now locks songs rather than deleting them.
+
+### Library
+
+- Artists and albums can be sorted by **Recently added**, as songs could.
+- Scrolling back up brings the tabs and sort options back, with a button to the top. The search box no longer disappears behind the top menu.
+- The Android app can sort and filter its lists.
+
+### Android app
+
+- Your server now carries the app. Open GO on an Android phone, or scan the QR code in Admin > GO, to install it with no store. It offers its own updates when your server has a newer version. **If you installed a test build, uninstall it first**, because this one is signed differently.
+- **Home** is now **Playlist**, and a **Playing** button pulls up the player.
+- Now Playing shows the cover by default, and a button switches to visuals on devices that can run them. The cover and visuals go full screen, with controls that appear on a tap and fade.
+- Visuals no longer shake: Tunnel, Stars and Nebula were following every tiny change in the bass. Settings can now choose colors, RGB rotation, the number and spacing of bars, line thickness and smoothing.
+- Android Auto only shows apps from outside the Play Store once **Unknown sources** is on. The guide has the steps.
+
 ## 2026.11.01 (November 1, 2026)
 
 ### DJINN GO away from home

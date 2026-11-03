@@ -10,16 +10,18 @@
   import Icon from '../lib/Icon.svelte'
   import InfiniteList from '../lib/InfiniteList.svelte'
   import JumpStrip from '../lib/JumpStrip.svelte'
+  import { watchScroll } from '../lib/scrollWatch.svelte'
   import { jumpCache } from '../lib/listCache'
   import TrackRow from '../lib/TrackRow.svelte'
   import TrackTile from '../lib/TrackTile.svelte'
-  import type { AlbumFilter, AlbumSort, GenreMap, Jump, Track, TrackSort } from '../lib/types'
+  import type { AlbumFilter, AlbumSort, ArtistSort, GenreMap, Jump, Track, TrackSort } from '../lib/types'
 
   let {
     song,
     songTile,
     like,
     progress = true,
+    stuckBelow,
   }: {
     /** A song in the list view; the party's request row by default. */
     song?: Snippet<[Track]>
@@ -29,6 +31,8 @@
     like?: Snippet<['artist' | 'album', number, string]>
     /** Show the library check's progress at the top. */
     progress?: boolean
+    /** What's stuck to the top of the page already, for the options to return under. */
+    stuckBelow?: HTMLElement
   } = $props()
 
   type Tab = 'artists' | 'albums' | 'songs' | 'genres'
@@ -47,6 +51,7 @@
   let sort = $state((sessionStorage.getItem('djinn-browse-sort') as TrackSort) || 'title')
   let albumSort = $state((sessionStorage.getItem('djinn-browse-album-sort') as AlbumSort) || 'name')
   let albumFilter = $state<AlbumFilter>('all')
+  let artistSort = $state((sessionStorage.getItem('djinn-browse-artist-sort') as ArtistSort) || 'name')
   let view = $state<View>(readView())
   let genreView = $state<GenreView>(readStored('djinn-genre-view') === 'cloud' ? 'cloud' : 'tags')
   let genres = $state<GenreMap | null>(null)
@@ -54,18 +59,52 @@
   $effect(() => sessionStorage.setItem('djinn-browse-tab', tab))
   $effect(() => sessionStorage.setItem('djinn-browse-sort', sort))
   $effect(() => sessionStorage.setItem('djinn-browse-album-sort', albumSort))
+  $effect(() => sessionStorage.setItem('djinn-browse-artist-sort', artistSort))
   $effect(() => store('djinn-browse-view', view))
   $effect(() => store('djinn-genre-view', genreView))
 
   // The jump strip for the list on show: where each letter or year starts.
-  /** Height of the search box stuck to the top, which jumps land below. */
+  /** Until the search box has been measured. */
   const STUCK_PX = 72
-  let list = $state<{ jumpTo: (offset: number) => void }>()
+  let list = $state<{ jumpTo: (offset: number) => Promise<void> }>()
+  const scroll = watchScroll()
+  /** Where the top of the page really starts: below whatever's stuck up there. */
+  let stuckTop = $state(STUCK_PX)
+  $effect(() => {
+    const box = stuckBelow
+    if (!box) return
+    const measure = () => {
+      stuckTop = (parseFloat(getComputedStyle(box).top) || 0) + box.offsetHeight
+    }
+    measure()
+    const watching = new ResizeObserver(measure)
+    watching.observe(box)
+    addEventListener('resize', measure)
+    return () => {
+      watching.disconnect()
+      removeEventListener('resize', measure)
+    }
+  })
+
+  async function toTop() {
+    scroll.quiet()
+    await list?.jumpTo(0)
+    scrollTo({ top: 0 })
+  }
   let lists = $state<HTMLElement>()
   let jumps = $state<Jump[]>([])
-  const jumpKey = $derived(tab === 'albums' ? `albums-${albumSort}-${albumFilter}` : tab === 'songs' ? `songs-${sort}` : tab)
+  const jumpKey = $derived(
+    tab === 'albums'
+      ? `albums-${albumSort}-${albumFilter}`
+      : tab === 'songs'
+        ? `songs-${sort}`
+        : tab === 'artists'
+          ? `artists-${artistSort}`
+          : tab,
+  )
   const byYear = $derived(
-    (tab === 'albums' && albumSort !== 'name') || (tab === 'songs' && (sort === 'year' || sort === 'oldest')),
+    (tab === 'albums' && (albumSort === 'year' || albumSort === 'oldest')) ||
+      (tab === 'songs' && (sort === 'year' || sort === 'oldest')),
   )
   const newestFirst = $derived((tab === 'albums' ? albumSort : sort) === 'year')
   $effect(() => {
@@ -74,7 +113,7 @@
     jumps = cached ?? []
     if (cached || tab === 'genres') return
     const loading =
-      tab === 'artists' ? api.artistJumps() : tab === 'albums' ? api.albumJumps(albumSort, albumFilter) : api.trackJumps(sort)
+      tab === 'artists' ? api.artistJumps(artistSort) : tab === 'albums' ? api.albumJumps(albumSort, albumFilter) : api.trackJumps(sort)
     loading
       .then((found) => {
         jumpCache.set(k, found)
@@ -124,41 +163,88 @@
 
 {#if progress}<LibraryProgress />{/if}
 
-<div class="bar">
-  <div class="tabs" role="tablist">
-    {#each tabs as t (t.id)}
-      <button role="tab" aria-selected={tab === t.id} class:active={tab === t.id} onclick={() => (tab = t.id)}>
-        {t.label}
-      </button>
-    {/each}
+<div
+  class="controls"
+  class:returning={scroll.up}
+  style:top={scroll.up ? `${stuckTop}px` : null}
+>
+  <div class="bar">
+    <div class="tabs" role="tablist">
+      {#each tabs as t (t.id)}
+        <button role="tab" aria-selected={tab === t.id} class:active={tab === t.id} onclick={() => (tab = t.id)}>
+          {t.label}
+        </button>
+      {/each}
+    </div>
+    <div class="views" role="group" aria-label="Layout">
+      {#if tab === 'genres'}
+        <button
+          class:active={genreView === 'tags'}
+          aria-label="Tags"
+          aria-pressed={genreView === 'tags'}
+          onclick={() => (genreView = 'tags')}
+        >
+          <Icon name="list" size={20} />
+        </button>
+        <button
+          class:active={genreView === 'cloud'}
+          aria-label="Cloud"
+          aria-pressed={genreView === 'cloud'}
+          onclick={() => (genreView = 'cloud')}
+        >
+          <Icon name="cloud" size={20} />
+        </button>
+      {:else}
+        <button class:active={!grid} aria-label="List" aria-pressed={!grid} onclick={() => (view = 'list')}>
+          <Icon name="list" size={20} />
+        </button>
+        <button class:active={grid} aria-label="Grid" aria-pressed={grid} onclick={() => (view = 'grid')}>
+          <Icon name="grid" size={20} />
+        </button>
+      {/if}
+    </div>
   </div>
-  <div class="views" role="group" aria-label="Layout">
-    {#if tab === 'genres'}
-      <button
-        class:active={genreView === 'tags'}
-        aria-label="Tags"
-        aria-pressed={genreView === 'tags'}
-        onclick={() => (genreView = 'tags')}
-      >
-        <Icon name="list" size={20} />
-      </button>
-      <button
-        class:active={genreView === 'cloud'}
-        aria-label="Cloud"
-        aria-pressed={genreView === 'cloud'}
-        onclick={() => (genreView = 'cloud')}
-      >
-        <Icon name="cloud" size={20} />
-      </button>
-    {:else}
-      <button class:active={!grid} aria-label="List" aria-pressed={!grid} onclick={() => (view = 'list')}>
-        <Icon name="list" size={20} />
-      </button>
-      <button class:active={grid} aria-label="Grid" aria-pressed={grid} onclick={() => (view = 'grid')}>
-        <Icon name="grid" size={20} />
-      </button>
-    {/if}
-  </div>
+  {#if tab === 'artists'}
+    <label class="sort">
+        <span class="muted small">Sort by</span>
+        <select bind:value={artistSort}>
+          <option value="name">Name</option>
+          <option value="added">Recently added</option>
+        </select>
+      </label>
+  {:else if tab === 'albums'}
+    <div class="album-filters">
+        <label class="sort">
+          <span class="muted small">Show</span>
+          <select bind:value={albumFilter}>
+            <option value="all">All albums</option>
+            <option value="various">Various Artists</option>
+            <option value="soundtracks">Soundtracks</option>
+          </select>
+        </label>
+        <label class="sort">
+          <span class="muted small">Sort by</span>
+          <select bind:value={albumSort}>
+            <option value="name">Name</option>
+            <option value="added">Recently added</option>
+            <option value="year">Year (newest first)</option>
+            <option value="oldest">Year (oldest first)</option>
+          </select>
+        </label>
+      </div>
+  {:else if tab === 'songs'}
+    <label class="sort">
+        <span class="muted small">Sort by</span>
+        <select bind:value={sort}>
+          <option value="title">Title</option>
+          <option value="artist">Artist</option>
+          <option value="added">Recently added</option>
+          <option value="popular">Most popular</option>
+          <option value="year">Year (newest first)</option>
+          <option value="oldest">Year (oldest first)</option>
+        </select>
+      </label>
+  {/if}
 </div>
 
 {#if indexed}
@@ -168,17 +254,27 @@
     {newestFirst}
     below={lists}
     bind:inside={stripInside}
-    onjump={(offset) => list?.jumpTo(offset)}
+    onjump={(offset) => {
+      // Landing where it was asked to, not under the options.
+      scroll.quiet()
+      list?.jumpTo(offset)
+    }}
   />
+{/if}
+
+{#if scroll.up && scroll.far}
+  <button class="to-top" aria-label="Back to top" onclick={toTop}>
+    <Icon name="up" size={24} />
+  </button>
 {/if}
 
 <div class="lists" class:crowded={indexed && stripInside} bind:this={lists}>
   {#if tab === 'artists'}
-    <InfiniteList
+        <InfiniteList
       bind:this={list}
-      inset={STUCK_PX}
-      cacheKey="artists"
-      load={api.artists}
+      inset={stuckTop}
+      cacheKey="artists-{artistSort}"
+      load={(offset) => api.artists(artistSort, offset)}
       key={(a) => a.id}
       count={(n) => plural(n, 'artist', 'artists')}
       {grid}
@@ -227,27 +323,9 @@
       {/if}
     {/if}
   {:else if tab === 'albums'}
-    <div class="album-filters">
-      <label class="sort">
-        <span class="muted small">Show</span>
-        <select bind:value={albumFilter}>
-          <option value="all">All albums</option>
-          <option value="various">Various Artists</option>
-          <option value="soundtracks">Soundtracks</option>
-        </select>
-      </label>
-      <label class="sort">
-        <span class="muted small">Sort by</span>
-        <select bind:value={albumSort}>
-          <option value="name">Name</option>
-          <option value="year">Year (newest first)</option>
-          <option value="oldest">Year (oldest first)</option>
-        </select>
-      </label>
-    </div>
-    <InfiniteList
+        <InfiniteList
       bind:this={list}
-      inset={STUCK_PX}
+      inset={stuckTop}
       cacheKey="albums-{albumSort}-{albumFilter}"
       load={(offset) => api.albums(albumSort, albumFilter, offset)}
       key={(a) => a.id}
@@ -261,7 +339,7 @@
             <a class="tile" href="#/album/{album.id}">
               <div class="cover"><Art hash={album.art_hash} size={160} round={10} /></div>
               <span class="ellipsis">{album.title}</span>
-              <span class="muted small ellipsis">{album.artist}{albumSort !== 'name' && album.year ? ` · ${album.year}` : ''}</span>
+              <span class="muted small ellipsis">{album.artist}{byYear && album.year ? ` · ${album.year}` : ''}</span>
             </a>
             {#if like}<div class="tile-like">{@render like('album', album.id, album.title)}</div>{/if}
           </div>
@@ -282,20 +360,9 @@
       {/snippet}
     </InfiniteList>
   {:else}
-    <label class="sort">
-      <span class="muted small">Sort by</span>
-      <select bind:value={sort}>
-        <option value="title">Title</option>
-        <option value="artist">Artist</option>
-        <option value="added">Recently added</option>
-        <option value="popular">Most popular</option>
-        <option value="year">Year (newest first)</option>
-        <option value="oldest">Year (oldest first)</option>
-      </select>
-    </label>
-    <InfiniteList
+        <InfiniteList
       bind:this={list}
-      inset={STUCK_PX}
+      inset={stuckTop}
       cacheKey="songs-{sort}"
       load={(offset) => api.tracks(sort, offset)}
       key={(t) => t.id}
@@ -443,6 +510,39 @@
      than beside it. */
   .lists.crowded {
     padding-right: 18px;
+  }
+
+  /* In the page's flow, so the list doesn't move when they come back. */
+  .controls {
+    padding-bottom: 8px;
+    background: var(--bg);
+  }
+
+  .controls.returning {
+    position: sticky;
+    z-index: 4;
+    animation: slide-in 0.15s ease-out;
+  }
+
+  @keyframes slide-in {
+    from {
+      transform: translateY(-16px);
+      opacity: 0;
+    }
+  }
+
+  .to-top {
+    position: fixed;
+    right: 32px;
+    bottom: calc(var(--clear-of-player, 0px) + 24px + env(safe-area-inset-bottom));
+    z-index: 6;
+    display: grid;
+    place-items: center;
+    width: 48px;
+    height: 48px;
+    padding: 0;
+    border-radius: 999px;
+    box-shadow: 0 2px 10px rgb(0 0 0 / 0.4);
   }
 
   .sort {

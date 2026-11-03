@@ -12,7 +12,7 @@ use std::collections::{HashMap, VecDeque};
 use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Mutex, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
 use axum::body::Body;
@@ -32,9 +32,12 @@ use tower_http::services::ServeFile;
 
 use crate::auth::{go_refusal, new_token, AdminUser, CurrentSession, Device};
 use crate::error::{ApiError, ApiResult};
+use crate::go_announce::{self, GO_DISCOVERABLE, SERVER_NAME};
+use crate::go_app;
 use crate::go_upnp;
 use crate::security::{self, TRUSTED_PROXIES};
 use crate::state::AppState;
+use crate::tls::{self, ENCRYPTION};
 use crate::two_step::{self, ADMIN_TWO_STEP};
 use crate::{api, settings, web};
 
@@ -44,6 +47,13 @@ pub const GO_ENABLED: &str = "go_enabled";
 pub const GO_ALLOW_REMOTE: &str = "go_allow_remote";
 pub const GO_HTTPS_HOSTNAME: &str = "go_https_hostname";
 pub const GO_UPNP: &str = "go_upnp";
+/// What the app does with kept songs at sign-out: "delete" or "keep".
+const GO_SIGN_OUT_SONGS: &str = "go_sign_out_songs";
+/// What it does after too long away from the server: "lock", "delete" or "off".
+const GO_AWAY_ACTION: &str = "go_away_action";
+const GO_AWAY_DAYS: &str = "go_away_days";
+const DEFAULT_AWAY_DAYS: i64 = 30;
+const MAX_AWAY_DAYS: i64 = 3650;
 /// The default GO address.
 pub const DEFAULT_LISTEN: SocketAddr =
     SocketAddr::new(IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED), 8067);
@@ -65,6 +75,10 @@ pub struct GoState {
     enabled: AtomicBool,
     allow_remote: AtomicBool,
     upnp: Mutex<Option<go_upnp::Mapping>>,
+    /// Telling phones on the network about GO, while it's on.
+    announcer: Mutex<Option<go_announce::Announcer>>,
+    /// Shared with the main port's listener.
+    pub encryption: Arc<tls::Encryption>,
     /// Mirrors the `trusted_proxies` setting.
     proxies: RwLock<Vec<IpNet>>,
     /// Stops the running listener.
@@ -90,6 +104,10 @@ struct Grant {
     downloads: bool,
     /// Play an MP3 at this bit rate instead of the original.
     convert_kbps: Option<u32>,
+    /// That bit rate is an average.
+    vbr: bool,
+    /// A copy to keep, not listening: doesn't count as a stream.
+    offline: bool,
     expires: Instant,
 }
 
@@ -114,6 +132,8 @@ impl GoState {
             enabled: AtomicBool::new(false),
             allow_remote: AtomicBool::new(false),
             upnp: Mutex::default(),
+            announcer: Mutex::default(),
+            encryption: Arc::default(),
             proxies: RwLock::default(),
             running: Mutex::default(),
             error: Mutex::default(),
@@ -176,6 +196,8 @@ pub async fn apply(state: &AppState) -> anyhow::Result<()> {
     } else {
         stop(state);
     }
+    apply_encryption(state).await?;
+    announce(state, on).await?;
     let can_map = on && state.go.running.lock().is_ok_and(|r| r.is_some()) && allow_remote && upnp;
     if let Ok(mut slot) = state.go.upnp.lock() {
         if let Some(current) = slot.as_ref() {
@@ -187,6 +209,65 @@ pub async fn apply(state: &AppState) -> anyhow::Result<()> {
         }
         if can_map && slot.is_none() && go_upnp::valid_hostname(&hostname) {
             *slot = Some(go_upnp::start(hostname, state.shutdown.subscribe()));
+        }
+    }
+    Ok(())
+}
+
+/// Offers encryption or not, to match the setting. Takes effect for each new
+/// connection, on both ports, so nothing has to restart.
+pub async fn apply_encryption(state: &AppState) -> anyhow::Result<()> {
+    let encryption = &state.go.encryption;
+    if !settings::flag(&state.store, ENCRYPTION, true).await? {
+        encryption.set(None);
+    } else if !encryption.is_on() {
+        let dir = state
+            .art_dir
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."))
+            .join("tls");
+        match tls::load_or_make(&dir) {
+            Ok(identity) => encryption.set(Some(identity)),
+            // Without it everything still works as it did, unencrypted.
+            Err(e) => tracing::error!(error = %e, "couldn't set up encrypted connections"),
+        }
+    }
+    Ok(())
+}
+
+/// Starts, stops or renews the announcement to match the settings.
+async fn announce(state: &AppState, on: bool) -> anyhow::Result<()> {
+    let go = &state.go;
+    let wanted = on
+        && go.running.lock().is_ok_and(|r| r.is_some())
+        && settings::flag(&state.store, GO_DISCOVERABLE, true).await?;
+    let name = go_announce::server_name(&state.store).await?;
+    let fingerprint = go.encryption.fingerprint();
+    let stale = go
+        .announcer
+        .lock()
+        .ok()
+        .and_then(|mut slot| match slot.as_ref() {
+            Some(current)
+                if !wanted || current.name != name || current.fingerprint != fingerprint =>
+            {
+                slot.take()
+            }
+            _ => None,
+        });
+    if let Some(old) = stale {
+        old.stop();
+    }
+    let missing = go.announcer.lock().is_ok_and(|slot| slot.is_none());
+    if wanted && missing {
+        match go_announce::Announcer::start(&state.store, go.listen.port(), fingerprint).await {
+            Ok(announcer) => {
+                if let Ok(mut slot) = go.announcer.lock() {
+                    *slot = Some(announcer);
+                }
+            }
+            // GO still works when typed in; finding it is the only thing lost.
+            Err(e) => tracing::warn!(error = %e, "couldn't announce DJINN GO on the network"),
         }
     }
     Ok(())
@@ -209,6 +290,15 @@ async fn start(state: &AppState) {
     };
     let (stop_tx, mut stop_rx) = watch::channel(false);
     let mut shutdown = state.shutdown.subscribe();
+    let shutting_down = state.shutdown.subscribe();
+    let closing = state.clone();
+    let listener = match tls::listen(listener, Arc::clone(&go.encryption)) {
+        Ok(listener) => listener,
+        Err(e) => {
+            tracing::error!(error = %e, "DJINN GO couldn't start");
+            return;
+        }
+    };
     let app = router(state.clone()).into_make_service_with_connect_info::<SocketAddr>();
     tokio::spawn(async move {
         let stopped = async move {
@@ -222,6 +312,12 @@ async fn start(state: &AppState) {
             .await
         {
             tracing::error!(error = %e, "DJINN GO stopped");
+        }
+        if *shutting_down.borrow() {
+            let announcer = closing.go.announcer.lock().ok().and_then(|mut a| a.take());
+            if let Some(announcer) = announcer {
+                announcer.stop();
+            }
         }
     });
     if let Ok(mut running) = go.running.lock() {
@@ -246,6 +342,7 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .nest("/api", api::router())
         .route("/go/stream/{token}", get(stream))
+        .route(go_app::APK_PATH, get(go_app::download))
         .merge(crate::subsonic::router())
         .fallback(web::go_handler)
         .layer(middleware::from_fn_with_state(state.clone(), guard))
@@ -260,7 +357,11 @@ pub fn api_router() -> Router<AppState> {
         .route("/go/settings", put(save_settings))
         .route("/go/sign-ins", get(sign_ins))
         .route("/go/play/{id}", get(play))
+        .route("/go/offline/{id}", get(offline_link))
         .route("/go/address", get(address))
+        .route("/go/hello", get(go_announce::hello))
+        .route("/go/app", get(go_app::latest))
+        .route("/go/keep-rules", get(keep_rules))
 }
 
 /// Which API routes GO answers, and who for.
@@ -277,6 +378,8 @@ enum Access {
 /// `*` matches one path segment, a trailing `**` any rest.
 const ROUTES: &[(Method, &str, Access)] = &[
     (Method::GET, "/api/health", Access::Public),
+    (Method::GET, "/api/go/hello", Access::Public),
+    (Method::GET, "/api/go/app", Access::Public),
     (Method::GET, "/api/auth/mode", Access::Public),
     (Method::POST, "/api/auth/login", Access::Public),
     (Method::POST, "/api/auth/two-step", Access::Public),
@@ -313,8 +416,12 @@ const ROUTES: &[(Method, &str, Access)] = &[
     (Method::GET, "/api/genres", Access::Listener),
     (Method::GET, "/api/genres/*", Access::Listener),
     (Method::GET, "/api/go/play/*", Access::Listener),
+    (Method::GET, "/api/go/offline/*", Access::Listener),
+    (Method::POST, "/api/go/offline/versions", Access::Listener),
+    (Method::GET, "/api/go/offline-suggested", Access::Listener),
     (Method::GET, "/api/go/home", Access::Listener),
     (Method::GET, "/api/go/address", Access::Setup),
+    (Method::GET, "/api/go/keep-rules", Access::Listener),
     (Method::GET, "/api/go/likes", Access::Listener),
     (Method::GET, "/api/go/likes/ids", Access::Listener),
     (Method::PUT, "/api/go/likes/*/*", Access::Listener),
@@ -565,6 +672,8 @@ async fn play(
                 max_streams: permissions.max_streams,
                 downloads: permissions.downloads,
                 convert_kbps: convert_kbps.filter(|_| convert),
+                vbr: false,
+                offline: false,
                 expires: now + GRANT_LIFE,
             },
         );
@@ -577,6 +686,118 @@ async fn play(
         gain,
         converted: convert,
         can_convert: convert_kbps.is_some(),
+    }))
+}
+
+#[derive(Deserialize)]
+struct OfflineQuery {
+    /// An MP3 at about this bit rate for lossless songs; the original without.
+    kbps: Option<u32>,
+    /// `kbps` is an average, not a constant.
+    #[serde(default)]
+    vbr: bool,
+}
+
+#[derive(Serialize)]
+struct OfflineLink {
+    url: String,
+    /// What the file at `url` will be.
+    mime: &'static str,
+    gain: f32,
+    /// `url` is an MP3 made from the original.
+    converted: bool,
+    /// Asked to convert, but this account can't: `url` is the original.
+    convert_refused: bool,
+    /// Changes when the file does, so an old copy can be replaced.
+    version: String,
+}
+
+/// Whether converting a song saves anything: compressed formats stay as
+/// they are.
+fn lossless(path: &std::path::Path) -> bool {
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    ["flac", "wav", "aif", "aiff"]
+        .iter()
+        .any(|l| ext.eq_ignore_ascii_case(l))
+}
+
+/// A link to fetch a copy of a song to keep on a device (the app's downloads
+/// and smart cache). Needs the role's downloads permission, and neither counts
+/// as a stream nor shows as listening. Only on the GO port.
+async fn offline_link(
+    me: CurrentSession,
+    State(state): State<AppState>,
+    device: Device,
+    Path(id): Path<i64>,
+    Query(query): Query<OfflineQuery>,
+) -> ApiResult<Json<OfflineLink>> {
+    if !device.go {
+        return Err(ApiError::not_found());
+    }
+    let permissions = state.store.permissions(&me.user).await?;
+    if !permissions.downloads {
+        return Err(ApiError::forbidden());
+    }
+    let track = state
+        .store
+        .track(id)
+        .await?
+        .ok_or_else(ApiError::not_found)?;
+    let path = PathBuf::from(
+        state
+            .store
+            .track_path(id)
+            .await?
+            .ok_or_else(ApiError::not_found)?,
+    );
+    let version = state
+        .store
+        .track_versions(&[id])
+        .await?
+        .pop()
+        .map(|v| v.version)
+        .ok_or_else(ApiError::not_found)?;
+    let wanted = query.kbps.filter(|_| lossless(&path));
+    let allowed = crate::convert::available(&state, &me.user).await?.is_some();
+    let kbps = wanted.filter(|_| allowed).map(crate::convert::snap);
+    let replay_gain = state.jukebox.lock().await.replay_gain();
+    let gain = match state.store.gain_info(id).await? {
+        Some(info) => replay_gain.linear(&info),
+        None => 1.0,
+    };
+    let mime = if kbps.is_some() {
+        "audio/mpeg"
+    } else {
+        mime_for(&path)
+    };
+    let token = new_token()?;
+    let now = Instant::now();
+    if let Ok(mut grants) = state.go.grants.lock() {
+        grants.retain(|_, g| g.expires > now);
+        grants.insert(
+            token.clone(),
+            Grant {
+                user_id: me.user.id,
+                username: me.user.name().to_owned(),
+                session_id: me.session_id,
+                title: track.title,
+                path,
+                max_streams: 0,
+                downloads: true,
+                convert_kbps: kbps,
+                vbr: query.vbr,
+                offline: true,
+                expires: now + GRANT_LIFE,
+            },
+        );
+    }
+    Ok(Json(OfflineLink {
+        url: format!("/go/stream/{token}"),
+        mime,
+        gain,
+        converted: kbps.is_some(),
+        convert_refused: wanted.is_some() && !allowed,
+        version,
     }))
 }
 
@@ -610,10 +831,12 @@ async fn stream(
     }
     // Downloads are always the original file.
     let path = match grant.convert_kbps.filter(|_| !query.download) {
-        Some(kbps) => match crate::convert::converted(&state, &grant.path, kbps).await {
-            Ok(path) => path,
-            Err(e) => return e.into_response(),
-        },
+        Some(kbps) => {
+            match crate::convert::converted_as(&state, &grant.path, kbps, grant.vbr).await {
+                Ok(path) => path,
+                Err(e) => return e.into_response(),
+            }
+        }
         None => grant.path.clone(),
     };
     send_song(
@@ -624,6 +847,7 @@ async fn stream(
             session_id: grant.session_id,
             title: grant.title,
             max_streams: grant.max_streams,
+            counts: !grant.offline,
         },
         &path,
         query.download,
@@ -640,6 +864,8 @@ pub struct Listening {
     pub session_id: i64,
     pub title: String,
     pub max_streams: i64,
+    /// Someone listening, not a copy being kept.
+    pub counts: bool,
 }
 
 /// Sends a song's file as it is (with ranges, for seeking), unless the
@@ -653,7 +879,7 @@ pub async fn send_song(
     request: Request,
 ) -> Response {
     let now = Instant::now();
-    if let Ok(mut playing) = state.go.playing.lock() {
+    if let Some(mut playing) = state.go.playing.lock().ok().filter(|_| who.counts) {
         playing.retain(|_, p| now.duration_since(p.at) < ACTIVE_FOR);
         let elsewhere = playing
             .iter()
@@ -774,6 +1000,18 @@ struct Listener {
 
 #[derive(Serialize)]
 struct Status {
+    /// The Android app this server carries, and how to get it.
+    android_app: Option<AndroidApp>,
+    /// Encrypted connections are offered.
+    encryption: bool,
+    /// For comparing with what the app shows.
+    security_code: Option<String>,
+    keep: KeepRules,
+    /// What the admin named this server; empty means `default_name`.
+    server_name: String,
+    default_name: String,
+    /// Phones on the network can find it.
+    discoverable: bool,
     enabled: bool,
     allow_remote: bool,
     https_hostname: String,
@@ -829,6 +1067,20 @@ async fn status_of(state: &AppState) -> anyhow::Result<Status> {
     let mbps = bytes as f64 * 8.0 / SPEED_WINDOW.as_secs_f64() / 1_000_000.0;
     let port = go.listen.port();
     Ok(Status {
+        android_app: android_app(state),
+        encryption: settings::flag(&state.store, ENCRYPTION, true).await?,
+        security_code: go
+            .encryption
+            .fingerprint()
+            .map(|fingerprint| tls::security_code(&fingerprint)),
+        keep: keep_rules_of(&state.store).await?,
+        server_name: state
+            .store
+            .get_setting(SERVER_NAME)
+            .await?
+            .unwrap_or_default(),
+        default_name: go_announce::computer_name(),
+        discoverable: settings::flag(&state.store, GO_DISCOVERABLE, true).await?,
         enabled: go.enabled(),
         allow_remote: go.allow_remote(),
         https_hostname: state
@@ -888,6 +1140,47 @@ struct Address {
     others: Vec<String>,
 }
 
+fn qr_svg(text: &str) -> anyhow::Result<String> {
+    Ok(qrcode::QrCode::new(text.as_bytes())?
+        .render::<qrcode::render::svg::Color>()
+        .min_dimensions(240, 240)
+        .dark_color(qrcode::render::svg::Color("#14111f"))
+        .light_color(qrcode::render::svg::Color("#ffffff"))
+        .build())
+}
+
+#[derive(Serialize)]
+struct AndroidApp {
+    #[serde(flatten)]
+    release: go_app::AppRelease,
+    url: String,
+    qr_svg: String,
+}
+
+/// For Admin > GO: the app, and a QR code for a phone's camera to fetch it.
+fn android_app(state: &AppState) -> Option<AndroidApp> {
+    let release = go_app::release()?;
+    let base = crate::banner::urls(state.go.listen).into_iter().next()?;
+    let url = format!("{base}{}", go_app::APK_PATH);
+    let qr_svg = qr_svg(&url).ok()?;
+    Some(AndroidApp {
+        release,
+        url,
+        qr_svg,
+    })
+}
+
+/// What a QR code says: the address, and the certificate to expect. A phone's
+/// camera opens the address and browsers keep what's after the # to themselves;
+/// the app's scanner remembers the certificate, which makes this the one way
+/// of connecting that someone on the network can't get in the middle of.
+fn qr_text(url: &str, fingerprint: Option<String>) -> String {
+    match fingerprint {
+        Some(fingerprint) => format!("{url}#fp={fingerprint}"),
+        None => url.to_owned(),
+    }
+}
+
 /// GO's address and a QR code for it, for opening GO on a phone.
 async fn address(
     _: CurrentSession,
@@ -912,13 +1205,7 @@ async fn address(
         urls.insert(0, here.to_owned());
     }
     let url = urls.first().cloned().ok_or_else(ApiError::not_found)?;
-    let qr_svg = qrcode::QrCode::new(url.as_bytes())
-        .map_err(anyhow::Error::from)?
-        .render::<qrcode::render::svg::Color>()
-        .min_dimensions(240, 240)
-        .dark_color(qrcode::render::svg::Color("#14111f"))
-        .light_color(qrcode::render::svg::Color("#ffffff"))
-        .build();
+    let qr_svg = qr_svg(&qr_text(&url, state.go.encryption.fingerprint()))?;
     Ok(Json(Address {
         url,
         qr_svg,
@@ -946,6 +1233,14 @@ async fn status(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json<S
 
 #[derive(Deserialize)]
 struct GoSettings {
+    #[serde(default = "yes")]
+    encryption: bool,
+    #[serde(default)]
+    keep: KeepRules,
+    #[serde(default)]
+    server_name: String,
+    #[serde(default = "yes")]
+    discoverable: bool,
     enabled: bool,
     #[serde(default)]
     allow_remote: bool,
@@ -959,11 +1254,73 @@ struct GoSettings {
     admin_two_step: bool,
 }
 
+fn yes() -> bool {
+    true
+}
+
+/// The admin's rules for songs kept on devices. The app gets them at each
+/// contact and follows them while it's away, so they apply from then on.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+struct KeepRules {
+    sign_out: String,
+    away: String,
+    away_days: i64,
+}
+
+impl Default for KeepRules {
+    fn default() -> Self {
+        Self {
+            sign_out: "delete".to_owned(),
+            away: "lock".to_owned(),
+            away_days: DEFAULT_AWAY_DAYS,
+        }
+    }
+}
+
+impl KeepRules {
+    fn check(&self) -> Result<(), &'static str> {
+        if !matches!(self.sign_out.as_str(), "delete" | "keep") {
+            return Err("at sign-out, kept songs are deleted or kept");
+        }
+        if !matches!(self.away.as_str(), "lock" | "delete" | "off") {
+            return Err("after too long away, kept songs are locked, deleted or left alone");
+        }
+        if !(1..=MAX_AWAY_DAYS).contains(&self.away_days) {
+            return Err("the time away must be from 1 to 3650 days");
+        }
+        Ok(())
+    }
+}
+
+async fn keep_rules_of(store: &djinn_store::Store) -> anyhow::Result<KeepRules> {
+    let defaults = KeepRules::default();
+    Ok(KeepRules {
+        sign_out: store
+            .get_setting(GO_SIGN_OUT_SONGS)
+            .await?
+            .unwrap_or(defaults.sign_out),
+        away: store
+            .get_setting(GO_AWAY_ACTION)
+            .await?
+            .unwrap_or(defaults.away),
+        away_days: settings::number(store, GO_AWAY_DAYS, defaults.away_days).await?,
+    })
+}
+
+async fn keep_rules(
+    _: CurrentSession,
+    State(state): State<AppState>,
+) -> ApiResult<Json<KeepRules>> {
+    Ok(Json(keep_rules_of(&state.store).await?))
+}
+
 async fn save_settings(
     AdminUser(admin): AdminUser,
     State(state): State<AppState>,
     Json(body): Json<GoSettings>,
 ) -> ApiResult<Json<Status>> {
+    let server_name = go_announce::clean_name(&body.server_name).map_err(ApiError::bad_request)?;
+    body.keep.check().map_err(ApiError::bad_request)?;
     let mut proxies = body.trusted_proxies.trim().to_owned();
     let parsed = security::parse_proxies(&proxies);
     let entries = proxies
@@ -1000,6 +1357,21 @@ async fn save_settings(
         }
         proxies.push_str("127.0.0.1");
     }
+    settings::set_flag(&state.store, ENCRYPTION, body.encryption).await?;
+    state.store.set_setting(SERVER_NAME, &server_name).await?;
+    state
+        .store
+        .set_setting(GO_SIGN_OUT_SONGS, &body.keep.sign_out)
+        .await?;
+    state
+        .store
+        .set_setting(GO_AWAY_ACTION, &body.keep.away)
+        .await?;
+    state
+        .store
+        .set_setting(GO_AWAY_DAYS, &body.keep.away_days.to_string())
+        .await?;
+    settings::set_flag(&state.store, GO_DISCOVERABLE, body.discoverable).await?;
     settings::set_flag(&state.store, GO_ENABLED, body.enabled).await?;
     settings::set_flag(&state.store, GO_ALLOW_REMOTE, body.allow_remote).await?;
     state
@@ -1041,6 +1413,153 @@ async fn sign_ins(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn the_app_can_be_fetched_before_signing_in() {
+        let state = AppState::for_tests().await;
+        state.go.enable_for_tests();
+        let (status, body, _) = go(&state, Method::GET, "/api/go/app", None, None).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let (status, _, _) = go(&state, Method::GET, go_app::APK_PATH, None, None).await;
+        if go_app::release().is_some() {
+            assert_eq!(status, StatusCode::OK);
+        } else {
+            assert_eq!(body, "null");
+            assert_eq!(status, StatusCode::NOT_FOUND);
+        }
+    }
+
+    #[test]
+    fn qr_codes_carry_the_certificate_when_there_is_one() {
+        assert_eq!(
+            qr_text("http://10.0.0.2:8067", None),
+            "http://10.0.0.2:8067"
+        );
+        assert_eq!(
+            qr_text("http://10.0.0.2:8067", Some("abc".to_owned())),
+            "http://10.0.0.2:8067#fp=abc"
+        );
+    }
+
+    #[tokio::test]
+    async fn encryption_is_on_unless_turned_off() {
+        let dir = std::env::temp_dir().join(format!("djinn-go-tls-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let state = AppState::for_tests_in(&dir).await;
+        apply_encryption(&state).await.unwrap();
+        let fingerprint = state.go.encryption.fingerprint();
+        assert!(fingerprint.is_some());
+        assert!(dir.join("tls").join("djinn.key").exists());
+
+        state.go.enable_for_tests();
+        let (_, body, _) = go(&state, Method::GET, "/api/go/hello", None, None).await;
+        let hello: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(hello["encrypted"], true);
+
+        settings::set_flag(&state.store, ENCRYPTION, false)
+            .await
+            .unwrap();
+        apply_encryption(&state).await.unwrap();
+        assert!(!state.go.encryption.is_on());
+        let (_, body, _) = go(&state, Method::GET, "/api/go/hello", None, None).await;
+        let hello: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(hello["encrypted"], false);
+
+        settings::set_flag(&state.store, ENCRYPTION, true)
+            .await
+            .unwrap();
+        apply_encryption(&state).await.unwrap();
+        assert_eq!(
+            state.go.encryption.fingerprint(),
+            fingerprint,
+            "the same one"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn keep_rules_are_checked() {
+        let good = KeepRules::default();
+        assert_eq!(good.check(), Ok(()));
+        assert_eq!(
+            good.away, "lock",
+            "locked, not deleted, unless the admin says"
+        );
+        for rules in [
+            KeepRules {
+                sign_out: "shred".to_owned(),
+                ..good.clone()
+            },
+            KeepRules {
+                away: "explode".to_owned(),
+                ..good.clone()
+            },
+            KeepRules {
+                away_days: 0,
+                ..good.clone()
+            },
+            KeepRules {
+                away_days: MAX_AWAY_DAYS + 1,
+                ..good.clone()
+            },
+        ] {
+            assert!(rules.check().is_err(), "{rules:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn keep_rules_read_what_was_saved() {
+        let state = AppState::for_tests().await;
+        assert_eq!(
+            keep_rules_of(&state.store).await.unwrap(),
+            KeepRules::default()
+        );
+        state
+            .store
+            .set_setting(GO_AWAY_ACTION, "off")
+            .await
+            .unwrap();
+        state.store.set_setting(GO_AWAY_DAYS, "90").await.unwrap();
+        state
+            .store
+            .set_setting(GO_SIGN_OUT_SONGS, "keep")
+            .await
+            .unwrap();
+        assert_eq!(
+            keep_rules_of(&state.store).await.unwrap(),
+            KeepRules {
+                sign_out: "keep".to_owned(),
+                away: "off".to_owned(),
+                away_days: 90,
+            }
+        );
+        assert_eq!(
+            access(&Method::GET, "/api/go/keep-rules"),
+            Some(Access::Listener)
+        );
+    }
+
+    #[tokio::test]
+    async fn a_server_says_who_it_is_before_sign_in() {
+        let state = AppState::for_tests().await;
+        state.go.enable_for_tests();
+        let (status, body, _) = go(&state, Method::GET, "/api/go/hello", None, None).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let first: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(first["name"], go_announce::computer_name());
+        assert_eq!(first["id"].as_str().map(str::len), Some(16));
+
+        state
+            .store
+            .set_setting(SERVER_NAME, "Dorm 4")
+            .await
+            .unwrap();
+        let (_, body, _) = go(&state, Method::GET, "/api/go/hello", None, None).await;
+        let second: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(second["name"], "Dorm 4");
+        assert_eq!(second["id"], first["id"], "the id stays");
+    }
 
     #[test]
     fn route_patterns() {
@@ -1390,6 +1909,238 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+        // An app finishing two-step gets a token instead of a cookie.
+        let (_, text, _) = go(
+            &state,
+            Method::POST,
+            "/api/auth/login",
+            Some(r#"{"username":"sam","password":"correct horse","device_token":true}"#),
+            None,
+        )
+        .await;
+        let ticket = field(&text, "ticket").as_str().unwrap().to_owned();
+        let app = format!(
+            r#"{{"ticket":"{ticket}","code":"{}","device_token":true}}"#,
+            code(1)
+        );
+        let (status, text, cookie) =
+            go(&state, Method::POST, "/api/auth/two-step", Some(&app), None).await;
+        assert_eq!((status, cookie), (StatusCode::OK, None));
+        assert!(field(&text, "token").is_string());
+    }
+
+    #[tokio::test]
+    async fn apps_sign_in_with_a_token() {
+        let state = AppState::for_tests().await;
+        state.go.enabled.store(true, Ordering::Relaxed);
+        let listener = state.store.role(djinn_store::LISTENER_ROLE).await.unwrap();
+        account(&state, "sam", listener.unwrap().id).await;
+        let call = |method: Method, path: &str, token: Option<&str>, body: Option<String>| {
+            let mut request = Request::builder().method(method).uri(path);
+            if let Some(token) = token {
+                request = request.header(header::AUTHORIZATION, format!("Bearer {token}"));
+            }
+            if body.is_some() {
+                request = request.header(header::CONTENT_TYPE, "application/json");
+            }
+            let mut request = request.body(Body::from(body.unwrap_or_default())).unwrap();
+            request
+                .extensions_mut()
+                .insert(axum::extract::ConnectInfo(SocketAddr::from((
+                    [192, 168, 1, 8],
+                    50000,
+                ))));
+            router(state.clone()).oneshot(request)
+        };
+        let body = r#"{"username":"sam","password":"correct horse","device_token":true}"#;
+        let res = call(Method::POST, "/api/auth/login", None, Some(body.to_owned()))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        assert!(!res.headers().contains_key(header::SET_COOKIE), "no cookie");
+        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let text = String::from_utf8(bytes.to_vec()).unwrap();
+        let token = field(&text, "token").as_str().unwrap().to_owned();
+        assert_eq!(field(&text, "me")["username"], "sam");
+
+        let res = call(Method::GET, "/api/tracks", Some(&token), None).await;
+        assert_eq!(res.unwrap().status(), StatusCode::OK);
+        let res = call(Method::GET, "/api/tracks", Some("not-a-token"), None).await;
+        assert_eq!(res.unwrap().status(), StatusCode::UNAUTHORIZED);
+        let res = call(Method::GET, "/api/tracks", None, None).await;
+        assert_eq!(res.unwrap().status(), StatusCode::UNAUTHORIZED);
+
+        // It's a session like any other, on the list of signed-in devices.
+        let res = call(Method::GET, "/api/me/sessions", Some(&token), None).await;
+        assert_eq!(res.unwrap().status(), StatusCode::OK);
+
+        // Away from GO's port a token is nothing, even if it's real.
+        let (mut parts, _) = Request::builder()
+            .header(header::AUTHORIZATION, format!("Bearer {token}"))
+            .body(())
+            .unwrap()
+            .into_parts();
+        assert!(CurrentSession::from_request_parts(&mut parts, &state)
+            .await
+            .is_err());
+
+        // Signing out ends it.
+        let res = call(Method::POST, "/api/auth/logout", Some(&token), None).await;
+        assert_eq!(res.unwrap().status(), StatusCode::NO_CONTENT);
+        let res = call(Method::GET, "/api/tracks", Some(&token), None).await;
+        assert_eq!(res.unwrap().status(), StatusCode::UNAUTHORIZED);
+
+        // The party's sign-in ignores the request and sets a cookie.
+        let plain = Request::builder()
+            .method(Method::POST)
+            .uri("/auth/login")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(body))
+            .unwrap();
+        let res = crate::api::router()
+            .with_state(state.clone())
+            .oneshot(plain)
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        assert!(res.headers().contains_key(header::SET_COOKIE));
+    }
+
+    #[tokio::test]
+    async fn offline_copies_need_downloads_and_are_not_streams() {
+        let state = AppState::for_tests().await;
+        state.go.enabled.store(true, Ordering::Relaxed);
+        state.go.allow_remote.store(true, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("djinn-offline-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("song.mp3");
+        std::fs::write(&file, b"not really audio, but served as it is").unwrap();
+        state
+            .store
+            .save_scanned(&[djinn_store::ScannedTrack {
+                path: file.to_string_lossy().into_owned(),
+                size: 37,
+                mtime: 5,
+                title: "Song".to_owned(),
+                ..Default::default()
+            }])
+            .await
+            .unwrap();
+        let id = state
+            .store
+            .tracks_page(djinn_store::TrackSort::Title, 0, 1)
+            .await
+            .unwrap()
+            .items[0]
+            .id;
+        let without = djinn_store::Permissions {
+            go: true,
+            go_remote: true,
+            ..djinn_store::Permissions::default()
+        };
+        let with = djinn_store::Permissions {
+            downloads: true,
+            ..without.clone()
+        };
+        let plain = state.store.create_role("Plain", &without).await.unwrap();
+        let keeper = state.store.create_role("Keeper", &with).await.unwrap();
+        account(&state, "pat", plain.id).await;
+        account(&state, "kim", keeper.id).await;
+        let sign_in = |name: &'static str| {
+            let state = state.clone();
+            async move {
+                let (_, _, cookie) = go(
+                    &state,
+                    Method::POST,
+                    "/api/auth/login",
+                    Some(&login(name)),
+                    None,
+                )
+                .await;
+                cookie.unwrap()
+            }
+        };
+        let (pat, kim) = (sign_in("pat").await, sign_in("kim").await);
+        let path = format!("/api/go/offline/{id}");
+
+        let (status, _, _) = go(&state, Method::GET, &path, None, Some(&pat)).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "no downloads permission");
+
+        let (status, text, _) = go(&state, Method::GET, &path, None, Some(&kim)).await;
+        assert_eq!(status, StatusCode::OK, "{text}");
+        assert_eq!(field(&text, "version"), "37-5");
+        assert_eq!(field(&text, "converted"), false);
+        let url = field(&text, "url").as_str().unwrap().to_owned();
+        let (status, _, _) = go(&state, Method::GET, &url, None, None).await;
+        assert_eq!(status, StatusCode::OK);
+        let listening = state.go.playing.lock().unwrap().len();
+        assert_eq!(listening, 0, "keeping a copy isn't listening");
+
+        // Compressed songs stay as they are, whatever was asked.
+        let (_, text, _) = go(
+            &state,
+            Method::GET,
+            &format!("{path}?kbps=128&vbr=true"),
+            None,
+            Some(&kim),
+        )
+        .await;
+        assert_eq!(field(&text, "converted"), false);
+        assert_eq!(field(&text, "convert_refused"), false);
+
+        let versions = format!(r#"{{"ids":[{id},999999]}}"#);
+        let (status, text, _) = go(
+            &state,
+            Method::POST,
+            "/api/go/offline/versions",
+            Some(&versions),
+            Some(&kim),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{text}");
+        let found: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(
+            found.as_array().unwrap().len(),
+            1,
+            "removed songs are left out"
+        );
+        assert_eq!(found[0]["version"], "37-5");
+        assert_eq!(found[0]["size"], 37);
+
+        let (status, _, _) = go(
+            &state,
+            Method::GET,
+            "/api/go/offline-suggested",
+            None,
+            Some(&pat),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let report = format!(r#"{{"track_id":{id},"ms_played":90000,"at":1000000}}"#);
+        let (status, _, _) = go(
+            &state,
+            Method::POST,
+            "/api/go/plays",
+            Some(&report),
+            Some(&kim),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        let (status, text, _) = go(
+            &state,
+            Method::GET,
+            "/api/go/offline-suggested",
+            None,
+            Some(&kim),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{text}");
+        let found: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(found[0]["id"], id);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]
@@ -1453,6 +2204,11 @@ mod tests {
         assert_eq!(status, StatusCode::NO_CONTENT);
         let (_, text, _) = call(Method::GET, "/api/go/prefs".into(), None).await;
         assert_eq!(field(&text, "tap"), "queue");
+        let end = r#"{"tap":"end"}"#.to_owned();
+        let (status, _, _) = call(Method::PUT, "/api/go/prefs".into(), Some(end)).await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        let (_, text, _) = call(Method::GET, "/api/go/prefs".into(), None).await;
+        assert_eq!(field(&text, "tap"), "end");
         let odd = r#"{"tap":"shout"}"#.to_owned();
         let (status, _, _) = call(Method::PUT, "/api/go/prefs".into(), Some(odd)).await;
         assert!(status.is_client_error());
@@ -1487,6 +2243,21 @@ mod tests {
 
         // Radio without sound analysis: the seed, then same artist and genre,
         // leaving out what was just heard.
+        // Asking for more leaves out what's already lined up.
+        let (status, text, _) = call(
+            Method::GET,
+            format!("/api/go/radio/{0}?exclude={1},{2}", ids[3], ids[0], ids[2]),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{text}");
+        let more: serde_json::Value = serde_json::from_str(&text).unwrap();
+        for song in more.as_array().unwrap() {
+            assert!(
+                song["id"] != ids[0] && song["id"] != ids[2],
+                "already lined up"
+            );
+        }
         let (status, text, _) = call(Method::GET, format!("/api/go/radio/{}", ids[3]), None).await;
         assert_eq!(status, StatusCode::OK, "{text}");
         let radio: Vec<i64> = serde_json::from_str::<Vec<serde_json::Value>>(&text)

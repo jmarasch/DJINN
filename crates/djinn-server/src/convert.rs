@@ -103,6 +103,16 @@ fn cache_dir(state: &AppState) -> PathBuf {
 /// The cache key includes the file's size and change time, so a changed
 /// file is converted again.
 pub async fn converted(state: &AppState, path: &Path, kbps: u32) -> ApiResult<PathBuf> {
+    converted_as(state, path, kbps, false).await
+}
+
+/// `converted`, with `vbr` making `kbps` an average instead of a constant.
+pub async fn converted_as(
+    state: &AppState,
+    path: &Path,
+    kbps: u32,
+    vbr: bool,
+) -> ApiResult<PathBuf> {
     let meta = tokio::fs::metadata(path)
         .await
         .map_err(|_| ApiError::not_found())?;
@@ -111,11 +121,13 @@ pub async fn converted(state: &AppState, path: &Path, kbps: u32) -> ApiResult<Pa
         .ok()
         .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
         .map_or(0, |d| d.as_secs());
-    let key: String =
-        md5::Md5::digest(format!("{}|{}|{modified}|{kbps}", path.display(), meta.len()).as_bytes())
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect();
+    let kind = if vbr { "|vbr" } else { "" };
+    let key: String = md5::Md5::digest(
+        format!("{}|{}|{modified}|{kbps}{kind}", path.display(), meta.len()).as_bytes(),
+    )
+    .iter()
+    .map(|b| format!("{b:02x}"))
+    .collect();
     let dir = cache_dir(state);
     let target = dir.join(format!("{key}.mp3"));
     // Someone else converting the same file: wait for them.
@@ -146,7 +158,7 @@ pub async fn converted(state: &AppState, path: &Path, kbps: u32) -> ApiResult<Pa
     let started = std::time::Instant::now();
     let result = tokio::task::spawn_blocking({
         let (input, output) = (path.to_path_buf(), partial.clone());
-        move || djinn_cast::convert::to_mp3(&input, &output, kbps)
+        move || djinn_cast::convert::to_mp3(&input, &output, kbps, vbr)
     })
     .await
     .map_err(anyhow::Error::from)?;
