@@ -97,16 +97,30 @@ struct DailyWriter {
     keep_days: u16,
 }
 
+/// Opens a log file to add to, readable only by this account: sign-ins, names
+/// and addresses go in it, and before there's an admin the setup link too.
+fn open_private(path: &Path) -> io::Result<File> {
+    let mut options = OpenOptions::new();
+    options.create(true).append(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        options.mode(0o600);
+        let file = options.open(path)?;
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+        Ok(file)
+    }
+    #[cfg(not(unix))]
+    options.open(path)
+}
+
 impl DailyWriter {
     fn new(base: PathBuf, keep_days: u16) -> io::Result<Self> {
         let day = Local::now().date_naive();
         if let Some(parent) = base.parent().filter(|p| !p.as_os_str().is_empty()) {
             std::fs::create_dir_all(parent)?;
         }
-        let file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(daily_path(&base, day))?;
+        let file = open_private(&daily_path(&base, day))?;
         Ok(Self {
             base,
             day,
@@ -121,10 +135,7 @@ impl DailyWriter {
 
     fn write_on(&mut self, day: NaiveDate, buf: &[u8]) -> io::Result<usize> {
         if day != self.day {
-            self.file = OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(daily_path(&self.base, day))?;
+            self.file = open_private(&daily_path(&self.base, day))?;
             self.day = day;
             self.prune()?;
         }

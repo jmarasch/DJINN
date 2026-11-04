@@ -9,8 +9,12 @@ artwork DJINN collected. It doesn't hold your music, the AI models (DJINN
 downloads them again when you turn AI back on), or `config.toml`, which
 belongs to the computer.
 
-Keep backups private: they hold your accounts (passwords are stored
-scrambled, not as text).
+Keep backups private. They aren't encrypted, and they hold your accounts
+(passwords are stored scrambled, not as text), two-step secrets, app passwords
+and API keys, which are as good as the real thing to whoever has the file.
+
+Only restore backups you made yourself. A backup replaces every account, so
+restoring someone else's hands them this DJINN.
 
 ## Make a backup
 

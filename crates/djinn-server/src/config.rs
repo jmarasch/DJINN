@@ -177,6 +177,16 @@ fn figment(path: Option<&Path>) -> Figment {
 }
 
 /// Next to the binary on Windows, `~/.config/djinn/config.toml` elsewhere.
+/// The folder DJINN makes for itself on Linux. Only this one is DJINN's to lock
+/// down: a database put somewhere else may share its folder with other things.
+pub fn own_folder() -> Option<PathBuf> {
+    if cfg!(windows) {
+        None
+    } else {
+        Some(dirs::config_dir()?.join("djinn"))
+    }
+}
+
 fn default_path() -> Option<PathBuf> {
     if cfg!(windows) {
         let exe = std::env::current_exe().ok()?;

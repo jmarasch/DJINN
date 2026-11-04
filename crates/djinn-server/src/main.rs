@@ -147,6 +147,8 @@ async fn run() -> anyhow::Result<()> {
         .parent()
         .map_or_else(|| PathBuf::from("art"), |dir| dir.join("art"));
 
+    backup::protect_data(&config.database.path);
+
     // A full reset, or a backup waiting to be restored, happens before the
     // database opens.
     system_api::reset_if_asked(&config.database.path, &art_dir);
