@@ -2,7 +2,10 @@
   import Art from '../../lib/Art.svelte'
   import { duration } from '../../lib/format'
   import Icon from '../../lib/Icon.svelte'
+  import { toast } from '../../lib/state.svelte'
   import {
+    clearAll,
+    clearUpcoming,
     moveInQueue,
     current,
     cycleRepeat,
@@ -21,6 +24,10 @@
   import { ui } from '../ui.svelte'
 
   const song = $derived(current())
+
+  function clear(clearing: () => () => void) {
+    toast('Queue cleared', false, { label: 'Undo', run: clearing() })
+  }
   const upNext = $derived(player.queue.slice(player.index + 1))
 
   // Dragging a song in Up next by its handle: the row follows the finger, and
@@ -122,7 +129,13 @@
     </section>
 
     <section class="queue">
-      <h2>Up next{#if player.radio}{' '}<span class="muted small">(radio)</span>{/if}</h2>
+      <div class="queue-head">
+        <h2>Up next{#if player.radio}{' '}<span class="muted small">(radio)</span>{/if}</h2>
+        {#if upNext.length}
+          <button class="small-button" onclick={() => clear(clearUpcoming)}>Clear upcoming</button>
+          <button class="small-button" onclick={() => clear(clearAll)}>Clear all</button>
+        {/if}
+      </div>
       {#each upNext as track, i (`${track.id}-${player.index + 1 + i}`)}
         <div class="queued" class:dragging={dragging === i} style:transform={dragging === i ? `translateY(${dragY}px)` : null}>
           <button
@@ -260,6 +273,19 @@
   h2 {
     margin: 0 0 8px;
     font-size: 1.1rem;
+  }
+
+  .queue-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+
+  .queue-head h2 {
+    flex: 1;
+    margin: 0;
   }
 
   .queued {

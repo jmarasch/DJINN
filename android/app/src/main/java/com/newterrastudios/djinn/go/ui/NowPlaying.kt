@@ -287,7 +287,17 @@ fun NowPlayingScreen(nav: Nav) {
             }
         }
         if (player.upNext.isNotEmpty()) {
-            item { Heading("Up next") }
+            item {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.weight(1f)) { Heading("Up next") }
+                    TextButton(onClick = { nav.undo = player.clearUpcoming(); nav.message = "Queue cleared" }) {
+                        Text("Clear upcoming")
+                    }
+                    TextButton(onClick = { nav.undo = player.clearAll(); nav.message = "Queue cleared" }) {
+                        Text("Clear all")
+                    }
+                }
+            }
             items(player.upNext, key = { "${it.index}-${it.item.mediaId}" }) { entry ->
                 var dragged by remember { mutableStateOf(0f) }
                 var rowHeight by remember { mutableIntStateOf(1) }

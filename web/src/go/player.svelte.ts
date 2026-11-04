@@ -551,6 +551,57 @@ export function stop() {
   }
 }
 
+/** Takes everything after the song playing out of the queue. Gives back how to undo it. */
+export function clearUpcoming(): () => void {
+  const playing = current()
+  const gone = player.queue.slice(player.index + 1)
+  const before = [...unshuffled]
+  const seed = radioSeed
+  const radio = player.radio
+  player.queue.splice(player.index + 1)
+  if (playing) unshuffled = unshuffled.filter((t) => t.id === playing.id)
+  else unshuffled = []
+  for (const track of gone) {
+    added.delete(track)
+    addedToEnd.delete(track)
+  }
+  // Radio would only fill it up again.
+  radioSeed = null
+  player.radio = false
+  preloaded = null
+  return () => {
+    if (player.index < 0) return
+    player.queue.splice(player.index + 1, 0, ...gone)
+    unshuffled = before
+    radioSeed = seed
+    player.radio = radio
+    preloadNext()
+  }
+}
+
+/** Stops the song playing and empties the queue. Gives back how to undo it. */
+export function clearAll(): () => void {
+  const queue = [...player.queue]
+  const index = player.index
+  const at = decks[active].currentTime
+  const before = [...unshuffled]
+  const seed = radioSeed
+  const radio = player.radio
+  stop()
+  radioSeed = null
+  player.radio = false
+  unshuffled = []
+  return () => {
+    if (player.index >= 0 || index < 0) return
+    player.queue = queue
+    unshuffled = before
+    radioSeed = seed
+    player.radio = radio
+    startAt = at
+    start(index)
+  }
+}
+
 function shuffled<T>(items: T[]): T[] {
   const out = [...items]
   for (let i = out.length - 1; i > 0; i--) {

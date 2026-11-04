@@ -1,6 +1,7 @@
 package com.newterrastudios.djinn.go.ui
 
 import com.newterrastudios.djinn.go.data.AppRelease
+import androidx.compose.material3.TextButton
 import com.newterrastudios.djinn.go.data.AppUpdater
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
@@ -112,6 +113,8 @@ class Nav(
     var keptIds by mutableStateOf<Set<Long>>(emptySet())
     /** Something to say briefly. */
     var message by mutableStateOf<String?>(null)
+    /** Takes back what the message is about, while it shows. */
+    var undo by mutableStateOf<(() -> Unit)?>(null)
     val stack = mutableStateListOf<Screen>()
     var menuFor by mutableStateOf<Track?>(null)
     val liked = mutableStateListOf<Long>()
@@ -231,8 +234,9 @@ fun MainScreen(nav: Nav) {
             LaunchedEffect(nav.message) {
                 // Errors stay until read; other messages clear themselves.
                 if (nav.message != null) {
-                    delay(4000)
+                    delay(if (nav.undo != null) 6000 else 4000)
                     nav.message = null
+                    nav.undo = null
                 }
             }
             (nav.player.error ?: nav.message)?.let { message ->
@@ -243,7 +247,17 @@ fun MainScreen(nav: Nav) {
                         .clickable {
                             nav.player.error = null
                             nav.message = null
+                            nav.undo = null
                         },
+                    action = nav.undo?.let { undo ->
+                        {
+                            TextButton(onClick = {
+                                undo()
+                                nav.message = null
+                                nav.undo = null
+                            }) { Text("Undo") }
+                        }
+                    },
                 ) { Text(message) }
             }
         }

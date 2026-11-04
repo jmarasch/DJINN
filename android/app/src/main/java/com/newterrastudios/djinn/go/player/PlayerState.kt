@@ -330,6 +330,47 @@ class PlayerState(private val api: GoApi) {
         controller?.removeMediaItem(index)
     }
 
+    /** Takes everything after the song playing out of the queue. Gives back how to undo it. */
+    fun clearUpcoming(): () -> Unit {
+        val player = controller ?: return {}
+        val gone = upNext.map { it.item }
+        val seed = radioSeed
+        val ahead = addedAhead
+        // Radio would only fill it up again.
+        radioSeed = null
+        addedAhead = 0
+        player.removeMediaItems(player.currentMediaItemIndex + 1, player.mediaItemCount)
+        return {
+            controller?.takeIf { it.mediaItemCount > 0 }?.let {
+                it.addMediaItems(it.currentMediaItemIndex + 1, gone)
+                radioSeed = seed
+                addedAhead = ahead
+            }
+        }
+    }
+
+    /** Stops the song playing and empties the queue. Gives back how to undo it. */
+    fun clearAll(): () -> Unit {
+        val player = controller ?: return {}
+        val items = (0 until player.mediaItemCount).map { player.getMediaItemAt(it) }
+        val index = player.currentMediaItemIndex
+        val position = player.currentPosition
+        val seed = radioSeed
+        val ahead = addedAhead
+        radioSeed = null
+        addedAhead = 0
+        stop()
+        return {
+            controller?.takeIf { it.mediaItemCount == 0 && items.isNotEmpty() }?.let {
+                it.setMediaItems(items, index, position)
+                it.prepare()
+                it.play()
+                radioSeed = seed
+                addedAhead = ahead
+            }
+        }
+    }
+
     fun toggleShuffle() {
         controller?.let { it.shuffleModeEnabled = !it.shuffleModeEnabled }
     }
