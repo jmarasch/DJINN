@@ -6,9 +6,13 @@
 
 - A song, album or artist whose name begins with exactly what you typed now comes first. Short names like **S&M** could be buried by thousands of other matches and never show up.
 
+### Library
+
+- Years that can't be real, like the 9999 some files carry as a placeholder, now count as unknown. One of them could stretch the year lists by thousands of years. Your files aren't changed.
+
 ### DJINN GO for Android
 
-- **Browse by genre**, and jump through artists, albums and songs with an **A to Z (or year) strip** beside the list.
+- **Browse by genre**, and jump through artists, albums, songs and genres with an **A to Z (or year) strip** beside the list.
 - On Now Playing, **tap the artist or album** to open its page.
 - **Search uses the server's AI** when it's on and allowed for your account, for searches like "music for cooking dinner".
 - The first tab is called **Home** again.

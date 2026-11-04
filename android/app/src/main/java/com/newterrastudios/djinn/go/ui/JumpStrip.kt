@@ -9,7 +9,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -27,13 +29,29 @@ import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.newterrastudios.djinn.go.data.Jump
+import java.text.Normalizer
 
 /** A place on the strip, and where in the list it goes. */
 data class JumpEntry(val label: String, val offset: Int)
 
 private const val LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+/**
+ * Where each letter starts in a list of names already in order, for lists the
+ * server doesn't send jumps for. Accents are dropped, and anything that isn't a
+ * letter goes under "#", as on the server.
+ */
+fun letterJumps(names: List<String>): List<Jump> {
+    val found = LinkedHashMap<String, Int>()
+    names.forEachIndexed { index, name ->
+        val plain = Normalizer.normalize(name.trimStart().take(1), Normalizer.Form.NFD).take(1).uppercase()
+        found.getOrPut(if (plain.isNotEmpty() && plain[0] in LETTERS) plain else "#") { index }
+    }
+    return found.map { (label, offset) -> Jump(label, offset) }
+}
 
 /**
  * Everything on the strip, top to bottom, for a list in this order. Letters and
@@ -154,5 +172,21 @@ fun JumpStrip(entries: List<JumpEntry>, onPressed: (String?) -> Unit, onJump: (I
                 )
             }
         }
+    }
+}
+
+/** A finger on the strip covers the letter it's on, so this shows it. */
+@Composable
+fun JumpBubble(label: String, modifier: Modifier = Modifier) {
+    Surface(
+        modifier,
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.primaryContainer,
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.displaySmall,
+            modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp),
+        )
     }
 }

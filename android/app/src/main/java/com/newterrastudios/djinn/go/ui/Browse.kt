@@ -85,7 +85,6 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
-import androidx.compose.material3.Surface
 import androidx.compose.runtime.mutableStateMapOf
 import kotlinx.coroutines.flow.collectLatest
 import androidx.compose.material.icons.filled.Shuffle
@@ -247,20 +246,7 @@ private fun <T : Any> PagedList(
                 Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Back to top")
             }
         }
-        // A finger on the strip covers the letter it's on.
-        pressedLabel?.let { label ->
-            Surface(
-                Modifier.align(Alignment.Center),
-                shape = MaterialTheme.shapes.large,
-                color = MaterialTheme.colorScheme.primaryContainer,
-            ) {
-                Text(
-                    label,
-                    style = MaterialTheme.typography.displaySmall,
-                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp),
-                )
-            }
-        }
+        pressedLabel?.let { JumpBubble(it, Modifier.align(Alignment.Center)) }
     }
 }
 
@@ -896,16 +882,37 @@ private fun genreTitle(name: String) = name.replaceFirstChar { it.uppercase() }
 @Composable
 private fun GenresTab(nav: Nav) {
     Loaded(key = "genres", load = { nav.api.genres() }) { list: GenreList ->
-        LazyColumn(Modifier.fillMaxSize()) {
-            if (list.genres.isEmpty()) item { Note("No genres yet.") }
-            items(list.genres) { genre ->
-                Row2(
-                    title = genreTitle(genre.name),
-                    subtitle = if (genre.songs == 1L) "1 song" else "${genre.songs} songs",
-                    art = {},
-                    onClick = { nav.push(Screen.Genre(genre.name)) },
-                )
+        val entries = remember(list) { jumpEntries(letterJumps(list.genres.map { it.name }), "name") }
+        val state = rememberLazyListState()
+        val scope = rememberCoroutineScope()
+        var pressedLabel by remember { mutableStateOf<String?>(null) }
+        Box(Modifier.fillMaxSize()) {
+            Row(Modifier.fillMaxSize()) {
+                LazyColumn(
+                    Modifier
+                        .weight(1f)
+                        .fillMaxHeight(),
+                    state = state,
+                ) {
+                    if (list.genres.isEmpty()) item { Note("No genres yet.") }
+                    items(list.genres) { genre ->
+                        Row2(
+                            title = genreTitle(genre.name),
+                            subtitle = if (genre.songs == 1L) "1 song" else "${genre.songs} songs",
+                            art = {},
+                            onClick = { nav.push(Screen.Genre(genre.name)) },
+                        )
+                    }
+                }
+                if (entries.size > 1) {
+                    JumpStrip(
+                        entries,
+                        onPressed = { pressedLabel = it },
+                        onJump = { offset -> scope.launch { state.scrollToItem(offset) } },
+                    )
+                }
             }
+            pressedLabel?.let { JumpBubble(it, Modifier.align(Alignment.Center)) }
         }
     }
 }

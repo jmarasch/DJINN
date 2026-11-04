@@ -9,6 +9,22 @@ class JumpStripTest {
     private fun at(entries: List<JumpEntry>, label: String) = entries.first { it.label == label }.offset
 
     @Test
+    fun `a list of names gets its letters from where each one starts`() {
+        val names = listOf("80s pop", "ambient", "art rock", "écossaise", "jazz", "rock")
+        assertEquals(
+            listOf(Jump("#", 0), Jump("A", 1), Jump("E", 3), Jump("J", 4), Jump("R", 5)),
+            letterJumps(names),
+        )
+    }
+
+    @Test
+    fun `a letter missing from a list of names goes to the next one`() {
+        val entries = jumpEntries(letterJumps(listOf("ambient", "jazz", "rock")), "name")
+        assertEquals(1, at(entries, "B"))
+        assertEquals(2, at(entries, "K"))
+    }
+
+    @Test
     fun `every letter is on the strip, even with nothing under it`() {
         val entries = jumpEntries(listOf(Jump("B", 0), Jump("D", 10)), "name")
         assertEquals("ABCDEFGHIJKLMNOPQRSTUVWXYZ".map { it.toString() }, entries.map { it.label })

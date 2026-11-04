@@ -21,6 +21,40 @@ fn fts_query_quotes_prefix_terms() {
     assert_eq!(fts_query("  -- "), None);
 }
 
+/// A placeholder year stretched the year strips from 1955 to 9999.
+#[tokio::test]
+async fn impossible_years_already_stored_are_cleared() {
+    let store = Store::open_in_memory().await.unwrap();
+    let song = |path: &str, year| {
+        let mut track = scanned(path, "Song", "Band", path);
+        track.year = Some(year);
+        track
+    };
+    store
+        .save_scanned(&[song("/m/1.flac", 9999), song("/m/2.flac", 1997)])
+        .await
+        .unwrap();
+    sqlx::raw_sql(include_str!(
+        "../../../../migrations/0033_impossible_years.sql"
+    ))
+    .execute(&store.pool)
+    .await
+    .unwrap();
+    let labels: Vec<_> = store
+        .track_jumps(TrackSort::Year)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|j| j.label)
+        .collect();
+    assert_eq!(labels, ["1997"]);
+    let albums: Vec<Option<i64>> = sqlx::query_scalar("SELECT year FROM albums ORDER BY title")
+        .fetch_all(&store.pool)
+        .await
+        .unwrap();
+    assert_eq!(albums, [None, Some(1997)]);
+}
+
 #[test]
 fn fts_starts_with_is_one_phrase() {
     assert_eq!(fts_starts_with("S&M").as_deref(), Some("^ \"S M\""));
