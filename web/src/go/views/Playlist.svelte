@@ -3,7 +3,8 @@
   import { api } from '../../lib/api'
   import Icon from '../../lib/Icon.svelte'
   import { app, toast } from '../../lib/state.svelte'
-  import type { GoPlaylistDetail } from '../../lib/types'
+  import PlaylistSharing from '../../lib/PlaylistSharing.svelte'
+  import type { GoPlaylistDetail, PlaylistRow } from '../../lib/types'
   import { addToEnd, playList, playNext, tapSong } from '../player.svelte'
   import SongRow from '../SongRow.svelte'
 
@@ -24,7 +25,24 @@
     }
   }
 
-  const mine = $derived(list?.user_id === app.me?.id)
+  const mine = $derived(list?.mine ?? false)
+  const flagged = $derived(list?.rows.filter((row) => row.problem) ?? [])
+
+  function reason(row: PlaylistRow) {
+    if (row.problem === 'not_in_library') return 'Not in the library'
+    if (row.problem === 'file_missing') return 'File is missing'
+    return "File won't play"
+  }
+
+  async function removeRow(row: PlaylistRow) {
+    if (!list) return
+    try {
+      await api.removeFromPlaylist(list.id, row.entry_id)
+      await load(list.id)
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not remove it', true)
+    }
+  }
 
   async function rename() {
     if (!list) return
@@ -43,7 +61,6 @@
     try {
       await api.goUpdatePlaylist(list.id, { shared })
       list.shared = shared
-      toast(shared ? 'Other GO listeners can see and play it now' : 'Only you can see it now')
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Could not change that', true)
     }
@@ -91,7 +108,8 @@
   <h1>{list.name}</h1>
   <p class="muted small">
     {list.songs.length}
-    {list.songs.length === 1 ? 'song' : 'songs'}{#if !mine}, shared by {list.owner}{:else if list.shared}, shared{/if}
+    {list.songs.length === 1 ? 'song' : 'songs'}{#if !mine}, shared by {list.owner}{:else if list.shared}, shared{/if}{#if flagged.length},
+      <span class="bad"><Icon name="warning" size={13} /> {flagged.length} can't play and will be skipped</span>{/if}
   </p>
   <div class="buttons">
     <button class="primary" onclick={() => list && playList(list.songs)} disabled={!list.songs.length}>
@@ -106,14 +124,9 @@
   {#if editing && mine}
     <div class="edit card">
       <button class="small-button" onclick={rename}>Rename</button>
-      {#if app.me?.permissions?.share_playlists}
-        <label class="switch">
-          <input type="checkbox" checked={list.shared} onchange={(e) => setShared(e.currentTarget.checked)} />
-          Share with other GO listeners
-        </label>
-      {/if}
       <button class="small-button" onclick={remove}>Delete playlist</button>
     </div>
+    <PlaylistSharing id={list.id} shared={list.shared} {setShared} />
     {#each list.songs as track, i (`${track.id}-${i}`)}
       <div class="edit-row">
         <span class="grow">{track.title} <span class="muted small">{track.artist ?? ''}</span></span>
@@ -127,8 +140,22 @@
       </div>
     {/each}
   {:else}
-    {#each list.songs as track, i (`${track.id}-${i}`)}
-      <SongRow {track} onplay={() => tapSong(track, () => list && playList(list.songs, i))} />
+    {#each list.rows as row, i (`${row.entry_id}-${row.track_id}-${i}`)}
+      {@const at = row.song_index}
+      {@const song = at === null ? undefined : list.songs[at]}
+      {#if song}
+        <SongRow track={song} onplay={() => tapSong(song, () => list && playList(list.songs, at ?? 0))} />
+      {:else}
+        <div class="edit-row flagged">
+          <span class="grow">
+            <span class="block">{row.title} <span class="muted small">{row.artist ?? ''}</span></span>
+            <span class="bad small" title={row.error ?? undefined}><Icon name="warning" size={13} /> {reason(row)}</span>
+          </span>
+          {#if mine && row.removable}
+            <button class="icon" aria-label="Remove {row.title}" onclick={() => removeRow(row)}><Icon name="close" /></button>
+          {/if}
+        </div>
+      {/if}
     {:else}
       <p class="muted">No songs yet. Add some from a song's menu.</p>
     {/each}
@@ -151,6 +178,19 @@
     flex-direction: row;
     flex-wrap: wrap;
     align-items: center;
+  }
+
+  .bad {
+    color: var(--bad);
+  }
+
+  .block {
+    display: block;
+  }
+
+  .flagged {
+    min-height: 56px;
+    color: var(--muted);
   }
 
   .edit-row {

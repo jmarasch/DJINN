@@ -301,6 +301,15 @@ async fn save_track(tx: &mut Transaction<'_, Sqlite>, t: &ScannedTrack, now: i64
     .bind(t.replay_gain.album_peak)
     .fetch_one(&mut **tx)
     .await?;
+    // A file that changed gets another chance to play.
+    sqlx::query(
+        "DELETE FROM track_problems WHERE track_id = ? AND (size IS NOT ? OR mtime IS NOT ?)",
+    )
+    .bind(track_id)
+    .bind(t.size)
+    .bind(t.mtime)
+    .execute(&mut **tx)
+    .await?;
     sqlx::query("DELETE FROM track_artists WHERE track_id = ?")
         .bind(track_id)
         .execute(&mut **tx)

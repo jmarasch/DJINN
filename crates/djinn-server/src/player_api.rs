@@ -655,11 +655,15 @@ mod tests {
             &state,
             Method::POST,
             "/api/playlists",
-            Some(r#"{"name":"Chill"}"#),
+            Some(r#"{"name":"Zed, Alice's own"}"#),
             Some(&alice),
         )
         .await;
-        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(
+            status,
+            StatusCode::CREATED,
+            "anyone signed in has their own"
+        );
         let (status, _) = call(
             &state,
             Method::POST,

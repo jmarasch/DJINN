@@ -60,6 +60,9 @@ import type {
   Page,
   PartyStyle,
   PlayerState,
+  ImportResult,
+  ShareTarget,
+  PlaylistCheck,
   PlaylistDetail,
   PlaylistEntry,
   PlaylistListItem,
@@ -272,7 +275,17 @@ export const api = {
   playlists: () => get<PlaylistListItem[]>('/playlists'),
   playlist: (id: number) => get<PlaylistDetail>(`/playlists/${id}`),
   createPlaylist: (name: string) => post<PlaylistSummary>('/playlists', { name }),
-  updatePlaylist: (id: number, changes: { name?: string; shuffle?: boolean }) =>
+  importPlaylist: (text: string, filename?: string, name?: string) =>
+    post<ImportResult>('/playlists/import', { text, filename, name: name?.trim() || undefined }),
+  youtubeKey: () => get<{ has_key: boolean }>('/playlists/youtube-key'),
+  setYoutubeKey: (key: string) => put<void>('/playlists/youtube-key', { key }),
+  checkPlaylist: (id: number) => post<void>(`/playlists/${id}/check`),
+  playlistCheck: () => get<PlaylistCheck | null>('/playlists/check'),
+  shareTargets: () => get<ShareTarget[]>('/playlists/share-targets'),
+  playlistShares: (id: number) => get<ShareTarget[]>(`/playlists/${id}/shares`),
+  sharePlaylist: (id: number, user: number) => put<void>(`/playlists/${id}/shares/${user}`, {}),
+  unsharePlaylist: (id: number, user: number) => del<void>(`/playlists/${id}/shares/${user}`),
+  updatePlaylist: (id: number, changes: { name?: string; shuffle?: boolean; shared?: boolean }) =>
     patch<void>(`/playlists/${id}`, changes),
   deletePlaylist: (id: number) => del<void>(`/playlists/${id}`),
   addToPlaylist: (id: number, kind: EntryKind, refId: number) =>

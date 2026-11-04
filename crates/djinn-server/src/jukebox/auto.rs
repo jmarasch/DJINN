@@ -126,17 +126,11 @@ impl Jukebox {
                 name: "Wild play".to_owned(),
                 shuffle: true,
             }),
-            id => self
-                .store
-                .playlists()
-                .await?
-                .into_iter()
-                .find(|p| p.id == id)
-                .map(|p| PlaylistRef {
-                    id: p.id,
-                    name: p.name,
-                    shuffle: p.shuffle,
-                }),
+            id => self.store.playlist_summary(id).await?.map(|p| PlaylistRef {
+                id: p.id,
+                name: p.name,
+                shuffle: p.shuffle,
+            }),
         };
         Ok(())
     }
@@ -232,7 +226,8 @@ impl Jukebox {
             Some(id) => Some(id),
             None if self.weighted() => self.weighted_draw(pool).await?,
             None if self.active.as_ref().is_some_and(|p| !p.shuffle) => {
-                next_in_order(&ids, self.order_anchor())
+                let anchor = self.playable_anchor(&ids).await?;
+                next_in_order(&ids, anchor)
             }
             None => self.shuffle_draw(&ids).await?,
         };
@@ -260,6 +255,20 @@ impl Jukebox {
                 .filter(|p| p.source == PlaySource::Pool))
             .map(|p| p.track.id)
             .or(self.cursor)
+    }
+
+    /// The anchor, or if it can no longer play, the nearest song before it
+    /// that can, so the playlist carries on from there and doesn't restart.
+    async fn playable_anchor(&self, playable: &[i64]) -> anyhow::Result<Option<i64>> {
+        let anchor = self.order_anchor();
+        let (Some(anchor_id), Some(playlist)) = (anchor, &self.active) else {
+            return Ok(anchor);
+        };
+        if playable.contains(&anchor_id) {
+            return Ok(anchor);
+        }
+        let order = self.store.playlist_order_ids(playlist.id).await?;
+        Ok(previous_playable(&order, playable, anchor_id))
     }
 
     async fn shuffle_draw(&mut self, pool: &[i64]) -> anyhow::Result<Option<i64>> {
@@ -299,6 +308,16 @@ impl Jukebox {
         recent.extend(self.store.recent_track_ids(window).await?);
         Ok((recent, usize::try_from(window).unwrap_or(0) + upcoming))
     }
+}
+
+/// The closest song before `anchor` in `order` that's in `playable`.
+pub(super) fn previous_playable(order: &[i64], playable: &[i64], anchor: i64) -> Option<i64> {
+    let at = order.iter().position(|&id| id == anchor)?;
+    order[..at]
+        .iter()
+        .rev()
+        .find(|id| playable.contains(id))
+        .copied()
 }
 
 /// The song after `anchor` in `ids`, wrapping around; the first song if

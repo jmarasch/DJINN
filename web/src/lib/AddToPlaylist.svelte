@@ -1,9 +1,9 @@
 <script lang="ts">
-  // Admin: add a song, album, or artist to a playlist (or a new one).
+  // Add a song, album, or artist to one of your playlists (or a new one).
   import { api, ApiError } from './api'
   import Icon from './Icon.svelte'
   import Sheet from './Sheet.svelte'
-  import { isAdmin, toast } from './state.svelte'
+  import { app, toast, hasPlaylists } from './state.svelte'
   import type { EntryKind, PlaylistListItem } from './types'
 
   let {
@@ -27,7 +27,7 @@
   let newName = $state('')
 
   $effect(() => {
-    if (open) api.playlists().then((list) => (playlists = list))
+    if (open) api.playlists().then((list) => (playlists = list.filter((p) => p.owner_id === app.me?.id)))
   })
 
   function show(e: Event) {
@@ -59,7 +59,7 @@
   }
 </script>
 
-{#if isAdmin()}
+{#if hasPlaylists()}
   {#if !trigger}
     <!-- Opened from elsewhere. -->
   {:else if compact}

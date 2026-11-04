@@ -80,6 +80,8 @@ pub struct ScanState {
     /// so Commons isn't flooded and no artist is fetched twice.
     pub pictures: tokio::sync::Mutex<()>,
     pub last: Mutex<Option<ScanProgress>>,
+    /// The latest check of a playlist's files.
+    pub playlist_check: Mutex<Option<crate::playlist_import::PlaylistCheck>>,
 }
 
 impl AppState {

@@ -264,6 +264,108 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    async fn party_and_go_playlists_become_one_system() {
+        const MERGE: i64 = 32;
+        let pool = {
+            let options = SqliteConnectOptions::from_str("sqlite::memory:").unwrap();
+            SqlitePoolOptions::new()
+                .max_connections(1)
+                .min_connections(1)
+                .idle_timeout(None)
+                .max_lifetime(None)
+                .connect_with(common(options))
+                .await
+                .unwrap()
+        };
+        let before = sqlx::migrate::Migrator {
+            migrations: MIGRATOR
+                .migrations
+                .iter()
+                .filter(|m| m.version < MERGE)
+                .cloned()
+                .collect::<Vec<_>>()
+                .into(),
+            ..sqlx::migrate::Migrator::DEFAULT
+        };
+        before.run(&pool).await.unwrap();
+        // GO playlists 1 and 7, party playlists 1 and 2 (the one playing).
+        // Party playlist 1 has a song the library lacks.
+        for sql in [
+            "INSERT INTO users (id, username, password_hash, role, created_at)
+             VALUES (1, 'root', 'h', 'admin', 0), (2, 'sam', 'h', 'user', 0)",
+            "INSERT INTO tracks (id, path, size, mtime, title, added_at)
+             VALUES (10, '/a', 0, 0, 'A', 0), (11, '/b', 0, 0, 'B', 0)",
+            "INSERT INTO go_playlists (id, user_id, name, shared, created_at, updated_at)
+             VALUES (1, 2, 'Private', 0, 5, 6), (7, 2, 'Open', 1, 5, 6)",
+            "INSERT INTO go_playlist_tracks (playlist_id, position, track_id)
+             VALUES (1, 0, 11), (1, 1, 10), (1, 2, 11)",
+            "INSERT INTO playlists (id, owner_id, name, shuffle, created_at, updated_at)
+             VALUES (1, 1, 'Dance', 0, 5, 6), (2, 1, 'Chill', 1, 5, 6)",
+            "INSERT INTO playlist_wanted (id, playlist_id, title) VALUES (3, 1, 'Gap')",
+            "INSERT INTO playlist_entries (id, playlist_id, kind, ref_id, position, added_at)
+             VALUES (40, 1, 'track', 10, 1, 0), (41, 1, 'wanted', 3, 2, 0)",
+            "INSERT OR REPLACE INTO settings (key, value) VALUES ('active_playlist', '2')",
+            "INSERT OR REPLACE INTO roles (id, name, builtin, created_at) VALUES (9, 'Old', 0, 0)",
+        ] {
+            sqlx::query(sql).execute(&pool).await.unwrap();
+        }
+
+        MIGRATOR.run(&pool).await.unwrap();
+        let store = Store {
+            pool,
+            browse: Arc::default(),
+        };
+
+        // GO's keep their ids, with the repeat at its first place.
+        let private = store.playlist(1).await.unwrap().unwrap();
+        assert_eq!(private.playlist.name, "Private");
+        assert!(!private.playlist.shared);
+        assert_eq!(private.playlist.owner_id, 2);
+        let songs: Vec<_> = private.tracks.iter().map(|t| t.id).collect();
+        assert_eq!(songs, [11, 10]);
+        assert!(store.playlist(7).await.unwrap().unwrap().playlist.shared);
+
+        // Party ones move above them, shared, whole, and still playing.
+        let dance = store.playlist(8).await.unwrap().unwrap();
+        assert_eq!(dance.playlist.name, "Dance");
+        assert!(dance.playlist.shared);
+        assert!(!dance.playlist.shuffle);
+        assert_eq!(dance.entries.len(), 2);
+        assert_eq!(dance.entries[1].name.as_deref(), Some("Gap"));
+        assert_eq!(
+            store
+                .get_setting("active_playlist")
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("9")
+        );
+        assert_eq!(
+            store.playlist(9).await.unwrap().unwrap().playlist.name,
+            "Chill"
+        );
+
+        // Sam sees their own and what's open, and a new role can't take over.
+        let sam: Vec<_> = store
+            .playlists_for(2)
+            .await
+            .unwrap()
+            .iter()
+            .map(|p| p.id)
+            .collect();
+        assert_eq!(sam, [7, 1, 9, 8]);
+        let root: Vec<_> = store
+            .playlists_for(1)
+            .await
+            .unwrap()
+            .iter()
+            .map(|p| p.id)
+            .collect();
+        assert_eq!(root, [9, 8, 7], "not Sam's private one");
+        assert!(!store.role(9).await.unwrap().unwrap().permissions.auto_mix);
+    }
+
+    #[tokio::test]
     async fn migrations_apply() {
         let store = Store::open_in_memory().await.unwrap();
         let tables: Vec<String> =

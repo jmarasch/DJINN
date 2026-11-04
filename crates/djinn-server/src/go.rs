@@ -439,6 +439,25 @@ const ROUTES: &[(Method, &str, Access)] = &[
     (Method::DELETE, "/api/go/playlists/*", Access::Listener),
     (Method::POST, "/api/go/playlists/*/songs", Access::Listener),
     (Method::PUT, "/api/go/playlists/*/songs", Access::Listener),
+    (Method::POST, "/api/playlists/import", Access::Listener),
+    (Method::GET, "/api/playlists/youtube-key", Access::Listener),
+    (
+        Method::GET,
+        "/api/playlists/share-targets",
+        Access::Listener,
+    ),
+    (Method::GET, "/api/playlists/*/shares", Access::Listener),
+    (Method::PUT, "/api/playlists/*/shares/*", Access::Listener),
+    (
+        Method::DELETE,
+        "/api/playlists/*/shares/*",
+        Access::Listener,
+    ),
+    (
+        Method::DELETE,
+        "/api/playlists/*/entries/*",
+        Access::Listener,
+    ),
     (Method::GET, "/api/go/radio/*", Access::Listener),
     (Method::POST, "/api/go/party/*", Access::Listener),
     (Method::GET, "/api/go/submissions", Access::Listener),
@@ -2217,6 +2236,25 @@ mod tests {
         let (status, text, _) = call(Method::POST, "/api/go/playlists".into(), Some(body)).await;
         assert_eq!(status, StatusCode::CREATED, "{text}");
         let list = field(&text, "id");
+        // The YouTube key is the server's: GO says whether it's there, and
+        // can't change it.
+        let key_path = "/api/playlists/youtube-key";
+        state
+            .store
+            .set_setting(crate::youtube::API_KEY, "SECRET-KEY")
+            .await
+            .unwrap();
+        let (status, text, _) = call(Method::GET, key_path.into(), None).await;
+        assert_eq!(status, StatusCode::OK, "{text}");
+        assert_eq!(text, r#"{"has_key":true}"#);
+        let (status, _, _) = call(
+            Method::PUT,
+            key_path.into(),
+            Some(r#"{"key":"other"}"#.into()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+
         // This role can't share playlists.
         let (status, _, _) = call(
             Method::PATCH,

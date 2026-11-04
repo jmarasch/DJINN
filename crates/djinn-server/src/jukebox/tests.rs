@@ -1,4 +1,4 @@
-use super::auto::next_in_order;
+use super::auto::{next_in_order, previous_playable};
 use super::*;
 use djinn_store::{EntryKind, Role, ScannedTrack};
 use std::sync::{Arc, Mutex};
@@ -591,6 +591,85 @@ fn order_wraps_and_restarts() {
     assert_eq!(next_in_order(&[1, 2, 3], Some(3)), Some(1));
     assert_eq!(next_in_order(&[1, 2, 3], Some(9)), Some(1));
     assert_eq!(next_in_order(&[], None), None);
+}
+
+#[test]
+fn order_carries_on_past_a_song_that_stopped_working() {
+    let order = [1, 2, 3, 4];
+    assert_eq!(previous_playable(&order, &[1, 2, 4], 3), Some(2));
+    assert_eq!(previous_playable(&order, &[2, 3, 4], 1), None);
+    assert_eq!(previous_playable(&order, &[1, 4], 3), Some(1));
+    assert_eq!(previous_playable(&order, &[1, 2], 9), None);
+    assert_eq!(next_in_order(&[1, 2, 4], Some(2)), Some(4));
+}
+
+/// Gives a song a real but unplayable file, as a corrupted one would be.
+async fn break_file(h: &Harness, id: i64) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("djinn-broken-{}", rand::random::<u64>()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("broken.flac");
+    std::fs::write(&path, b"not audio").unwrap();
+    djinn_store::sqlx::query("UPDATE tracks SET path = ? WHERE id = ?")
+        .bind(path.to_string_lossy().into_owned())
+        .bind(id)
+        .execute(h.store.pool())
+        .await
+        .unwrap();
+    dir
+}
+
+#[tokio::test]
+async fn a_song_that_fails_is_flagged_and_never_drawn_again() {
+    let mut h = Harness::new(3).await;
+    h.event(EngineEvent::NextNeeded { after: None }).await;
+    let broken = h.last_next().unwrap();
+    let dir = break_file(&h, broken).await;
+    h.event(EngineEvent::TrackError {
+        id: TrackId(broken),
+        error: "corrupt".into(),
+    })
+    .await;
+    h.event(EngineEvent::NextNeeded { after: None }).await;
+
+    assert_eq!(h.store.problem_files().await.unwrap()[0].id, broken);
+    for _ in 0..8 {
+        let id = h.play_next().await;
+        assert_ne!(id, broken);
+        h.finish(id).await;
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test]
+async fn an_ordered_playlist_keeps_its_place_when_a_song_fails_midway() {
+    let mut h = Harness::new(4).await;
+    let list = h.store.playlists().await.unwrap()[0].id;
+    h.store
+        .update_playlist(list, None, Some(false))
+        .await
+        .unwrap();
+    let (first, second, third) = (h.tracks[0], h.tracks[1], h.tracks[2]);
+    h.jukebox.play_playlist(list, Some(first)).await.unwrap();
+    assert_eq!(h.play_next().await, first);
+    h.finish(first).await;
+    assert_eq!(h.play_next().await, second);
+
+    // It plays for a while, then the damage is reached.
+    let dir = break_file(&h, second).await;
+    h.event(EngineEvent::TrackError {
+        id: TrackId(second),
+        error: "corrupt".into(),
+    })
+    .await;
+    h.event(EngineEvent::TrackEnded {
+        id: TrackId(second),
+        played_ms: 500,
+        reason: EndReason::Error,
+    })
+    .await;
+    h.jukebox.auto_mix_changed().await.unwrap();
+    assert_eq!(h.last_next(), Some(third), "not back to the start");
+    std::fs::remove_dir_all(dir).unwrap();
 }
 
 #[tokio::test]

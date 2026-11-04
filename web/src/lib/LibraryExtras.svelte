@@ -55,6 +55,27 @@
   const analysis = $derived(app.loudness)
   const lookups = $derived(settings.online_artist_info || settings.musicbrainz)
   const mb = (bytes: number) => (bytes / (1024 * 1024)).toFixed(1)
+
+  let hasYoutubeKey = $state(false)
+  let youtubeKey = $state('')
+
+  onMount(() => {
+    api
+      .youtubeKey()
+      .then((status) => (hasYoutubeKey = status.has_key))
+      .catch(() => {})
+  })
+
+  async function saveYoutubeKey(key: string) {
+    try {
+      await api.setYoutubeKey(key)
+      hasYoutubeKey = !!key.trim()
+      youtubeKey = ''
+      toast(hasYoutubeKey ? 'YouTube links can be imported now' : 'Key removed. DJINN no longer contacts YouTube')
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not save the key', true)
+    }
+  }
 </script>
 
 <h2 class="group">Extras</h2>
@@ -293,6 +314,34 @@
   </p>
 </section>
 <IdentifyPanel />
+
+<section class="card">
+  <h3>YouTube playlist links: {hasYoutubeKey ? 'on' : 'off'}</h3>
+  <p class="small muted">
+    Lets anyone on this server import a YouTube or YouTube Music playlist from its link, here, on GO and in the Android
+    app. Without a key, DJINN never contacts YouTube. With one, it sends only the key and the playlist's id when someone
+    imports a link, nothing about who's asking. YouTube still sees this server's internet address.
+  </p>
+  <form
+    class="inline"
+    onsubmit={(e) => {
+      e.preventDefault()
+      saveYoutubeKey(youtubeKey)
+    }}
+  >
+    <label>
+      YouTube Data API key
+      <input type="password" autocomplete="off" placeholder={hasYoutubeKey ? 'Saved. Paste a new key to replace it' : 'Your API key'} bind:value={youtubeKey} />
+    </label>
+    <button disabled={!youtubeKey.trim()}>Save</button>
+    {#if hasYoutubeKey}<button type="button" onclick={() => saveYoutubeKey('')}>Remove</button>{/if}
+  </form>
+  <p class="small muted">
+    Free from
+    <a href="https://console.cloud.google.com/apis/library/youtube.googleapis.com" target="_blank" rel="noopener noreferrer">Google Cloud</a>:
+    create a project, enable YouTube Data API v3, and create an API key.
+  </p>
+</section>
 
 <style>
   .picture-limits {

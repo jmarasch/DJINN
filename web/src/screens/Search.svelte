@@ -4,7 +4,7 @@
   import Browse from './Browse.svelte'
   import Icon from '../lib/Icon.svelte'
   import TrackRow from '../lib/TrackRow.svelte'
-  import { isAdmin, toast } from '../lib/state.svelte'
+  import { hasPlaylists, isAdmin, toast } from '../lib/state.svelte'
   import type { SearchResults } from '../lib/types'
 
   let searchBox = $state<HTMLElement>()
@@ -131,7 +131,7 @@
             </p>
           {/if}
         </div>
-        {#if isAdmin() && described.tracks.length}
+        {#if hasPlaylists() && described.tracks.length}
           <button class="small-button" onclick={savePlaylist}>Save as playlist</button>
         {/if}
       </div>

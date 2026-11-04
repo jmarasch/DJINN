@@ -23,6 +23,7 @@ mod outputs;
 mod player;
 mod resample;
 mod tap;
+mod verify;
 
 use std::path::PathBuf;
 
@@ -40,6 +41,7 @@ pub use fingerprint::fingerprint;
 pub use loudness::{measure_loudness, Loudness, REFERENCE_LUFS};
 pub use player::MAX_CROSSFADE_SECS;
 pub use tap::{stream_tap, StreamTap, TapReader};
+pub use verify::verify;
 
 /// Opaque track identifier chosen by the engine's owner.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]

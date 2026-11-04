@@ -70,11 +70,32 @@ export interface GoPlaylist {
   name: string
   shared: boolean
   tracks: number
+  /** It's yours, so you can change it. */
+  mine: boolean
   updated_at: number
+}
+
+export interface PlaylistRow {
+  entry_id: number
+  /** Its entry is this one song. A song of an album or artist goes with the whole entry. */
+  removable: boolean
+  /** Where it is in the list of songs, if it can play. */
+  song_index: number | null
+  track_id: number | null
+  title: string
+  artist: string | null
+  problem: 'not_in_library' | 'file_missing' | 'file_broken' | null
+  error: string | null
+}
+
+export interface ShareTarget {
+  id: number
+  name: string
 }
 
 export interface GoPlaylistDetail extends GoPlaylist {
   songs: Track[]
+  rows: PlaylistRow[]
 }
 
 /** Your DJINN GO preferences. */
@@ -215,6 +236,8 @@ export interface Permissions {
   require_two_step: boolean
   /** May have songs converted, when converting is on. */
   convert: boolean
+  /** May start a playlist as what plays when the requests run out. */
+  auto_mix: boolean
 }
 
 export interface AccountRole extends Permissions {
@@ -496,30 +519,68 @@ export type EntryKind = 'track' | 'album' | 'artist'
 
 export interface PlaylistSummary {
   id: number
+  owner_id: number
+  owner: string
   name: string
   shuffle: boolean
+  /** Everyone can see and play it. */
+  shared: boolean
   entry_count: number
+  /** Songs it covers that can play. */
+  song_count: number
   created_at: number
   updated_at: number
 }
 
 export interface PlaylistListItem extends PlaylistSummary {
   active: boolean
+  problem_songs: number
+}
+
+export interface ImportedPlaylist {
+  id: number
+  name: string
+  found: number
+  missing: number
+}
+
+export interface ImportResult {
+  playlists: ImportedPlaylist[]
+  skipped: number
+}
+
+export interface PlaylistCheck {
+  playlist_id: number
+  running: boolean
+  done: number
+  total: number
+  problems: number
+}
+
+export interface UnplayableSong {
+  track_id: number
+  title: string
+  artist: string | null
+  album: string | null
+  removed: boolean
+  error: string | null
 }
 
 export interface PlaylistEntry {
   id: number
-  kind: EntryKind
+  kind: EntryKind | 'wanted'
   ref_id: number
   name: string | null
   subtitle: string | null
   art_hash: string | null
   position: number
+  problem_songs: number
 }
 
 export interface PlaylistDetail extends PlaylistSummary {
   entries: PlaylistEntry[]
   tracks: Track[]
+  unplayable: UnplayableSong[]
 }
 
 export interface LibraryRoot {

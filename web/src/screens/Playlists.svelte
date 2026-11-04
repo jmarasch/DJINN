@@ -2,7 +2,8 @@
   import { onMount } from 'svelte'
   import { api } from '../lib/api'
   import Icon from '../lib/Icon.svelte'
-  import { app, toast } from '../lib/state.svelte'
+  import ImportPlaylist from '../lib/ImportPlaylist.svelte'
+  import { app, canStartAutoMix, isAdmin, toast } from '../lib/state.svelte'
   import type { PlaylistListItem } from '../lib/types'
 
   let playlists = $state<PlaylistListItem[]>([])
@@ -56,18 +57,19 @@
 
 <h1>Playlists</h1>
 <p class="muted small">
-  The playing playlist fills in whenever nobody has requested anything. Make one per mood or kind of
-  party, and add songs, albums, or artists from the Library with the
-  <Icon name="playlist" size={14} /> button.
+  Your playlists are yours, here and on DJINN GO, and private until you share them. Add songs, albums, or artists from
+  the Library with the <Icon name="playlist" size={14} /> button.
+  {#if canStartAutoMix()}The playing playlist fills in whenever nobody has requested anything.{/if}
 </p>
 
 {#if app.player.playlist}
   <div class="playing card">
     <span>Playing from <b>{app.player.playlist.name}</b></span>
-    <button onclick={stop}>Stop</button>
+    {#if canStartAutoMix()}<button onclick={stop}>Stop</button>{/if}
   </div>
 {/if}
 
+{#if isAdmin()}
 <button class="row wild" class:active={wild} onclick={playWild}>
   <span class="icon"><Icon name="shuffle" /></span>
   <span class="text">
@@ -80,11 +82,13 @@
     <span class="play">Play</span>
   {/if}
 </button>
+{/if}
 
 <form class="new" onsubmit={create}>
   <input placeholder="New playlist, e.g. Chill or Dance" bind:value={name} maxlength="60" />
   <button class="primary" disabled={!name.trim()}>Create</button>
 </form>
+<ImportPlaylist onimported={() => load().catch(() => {})} />
 
 {#each playlists as playlist (playlist.id)}
   <a class="row" href="#/playlist/{playlist.id}">
@@ -94,12 +98,16 @@
       <span class="muted small">
         {playlist.entry_count} {playlist.entry_count === 1 ? 'item' : 'items'} ·
         {playlist.shuffle ? 'shuffle' : 'in order'}
+        {#if playlist.owner_id !== app.me?.id}· from {playlist.owner}{:else if playlist.shared}· shared{/if}
+        {#if playlist.problem_songs}
+          · <span class="flag"><Icon name="warning" size={13} /> {playlist.problem_songs} can't play</span>
+        {/if}
       </span>
     </span>
     {#if playlist.active}<span class="badge">Playing</span>{/if}
   </a>
 {:else}
-  <p class="muted">No playlists yet. Create one above.</p>
+  <p class="muted">No playlists yet. Create or import one above.</p>
 {/each}
 
 <style>
@@ -169,6 +177,11 @@
 
   .block {
     display: block;
+  }
+
+  .flag {
+    color: var(--bad);
+    white-space: nowrap;
   }
 
   .badge {

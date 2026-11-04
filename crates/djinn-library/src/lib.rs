@@ -5,6 +5,8 @@ pub mod credits;
 pub mod genres;
 pub mod identify;
 pub mod online;
+pub mod playlist_file;
+pub mod playlist_match;
 pub mod radio;
 pub mod sound;
 mod tags;

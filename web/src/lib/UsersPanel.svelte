@@ -224,6 +224,7 @@
           unlimited_requests: false,
           require_two_step: false,
           convert: true,
+          auto_mix: false,
         }
   }
 
@@ -273,6 +274,7 @@
     ['submit_music', 'Submit music', 'Upload songs for the library from DJINN GO.'],
     ['submit_without_review', 'Submitted music goes straight in', 'Otherwise you review each upload.'],
     ['unlimited_requests', 'No party request limit', 'Skip the per-person limit and the queue cap.'],
+    ['auto_mix', 'Choose what the party plays', 'Start a playlist that plays when nobody has requested anything.'],
   ]
   const dependsOn: Partial<Record<keyof Permissions, keyof Permissions>> = {
     go_remote: 'go',

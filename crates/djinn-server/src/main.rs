@@ -36,6 +36,7 @@ mod network;
 mod party_api;
 mod player_api;
 mod playlist_api;
+mod playlist_import;
 mod reader;
 mod security;
 mod settings;
@@ -53,6 +54,7 @@ mod two_step;
 mod update;
 mod watcher;
 mod web;
+mod youtube;
 
 use std::path::PathBuf;
 

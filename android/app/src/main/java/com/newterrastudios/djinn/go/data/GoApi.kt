@@ -248,6 +248,33 @@ class GoApi(private val account: Account) {
         write("PUT", "/api/go/playlists/$id/songs", SongIds(songs))
 
     suspend fun playlists(): List<GoPlaylist> = get("/api/go/playlists")
+
+    /** Makes playlists from a file or pasted songs. */
+    suspend fun importPlaylist(text: String, filename: String?): ImportResult = withContext(Dispatchers.IO) {
+        json.decodeFromString(send("POST", "/api/playlists/import", json.encodeToString(ImportRequest(text, filename))))
+    }
+
+    /** Takes one line out of a playlist, whether or not it can play. */
+    suspend fun removePlaylistEntry(playlist: Long, entry: Long) = withContext(Dispatchers.IO) {
+        send("DELETE", "/api/playlists/$playlist/entries/$entry")
+        Unit
+    }
+
+    suspend fun setPlaylistShared(id: Long, shared: Boolean) =
+        write("PATCH", "/api/go/playlists/$id", SharedSetting(shared))
+
+    suspend fun shareTargets(): List<ShareTarget> = get("/api/playlists/share-targets")
+    suspend fun playlistShares(id: Long): List<ShareTarget> = get("/api/playlists/$id/shares")
+
+    suspend fun sharePlaylist(id: Long, user: Long) = withContext(Dispatchers.IO) {
+        send("PUT", "/api/playlists/$id/shares/$user", "{}")
+        Unit
+    }
+
+    suspend fun unsharePlaylist(id: Long, user: Long) = withContext(Dispatchers.IO) {
+        send("DELETE", "/api/playlists/$id/shares/$user")
+        Unit
+    }
     suspend fun addToPlaylist(playlist: Long, song: Long) =
         write("POST", "/api/go/playlists/$playlist/songs", SongIds(listOf(song)))
 
