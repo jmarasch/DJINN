@@ -1,6 +1,7 @@
 <script lang="ts">
   import { api } from '../lib/api'
   import Art from '../lib/Art.svelte'
+  import ScrollRow from '../lib/ScrollRow.svelte'
   import Browse from './Browse.svelte'
   import Icon from '../lib/Icon.svelte'
   import TrackRow from '../lib/TrackRow.svelte'
@@ -195,7 +196,7 @@
 
   {#if results.albums.length}
     <h2>Albums</h2>
-    <div class="albums">
+    <ScrollRow>
       {#each results.albums as album (album.id)}
         <a class="album" href="#/album/{album.id}">
           <Art hash={album.art_hash} size={120} round={10} />
@@ -203,7 +204,7 @@
           <span class="muted small ellipsis">{album.artist}</span>
         </a>
       {/each}
-    </div>
+    </ScrollRow>
   {/if}
 
   {#if results.tracks.length}
@@ -300,18 +301,9 @@
     color: var(--text);
   }
 
-  .albums {
-    display: grid;
-    grid-auto-flow: column;
-    grid-auto-columns: 120px;
-    gap: 14px;
-    overflow-x: auto;
-    margin: 0 -16px;
-    padding: 0 16px 6px;
-    scrollbar-width: none;
-  }
-
   .album {
+    flex: none;
+    width: 120px;
     display: flex;
     flex-direction: column;
     gap: 4px;

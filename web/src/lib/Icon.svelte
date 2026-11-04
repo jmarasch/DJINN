@@ -4,6 +4,8 @@
     | 'upload'
     | 'warning'
     | 'cloud'
+    | 'chevron-left'
+    | 'chevron-right'
     | 'edit'
     | 'pause'
     | 'skip'
@@ -89,6 +91,8 @@
     'repeat-one': 'M7 7h10v3l4-4-4-4v3H5v6h2zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2zm-4-2V9h-1l-2 1v1h1.5v4z',
     download: 'M19 9h-4V3H9v6H5l7 7zM5 18v2h14v-2z',
     home: 'M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z',
+    'chevron-left': 'M15.4 7.4 14 6l-6 6 6 6 1.4-1.4-4.6-4.6z',
+    'chevron-right': 'M8.6 7.4 10 6l6 6-6 6-1.4-1.4 4.6-4.6z',
     clock:
       'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zm0 16a7 7 0 1 1 0-14 7 7 0 0 1 0 14zm.5-11H11v5l4.2 2.5.8-1.2-3.5-2.1z',
   }

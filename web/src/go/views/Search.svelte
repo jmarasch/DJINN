@@ -4,6 +4,7 @@
   // the big lists plays it, then songs like it.
   import { api } from '../../lib/api'
   import Art from '../../lib/Art.svelte'
+  import ScrollRow from '../../lib/ScrollRow.svelte'
   import type { SearchResults, Track } from '../../lib/types'
   import Browse from '../../screens/Browse.svelte'
   import { playRadio, tapSong } from '../player.svelte'
@@ -74,7 +75,7 @@
 {:else if results}
   {#if results.artists.length}
     <h2>Artists</h2>
-    <div class="tiles">
+    <ScrollRow gap={12}>
       {#each results.artists as artist (artist.id)}
         <div class="tile-wrap">
           <a class="tile" href="#/artist/{artist.id}">
@@ -84,11 +85,11 @@
           <div class="corner"><LikeButton kind="artist" id={artist.id} name={artist.name} size={18} /></div>
         </div>
       {/each}
-    </div>
+    </ScrollRow>
   {/if}
   {#if results.albums.length}
     <h2>Albums</h2>
-    <div class="tiles">
+    <ScrollRow gap={12}>
       {#each results.albums as album (album.id)}
         <div class="tile-wrap">
           <a class="tile" href="#/album/{album.id}">
@@ -99,7 +100,7 @@
           <div class="corner"><LikeButton kind="album" id={album.id} name={album.title} size={18} /></div>
         </div>
       {/each}
-    </div>
+    </ScrollRow>
   {/if}
   <h2>Songs</h2>
   {#if results.tracks.length}
@@ -125,13 +126,6 @@
   h2 {
     margin: 18px 0 8px;
     font-size: 1.05rem;
-  }
-
-  .tiles {
-    display: flex;
-    gap: 12px;
-    overflow-x: auto;
-    padding-bottom: 4px;
   }
 
   .tile {

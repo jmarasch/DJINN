@@ -2,6 +2,7 @@
   // Your library: liked songs, albums and artists, playlists, history.
   import { api } from '../../lib/api'
   import Art from '../../lib/Art.svelte'
+  import ScrollRow from '../../lib/ScrollRow.svelte'
   import { app, toast } from '../../lib/state.svelte'
   import ImportPlaylist from '../../lib/ImportPlaylist.svelte'
   import type { GoPlaylist, Liked, Played } from '../../lib/types'
@@ -62,7 +63,7 @@
 {#if section === 'liked' && liked}
   {#if liked.artists.length}
     <h2>Artists</h2>
-    <div class="tiles">
+    <ScrollRow gap={12}>
       {#each liked.artists as artist (artist.id)}
         <div class="tile-wrap">
           <a class="tile" href="#/artist/{artist.id}">
@@ -72,11 +73,11 @@
           <div class="corner"><LikeButton kind="artist" id={artist.id} name={artist.name} size={18} /></div>
         </div>
       {/each}
-    </div>
+    </ScrollRow>
   {/if}
   {#if liked.albums.length}
     <h2>Albums</h2>
-    <div class="tiles">
+    <ScrollRow gap={12}>
       {#each liked.albums as album (album.id)}
         <div class="tile-wrap">
           <a class="tile" href="#/album/{album.id}">
@@ -87,7 +88,7 @@
           <div class="corner"><LikeButton kind="album" id={album.id} name={album.title} size={18} /></div>
         </div>
       {/each}
-    </div>
+    </ScrollRow>
   {/if}
   <div class="head">
     <h2>Songs</h2>
@@ -159,13 +160,6 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-  }
-
-  .tiles {
-    display: flex;
-    gap: 12px;
-    overflow-x: auto;
-    padding-bottom: 4px;
   }
 
   .tile {
