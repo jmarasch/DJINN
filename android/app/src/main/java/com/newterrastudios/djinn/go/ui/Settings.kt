@@ -1,6 +1,7 @@
 package com.newterrastudios.djinn.go.ui
 
 import com.newterrastudios.djinn.go.data.ApiException
+import com.newterrastudios.djinn.go.player.TalkOver
 import com.newterrastudios.djinn.go.BuildConfig
 import android.content.Context
 import android.text.format.Formatter
@@ -168,6 +169,7 @@ fun SettingsScreen(nav: Nav) {
             Note("DJINN GO version ${BuildConfig.VERSION_NAME}")
         }
         item { TapSettings(nav) }
+        item { TalkOverSettings(nav) }
         item { VisualsSettings(nav) }
         if (nav.canKeepSongs) {
             item {
@@ -335,6 +337,26 @@ private fun TapSettings(nav: Nav) {
         ) {
             RadioButton(selected = nav.tapAction == value, onClick = ::choose)
             Text(label)
+        }
+    }
+}
+
+/** For a call being screened, directions, or a voice assistant. Answered calls always pause. */
+@Composable
+private fun TalkOverSettings(nav: Nav) {
+    val chosen by nav.prefs.talkOverChoice.collectAsState()
+    Heading("When another app needs to talk")
+    Note("Such as an assistant screening a call, or directions. A call you answer always pauses the music.")
+    TalkOver.entries.forEach { choice ->
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clickable { nav.prefs.chooseTalkOver(choice) }
+                .padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            RadioButton(selected = chosen == choice, onClick = { nav.prefs.chooseTalkOver(choice) })
+            Text(choice.label)
         }
     }
 }
