@@ -101,6 +101,13 @@ export class ApiError extends Error {
   }
 }
 
+let unauthorized: (() => void) | null = null
+
+/** Called when the server turns a request down for want of a sign-in. A wrong password answers the same, so check. */
+export function onUnauthorized(handler: () => void) {
+  unauthorized = handler
+}
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(`/api${path}`, {
     method,
@@ -108,6 +115,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     body: body === undefined ? undefined : JSON.stringify(body),
   })
   if (!res.ok) {
+    if (res.status === 401) unauthorized?.()
     let message = `Request failed (${res.status})`
     try {
       const data = await res.json()

@@ -539,11 +539,16 @@ export function stop() {
   for (const deck of decks) {
     deck.pause()
     deck.removeAttribute('src')
+    deck.load()
   }
   preloaded = null
   player.queue = []
   player.index = -1
   player.playing = false
+  if ('mediaSession' in navigator) {
+    navigator.mediaSession.metadata = null
+    navigator.mediaSession.playbackState = 'none'
+  }
 }
 
 function shuffled<T>(items: T[]): T[] {

@@ -47,6 +47,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.guava.future
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -94,6 +96,16 @@ class PlaybackService : MediaLibraryService() {
             app.account.current.collect {
                 links.clear()
                 searches.clear()
+            }
+        }
+        // However a sign-in ends, here or from the server, the music ends with
+        // it. A dead one shows within SAVE_EVERY_MS, when saving the place fails.
+        scope.launch {
+            app.account.signedIn.drop(1).filter { !it }.collect {
+                session?.player?.run {
+                    stop()
+                    clearMediaItems()
+                }
             }
         }
         val network = OkHttpDataSource.Factory(app.api.http)

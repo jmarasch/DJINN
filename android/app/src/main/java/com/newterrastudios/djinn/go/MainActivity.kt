@@ -42,6 +42,8 @@ import com.newterrastudios.djinn.go.ui.MainScreen
 import com.newterrastudios.djinn.go.ui.Nav
 import com.newterrastudios.djinn.go.ui.SignInScreen
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.launch
 import java.io.IOException
@@ -161,6 +163,10 @@ class MainActivity : ComponentActivity() {
             }
         }
         LaunchedEffect(Unit) { player.followPosition() }
+        // A TV keeps playing what it was given until it's told otherwise.
+        LaunchedEffect(Unit) {
+            app.account.signedIn.drop(1).filter { !it }.collect { cast.stop() }
+        }
         LaunchedEffect(Unit) {
             nav.update = offeredUpdate(api.appRelease(), BuildConfig.VERSION_CODE.toLong())
         }

@@ -3,7 +3,7 @@
   // come as they are and this device plays them.
   import { onMount } from 'svelte'
   import AccountPanels from '../lib/AccountPanels.svelte'
-  import { api, ApiError } from '../lib/api'
+  import { api, ApiError, onUnauthorized } from '../lib/api'
   import Icon from '../lib/Icon.svelte'
   import { goBack, navigation, param, route } from '../lib/router.svelte'
   import { app } from '../lib/state.svelte'
@@ -36,6 +36,7 @@
   let error = $state('')
 
   onMount(async () => {
+    onUnauthorized(checkSignedIn)
     await refresh()
     ready = true
   })
@@ -69,6 +70,28 @@
     await api.logout().catch(() => {})
     app.me = null
     app.mode = await api.mode().catch(() => null)
+  }
+
+  let checking = false
+
+  /**
+   * A sign-in can end from elsewhere: an admin, another device. Saving the
+   * place in the song fails within seconds when it does, and the music stops.
+   */
+  async function checkSignedIn() {
+    if (checking || !app.me) return
+    checking = true
+    try {
+      await api.me()
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) {
+        stop()
+        app.me = null
+        app.mode = await api.mode().catch(() => null)
+      }
+    } finally {
+      checking = false
+    }
   }
 
   const albumId = $derived(param('/album'))

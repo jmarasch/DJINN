@@ -187,7 +187,15 @@ export async function signInAsHost() {
   app.hostLogin = true
 }
 
+const onLogout: (() => void)[] = []
+
+/** Something to end on signing out. GO shares this file, so what the party alone has registers itself. */
+export function whenLoggingOut(run: () => void) {
+  onLogout.push(run)
+}
+
 export async function logout() {
+  for (const run of onLogout) run()
   await api.logout().catch(() => {})
   disconnect()
   app.me = null
