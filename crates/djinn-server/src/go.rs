@@ -31,6 +31,7 @@ use tower::ServiceExt;
 use tower_http::services::ServeFile;
 
 use crate::auth::{go_refusal, new_token, AdminUser, CurrentSession, Device};
+use crate::client::DirectTls;
 use crate::error::{ApiError, ApiResult};
 use crate::go_announce::{self, GO_DISCOVERABLE, SERVER_NAME};
 use crate::go_app;
@@ -45,6 +46,8 @@ use crate::{api, settings, web};
 pub const GO_ENABLED: &str = "go_enabled";
 /// 1 when the GO listener accepts requests outside the home network.
 pub const GO_ALLOW_REMOTE: &str = "go_allow_remote";
+/// 1 when signing in from outside the home network may go unencrypted.
+const GO_ALLOW_PLAIN_REMOTE: &str = "go_allow_plain_remote";
 pub const GO_HTTPS_HOSTNAME: &str = "go_https_hostname";
 pub const GO_UPNP: &str = "go_upnp";
 /// What the app does with kept songs at sign-out: "delete" or "keep".
@@ -74,6 +77,7 @@ pub struct GoState {
     /// Mirrors the `go_enabled` setting.
     enabled: AtomicBool,
     allow_remote: AtomicBool,
+    allow_plain_remote: AtomicBool,
     upnp: Mutex<Option<go_upnp::Mapping>>,
     /// Telling phones on the network about GO, while it's on.
     announcer: Mutex<Option<go_announce::Announcer>>,
@@ -131,6 +135,7 @@ impl GoState {
             listen,
             enabled: AtomicBool::new(false),
             allow_remote: AtomicBool::new(false),
+            allow_plain_remote: AtomicBool::new(false),
             upnp: Mutex::default(),
             announcer: Mutex::default(),
             encryption: Arc::default(),
@@ -185,6 +190,11 @@ pub async fn apply(state: &AppState) -> anyhow::Result<()> {
     state.go.enabled.store(on, Ordering::Relaxed);
     let allow_remote = settings::flag(&state.store, GO_ALLOW_REMOTE, false).await?;
     state.go.allow_remote.store(allow_remote, Ordering::Relaxed);
+    let allow_plain = settings::flag(&state.store, GO_ALLOW_PLAIN_REMOTE, false).await?;
+    state
+        .go
+        .allow_plain_remote
+        .store(allow_plain, Ordering::Relaxed);
     let hostname = state
         .store
         .get_setting(GO_HTTPS_HOSTNAME)
@@ -299,7 +309,7 @@ async fn start(state: &AppState) {
             return;
         }
     };
-    let app = router(state.clone()).into_make_service_with_connect_info::<SocketAddr>();
+    let app = router(state.clone()).into_make_service_with_connect_info::<tls::Peer>();
     tokio::spawn(async move {
         let stopped = async move {
             tokio::select! {
@@ -346,7 +356,9 @@ pub fn router(state: AppState) -> Router {
         .merge(crate::subsonic::router())
         .fallback(web::go_handler)
         .layer(middleware::from_fn_with_state(state.clone(), guard))
+        .layer(middleware::from_fn(security::same_origin))
         .layer(middleware::from_fn_with_state(state.clone(), headers))
+        .layer(middleware::from_fn(crate::client::note_peer))
         .with_state(state)
 }
 
@@ -487,6 +499,20 @@ fn access(method: &Method, path: &str) -> Option<Access> {
         .map(|&(_, _, access)| access)
 }
 
+/// Whether a path takes a password or a session, which mustn't cross the
+/// internet unencrypted. Song links are only good for one song, and cast devices
+/// can't use DJINN's own certificate; the page and the app hold nothing private.
+fn carries_sign_in(path: &str) -> bool {
+    const SAYS_NOTHING_PRIVATE: &[&str] = &[
+        "/api/health",
+        "/api/go/hello",
+        "/api/go/app",
+        "/api/auth/mode",
+    ];
+    path.starts_with("/rest/")
+        || (path.starts_with("/api/") && !SAYS_NOTHING_PRIVATE.contains(&path))
+}
+
 /// Lets through only what GO serves, to whom it should.
 async fn guard(State(state): State<AppState>, request: Request, next: Next) -> Response {
     match check(&state, request).await {
@@ -511,6 +537,19 @@ async fn check(state: &AppState, request: Request) -> ApiResult<Request> {
         return Err(ApiError::new(
             StatusCode::FORBIDDEN,
             "DJINN GO only accepts home network and Tailscale connections",
+        ));
+    }
+    if !origin.home
+        && !origin.https
+        && !state.go.allow_plain_remote.load(Ordering::Relaxed)
+        && request.extensions().get::<DirectTls>().is_none()
+        && carries_sign_in(request.uri().path())
+    {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "away from home, DJINN GO needs an encrypted connection: open it with https://. \
+             If this comes through a proxy or tunnel on this computer, add it to the trusted \
+             proxies in Admin > GO; to allow it unencrypted anyway, there's a switch there too",
         ));
     }
     let (mut parts, body) = request.into_parts();
@@ -568,30 +607,7 @@ async fn headers(State(state): State<AppState>, request: Request, next: Next) ->
         tracing::trace!(ip = ?origin.ip, %method, status = status.as_u16(),
                         elapsed_ms = started.elapsed().as_millis(), "GO request");
     }
-    let h = response.headers_mut();
-    h.insert(
-        header::CONTENT_SECURITY_POLICY,
-        HeaderValue::from_static(
-            "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; \
-             img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; \
-             object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
-        ),
-    );
-    h.insert(
-        header::X_CONTENT_TYPE_OPTIONS,
-        HeaderValue::from_static("nosniff"),
-    );
-    h.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
-    h.insert(
-        header::REFERRER_POLICY,
-        HeaderValue::from_static("same-origin"),
-    );
-    if origin.https {
-        h.insert(
-            header::STRICT_TRANSPORT_SECURITY,
-            HeaderValue::from_static("max-age=31536000"),
-        );
-    }
+    security::set_headers(response.headers_mut(), security::GO_CSP, origin.https);
     response
 }
 
@@ -1042,6 +1058,7 @@ struct Status {
     discoverable: bool,
     enabled: bool,
     allow_remote: bool,
+    allow_plain_remote: bool,
     https_hostname: String,
     upnp: bool,
     upnp_error: Option<String>,
@@ -1111,6 +1128,7 @@ async fn status_of(state: &AppState) -> anyhow::Result<Status> {
         discoverable: settings::flag(&state.store, GO_DISCOVERABLE, true).await?,
         enabled: go.enabled(),
         allow_remote: go.allow_remote(),
+        allow_plain_remote: settings::flag(&state.store, GO_ALLOW_PLAIN_REMOTE, false).await?,
         https_hostname: state
             .store
             .get_setting(GO_HTTPS_HOSTNAME)
@@ -1273,6 +1291,8 @@ struct GoSettings {
     #[serde(default)]
     allow_remote: bool,
     #[serde(default)]
+    allow_plain_remote: bool,
+    #[serde(default)]
     https_hostname: String,
     #[serde(default)]
     upnp: bool,
@@ -1402,6 +1422,7 @@ async fn save_settings(
     settings::set_flag(&state.store, GO_DISCOVERABLE, body.discoverable).await?;
     settings::set_flag(&state.store, GO_ENABLED, body.enabled).await?;
     settings::set_flag(&state.store, GO_ALLOW_REMOTE, body.allow_remote).await?;
+    settings::set_flag(&state.store, GO_ALLOW_PLAIN_REMOTE, body.allow_plain_remote).await?;
     state
         .store
         .set_setting(GO_HTTPS_HOSTNAME, &hostname)
@@ -1692,7 +1713,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn outside_access_needs_switch_but_https_is_optional() {
+    async fn outside_access_needs_the_switch_and_encryption_unless_allowed() {
         let state = AppState::for_tests().await;
         state.go.enabled.store(true, Ordering::Relaxed);
         let call = |ip: [u8; 4], proto: Option<&str>| {
@@ -1732,19 +1753,32 @@ mod tests {
         };
         let role = state.store.create_role("Remote", &away).await.unwrap();
         account(&state, "alex", role.id).await;
-        let mut request = Request::builder()
-            .method(Method::POST)
-            .uri("/api/auth/login")
-            .header(header::CONTENT_TYPE, "application/json")
-            .body(Body::from(login("alex")))
-            .unwrap();
-        request
-            .extensions_mut()
-            .insert(axum::extract::ConnectInfo(SocketAddr::from((
-                [8, 8, 8, 8],
-                50000,
-            ))));
-        let res = router(state.clone()).oneshot(request).await.unwrap();
+        let plain_login = |tls: bool| {
+            let mut request = Request::builder()
+                .method(Method::POST)
+                .uri("/api/auth/login")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(login("alex")))
+                .unwrap();
+            request
+                .extensions_mut()
+                .insert(axum::extract::ConnectInfo(SocketAddr::from((
+                    [8, 8, 8, 8],
+                    50000,
+                ))));
+            if tls {
+                request.extensions_mut().insert(DirectTls);
+            }
+            router(state.clone()).oneshot(request)
+        };
+        let res = plain_login(false).await.unwrap();
+        assert_eq!(
+            res.status(),
+            StatusCode::FORBIDDEN,
+            "no password in the clear"
+        );
+        // DJINN's own encryption counts.
+        let res = plain_login(true).await.unwrap();
         assert_eq!(res.status(), StatusCode::OK);
         let cookie = res
             .headers()
@@ -1752,10 +1786,18 @@ mod tests {
             .unwrap()
             .to_str()
             .unwrap();
-        assert!(
-            !cookie.contains("; Secure"),
-            "HTTP login must work without TLS"
-        );
+        assert!(cookie.contains("; Secure"), "{cookie}");
+        // The admin can allow it, for a port forward with no HTTPS.
+        state.go.allow_plain_remote.store(true, Ordering::Relaxed);
+        let res = plain_login(false).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let cookie = res
+            .headers()
+            .get(header::SET_COOKIE)
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert!(!cookie.contains("; Secure"), "{cookie}");
         // A direct client can't claim trusted HTTPS by setting a header.
         let res = router(state.clone())
             .oneshot(call([8, 8, 8, 8], Some("https")))

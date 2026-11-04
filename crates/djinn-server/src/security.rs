@@ -6,9 +6,13 @@ use std::net::{IpAddr, SocketAddr};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use axum::extract::ConnectInfo;
-use axum::http::HeaderMap;
+use axum::extract::{ConnectInfo, Request};
+use axum::http::{header, HeaderMap, HeaderValue, Method};
+use axum::middleware::Next;
+use axum::response::{IntoResponse, Response};
 use ipnet::IpNet;
+
+use crate::error::ApiError;
 
 /// Proxies (or tunnels like cloudflared) whose forwarding headers DJINN
 /// believes, one address or range per line or comma.
@@ -116,6 +120,91 @@ pub fn is_home(ip: IpAddr) -> bool {
                 || (first & 0xffc0) == 0xfe80
         }
     }
+}
+
+/// What pages on the party port may load: its own files, and the photos an
+/// admin chose to show straight from Unsplash.
+pub const PARTY_CSP: HeaderValue = HeaderValue::from_static(
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; \
+     img-src 'self' data: blob: https://images.unsplash.com; media-src 'self' blob:; \
+     connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; \
+     frame-ancestors 'none'",
+);
+/// The same for DJINN GO's page.
+pub const GO_CSP: HeaderValue = HeaderValue::from_static(
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; \
+     img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; \
+     object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+);
+
+/// Security headers for a response. HSTS only through a proxy's HTTPS: on
+/// DJINN's own certificate, which browsers warn about, it would leave no way
+/// past the warning.
+pub fn set_headers(headers: &mut HeaderMap, csp: HeaderValue, proxied_https: bool) {
+    headers.insert(header::CONTENT_SECURITY_POLICY, csp);
+    headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    headers.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
+    headers.insert(
+        header::REFERRER_POLICY,
+        HeaderValue::from_static("same-origin"),
+    );
+    if proxied_https {
+        headers.insert(
+            header::STRICT_TRANSPORT_SECURITY,
+            HeaderValue::from_static("max-age=31536000"),
+        );
+    }
+}
+
+/// Whether a browser says this request was made by a page from somewhere
+/// else. Cookies keep to their site but not their port, so another program on
+/// this computer could otherwise press DJINN's buttons for someone signed in.
+/// Forwarding headers mean a proxy may have changed the Host; pages can't add
+/// those to a request without asking first, which DJINN never allows.
+fn from_another_origin(headers: &HeaderMap, authority: Option<&str>) -> bool {
+    let Some(origin) = headers.get(header::ORIGIN).and_then(|v| v.to_str().ok()) else {
+        return false;
+    };
+    if [
+        "x-forwarded-for",
+        "x-forwarded-host",
+        "cf-connecting-ip",
+        "forwarded",
+    ]
+    .iter()
+    .any(|name| headers.contains_key(*name))
+    {
+        return false;
+    }
+    let host = headers
+        .get(header::HOST)
+        .and_then(|v| v.to_str().ok())
+        .or(authority);
+    let Some(host) = host else { return false };
+    let from = origin.split_once("://").map_or(origin, |(_, rest)| rest);
+    !from.eq_ignore_ascii_case(host)
+}
+
+/// Refuses changes asked for by pages from somewhere else. Apps send no
+/// Origin, and Subsonic calls carry their own sign-in rather than a cookie.
+pub async fn same_origin(request: Request, next: Next) -> Response {
+    let reads = matches!(
+        *request.method(),
+        Method::GET | Method::HEAD | Method::OPTIONS
+    );
+    if !reads
+        && !request.uri().path().starts_with("/rest/")
+        && from_another_origin(
+            request.headers(),
+            request.uri().authority().map(|a| a.as_str()),
+        )
+    {
+        return ApiError::forbidden().into_response();
+    }
+    next.run(request).await
 }
 
 /// Tries allowed in a window: one account from one address, one address on
@@ -354,6 +443,39 @@ mod tests {
         // No headers: the peer decides.
         let o = origin(Some(ip("192.168.1.9")), &HeaderMap::new(), &[]);
         assert!(o.home);
+    }
+
+    #[test]
+    fn pages_from_elsewhere_are_noticed() {
+        let with = |pairs: &[(&'static str, &'static str)]| {
+            let mut headers = HeaderMap::new();
+            for (name, value) in pairs {
+                headers.insert(*name, HeaderValue::from_static(value));
+            }
+            from_another_origin(&headers, None)
+        };
+        let host = ("host", "192.168.1.5:8066");
+        assert!(!with(&[host]), "an app sends no Origin");
+        assert!(!with(&[host, ("origin", "http://192.168.1.5:8066")]));
+        assert!(!with(&[host, ("origin", "https://192.168.1.5:8066")]));
+        assert!(!with(&[
+            ("host", "Music.example.com"),
+            ("origin", "https://music.example.com")
+        ]));
+        assert!(
+            with(&[host, ("origin", "http://192.168.1.5:9000")]),
+            "another port"
+        );
+        assert!(with(&[host, ("origin", "https://evil.example")]));
+        assert!(with(&[host, ("origin", "null")]));
+        assert!(
+            !with(&[
+                host,
+                ("origin", "https://music.example.com"),
+                ("x-forwarded-for", "1.2.3.4")
+            ]),
+            "a proxy may have changed the Host"
+        );
     }
 
     #[test]

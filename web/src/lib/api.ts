@@ -186,7 +186,7 @@ export const api = {
   goSendToParty: (trackId: number) => post<{ outcome: 'added' | 'backed' }>(`/go/party/${trackId}`),
   goStatus: () => get<GoStatus>('/go/status'),
   goApp: () => get<GoAppRelease | null>('/go/app'),
-  saveGoSettings: (settings: { encryption: boolean; keep: GoKeepRules; server_name: string; discoverable: boolean; enabled: boolean; allow_remote: boolean; https_hostname: string; upnp: boolean; trusted_proxies: string; admin_two_step: boolean }) =>
+  saveGoSettings: (settings: { encryption: boolean; keep: GoKeepRules; server_name: string; discoverable: boolean; enabled: boolean; allow_remote: boolean; allow_plain_remote: boolean; https_hostname: string; upnp: boolean; trusted_proxies: string; admin_two_step: boolean }) =>
     put<GoStatus>('/go/settings', settings),
   signIns: (limit = 200) => get<SignIn[]>(`/go/sign-ins?limit=${limit}`),
   turnOffUserTwoStep: (id: number) => del<void>(`/users/${id}/two-step`),
@@ -405,6 +405,7 @@ export const api = {
     post<CastList>(`/cast/${encodeURIComponent(id)}/start`, { mode }),
   stopCast: (id: string) => post<CastList>(`/cast/${encodeURIComponent(id)}/stop`),
   stopAllCasts: () => post<void>('/cast/stop-all'),
+  newStreamLink: () => post<CastList>('/cast/new-link'),
   setCastVolume: (id: string, level: number) => put<void>(`/cast/${encodeURIComponent(id)}/volume`, { level }),
   saveReplayGain: (mode: ReplayGainMode, preamp_db: number) =>
     put<ReplayGainSettings>('/audio/replaygain', { mode, preamp_db }),

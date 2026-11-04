@@ -238,7 +238,7 @@ pub struct Device {
     pub agent: Option<String>,
     /// On the home network (or Tailscale).
     pub home: bool,
-    /// Reached over HTTPS through a trusted proxy.
+    /// Reached over HTTPS, DJINN's own or through a trusted proxy.
     pub https: bool,
     /// Came in on the DJINN GO port.
     pub go: bool,
@@ -266,7 +266,7 @@ impl FromRequestParts<AppState> for Device {
             ip: origin.ip.map(|ip| ip.to_string()),
             agent,
             home: origin.home,
-            https: origin.https,
+            https: origin.https || parts.extensions.get::<client::DirectTls>().is_some(),
             go: parts.extensions.get::<crate::go::GoRequest>().is_some(),
         })
     }

@@ -51,6 +51,16 @@
     }
   }
 
+  async function newLink() {
+    if (!confirm('Give the live stream a new address? Anyone listening with the old one stops, and casts restart.')) return
+    try {
+      app.casts = (await api.newStreamLink()).devices
+      toast('The stream has a new address')
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'That did not work', true)
+    }
+  }
+
   const timers = new Map<string, ReturnType<typeof setTimeout>>()
   function setVolume(device: CastDevice, level: number) {
     device.volume = level
@@ -139,6 +149,7 @@
       {#if searching}<span class="spinner" aria-hidden="true"></span> Looking...{:else}Look for devices{/if}
     </button>
     {#if anyActive}<button onclick={stopAll}>Stop all casts</button>{/if}
+    <button onclick={newLink}>New stream address</button>
   </div>
 </section>
 

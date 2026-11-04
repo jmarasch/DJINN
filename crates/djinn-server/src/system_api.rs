@@ -68,6 +68,7 @@ const RESET_SETTINGS: &[&str] = &[
     "smart_strength",
     "sound_analysis",
     "tv_page",
+    "tv_sound",
     "update_auto",
     "update_check",
     "volume",

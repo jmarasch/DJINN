@@ -9,7 +9,10 @@
   const UP_NEXT = 6
   /** Opened by a cast (Chromecast, Google TV): play sound at once, no
    * on-screen buttons, since nobody can tap them. */
-  const casting = new URLSearchParams(location.search).has('cast')
+  const params = new URLSearchParams(location.search)
+  const casting = params.has('cast')
+  /** What DJINN gave the cast, to get the stream with. */
+  const castKey = params.get('cast')
 
   let nowPlaying = $state<NowPlaying>({ current: null, position_ms: 0, up_next: null })
   let player = $state<PlayerState | null>(null)
@@ -47,7 +50,7 @@
 
   async function load() {
     try {
-      const res = await fetch('/api/tv')
+      const res = await fetch(castKey ? `/api/tv?key=${encodeURIComponent(castKey)}` : '/api/tv')
       if (!res.ok) {
         error = (await res.json().catch(() => null))?.error ?? 'The TV page is not available.'
         setTimeout(load, 10_000)

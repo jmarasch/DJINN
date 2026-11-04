@@ -192,6 +192,7 @@ export interface GoStatus {
   discoverable: boolean
   enabled: boolean
   allow_remote: boolean
+  allow_plain_remote: boolean
   https_hostname: string
   upnp: boolean
   upnp_error: string | null
@@ -625,6 +626,8 @@ export interface Settings {
   show_collaboration_artists: boolean
   /** The TV page (/tv) works without signing in. */
   tv_page: boolean
+  /** The TV page can play the party without signing in. */
+  tv_sound: boolean
   /** Anyone signed in can play the party in their own browser. */
   play_here: boolean
   /** Votes that skip a song; 0 turns skip voting off. */

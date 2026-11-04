@@ -42,8 +42,8 @@ pub struct AppState {
     pub guest_mode: Arc<AtomicBool>,
     /// The live stream for casting, when the engine runs.
     pub stream: Option<djinn_cast::stream::LiveStream>,
-    /// Secret in the stream URL.
-    pub cast_token: Arc<String>,
+    /// Secret in the stream URL; an admin can change it.
+    pub cast_token: Arc<std::sync::RwLock<String>>,
     pub caster: djinn_cast::Caster,
     /// Songs as points in sound space, for "more like this".
     pub sound: Arc<std::sync::RwLock<djinn_library::sound::SoundIndex>>,
@@ -112,7 +112,7 @@ impl AppState {
             network: Arc::default(),
             guest_mode: Arc::new(AtomicBool::new(false)),
             stream: None,
-            cast_token: Arc::new(String::new()),
+            cast_token: Arc::default(),
             caster: djinn_cast::Caster::new(),
             sound: Arc::default(),
             catalog: Arc::default(),
@@ -127,8 +127,16 @@ impl AppState {
 
     pub fn with_stream(mut self, stream: djinn_cast::stream::LiveStream, token: String) -> Self {
         self.stream = Some(stream);
-        self.cast_token = Arc::new(token);
+        self.cast_token = Arc::new(std::sync::RwLock::new(token));
         self
+    }
+
+    /// The secret in the stream URL just now.
+    pub fn stream_token(&self) -> String {
+        self.cast_token
+            .read()
+            .map(|token| token.clone())
+            .unwrap_or_default()
     }
 
     /// Where DJINN GO listens when it's on.

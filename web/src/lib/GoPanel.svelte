@@ -10,7 +10,7 @@
   import type { GoKeepRules, GoStatus, SignIn } from './types'
 
   let status = $state<GoStatus | null>(null)
-  let form = $state({ encryption: true, keep: { sign_out: 'delete', away: 'lock', away_days: 30 } as GoKeepRules, server_name: '', discoverable: true, enabled: false, allow_remote: false, https_hostname: '', upnp: false, trusted_proxies: '', admin_two_step: false })
+  let form = $state({ encryption: true, keep: { sign_out: 'delete', away: 'lock', away_days: 30 } as GoKeepRules, server_name: '', discoverable: true, enabled: false, allow_remote: false, allow_plain_remote: false, https_hostname: '', upnp: false, trusted_proxies: '', admin_two_step: false })
   let signIns = $state<SignIn[]>([])
   let busy = $state(false)
   let timer: ReturnType<typeof setInterval> | undefined
@@ -44,7 +44,7 @@
   }
 
   function formFrom(s: GoStatus) {
-    return { encryption: s.encryption, keep: { ...s.keep }, server_name: s.server_name, discoverable: s.discoverable, enabled: s.enabled, allow_remote: s.allow_remote, https_hostname: s.https_hostname, upnp: s.upnp, trusted_proxies: s.trusted_proxies, admin_two_step: s.admin_two_step }
+    return { encryption: s.encryption, keep: { ...s.keep }, server_name: s.server_name, discoverable: s.discoverable, enabled: s.enabled, allow_remote: s.allow_remote, allow_plain_remote: s.allow_plain_remote, https_hostname: s.https_hostname, upnp: s.upnp, trusted_proxies: s.trusted_proxies, admin_two_step: s.admin_two_step }
   }
 
   async function save() {
@@ -188,7 +188,13 @@
     {#if form.allow_remote}
       <div class="remote-setup">
         <h3>Router port forwarding</h3>
-        <p class="small muted">To connect directly without HTTPS, forward TCP {status.port} on your router to {lanIp}:{status.port}. This uses plain HTTP, so passwords, app passwords, and music travel without encryption.</p>
+        <p class="small muted">To connect directly, forward TCP {status.port} on your router to {lanIp}:{status.port}. DJINN GO's app encrypts this by itself. Browsers warn about its certificate if you open <code>https://</code>, and other Subsonic apps need to be told to accept it.</p>
+        <label class="switch">
+          <input type="checkbox" bind:checked={form.allow_plain_remote} onchange={save} disabled={busy} />
+          <span>Also allow unencrypted connections from outside
+            <span class="small muted block">Off by default. With this on, signing in over plain HTTP works from anywhere, and passwords, app passwords, and music can be read by anyone along the way.</span>
+          </span>
+        </label>
         <h3>Recommended: HTTPS</h3>
         <p class="small muted">Give GO a public DNS name and run an HTTPS reverse proxy on this computer. With Caddy, add this site to its Caddyfile:</p>
         <label>Public hostname <input type="text" bind:value={form.https_hostname} placeholder="music.example.com" spellcheck="false" /></label>

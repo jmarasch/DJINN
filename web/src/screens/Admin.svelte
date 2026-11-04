@@ -238,6 +238,15 @@
           <a href="/tv" target="_blank" rel="noopener">/tv</a> on that screen; no sign-in needed.
         </span>
       </label>
+      {#if settings.tv_page}
+        <label class="switch big">
+          <input type="checkbox" bind:checked={settings.tv_sound} />
+          <span>
+            Sound on the TV page: a button on it plays the party, for a TV browser that isn't cast to.
+            Anyone who can open the page can listen, signed in or not.
+          </span>
+        </label>
+      {/if}
       <label class="switch big">
         <input type="checkbox" bind:checked={settings.play_here} />
         Play here: a Tune In button on the Playing tab lets anyone play the party on their own phone

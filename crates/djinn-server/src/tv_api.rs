@@ -8,7 +8,7 @@ use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::{Json, Router};
 use djinn_store::QueueItem;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::error::{ApiError, ApiResult};
 use crate::events::{NowPlaying, PlayerState};
@@ -17,6 +17,9 @@ use crate::state::AppState;
 
 /// Setting key; on unless set to "0".
 pub const TV_PAGE: &str = "tv_page";
+/// Setting key: the TV page can play the party without signing in, which means
+/// anyone who can open it can listen. Off unless set to "1".
+pub const TV_SOUND: &str = "tv_sound";
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -49,12 +52,25 @@ struct TvSnapshot {
     queue: Vec<QueueItem>,
     join_url: String,
     guest_mode: bool,
-    /// The live stream, so the TV can play the music itself.
+    /// The live stream, so the TV can play the music itself: for a cast,
+    /// which is given the secret, or when the admin allows it for everyone.
     stream_url: Option<String>,
 }
 
-async fn snapshot(State(state): State<AppState>) -> ApiResult<Json<TvSnapshot>> {
+#[derive(Deserialize)]
+struct TvQuery {
+    /// The stream's secret, from the address a cast opens.
+    key: Option<String>,
+}
+
+async fn snapshot(
+    State(state): State<AppState>,
+    Query(query): Query<TvQuery>,
+) -> ApiResult<Json<TvSnapshot>> {
     check_enabled(&state).await?;
+    let token = state.stream_token();
+    let sound = query.key.as_deref() == Some(token.as_str())
+        || settings::flag(&state.store, TV_SOUND, false).await?;
     let (now_playing, player) = {
         let jukebox = state.jukebox.lock().await;
         (jukebox.now_playing(), jukebox.player_state())
@@ -68,7 +84,8 @@ async fn snapshot(State(state): State<AppState>) -> ApiResult<Json<TvSnapshot>> 
         stream_url: state
             .stream
             .as_ref()
-            .map(|_| crate::cast_api::stream_path(&state.cast_token)),
+            .filter(|_| sound)
+            .map(|_| crate::cast_api::stream_path(&token)),
     }))
 }
 

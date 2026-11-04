@@ -322,11 +322,16 @@ account and a domain on Cloudflare.
 
 When the admin turns on **Allow connections from outside the home network**
 and a listener's role has **Use GO away from home**, GO accepts direct
-connections over HTTP. To use this without HTTPS, forward TCP port 8067
-on your router to the DJINN computer's LAN IP on port 8067. The Admin page
-shows the exact `IP:PORT`. Passwords, app passwords, and music travel
-without encryption on direct HTTP connections, so HTTPS is recommended
-for internet access.
+connections. Forward TCP port 8067 on your router to the DJINN computer's LAN
+IP on port 8067; the Admin page shows the exact `IP:PORT`. The DJINN GO app
+encrypts these connections with the server's own certificate. In a browser,
+open the address with `https://` and accept the warning.
+
+Away from home, signing in over plain HTTP is refused, because passwords, app
+passwords, and music would travel without encryption. If you need it anyway,
+for example for a Subsonic app that can't accept the certificate, Admin > GO
+has **Also allow unencrypted connections from outside**. A trusted HTTPS proxy,
+below, is the better answer.
 
 ### Recommended HTTPS setup
 
