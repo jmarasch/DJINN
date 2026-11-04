@@ -115,7 +115,13 @@
             : 'home',
   )
   const librarySection = $derived(
-    route.path === '/library/playlists' ? 'playlists' : route.path === '/library/history' ? 'history' : 'liked',
+    route.path === '/library/playlists'
+      ? 'playlists'
+      : route.path === '/library/genres'
+        ? 'genres'
+        : route.path === '/library/history'
+          ? 'history'
+          : 'liked',
   )
 </script>
 

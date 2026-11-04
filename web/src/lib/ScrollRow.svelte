@@ -130,7 +130,7 @@
   }
 
   /* Touch screens swipe, and the fade already shows there's more. */
-  @media (hover: hover) {
+  @media (any-hover: hover) {
     .arrow {
       display: flex;
     }

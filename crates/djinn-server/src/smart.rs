@@ -323,11 +323,33 @@ struct GenrePage {
     related: Vec<djinn_library::genres::Related>,
 }
 
+/// How much of the genre map the cloud wants, within reason.
+#[derive(Deserialize)]
+struct GenreShape {
+    top: Option<usize>,
+    lines: Option<usize>,
+}
+
+impl GenreShape {
+    fn shape(&self) -> djinn_library::genres::Shape {
+        let default = djinn_library::genres::Shape::default();
+        djinn_library::genres::Shape {
+            top: self.top.unwrap_or(default.top).clamp(10, 500),
+            links_per_genre: self.lines.unwrap_or(default.links_per_genre).clamp(1, 12),
+        }
+    }
+}
+
 /// Every genre in the library and how they relate, for browsing by genre
 /// and the genre cloud.
-async fn genres(_: CurrentUser, State(state): State<AppState>) -> Json<GenreMap> {
+async fn genres(
+    _: CurrentUser,
+    State(state): State<AppState>,
+    Query(asked): Query<GenreShape>,
+) -> Json<GenreMap> {
+    let shape = asked.shape();
     let map = match (state.catalog.read(), state.sound.read()) {
-        (Ok(catalog), Ok(index)) => djinn_library::genres::map(&catalog.tags, &index),
+        (Ok(catalog), Ok(index)) => djinn_library::genres::shaped(&catalog.tags, &index, shape),
         _ => GenreMap::default(),
     };
     Json(map)

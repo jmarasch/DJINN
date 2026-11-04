@@ -863,6 +863,8 @@ export interface GenreMap {
   genres: { name: string; songs: number }[]
   /** Related genres, as indexes into `genres`; strength 0 to 1. */
   links: { a: number; b: number; strength: number }[]
+  /** Links among the biggest genres only, for the cloud's top level. */
+  top_links: { a: number; b: number; strength: number }[]
 }
 
 /** Version and updates (Admin > About). */

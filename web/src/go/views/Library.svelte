@@ -4,20 +4,42 @@
   import Art from '../../lib/Art.svelte'
   import ScrollRow from '../../lib/ScrollRow.svelte'
   import { app, toast } from '../../lib/state.svelte'
+  import GenreCloud from '../../lib/GenreCloud.svelte'
+  import GenreTags from '../../lib/GenreTags.svelte'
+  import Icon from '../../lib/Icon.svelte'
   import ImportPlaylist from '../../lib/ImportPlaylist.svelte'
-  import type { GoPlaylist, Liked, Played } from '../../lib/types'
+  import type { GenreMap, GoPlaylist, Liked, Played } from '../../lib/types'
   import { playList, tapSong } from '../player.svelte'
   import SongList from '../SongList.svelte'
   import LikeButton from '../LikeButton.svelte'
   import SongRow from '../SongRow.svelte'
 
-  let { section = 'liked' }: { section?: 'liked' | 'playlists' | 'history' } = $props()
+  let { section = 'liked' }: { section?: 'liked' | 'playlists' | 'genres' | 'history' } = $props()
 
   let liked = $state<Liked | null>(null)
   let lists = $state<GoPlaylist[]>([])
   let history = $state<Played[]>([])
   let more = $state(true)
   let name = $state('')
+  let genres = $state<GenreMap | null>(null)
+  let genreView = $state<'tags' | 'cloud'>(storedGenreView())
+
+  function storedGenreView() {
+    try {
+      return localStorage.getItem('djinn-genre-view') === 'cloud' ? 'cloud' : 'tags'
+    } catch {
+      return 'tags'
+    }
+  }
+
+  function showGenres(view: 'tags' | 'cloud') {
+    genreView = view
+    try {
+      localStorage.setItem('djinn-genre-view', view)
+    } catch {
+      // Only a convenience.
+    }
+  }
 
   $effect(() => {
     load(section).catch((e) => toast(e.message, true))
@@ -26,6 +48,7 @@
   async function load(which: string) {
     if (which === 'liked') liked = await api.goLiked()
     else if (which === 'playlists') lists = await api.goPlaylists()
+    else if (which === 'genres') genres = await api.genres()
     else {
       history = await api.goHistory(0)
       more = history.length === 100
@@ -56,9 +79,30 @@
 <nav class="sections">
   <a href="#/library" class:active={section === 'liked'}>Liked</a>
   <a href="#/library/playlists" class:active={section === 'playlists'}>Playlists</a>
+  <a href="#/library/genres" class:active={section === 'genres'}>Genres</a>
   <a href="#/library/history" class:active={section === 'history'}>History</a>
   {#if app.me?.permissions?.submit_music}<a href="#/submit">Submit music</a>{/if}
 </nav>
+
+{#if section === 'genres'}
+  <div class="genre-views" role="group" aria-label="Layout">
+    <button class:active={genreView === 'tags'} aria-label="List" aria-pressed={genreView === 'tags'} onclick={() => showGenres('tags')}>
+      <Icon name="list" size={20} />
+    </button>
+    <button class:active={genreView === 'cloud'} aria-label="Cloud" aria-pressed={genreView === 'cloud'} onclick={() => showGenres('cloud')}>
+      <Icon name="cloud" size={20} />
+    </button>
+  </div>
+  {#if !genres}
+    <p class="muted small">Loading genres...</p>
+  {:else if !genres.genres.length}
+    <p class="muted">No genres yet.</p>
+  {:else if genreView === 'cloud'}
+    <GenreCloud />
+  {:else}
+    <GenreTags map={genres} />
+  {/if}
+{/if}
 
 {#if section === 'liked' && liked}
   {#if liked.artists.length}
@@ -229,5 +273,25 @@
   .more {
     width: 100%;
     margin-top: 8px;
+  }
+
+  .genre-views {
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+
+  .genre-views button {
+    width: 40px;
+    min-height: 40px;
+    padding: 0;
+    background: var(--surface-2);
+    color: var(--muted);
+  }
+
+  .genre-views button.active {
+    background: var(--surface-3);
+    color: var(--text);
   }
 </style>
