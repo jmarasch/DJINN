@@ -846,6 +846,14 @@ async fn stream(
     let Some(grant) = grant else {
         return ApiError::new(StatusCode::FORBIDDEN, "this link has expired").into_response();
     };
+    // Signing out, a new password or a turned-off account ends its links too.
+    match state.store.session_is_live(grant.session_id).await {
+        Ok(true) => {}
+        Ok(false) => {
+            return ApiError::new(StatusCode::FORBIDDEN, "this link has expired").into_response()
+        }
+        Err(e) => return ApiError::from(e).into_response(),
+    }
     if query.download && !grant.downloads {
         return ApiError::forbidden().into_response();
     }
@@ -1850,7 +1858,7 @@ mod tests {
             &state,
             Method::POST,
             "/api/me/two-step/start",
-            Some("{}"),
+            Some(r#"{"password":"correct horse"}"#),
             Some(&sam),
         )
         .await;
@@ -1948,6 +1956,254 @@ mod tests {
             go(&state, Method::POST, "/api/auth/two-step", Some(&app), None).await;
         assert_eq!((status, cookie), (StatusCode::OK, None));
         assert!(field(&text, "token").is_string());
+    }
+
+    /// A role that can use GO from anywhere, as the `go` helper's client is.
+    async fn travel_role(state: &AppState) -> i64 {
+        state
+            .store
+            .create_role(
+                "Travel",
+                &djinn_store::Permissions {
+                    go: true,
+                    go_remote: true,
+                    ..djinn_store::Permissions::default()
+                },
+            )
+            .await
+            .unwrap()
+            .id
+    }
+
+    #[tokio::test]
+    async fn a_phone_token_only_works_on_gos_port() {
+        let state = AppState::for_tests().await;
+        state.go.enable_for_tests();
+        let role = travel_role(&state).await;
+        account(&state, "sam", role).await;
+        let body = r#"{"username":"sam","password":"correct horse","device_token":true}"#;
+        let (status, text, _) = go(&state, Method::POST, "/api/auth/login", Some(body), None).await;
+        assert_eq!(status, StatusCode::OK, "{text}");
+        let token = field(&text, "token").as_str().unwrap().to_owned();
+        let cookie = format!("djinn_session={token}");
+        let (status, _, _) = go(&state, Method::GET, "/api/me", None, Some(&cookie)).await;
+        assert_eq!(status, StatusCode::OK, "GO's port");
+        let (status, _) =
+            crate::test_util::call(&state, Method::GET, "/api/me", None, Some(&cookie)).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "the party port");
+
+        // A browser's sign-in still works on both.
+        let (_, _, cookie) = go(
+            &state,
+            Method::POST,
+            "/api/auth/login",
+            Some(&login("sam")),
+            None,
+        )
+        .await;
+        let cookie = cookie.unwrap();
+        let (status, _) =
+            crate::test_util::call(&state, Method::GET, "/api/me", None, Some(&cookie)).await;
+        assert_eq!(status, StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn a_session_alone_cant_change_who_can_sign_in() {
+        let state = AppState::for_tests().await;
+        state.go.enable_for_tests();
+        let role = travel_role(&state).await;
+        account(&state, "sam", role).await;
+        let (_, _, cookie) = go(
+            &state,
+            Method::POST,
+            "/api/auth/login",
+            Some(&login("sam")),
+            None,
+        )
+        .await;
+        let sam = cookie.unwrap();
+        let start = "/api/me/two-step/start";
+        for wrong in ["{}", r#"{"password":"not it"}"#] {
+            let (status, text, _) = go(&state, Method::POST, start, Some(wrong), Some(&sam)).await;
+            assert!(status.is_client_error(), "{status} {text}");
+        }
+        // The same again once two-step is on: a new phone needs the password.
+        let right = r#"{"password":"correct horse"}"#;
+        let (_, setup, _) = go(&state, Method::POST, start, Some(right), Some(&sam)).await;
+        let secret = field(&setup, "secret").as_str().unwrap().to_owned();
+        let key = data_encoding::BASE32_NOPAD
+            .decode(secret.as_bytes())
+            .unwrap();
+        let step = djinn_store::now_ms() / 1000 / 30;
+        let code = format!("{:06}", two_step::code_at(&key, step).unwrap());
+        let (status, _, _) = go(
+            &state,
+            Method::POST,
+            "/api/me/two-step/confirm",
+            Some(&format!(r#"{{"code":"{code}"}}"#)),
+            Some(&sam),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let (status, _, _) = go(&state, Method::POST, start, Some("{}"), Some(&sam)).await;
+        assert!(status.is_client_error());
+        let (status, _, _) = go(&state, Method::POST, start, Some(right), Some(&sam)).await;
+        assert_eq!(status, StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn app_passwords_are_shown_once_and_end_with_the_password() {
+        let state = AppState::for_tests().await;
+        state.go.enable_for_tests();
+        let role = travel_role(&state).await;
+        account(&state, "sam", role).await;
+        let (_, _, cookie) = go(
+            &state,
+            Method::POST,
+            "/api/auth/login",
+            Some(&login("sam")),
+            None,
+        )
+        .await;
+        let sam = cookie.unwrap();
+        let path = "/api/me/app-password";
+        let (status, _, _) = go(&state, Method::POST, path, Some("{}"), Some(&sam)).await;
+        assert!(status.is_client_error(), "needs the password");
+        let (status, text, _) = go(
+            &state,
+            Method::POST,
+            path,
+            Some(r#"{"password":"correct horse"}"#),
+            Some(&sam),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{text}");
+        let key = field(&text, "password").as_str().unwrap().to_owned();
+        let (_, text, _) = go(&state, Method::GET, path, None, Some(&sam)).await;
+        assert_eq!(field(&text, "exists"), true);
+        assert!(!text.contains(&key), "a session can't read it back");
+
+        let ping = format!("/rest/ping?f=json&u=sam&p={key}");
+        let (_, text, _) = go(&state, Method::GET, &ping, None, None).await;
+        assert!(text.contains(r#""status":"ok""#), "{text}");
+
+        let change = r#"{"current":"correct horse","new":"a brand new password"}"#;
+        let (status, text, _) = go(
+            &state,
+            Method::POST,
+            "/api/me/password",
+            Some(change),
+            Some(&sam),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT, "{text}");
+        let (_, text, _) = go(&state, Method::GET, &ping, None, None).await;
+        assert!(text.contains(r#""status":"failed""#), "{text}");
+    }
+
+    #[tokio::test]
+    async fn bad_app_keys_dont_shut_out_good_ones() {
+        let state = AppState::for_tests().await;
+        state.go.enable_for_tests();
+        let role = travel_role(&state).await;
+        account(&state, "sam", role).await;
+        let id = state
+            .store
+            .user_credentials("sam")
+            .await
+            .unwrap()
+            .unwrap()
+            .0
+            .id;
+        state
+            .store
+            .set_subsonic_key(id, "the-good-key")
+            .await
+            .unwrap();
+        for _ in 0..5 {
+            go(
+                &state,
+                Method::GET,
+                "/rest/ping?f=json&apiKey=bad",
+                None,
+                None,
+            )
+            .await;
+        }
+        // Coming from somewhere else, where the bad keys didn't.
+        let mut request = Request::builder()
+            .uri("/rest/ping?f=json&apiKey=the-good-key")
+            .header("x-forwarded-for", "203.0.113.9")
+            .header("x-forwarded-proto", "https")
+            .body(Body::empty())
+            .unwrap();
+        request
+            .extensions_mut()
+            .insert(axum::extract::ConnectInfo(SocketAddr::from((
+                [127, 0, 0, 1],
+                50000,
+            ))));
+        let res = router(state.clone()).oneshot(request).await.unwrap();
+        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let text = String::from_utf8_lossy(&bytes);
+        assert!(text.contains(r#""status":"ok""#), "{text}");
+    }
+
+    #[tokio::test]
+    async fn wrong_codes_add_up_across_password_sign_ins() {
+        let state = AppState::for_tests().await;
+        state.go.enable_for_tests();
+        let role = travel_role(&state).await;
+        account(&state, "sam", role).await;
+        let id = state
+            .store
+            .user_credentials("sam")
+            .await
+            .unwrap()
+            .unwrap()
+            .0
+            .id;
+        state
+            .store
+            .begin_two_step(id, &two_step::new_secret().unwrap())
+            .await
+            .unwrap();
+        state
+            .store
+            .confirm_two_step(id, 0, &[], None)
+            .await
+            .unwrap();
+        let mut answers = Vec::new();
+        for _ in 0..3 {
+            let (_, text, _) = go(
+                &state,
+                Method::POST,
+                "/api/auth/login",
+                Some(&login("sam")),
+                None,
+            )
+            .await;
+            let ticket = field(&text, "ticket").as_str().unwrap().to_owned();
+            let wrong = format!(r#"{{"ticket":"{ticket}","code":"abcdef"}}"#);
+            for _ in 0..4 {
+                let (status, _, _) = go(
+                    &state,
+                    Method::POST,
+                    "/api/auth/two-step",
+                    Some(&wrong),
+                    None,
+                )
+                .await;
+                answers.push(status);
+            }
+        }
+        // Five wrong codes, then locked: the ticket that hit it is used up,
+        // and the next sign-in's first code is refused too.
+        assert!(answers[..5].iter().all(|s| *s == StatusCode::UNAUTHORIZED));
+        assert_eq!(answers[5], StatusCode::TOO_MANY_REQUESTS, "{answers:?}");
+        assert_eq!(answers[8], StatusCode::TOO_MANY_REQUESTS, "{answers:?}");
     }
 
     #[tokio::test]

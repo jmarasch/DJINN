@@ -10,7 +10,7 @@ use std::sync::OnceLock;
 use argon2::password_hash::phc::PasswordHash;
 use argon2::password_hash::{PasswordHasher, PasswordVerifier};
 use argon2::Argon2;
-use axum::extract::{FromRequestParts, Path, State};
+use axum::extract::{DefaultBodyLimit, FromRequestParts, Path, State};
 use axum::http::header::{AUTHORIZATION, COOKIE, SET_COOKIE, USER_AGENT};
 use axum::http::request::Parts;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
@@ -23,6 +23,7 @@ use djinn_store::{
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use tokio::sync::{Semaphore, SemaphorePermit};
 
 use crate::client::{self, ClientIp};
 use crate::error::{ApiError, ApiResult};
@@ -30,6 +31,9 @@ use crate::state::AppState;
 use crate::{security, settings, two_step};
 
 const COOKIE_NAME: &str = "djinn_session";
+/// The same over HTTPS. Browsers only keep and send this name over HTTPS, and
+/// an address's plain HTTP can't overwrite it or be stuck behind it.
+const SECURE_COOKIE_NAME: &str = "__Secure-djinn_session";
 const SESSION_DAYS: i64 = 30;
 /// Guests stay signed in for a year (renewed whenever they open the app),
 /// so they're recognized at the next party.
@@ -37,6 +41,13 @@ const GUEST_SESSION_DAYS: i64 = 365;
 const MIN_PASSWORD: usize = 8;
 const MAX_PASSWORD: usize = 256;
 const MAX_USERNAME: usize = 32;
+/// The longest name worth checking, counting or writing down.
+const MAX_NAME_TRIED: usize = MAX_USERNAME * 2;
+/// Sign-in forms are small; anything bigger isn't one.
+const MAX_AUTH_BODY: usize = 64 * 1024;
+/// Sign-ups and guest joins one address may make in the limiter's window.
+const SIGNUPS_PER_ADDRESS: usize = 10;
+const GUEST_JOINS_PER_ADDRESS: usize = 30;
 /// How stale a session's "last used" may get before it's updated, so
 /// requests don't each write to the database.
 const TOUCH_AFTER_MS: i64 = 5 * 60 * 1000;
@@ -138,16 +149,20 @@ pub async fn signup_role(store: &Store) -> anyhow::Result<i64> {
 }
 
 pub fn router() -> Router<AppState> {
+    let small = || DefaultBodyLimit::max(MAX_AUTH_BODY);
     Router::new()
-        .route("/auth/login", post(login))
-        .route("/auth/two-step", post(finish_two_step))
-        .route("/me/password", post(change_password))
-        .route("/me/username", post(change_username))
+        .route("/auth/login", post(login).layer(small()))
+        .route("/auth/two-step", post(finish_two_step).layer(small()))
+        .route("/me/password", post(change_password).layer(small()))
+        .route("/me/username", post(change_username).layer(small()))
         .route("/auth/logout", post(logout))
-        .route("/auth/bootstrap", get(bootstrap_status).post(bootstrap))
+        .route(
+            "/auth/bootstrap",
+            get(bootstrap_status).post(bootstrap).layer(small()),
+        )
         .route("/auth/mode", get(mode))
-        .route("/auth/guest", post(join_as_guest))
-        .route("/auth/signup", post(sign_up))
+        .route("/auth/guest", post(join_as_guest).layer(small()))
+        .route("/auth/signup", post(sign_up).layer(small()))
         .route("/auth/invite/{token}", get(check_invite))
         .route("/me", get(me))
         .route("/users", get(list_users).post(create_user))
@@ -179,6 +194,11 @@ impl FromRequestParts<AppState> for CurrentSession {
             .session(&hash_token(&token))
             .await?
             .ok_or_else(ApiError::unauthorized)?;
+        // An app's token is no use against the party or Admin, however it's
+        // sent.
+        if found.device && !go {
+            return Err(ApiError::unauthorized());
+        }
         // Turning guest mode off signs guests out.
         if found.user.role == Role::Guest && !state.guest_mode() {
             return Err(ApiError::unauthorized());
@@ -298,11 +318,13 @@ pub(crate) async fn log_sign_in(
     user_id: Option<i64>,
     outcome: &str,
 ) -> ApiResult<()> {
+    let username = name_tried(username);
+    let username = username.as_str();
     state
         .store
         .log_sign_in(&NewSignIn {
             user_id,
-            username: &username.chars().take(MAX_USERNAME * 2).collect::<String>(),
+            username,
             ip: device.ip.as_deref(),
             user_agent: device.agent.as_deref(),
             via: device.via(),
@@ -315,14 +337,20 @@ pub(crate) async fn log_sign_in(
     Ok(())
 }
 
-/// Checks the signed-in user's own password, counting wrong ones toward
-/// the lockout.
+/// A name as typed, cut to a length worth counting or writing down.
+pub(crate) fn name_tried(name: &str) -> String {
+    name.trim().chars().take(MAX_NAME_TRIED).collect()
+}
+
+/// Checks the signed-in user's own password, counting wrong ones apart from
+/// signing in: whoever is guessing here has the session, not the password.
 pub async fn check_own_password(
     state: &AppState,
     user: &User,
     password: String,
 ) -> ApiResult<bool> {
-    if let Some(wait) = state.limiter.wait(&user.username, None) {
+    let bucket = format!("own:{}", user.username);
+    if let Some(wait) = state.limiter.wait(Some(&bucket), None) {
         return Err(too_many_tries(wait));
     }
     let Some((_, hash)) = state.store.user_credentials(&user.username).await? else {
@@ -330,7 +358,7 @@ pub async fn check_own_password(
     };
     let ok = verify_password(password, hash).await?;
     if !ok {
-        state.limiter.failed(&user.username, None);
+        state.limiter.failed(Some(&bucket), None);
     }
     Ok(ok)
 }
@@ -390,12 +418,20 @@ async fn login(
     device: Device,
     Json(body): Json<Credentials>,
 ) -> ApiResult<Response> {
-    let username = body.username.trim();
-    if let Some(wait) = state.limiter.wait(username, device.addr) {
+    let typed = body.username.trim();
+    let tried = name_tried(typed);
+    let username = tried.as_str();
+    if let Err(wait) = state.limiter.begin_sign_in(username, device.addr) {
         log_sign_in(&state, &device, username, None, "locked_out").await?;
         return Err(too_many_tries(wait));
     }
-    let found = state.store.user_credentials(username).await?;
+    // Nothing this long can be right, so don't spend time hashing it.
+    let plausible = tried.len() == typed.len() && body.password.len() <= MAX_PASSWORD * 4;
+    let found = if plausible {
+        state.store.user_credentials(username).await?
+    } else {
+        None
+    };
     // Verify against a dummy hash for unknown users so response time doesn't
     // reveal which usernames exist.
     let (user, hash) = match found {
@@ -403,16 +439,25 @@ async fn login(
         None => (None, dummy_hash().to_owned()),
     };
     let user_id = user.as_ref().map(|u| u.id);
-    let valid = verify_password(body.password, hash).await?;
+    let valid = if plausible {
+        match verify_password(body.password, hash).await {
+            Ok(valid) => valid,
+            Err(e) => {
+                state.limiter.undo_sign_in(username, device.addr);
+                return Err(e);
+            }
+        }
+    } else {
+        false
+    };
     let Some(user) = user.filter(|_| valid) else {
-        state.limiter.failed(username, device.addr);
         log_sign_in(&state, &device, username, user_id, "wrong_password").await?;
         return Err(ApiError::new(
             StatusCode::UNAUTHORIZED,
             "wrong username or password",
         ));
     };
-    state.limiter.succeeded(username);
+    state.limiter.sign_in_ok(username, device.addr);
     // Only said once the password is right, so it reveals nothing.
     let refused = match user.status {
         AccountStatus::Active => None,
@@ -452,7 +497,7 @@ async fn signed_in(
     device_token: bool,
 ) -> ApiResult<Response> {
     if device_token && device.go {
-        let token = new_session(state, user.id, SESSION_DAYS, device).await?;
+        let token = new_session(state, user.id, SESSION_DAYS, device, true).await?;
         let me = me_for(state, user).await?;
         return Ok(Json(DeviceSignIn { token, me }).into_response());
     }
@@ -505,7 +550,7 @@ async fn finish_two_step(
             "that took too long; sign in again",
         )
     })?;
-    if let Some(wait) = state.limiter.wait(&ticket.username, device.addr) {
+    if let Err(wait) = state.limiter.begin_code(&ticket.username, device.addr) {
         state.tickets.used(&body.ticket);
         log_sign_in(
             &state,
@@ -519,7 +564,6 @@ async fn finish_two_step(
     }
     if !two_step::verify(&state, ticket.user_id, &body.code).await? {
         state.tickets.wrong(&body.ticket);
-        state.limiter.failed(&ticket.username, device.addr);
         log_sign_in(
             &state,
             &device,
@@ -533,6 +577,7 @@ async fn finish_two_step(
             "that code didn't work; try the newest one",
         ));
     }
+    state.limiter.code_ok(&ticket.username, device.addr);
     state.tickets.used(&body.ticket);
     let user = state
         .store
@@ -632,9 +677,19 @@ async fn logout(
     if let Some(token) = request_token(&headers, device.go) {
         state.store.delete_session(&hash_token(&token)).await?;
     }
-    let clear =
-        HeaderValue::from_static("djinn_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0");
-    Ok((StatusCode::NO_CONTENT, AppendHeaders([(SET_COOKIE, clear)])))
+    let mut clear = vec![(
+        SET_COOKIE,
+        HeaderValue::from_static("djinn_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"),
+    )];
+    if device.https {
+        clear.push((
+            SET_COOKIE,
+            HeaderValue::from_static(
+                "__Secure-djinn_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0; Secure",
+            ),
+        ));
+    }
+    Ok((StatusCode::NO_CONTENT, AppendHeaders(clear)))
 }
 
 /// The signed-in user. For guests this also renews the session and its
@@ -642,6 +697,7 @@ async fn logout(
 async fn me(
     CurrentUser(user): CurrentUser,
     State(state): State<AppState>,
+    device: Device,
     headers: HeaderMap,
 ) -> ApiResult<impl IntoResponse> {
     let mut renewed = None;
@@ -652,7 +708,7 @@ async fn me(
                 .store
                 .extend_session(&hash_token(&token), now_ms() + max_age * 1000)
                 .await?;
-            renewed = Some(session_cookie(&token, max_age, false)?);
+            renewed = Some(session_cookie(&token, max_age, device.https)?);
         }
     }
     Ok((
@@ -721,6 +777,10 @@ async fn sign_up(
             "DJINN isn't set up yet",
         ));
     }
+    state
+        .limiter
+        .allow("signup", device.addr, SIGNUPS_PER_ADDRESS)
+        .map_err(too_many_tries)?;
     let username = validate_username(&body.username)?;
     validate_password(&body.password, &username)?;
     let invite = body.invite.filter(|t| !t.is_empty());
@@ -818,6 +878,10 @@ async fn join_as_guest(
             "guest access is off, please sign in",
         ));
     }
+    state
+        .limiter
+        .allow("guest", device.addr, GUEST_JOINS_PER_ADDRESS)
+        .map_err(too_many_tries)?;
     let name = validate_display_name(&body.name)?;
     let mac = client::mac_for(ip).await;
     let ip = ip.map(|ip| ip.to_string());
@@ -1138,43 +1202,51 @@ async fn start_session(
     days: i64,
     device: &Device,
 ) -> ApiResult<HeaderValue> {
-    let token = new_session(state, user_id, days, device).await?;
+    let token = new_session(state, user_id, days, device, false).await?;
     session_cookie(&token, days * 24 * 60 * 60, device.https)
 }
 
-/// Creates a session and returns its token. Only the hash is kept.
+/// Creates a session and returns its token. Only the hash is kept. An `app`
+/// session's token works only on GO's port.
 async fn new_session(
     state: &AppState,
     user_id: i64,
     days: i64,
     device: &Device,
+    app: bool,
 ) -> ApiResult<String> {
     let token = new_token()?;
-    let max_age = days * 24 * 60 * 60;
-    state
-        .store
-        .create_session_from(
-            user_id,
-            &hash_token(&token),
-            now_ms() + max_age * 1000,
-            device.ip.as_deref(),
-            device.agent.as_deref(),
-        )
-        .await?;
+    let hash = hash_token(&token);
+    let expires = now_ms() + days * 24 * 60 * 60 * 1000;
+    let (ip, agent) = (device.ip.as_deref(), device.agent.as_deref());
+    if app {
+        state
+            .store
+            .create_device_session(user_id, &hash, expires, ip, agent)
+            .await?;
+    } else {
+        state
+            .store
+            .create_session_from(user_id, &hash, expires, ip, agent)
+            .await?;
+    }
     Ok(token)
 }
 
-/// The session cookie; `secure` (over HTTPS) keeps browsers from ever
-/// sending it unencrypted.
+/// The session cookie; over HTTPS, `secure` keeps browsers from ever sending
+/// it unencrypted.
 fn session_cookie(token: &str, max_age: i64, secure: bool) -> ApiResult<HeaderValue> {
-    let secure = if secure { "; Secure" } else { "" };
-    let cookie =
-        format!("{COOKIE_NAME}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age}{secure}");
+    let cookie = if secure {
+        format!("{SECURE_COOKIE_NAME}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age}; Secure")
+    } else {
+        format!("{COOKIE_NAME}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age}")
+    };
     Ok(HeaderValue::from_str(&cookie).map_err(anyhow::Error::from)?)
 }
 
-/// The session a request carries. Apps send a token, which only GO's port
-/// accepts: a token from a phone is no use against the party or Admin.
+/// The session a request carries. Apps send a token as a header, which only
+/// GO's port reads; `CurrentSession` holds an app's token to that port however
+/// it arrives.
 fn request_token(headers: &HeaderMap, go: bool) -> Option<String> {
     let bearer = go.then(|| bearer_token(headers)).flatten();
     bearer.or_else(|| session_token(headers))
@@ -1187,15 +1259,20 @@ fn bearer_token(headers: &HeaderMap) -> Option<String> {
 }
 
 fn session_token(headers: &HeaderMap) -> Option<String> {
-    headers
+    let cookies: Vec<(&str, &str)> = headers
         .get_all(COOKIE)
         .iter()
         .filter_map(|v| v.to_str().ok())
         .flat_map(|v| v.split(';'))
         .filter_map(|pair| pair.trim().split_once('='))
-        .find(|(name, _)| *name == COOKIE_NAME)
-        .map(|(_, value)| value.to_owned())
-        .filter(|v| !v.is_empty())
+        .collect();
+    // Over HTTPS a browser may hold both names; the secure one is the newer.
+    [SECURE_COOKIE_NAME, COOKIE_NAME].iter().find_map(|wanted| {
+        cookies
+            .iter()
+            .find(|(name, value)| name == wanted && !value.is_empty())
+            .map(|(_, value)| (*value).to_owned())
+    })
 }
 
 /// 32 random bytes, hex encoded.
@@ -1213,25 +1290,73 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
-async fn hash_password(password: String) -> anyhow::Result<String> {
-    tokio::task::spawn_blocking(move || {
+/// Argon2 takes about 19 MB and a good part of a second each, so only a few
+/// run at once and only so many wait; past that, sign-ins are told to try
+/// again rather than running the computer (and the music) out of memory.
+struct HashGate {
+    /// Everyone hashing or waiting to.
+    inside: Semaphore,
+    hashing: Semaphore,
+}
+
+impl HashGate {
+    fn new(hashing: usize, waiting: usize) -> Self {
+        Self {
+            inside: Semaphore::new(hashing + waiting),
+            hashing: Semaphore::new(hashing),
+        }
+    }
+
+    /// A turn at hashing, or None while too many are waiting already.
+    async fn enter(&self) -> Option<(SemaphorePermit<'_>, SemaphorePermit<'_>)> {
+        let inside = self.inside.try_acquire().ok()?;
+        let hashing = self.hashing.acquire().await.ok()?;
+        Some((inside, hashing))
+    }
+}
+
+fn hash_gate() -> &'static HashGate {
+    static GATE: OnceLock<HashGate> = OnceLock::new();
+    GATE.get_or_init(|| {
+        let threads = std::thread::available_parallelism().map_or(2, std::num::NonZero::get);
+        HashGate::new((threads / 2).clamp(1, 4), 32)
+    })
+}
+
+fn too_busy() -> ApiError {
+    ApiError::new(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "too many sign-ins at once; try again in a moment",
+    )
+}
+
+async fn hash_password(password: String) -> ApiResult<String> {
+    let _turn = hash_gate().enter().await.ok_or_else(too_busy)?;
+    let hash = tokio::task::spawn_blocking(move || {
         Argon2::default()
             .hash_password(password.as_bytes())
             .map(|h| h.to_string())
             .map_err(|e| anyhow::anyhow!("password hashing failed: {e}"))
     })
-    .await?
+    .await
+    .map_err(anyhow::Error::from)??;
+    Ok(hash)
 }
 
-async fn verify_password(password: String, hash: String) -> anyhow::Result<bool> {
-    tokio::task::spawn_blocking(move || {
+async fn verify_password(password: String, hash: String) -> ApiResult<bool> {
+    let _turn = hash_gate().enter().await.ok_or_else(too_busy)?;
+    let valid = tokio::task::spawn_blocking(move || {
         let parsed =
             PasswordHash::new(&hash).map_err(|e| anyhow::anyhow!("stored hash is invalid: {e}"))?;
-        Ok(Argon2::default()
-            .verify_password(password.as_bytes(), &parsed)
-            .is_ok())
+        anyhow::Ok(
+            Argon2::default()
+                .verify_password(password.as_bytes(), &parsed)
+                .is_ok(),
+        )
     })
-    .await?
+    .await
+    .map_err(anyhow::Error::from)??;
+    Ok(valid)
 }
 
 /// A valid Argon2 hash of a random password, for timing-safe failed logins.
@@ -1493,6 +1618,65 @@ mod tests {
         let login = r#"{"username":"dj2","password":"longenough"}"#;
         let (status, _) = call(&state, Method::POST, "/api/auth/login", Some(login), None).await;
         assert_eq!(status, StatusCode::OK, "new password works");
+    }
+
+    #[test]
+    fn cookies_over_https_keep_to_https() {
+        let plain = session_cookie("abc", 60, false).unwrap();
+        let plain = plain.to_str().unwrap();
+        assert!(plain.starts_with("djinn_session=abc;") && !plain.contains("Secure"));
+        let secure = session_cookie("abc", 60, true).unwrap();
+        let secure = secure.to_str().unwrap();
+        assert!(secure.starts_with("__Secure-djinn_session=abc;") && secure.ends_with("; Secure"));
+
+        let sent = |value: &'static str| {
+            let mut headers = HeaderMap::new();
+            headers.insert(COOKIE, HeaderValue::from_static(value));
+            session_token(&headers)
+        };
+        assert_eq!(sent("djinn_session=old").as_deref(), Some("old"));
+        assert_eq!(sent("__Secure-djinn_session=new").as_deref(), Some("new"));
+        assert_eq!(
+            sent("djinn_session=old; __Secure-djinn_session=new").as_deref(),
+            Some("new"),
+            "the secure one wins"
+        );
+        assert_eq!(sent("__Secure-djinn_session=; other=1"), None);
+    }
+
+    #[tokio::test]
+    async fn only_so_many_passwords_are_hashed_or_wait_at_once() {
+        let gate = HashGate::new(1, 1);
+        let first = gate.enter().await.unwrap();
+        let waiting = gate.enter();
+        tokio::pin!(waiting);
+        // The second waits for the first's turn...
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(20), &mut waiting)
+                .await
+                .is_err()
+        );
+        // ...and a third isn't let in to wait at all.
+        assert!(gate.enter().await.is_none());
+        drop(first);
+        assert!(waiting.await.is_some());
+    }
+
+    #[tokio::test]
+    async fn a_very_long_name_is_refused_without_keeping_it() {
+        let state = AppState::for_tests().await;
+        let long = "x".repeat(10_000);
+        let body = format!(r#"{{"username":"{long}","password":"whatever it is"}}"#);
+        let (status, _) = call(&state, Method::POST, "/api/auth/login", Some(&body), None).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        let log = state.store.sign_ins(1).await.unwrap();
+        assert_eq!(log[0].username.chars().count(), MAX_NAME_TRIED);
+        let body = format!(
+            r#"{{"username":"{}","password":"x"}}"#,
+            "y".repeat(MAX_AUTH_BODY)
+        );
+        let (status, _) = call(&state, Method::POST, "/api/auth/login", Some(&body), None).await;
+        assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
     }
 
     #[test]

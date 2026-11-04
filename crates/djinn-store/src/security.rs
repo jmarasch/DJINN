@@ -7,6 +7,8 @@ use crate::{now_ms, Result, Store};
 
 /// How long sign-ins are kept.
 const SIGN_IN_DAYS: i64 = 90;
+/// ...and how many at most, since anyone can add to them.
+const SIGN_IN_ROWS: i64 = 100_000;
 
 /// One sign-in attempt, for the log.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, FromRow)]
@@ -34,7 +36,8 @@ pub struct NewSignIn<'a> {
 }
 
 impl Store {
-    /// Records a sign-in attempt, and forgets ones older than 90 days.
+    /// Records a sign-in attempt, and forgets ones older than 90 days or past
+    /// the most it keeps.
     pub async fn log_sign_in(&self, s: &NewSignIn<'_>) -> Result<()> {
         let now = now_ms();
         let mut tx = self.pool.begin().await?;
@@ -53,6 +56,10 @@ impl Store {
         .await?;
         sqlx::query("DELETE FROM sign_ins WHERE at < ?")
             .bind(now - SIGN_IN_DAYS * 24 * 60 * 60 * 1000)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("DELETE FROM sign_ins WHERE id <= (SELECT max(id) FROM sign_ins) - ?")
+            .bind(SIGN_IN_ROWS)
             .execute(&mut *tx)
             .await?;
         tx.commit().await?;

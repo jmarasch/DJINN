@@ -5,23 +5,31 @@
   import { api } from '../lib/api'
   import { app, toast } from '../lib/state.svelte'
 
-  let password = $state<string | null>(null)
+  let exists = $state(false)
+  /** The new app password, shown only until this page closes. */
+  let made = $state<string | null>(null)
   let shown = $state(false)
   let loaded = $state(false)
+  /** Asking for the account's password before making one. */
+  let asking = $state(false)
+  let current = $state('')
 
   onMount(async () => {
     try {
-      password = (await api.appPassword()).password
+      exists = (await api.appPassword()).exists
     } finally {
       loaded = true
     }
   })
 
-  async function make() {
-    if (password && !confirm('Make a new app password? Apps using the old one stop working until you give them the new one.')) return
+  async function make(e: SubmitEvent) {
+    e.preventDefault()
     try {
-      password = (await api.newAppPassword()).password
+      made = (await api.newAppPassword(current)).password
+      exists = true
       shown = true
+      asking = false
+      current = ''
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Could not make one', true)
     }
@@ -31,7 +39,8 @@
     if (!confirm('Remove the app password? Apps using it stop working.')) return
     try {
       await api.removeAppPassword()
-      password = null
+      exists = false
+      made = null
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Could not remove it', true)
     }
@@ -62,10 +71,12 @@
       <dd class="mono">{app.me?.username}</dd>
       <dt>Password</dt>
       <dd>
-        {#if password}
-          <span class="mono">{shown ? password : '••••••••••••••••••••'}</span>
+        {#if made}
+          <span class="mono">{shown ? made : '••••••••••••••••••••'}</span>
           <button class="small-button" onclick={() => (shown = !shown)}>{shown ? 'Hide' : 'Show'}</button>
-          <button class="small-button" onclick={() => password && copy(password)}>Copy</button>
+          <button class="small-button" onclick={() => made && copy(made)}>Copy</button>
+        {:else if exists}
+          <span class="muted">You have one. It's only shown when it's made; make a new one if you've lost it.</span>
         {:else}
           <span class="muted">Make an app password first</span>
         {/if}
@@ -73,11 +84,21 @@
     </dl>
     <p class="small muted">
       The app password works only in these apps, never to sign in here, and skips two-step sign-in, so keep it to your own devices.
+      Changing your account's password removes it, so apps will need a new one after that.
     </p>
-    <div class="buttons">
-      <button class="small-button" onclick={make}>{password ? 'Make a new app password' : 'Make an app password'}</button>
-      {#if password}<button class="small-button" onclick={remove}>Remove it</button>{/if}
-    </div>
+    {#if made}<p class="small muted">Copy it now: it isn't shown again.</p>{/if}
+    {#if asking}
+      <form class="buttons" onsubmit={make}>
+        <input type="password" bind:value={current} autocomplete="current-password" placeholder="Your password" required aria-label="Your password" />
+        <button class="small-button">Make it</button>
+        {#if exists}<span class="small muted">Apps using the old one stop working until you give them the new one.</span>{/if}
+      </form>
+    {:else}
+      <div class="buttons">
+        <button class="small-button" onclick={() => (asking = true)}>{exists ? 'Make a new app password' : 'Make an app password'}</button>
+        {#if exists}<button class="small-button" onclick={remove}>Remove it</button>{/if}
+      </div>
+    {/if}
   {/if}
 </section>
 

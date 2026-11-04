@@ -321,28 +321,44 @@ async fn end_my_session(
 }
 
 #[derive(Serialize)]
-struct AppPassword {
-    /// For Subsonic phone apps on DJINN GO; None until one is made.
-    password: Option<String>,
+struct HasAppPassword {
+    /// For Subsonic phone apps on DJINN GO. The password itself is only shown
+    /// when it's made: a session alone can't read one to keep for later.
+    exists: bool,
 }
 
 async fn app_password(
     me: CurrentSession,
     State(state): State<AppState>,
-) -> ApiResult<Json<AppPassword>> {
-    Ok(Json(AppPassword {
-        password: state.store.subsonic_key(me.user.id).await?,
+) -> ApiResult<Json<HasAppPassword>> {
+    Ok(Json(HasAppPassword {
+        exists: state.store.subsonic_key(me.user.id).await?.is_some(),
     }))
 }
 
+#[derive(Deserialize)]
+struct CurrentPassword {
+    password: String,
+}
+
+#[derive(Serialize)]
+struct AppPassword {
+    password: String,
+}
+
 /// Makes a new app password, replacing any old one (apps using it stop
-/// working until they get the new one).
+/// working until they get the new one). It works without two-step sign-in, so
+/// this asks for the account's password first.
 async fn new_app_password(
     me: CurrentSession,
     State(state): State<AppState>,
+    Json(body): Json<CurrentPassword>,
 ) -> ApiResult<Json<AppPassword>> {
     if me.user.role == djinn_store::Role::Guest {
         return Err(ApiError::forbidden());
+    }
+    if !auth::check_own_password(&state, &me.user, body.password).await? {
+        return Err(ApiError::new(StatusCode::FORBIDDEN, "wrong password"));
     }
     // 20 letters and digits: typed into phone apps, so no symbols.
     const ALPHABET: &[u8] = b"abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -354,9 +370,7 @@ async fn new_app_password(
         .collect();
     state.store.set_subsonic_key(me.user.id, &password).await?;
     tracing::info!(username = %me.user.username, "app password made");
-    Ok(Json(AppPassword {
-        password: Some(password),
-    }))
+    Ok(Json(AppPassword { password }))
 }
 
 async fn remove_app_password(
