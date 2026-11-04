@@ -1,4 +1,4 @@
-use super::browse::fts_query;
+use super::browse::{fts_query, fts_starts_with};
 use super::*;
 
 fn scanned(path: &str, title: &str, artist: &str, album: &str) -> ScannedTrack {
@@ -19,6 +19,51 @@ fn fts_query_quotes_prefix_terms() {
     assert_eq!(fts_query("AC/DC").as_deref(), Some("\"AC\"* \"DC\"*"));
     assert_eq!(fts_query("\" OR *").as_deref(), Some("\"OR\"*"));
     assert_eq!(fts_query("  -- "), None);
+}
+
+#[test]
+fn fts_starts_with_is_one_phrase() {
+    assert_eq!(fts_starts_with("S&M").as_deref(), Some("^ \"S M\""));
+    assert_eq!(fts_starts_with("\" OR *").as_deref(), Some("^ \"OR\""));
+    assert_eq!(fts_starts_with("  -- "), None);
+}
+
+/// Short names made of common letters used to lose to anything with words
+/// starting with them, far past the end of the results.
+#[tokio::test]
+async fn a_name_typed_in_full_comes_first() {
+    let store = Store::open_in_memory().await.unwrap();
+    let mut songs: Vec<_> = (0..30)
+        .map(|i| {
+            scanned(
+                &format!("/m/{i}.flac"),
+                &format!("Slow Motion Slow Motion {i}"),
+                "Mister Sister",
+                "Some More Songs",
+            )
+        })
+        .collect();
+    songs.push(scanned(
+        "/m/a.flac",
+        "S.M.D. Medley",
+        "Carnivore",
+        "Retaliation",
+    ));
+    songs.push(scanned("/m/b.flac", "S&M", "Rihanna", "Loud"));
+    songs.push(scanned("/m/c.flac", "Master", "Band", "S&M"));
+    store.save_scanned(&songs).await.unwrap();
+
+    let found = store.search("S&M", 5).await.unwrap();
+    let titles: Vec<_> = found.tracks.iter().map(|t| t.title.as_str()).collect();
+    assert_eq!(titles[..2], ["S&M", "S.M.D. Medley"]);
+    assert_eq!(found.albums[0].title, "S&M");
+
+    // Plain searches keep working, and a query that's only punctuation is empty.
+    assert_eq!(
+        store.search("loud", 5).await.unwrap().tracks[0].title,
+        "S&M"
+    );
+    assert!(store.search("&&", 5).await.unwrap().tracks.is_empty());
 }
 
 #[tokio::test]
