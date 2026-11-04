@@ -113,6 +113,8 @@ class Nav(
     var keptIds by mutableStateOf<Set<Long>>(emptySet())
     /** Something to say briefly. */
     var message by mutableStateOf<String?>(null)
+    /** Where you are in the genre cloud, kept while a genre's page is open. */
+    var genrePath by mutableStateOf(emptyList<String>())
     /** Takes back what the message is about, while it shows. */
     var undo by mutableStateOf<(() -> Unit)?>(null)
     val stack = mutableStateListOf<Screen>()

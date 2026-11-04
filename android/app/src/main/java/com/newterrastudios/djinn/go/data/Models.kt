@@ -101,7 +101,16 @@ data class YoutubeLinks(@SerialName("has_key") val hasKey: Boolean = false)
 
 /** Every genre in the library, by name. */
 @Serializable
-data class GenreList(val genres: List<GenreSummary> = emptyList())
+data class GenreList(
+    val genres: List<GenreSummary> = emptyList(),
+    /** Related genres, as places in [genres]. */
+    val links: List<GenreLink> = emptyList(),
+    /** Links among the biggest genres only, for the cloud's top level. */
+    @SerialName("top_links") val topLinks: List<GenreLink> = emptyList(),
+)
+
+@Serializable
+data class GenreLink(val a: Int, val b: Int, val strength: Float)
 
 @Serializable
 data class GenreSummary(val name: String, val songs: Long = 0)

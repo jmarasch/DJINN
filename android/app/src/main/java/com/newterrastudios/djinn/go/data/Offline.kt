@@ -222,6 +222,17 @@ class Prefs(context: Context, private val scope: () -> String = { "" }) {
         talkOverNow.value = choice
     }
 
+    /** Genres as a cloud rather than a list, and how much of it to show. */
+    var genreCloud: Boolean
+        get() = prefs.getBoolean("genre_cloud", false)
+        set(value) = prefs.edit { putBoolean("genre_cloud", value) }
+    var genreTop: Int
+        get() = prefs.getInt("genre_top", 100)
+        set(value) = prefs.edit { putInt("genre_top", value) }
+    var genreLines: Int
+        get() = prefs.getInt("genre_lines", 4)
+        set(value) = prefs.edit { putInt("genre_lines", value) }
+
     /** Bit rate to convert lossless songs to; 0 keeps full quality. */
     var kbps: Int
         get() = prefs.getInt("kbps", DEFAULT_KBPS)

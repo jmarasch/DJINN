@@ -1,6 +1,9 @@
 package com.newterrastudios.djinn.go.ui
 
 import kotlinx.coroutines.withContext
+import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.BubbleChart
+import androidx.compose.runtime.mutableIntStateOf
 import kotlinx.coroutines.Dispatchers
 import com.newterrastudios.djinn.go.data.importText
 import com.newterrastudios.djinn.go.data.ShareTarget
@@ -881,12 +884,50 @@ private fun genreTitle(name: String) = name.replaceFirstChar { it.uppercase() }
 @UnstableApi
 @Composable
 private fun GenresTab(nav: Nav) {
-    Loaded(key = "genres", load = { nav.api.genres() }) { list: GenreList ->
+    var cloud by remember { mutableStateOf(nav.prefs.genreCloud) }
+    var top by remember { mutableIntStateOf(nav.prefs.genreTop) }
+    var lines by remember { mutableIntStateOf(nav.prefs.genreLines) }
+    Loaded(key = "genres-$top-$lines", load = { nav.api.genres(top, lines) }) { list: GenreList ->
         val entries = remember(list) { jumpEntries(letterJumps(list.genres.map { it.name }), "name") }
         val state = rememberLazyListState()
         val scope = rememberCoroutineScope()
         var pressedLabel by remember { mutableStateOf<String?>(null) }
-        Box(Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize()) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            IconButton(onClick = {
+                cloud = !cloud
+                nav.prefs.genreCloud = cloud
+            }) {
+                if (cloud) {
+                    Icon(Icons.AutoMirrored.Filled.List, "Show as a list")
+                } else {
+                    Icon(Icons.Default.BubbleChart, "Show as a cloud")
+                }
+            }
+        }
+        if (cloud && list.genres.isNotEmpty()) {
+            GenreCloud(
+                list,
+                nav,
+                top,
+                lines,
+                onTop = {
+                    top = it
+                    nav.prefs.genreTop = it
+                },
+                onLines = {
+                    lines = it
+                    nav.prefs.genreLines = it
+                },
+                modifier = Modifier.weight(1f),
+            )
+            return@Column
+        }
+        Box(
+            Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+        ) {
             Row(Modifier.fillMaxSize()) {
                 LazyColumn(
                     Modifier
@@ -913,6 +954,7 @@ private fun GenresTab(nav: Nav) {
                 }
             }
             pressedLabel?.let { JumpBubble(it, Modifier.align(Alignment.Center)) }
+        }
         }
     }
 }
