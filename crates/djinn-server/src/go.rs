@@ -400,6 +400,7 @@ const ROUTES: &[(Method, &str, Access)] = &[
     (Method::POST, "/api/me/app-password", Access::Listener),
     (Method::DELETE, "/api/me/app-password", Access::Listener),
     (Method::GET, "/api/search", Access::Listener),
+    (Method::GET, "/api/search/ask", Access::Listener),
     (Method::GET, "/api/tracks", Access::Listener),
     (Method::GET, "/api/tracks/jumps", Access::Listener),
     (Method::GET, "/api/tracks/*", Access::Listener),
@@ -2236,6 +2237,16 @@ mod tests {
         let (status, text, _) = call(Method::POST, "/api/go/playlists".into(), Some(body)).await;
         assert_eq!(status, StatusCode::CREATED, "{text}");
         let list = field(&text, "id");
+        // The AI reader is off here, so there's no reading, but GO may ask.
+        let (status, text, _) = call(
+            Method::GET,
+            "/api/search/ask?q=music+for+cooking+dinner".into(),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{text}");
+        assert_eq!(text, "null");
+
         // The YouTube key is the server's: GO says whether it's there, and
         // can't change it.
         let key_path = "/api/playlists/youtube-key";

@@ -84,6 +84,8 @@ data class SearchResults(
     val albums: List<Album> = emptyList(),
     val artists: List<Artist> = emptyList(),
     val described: Described? = null,
+    /** The server's AI reader might understand this better: see [GoApi.ask]. */
+    val ask: Boolean = false,
 )
 
 /** The search read as a description, like "80's hair metal". */
@@ -92,6 +94,32 @@ data class Described(
     val summary: List<String> = emptyList(),
     val tracks: List<Track> = emptyList(),
 )
+
+/** Whether this server can read YouTube playlist links. */
+@Serializable
+data class YoutubeLinks(@SerialName("has_key") val hasKey: Boolean = false)
+
+/** Every genre in the library, by name. */
+@Serializable
+data class GenreList(val genres: List<GenreSummary> = emptyList())
+
+@Serializable
+data class GenreSummary(val name: String, val songs: Long = 0)
+
+/** One genre: its most played songs, its artists, and the genres near it. */
+@Serializable
+data class GenrePage(
+    val name: String,
+    /** Songs with it, which can be more than are listed. */
+    val total: Long = 0,
+    val tracks: List<Track> = emptyList(),
+    val artists: List<ArtistSummary> = emptyList(),
+    val related: List<GenreSummary> = emptyList(),
+)
+
+/** Where a letter or year starts in a long list. */
+@Serializable
+data class Jump(val label: String, val offset: Int)
 
 @Serializable
 data class GoPlaylist(

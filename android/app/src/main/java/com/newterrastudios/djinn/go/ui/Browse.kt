@@ -6,6 +6,7 @@ import com.newterrastudios.djinn.go.data.importText
 import com.newterrastudios.djinn.go.data.ShareTarget
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.rememberLauncherForActivityResult
 import android.provider.OpenableColumns
@@ -78,6 +79,16 @@ import com.newterrastudios.djinn.go.data.largeDownloadWarning
 import com.newterrastudios.djinn.go.data.Page
 import com.newterrastudios.djinn.go.data.SearchResults
 import com.newterrastudios.djinn.go.data.Track
+import com.newterrastudios.djinn.go.data.GenreList
+import com.newterrastudios.djinn.go.data.GenrePage
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.height
+import androidx.compose.runtime.mutableStateMapOf
+import kotlinx.coroutines.flow.collectLatest
+import androidx.compose.material.icons.filled.Shuffle
+import androidx.compose.material3.AssistChip
 import androidx.work.WorkManager
 import com.newterrastudios.djinn.go.work.DOWNLOAD_TAG
 import com.newterrastudios.djinn.go.work.DownloadWorker
@@ -120,63 +131,108 @@ private fun <T : Any> Loaded(
 /** How far down a list counts as worth a way back to the top. */
 private const val TO_TOP_AFTER_ROWS = 10
 
-/** A long list from the server, a page at a time as you scroll. */
+/** How far either side of the screen to have rows ready. */
+private const val LOAD_AROUND_ROWS = 20
+
+/** How long the list has to stay put before loading, so sliding along the letters doesn't fetch every one. */
+private const val LOAD_SETTLE_MS = 120L
+
+/** Room for a row not loaded yet: its picture plus padding. */
+private val UNLOADED_ROW = 60.dp
+
+/**
+ * A long list from the server. Each row sits at its place in the whole list, so
+ * a jump can land anywhere, and pages load around what's on screen.
+ */
 @Composable
-private fun <T> PagedList(
+private fun <T : Any> PagedList(
     key: String,
     load: suspend (Int) -> Page<T>,
     /** Options above the list, out of the way until you scroll back up. */
     options: @Composable () -> Unit = {},
-    row: @Composable (T, List<T>) -> Unit,
+    /** The letters or years beside the list, for orders that have them. */
+    jumps: suspend () -> List<JumpEntry> = { emptyList() },
+    row: @Composable (T) -> Unit,
 ) {
-    val items = remember(key) { mutableStateListOf<T>() }
-    var total by remember(key) { mutableStateOf<Long?>(null) }
+    val items = remember(key) { mutableStateMapOf<Int, T>() }
+    var total by remember(key) { mutableStateOf<Int?>(null) }
     var failed by remember(key) { mutableStateOf(false) }
+    var entries by remember(key) { mutableStateOf<List<JumpEntry>>(emptyList()) }
+    var pressedLabel by remember(key) { mutableStateOf<String?>(null) }
     // Each order starts from its top.
     val state = remember(key) { LazyListState() }
     val scope = rememberCoroutineScope()
-    val wantMore by remember(key) {
+    val missing by remember(key) {
         derivedStateOf {
-            val last = state.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-            last >= items.size - 20
+            val known = total ?: return@derivedStateOf 0
+            val visible = state.layoutInfo.visibleItemsInfo
+            val first = (visible.firstOrNull()?.index ?: 0) - LOAD_AROUND_ROWS
+            val last = (visible.lastOrNull()?.index ?: 0) + LOAD_AROUND_ROWS
+            (first.coerceAtLeast(0)..last.coerceAtMost(known - 1)).firstOrNull { it !in items }
         }
     }
     LaunchedEffect(key) {
-        snapshotFlow { wantMore to items.size }.collect { (more, size) ->
-            val known = total
-            if (more && !failed && (known == null || size < known)) {
-                try {
-                    val page = load(size)
-                    items.addAll(page.items)
-                    total = if (page.items.isEmpty()) items.size.toLong() else page.total
-                } catch (_: IOException) {
-                    failed = true
-                }
+        snapshotFlow { if (failed) null else missing }.collectLatest { at ->
+            if (at == null) return@collectLatest
+            if (total != null) delay(LOAD_SETTLE_MS)
+            try {
+                val page = load(at)
+                page.items.forEachIndexed { index, item -> items[at + index] = item }
+                total = if (page.items.isEmpty()) at else page.total.toInt()
+            } catch (_: IOException) {
+                failed = true
             }
         }
     }
+    // Asks again after Try again, when the server may be back.
+    LaunchedEffect(key, failed) {
+        if (failed || entries.isNotEmpty()) return@LaunchedEffect
+        // The list works without them, so not reaching the server here says nothing.
+        entries = try {
+            jumps()
+        } catch (_: IOException) {
+            emptyList()
+        }
+    }
     val goingBack = state.canScrollBackward && state.lastScrolledBackward
+    val count = total ?: 0
+    val showStrip = entries.size > 1 && count > 0
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
             AnimatedVisibility(visible = !state.canScrollBackward || goingBack) { options() }
-            LazyColumn(
+            if (failed) {
+                Column(Modifier.padding(16.dp)) {
+                    Text("Couldn't load more.", color = MaterialTheme.colorScheme.error)
+                    FilledTonalButton(onClick = { failed = false }) { Text("Try again") }
+                }
+            }
+            Row(
                 Modifier
                     .fillMaxWidth()
                     .weight(1f),
-                state = state,
             ) {
-                items(items) { row(it, items) }
-                if (failed) {
-                    item {
-                        Column(Modifier.padding(16.dp)) {
-                            Text("Couldn't load more.", color = MaterialTheme.colorScheme.error)
-                            FilledTonalButton(onClick = { failed = false }) { Text("Try again") }
-                        }
+                LazyColumn(
+                    Modifier
+                        .weight(1f)
+                        .fillMaxHeight(),
+                    state = state,
+                ) {
+                    items(count) { index ->
+                        val item = items[index]
+                        if (item != null) row(item) else Spacer(Modifier.height(UNLOADED_ROW))
                     }
-                } else if (total == null) {
-                    item { Note("Loading...") }
-                } else if (total == 0L) {
-                    item { Note("Nothing here yet.") }
+                    if (total == null && !failed) {
+                        item { Note("Loading...") }
+                    } else if (total == 0) {
+                        item { Note("Nothing here yet.") }
+                    }
+                }
+                if (showStrip) {
+                    JumpStrip(
+                        entries,
+                        onPressed = { pressedLabel = it },
+                        onJump = { offset -> scope.launch { state.scrollToItem(offset.coerceAtMost(count - 1)) } },
+                    )
                 }
             }
         }
@@ -184,12 +240,13 @@ private fun <T> PagedList(
             visible = goingBack && state.firstVisibleItemIndex >= TO_TOP_AFTER_ROWS,
             modifier = Modifier
                 .align(Alignment.BottomEnd)
-                .padding(16.dp),
+                .padding(end = if (showStrip) 44.dp else 16.dp, bottom = 16.dp),
         ) {
             SmallFloatingActionButton(onClick = { scope.launch { state.scrollToItem(0) } }) {
                 Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Back to top")
             }
         }
+        pressedLabel?.let { JumpBubble(it, Modifier.align(Alignment.Center)) }
     }
 }
 
@@ -447,6 +504,7 @@ private fun PlaylistsTab(nav: Nav) {
     }
     if (pasting) {
         ImportDialog(
+            nav,
             onFile = {
                 pasting = false
                 pick.launch(arrayOf("*/*"))
@@ -477,8 +535,16 @@ private fun PlaylistsTab(nav: Nav) {
 
 /** Bring in a playlist: names only, never music. */
 @Composable
-private fun ImportDialog(onFile: () -> Unit, onPaste: (String) -> Unit, onCancel: () -> Unit) {
+private fun ImportDialog(nav: Nav, onFile: () -> Unit, onPaste: (String) -> Unit, onCancel: () -> Unit) {
     var text by remember { mutableStateOf("") }
+    var youtubeOn by remember { mutableStateOf<Boolean?>(null) }
+    LaunchedEffect(Unit) {
+        youtubeOn = try {
+            nav.api.youtubeLinks().hasKey
+        } catch (_: IOException) {
+            null
+        }
+    }
     AlertDialog(
         onDismissRequest = onCancel,
         title = { Text("Import a playlist") },
@@ -486,17 +552,24 @@ private fun ImportDialog(onFile: () -> Unit, onPaste: (String) -> Unit, onCancel
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
                     "This brings in the list, not the music. Songs you don't have stay in the list, flagged, " +
-                        "and are skipped. Paste a YouTube playlist link if your server has YouTube links on. " +
-                        "For other services, get a file from Tune My Music or Soundiiz.",
+                        "and are skipped. For other services, get a file from Tune My Music or Soundiiz.",
                     style = MaterialTheme.typography.bodySmall,
                 )
+                when (youtubeOn) {
+                    true -> Text("You can paste a YouTube playlist link too.", style = MaterialTheme.typography.bodySmall)
+                    false -> Text(
+                        "YouTube links are off on this server. An admin can turn them on under Admin > Library.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    null -> Unit
+                }
                 FilledTonalButton(onClick = onFile) { Text("Choose a file") }
                 OutlinedTextField(
                     value = text,
                     onValueChange = { text = it },
                     minLines = 3,
                     maxLines = 6,
-                    label = { Text("Or paste songs, or a YouTube link") },
+                    label = { Text(if (youtubeOn == false) "Or paste songs" else "Or paste songs, or a YouTube link") },
                     placeholder = { Text("Artist - Title") },
                 )
             }
@@ -620,7 +693,7 @@ fun LibraryScreen(nav: Nav) {
                 )
             }
         }
-        // Five words only share a phone evenly at small text sizes. Rather than break them, they scroll.
+        // Six words only share a phone evenly at small text sizes. Rather than break them, they scroll.
         val configuration = LocalConfiguration.current
         if (configuration.screenWidthDp / configuration.fontScale >= ROOM_FOR_EVEN_TABS_DP) {
             SecondaryTabRow(selectedTabIndex = tab, tabs = tabs)
@@ -635,7 +708,8 @@ fun LibraryScreen(nav: Nav) {
                     "artists-$sort",
                     { nav.api.artists(sort, it) },
                     options = { Choices(ARTIST_SORTS, nav.artistSort) { nav.artistSort = it } },
-                ) { artist, _ ->
+                    jumps = { jumpEntries(nav.api.artistJumps(sort), sort) },
+                ) { artist ->
                     Row2(
                         title = artist.name,
                         subtitle = "${artist.trackCount} songs",
@@ -656,7 +730,8 @@ fun LibraryScreen(nav: Nav) {
                             Choices(ALBUM_SORTS, nav.albumSort) { nav.albumSort = it }
                         }
                     },
-                ) { album, _ ->
+                    jumps = { jumpEntries(nav.api.albumJumps(sort, filter), sort) },
+                ) { album ->
                     AlbumRow(album, nav)
                 }
             }
@@ -666,11 +741,13 @@ fun LibraryScreen(nav: Nav) {
                     "songs-$sort",
                     { nav.api.songs(sort, it) },
                     options = { Choices(SONG_SORTS, nav.songSort) { nav.songSort = it } },
-                ) { song, _ ->
+                    jumps = { jumpEntries(nav.api.songJumps(sort), sort) },
+                ) { song ->
                     SongRow(song, nav) { nav.startRadio(song) }
                 }
             }
-            3 -> PlaylistsTab(nav)
+            3 -> GenresTab(nav)
+            4 -> PlaylistsTab(nav)
             else -> Column {
                 DownloadStatus()
                 Choices(KEPT_VIEWS, nav.keptView) { nav.keptView = it }
@@ -680,8 +757,8 @@ fun LibraryScreen(nav: Nav) {
     }
 }
 
-private val LIBRARY_TABS = listOf("Artists", "Albums", "Songs", "Lists", "On phone")
-private const val ROOM_FOR_EVEN_TABS_DP = 480
+private val LIBRARY_TABS = listOf("Artists", "Albums", "Songs", "Genres", "Lists", "On phone")
+private const val ROOM_FOR_EVEN_TABS_DP = 576
 
 val KEPT_VIEWS = listOf("here" to "This server", "all" to "All servers")
 val ARTIST_SORTS = listOf("name" to "Name", "added" to "Recently added")
@@ -793,6 +870,115 @@ fun ArtistScreen(id: Long, nav: Nav) {
                 items(artist.appearsOn) { AlbumRow(it, nav) }
             }
             songSection("Other songs", artist.otherTracks, nav)
+        }
+    }
+}
+
+/** Genre names are stored in lower case. */
+private fun genreTitle(name: String) = name.replaceFirstChar { it.uppercase() }
+
+/** Every genre in the library. */
+@UnstableApi
+@Composable
+private fun GenresTab(nav: Nav) {
+    Loaded(key = "genres", load = { nav.api.genres() }) { list: GenreList ->
+        val entries = remember(list) { jumpEntries(letterJumps(list.genres.map { it.name }), "name") }
+        val state = rememberLazyListState()
+        val scope = rememberCoroutineScope()
+        var pressedLabel by remember { mutableStateOf<String?>(null) }
+        Box(Modifier.fillMaxSize()) {
+            Row(Modifier.fillMaxSize()) {
+                LazyColumn(
+                    Modifier
+                        .weight(1f)
+                        .fillMaxHeight(),
+                    state = state,
+                ) {
+                    if (list.genres.isEmpty()) item { Note("No genres yet.") }
+                    items(list.genres) { genre ->
+                        Row2(
+                            title = genreTitle(genre.name),
+                            subtitle = if (genre.songs == 1L) "1 song" else "${genre.songs} songs",
+                            art = {},
+                            onClick = { nav.push(Screen.Genre(genre.name)) },
+                        )
+                    }
+                }
+                if (entries.size > 1) {
+                    JumpStrip(
+                        entries,
+                        onPressed = { pressedLabel = it },
+                        onJump = { offset -> scope.launch { state.scrollToItem(offset) } },
+                    )
+                }
+            }
+            pressedLabel?.let { JumpBubble(it, Modifier.align(Alignment.Center)) }
+        }
+    }
+}
+
+/** One genre: its songs, artists and related genres. */
+@UnstableApi
+@Composable
+fun GenreScreen(name: String, nav: Nav) {
+    Loaded(key = name, load = { nav.api.genre(name) }) { page: GenrePage ->
+        LazyColumn(Modifier.fillMaxSize()) {
+            item {
+                Column(Modifier.padding(16.dp)) {
+                    Text(genreTitle(name), style = MaterialTheme.typography.headlineSmall)
+                    val shown = page.tracks.size
+                    Text(
+                        (if (page.total == 1L) "1 song" else "${page.total} songs") +
+                            if (page.total > shown) "; the $shown most played here." else ".",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Row(
+                        Modifier.padding(top = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        FilledTonalButton(
+                            onClick = { nav.player.play(page.tracks) },
+                            enabled = page.tracks.isNotEmpty(),
+                        ) {
+                            Icon(Icons.Default.PlayArrow, contentDescription = null)
+                            Text("Play", modifier = Modifier.padding(start = 8.dp))
+                        }
+                        FilledTonalButton(
+                            onClick = { nav.player.playShuffled(page.tracks) },
+                            enabled = page.tracks.isNotEmpty(),
+                        ) {
+                            Icon(Icons.Default.Shuffle, contentDescription = null)
+                            Text("Shuffle", modifier = Modifier.padding(start = 8.dp))
+                        }
+                    }
+                }
+            }
+            if (page.related.isNotEmpty()) {
+                item { Heading("Related genres") }
+                item {
+                    Chips(page.related.map { genreTitle(it.name) to { nav.push(Screen.Genre(it.name)) } })
+                }
+            }
+            if (page.artists.isNotEmpty()) {
+                item { Heading("Artists") }
+                item {
+                    Chips(page.artists.map { it.name to { nav.push(Screen.Artist(it.id)) } })
+                }
+            }
+            songSection("Songs", page.tracks, nav)
+        }
+    }
+}
+
+/** Names that open something, wrapping onto as many lines as they need. */
+@Composable
+private fun Chips(chips: List<Pair<String, () -> Unit>>) {
+    FlowRow(
+        Modifier.padding(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        chips.forEach { (label, open) ->
+            AssistChip(onClick = open, label = { Text(label) })
         }
     }
 }
@@ -930,23 +1116,40 @@ fun SearchScreen(nav: Nav) {
     var query by rememberSaveable { mutableStateOf("") }
     var results by remember { mutableStateOf<SearchResults?>(null) }
     var failed by remember { mutableStateOf(false) }
+    var thinking by remember { mutableStateOf(false) }
     LaunchedEffect(query) {
         failed = false
+        thinking = false
         if (query.isBlank()) {
             results = null
             return@LaunchedEffect
         }
         // Wait for typing to stop.
         delay(250)
-        try {
-            results = nav.api.search(query.trim())
+        val found = try {
+            nav.api.search(query.trim())
         } catch (e: ApiException) {
             failed = true
+            return@LaunchedEffect
         } catch (_: IOException) {
             // Away from the server: what's on this phone.
             results = SearchResults(
                 tracks = nav.offline.dao.search(nav.server, "%${query.trim()}%").map { it.toTrack() },
             )
+            return@LaunchedEffect
+        }
+        results = found
+        if (!found.ask) return@LaunchedEffect
+        // Words only the server's AI reader might know: it takes a few
+        // seconds, so wait a little longer for typing to stop.
+        thinking = true
+        try {
+            delay(600)
+            nav.api.ask(query.trim())?.let { results = found.copy(described = it) }
+        } catch (_: IOException) {
+            // Keep what was found.
+        } finally {
+            thinking = false
         }
     }
     Column(Modifier.fillMaxSize()) {
@@ -965,7 +1168,13 @@ fun SearchScreen(nav: Nav) {
         val empty = found.tracks.isEmpty() && found.albums.isEmpty() && found.artists.isEmpty() &&
             found.described?.tracks.isNullOrEmpty()
         LazyColumn(Modifier.fillMaxSize()) {
-            if (empty) item { Note("Nothing found.") }
+            if (thinking) {
+                item {
+                    LinearProgressIndicator(Modifier.fillMaxWidth())
+                    Note("Asking the server's AI...")
+                }
+            }
+            if (empty && !thinking) item { Note("Nothing found.") }
             if (found.artists.isNotEmpty()) {
                 item { Heading("Artists") }
                 items(found.artists) { artist ->

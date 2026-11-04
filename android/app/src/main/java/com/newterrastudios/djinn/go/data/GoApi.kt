@@ -38,6 +38,10 @@ data class Probed(
     val encrypted: Boolean,
 )
 
+/** A genre's address. In a path a "+" stays a plus, so spaces have to be %20. */
+internal fun genrePath(name: String) =
+    "/api/genres/" + URLEncoder.encode(name, "UTF-8").replace("+", "%20")
+
 /** DJINN GO's API on the server this phone is connected to. */
 class GoApi(private val account: Account) {
     val json = Json {
@@ -193,6 +197,12 @@ class GoApi(private val account: Account) {
     suspend fun albums(sort: String, filter: String, offset: Int): Page<Album> =
         get("/api/albums?sort=$sort&filter=$filter&offset=$offset")
     suspend fun songs(sort: String, offset: Int): Page<Track> = get("/api/tracks?sort=$sort&offset=$offset")
+    suspend fun artistJumps(sort: String): List<Jump> = get("/api/artists/jumps?sort=$sort")
+    suspend fun albumJumps(sort: String, filter: String): List<Jump> =
+        get("/api/albums/jumps?sort=$sort&filter=$filter")
+    suspend fun songJumps(sort: String): List<Jump> = get("/api/tracks/jumps?sort=$sort")
+    suspend fun genres(): GenreList = get("/api/genres")
+    suspend fun genre(name: String): GenrePage = get(genrePath(name))
     suspend fun album(id: Long): AlbumDetail = get("/api/albums/$id")
     suspend fun artist(id: Long): ArtistDetail = get("/api/artists/$id")
     suspend fun playlist(id: Long): GoPlaylistDetail = get("/api/go/playlists/$id")
@@ -202,6 +212,10 @@ class GoApi(private val account: Account) {
     suspend fun resume(): GoResume? = home().resume
     suspend fun search(query: String): SearchResults =
         get("/api/search?q=${URLEncoder.encode(query, "UTF-8")}")
+
+    /** The search read by the server's AI reader, which takes a few seconds. Null if it can't. */
+    suspend fun ask(query: String): Described? =
+        get("/api/search/ask?q=${URLEncoder.encode(query, "UTF-8")}")
 
     suspend fun likedIds(): LikedIds = get("/api/go/likes/ids")
     suspend fun setLike(id: Long, on: Boolean) = withContext(Dispatchers.IO) {
@@ -250,6 +264,8 @@ class GoApi(private val account: Account) {
     suspend fun playlists(): List<GoPlaylist> = get("/api/go/playlists")
 
     /** Makes playlists from a file or pasted songs. */
+    suspend fun youtubeLinks(): YoutubeLinks = get("/api/playlists/youtube-key")
+
     suspend fun importPlaylist(text: String, filename: String?): ImportResult = withContext(Dispatchers.IO) {
         json.decodeFromString(send("POST", "/api/playlists/import", json.encodeToString(ImportRequest(text, filename))))
     }

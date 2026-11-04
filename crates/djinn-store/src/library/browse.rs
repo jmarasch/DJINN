@@ -460,22 +460,31 @@ impl Store {
     }
 
     /// Search-as-you-type over tracks, albums, and artists. Every word must
-    /// match the start of a word in the indexed fields.
+    /// match the start of a word in the indexed fields. Names that begin with
+    /// exactly the words typed come first, shortest first: "S&M" also matches
+    /// everything with a word starting with S and one starting with M, which
+    /// would otherwise bury the song called that.
     pub async fn search(&self, query: &str, limit: i64) -> Result<SearchResults> {
         let Some(fts) = fts_query(query) else {
             return Ok(SearchResults::default());
         };
+        let starts = fts_starts_with(query).unwrap_or_default();
         // Title matches rank above artist/album matches, genre lowest.
         let tracks = sqlx::query_as(concat!(
             "SELECT ",
             track_columns!(),
             " FROM tracks_fts f JOIN tracks t ON t.id = f.rowid
+             LEFT JOIN (SELECT rowid AS named FROM tracks_fts WHERE tracks_fts MATCH 'title : ' || ?) e
+               ON e.named = t.id
              WHERE tracks_fts MATCH ? AND ",
             available!(),
             "
-             ORDER BY bm25(tracks_fts, 10.0, 5.0, 4.0, 3.0, 1.0)
+             ORDER BY e.named IS NULL,
+                      CASE WHEN e.named IS NOT NULL THEN length(t.title) END,
+                      bm25(tracks_fts, 10.0, 5.0, 4.0, 3.0, 1.0)
              LIMIT ?"
         ))
+        .bind(&starts)
         .bind(&fts)
         .bind(limit)
         .fetch_all(&self.pool)
@@ -486,28 +495,38 @@ impl Store {
             " FROM albums_fts f
              JOIN albums al ON al.id = f.rowid
              JOIN artists ar ON ar.id = al.artist_id
+             LEFT JOIN (SELECT rowid AS named FROM albums_fts WHERE albums_fts MATCH 'title : ' || ?) e
+               ON e.named = al.id
              WHERE albums_fts MATCH ?
                AND EXISTS (SELECT 1 FROM tracks t WHERE t.album_id = al.id AND ",
             available!(),
             ")
-             ORDER BY bm25(albums_fts, 5.0, 1.0)
+             ORDER BY e.named IS NULL,
+                      CASE WHEN e.named IS NOT NULL THEN length(al.title) END,
+                      bm25(albums_fts, 5.0, 1.0)
              LIMIT ?"
         ))
+        .bind(&starts)
         .bind(&fts)
         .bind(limit)
         .fetch_all(&self.pool)
         .await?;
         let artists = sqlx::query_as(concat!(
             "SELECT ar.id, ar.name, ar.art_hash FROM artists_fts f JOIN artists ar ON ar.id = f.rowid
+             LEFT JOIN (SELECT rowid AS named FROM artists_fts WHERE artists_fts MATCH 'name : ' || ?) e
+               ON e.named = ar.id
              WHERE artists_fts MATCH ?
                AND EXISTS (SELECT 1 FROM tracks t WHERE t.id IN ",
             artist_songs!("ar.id"),
             " AND ",
             available!(),
             ")
-             ORDER BY bm25(artists_fts)
+             ORDER BY e.named IS NULL,
+                      CASE WHEN e.named IS NOT NULL THEN length(ar.name) END,
+                      bm25(artists_fts)
              LIMIT ?"
         ))
+        .bind(&starts)
         .bind(&fts)
         .bind(limit)
         .fetch_all(&self.pool)
@@ -518,6 +537,16 @@ impl Store {
             artists,
         })
     }
+}
+
+/// The words typed as one phrase at the start of a column, for FTS5 once a
+/// column filter goes in front. Same splitting as [`fts_query`].
+pub(super) fn fts_starts_with(input: &str) -> Option<String> {
+    let words: Vec<&str> = input
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .collect();
+    (!words.is_empty()).then(|| format!("^ \"{}\"", words.join(" ")))
 }
 
 /// Turns user input into an FTS5 prefix query: each word becomes a quoted

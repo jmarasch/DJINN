@@ -54,13 +54,14 @@ sealed interface Screen {
     data class Album(val id: Long) : Screen
     data class Artist(val id: Long) : Screen
     data class Playlist(val id: Long) : Screen
+    data class Genre(val name: String) : Screen
     data object NowPlaying : Screen
     data object Settings : Screen
     data object Visuals : Screen
     data object Cover : Screen
 }
 
-enum class Tab(val label: String) { Playlist("Playlist"), Library("Library"), Search("Search") }
+enum class Tab(val label: String) { Home("Home"), Library("Library"), Search("Search") }
 
 /** Where you are in the app, and what every screen needs. */
 @UnstableApi
@@ -86,7 +87,7 @@ class Nav(
     val askStorage: suspend () -> Boolean,
     private val onOfflineChange: () -> Unit,
 ) {
-    var tab by mutableStateOf(Tab.Playlist)
+    var tab by mutableStateOf(Tab.Home)
     // How the library's lists are ordered, until the app closes.
     var artistSort by mutableStateOf(ARTIST_SORTS.first().first)
     var albumSort by mutableStateOf(ALBUM_SORTS.first().first)
@@ -158,7 +159,8 @@ class Nav(
     /** Leaves Now Playing for another screen. */
     fun goTo(screen: Screen) {
         stack.remove(Screen.NowPlaying)
-        stack.add(screen)
+        // Already what's underneath, so Back shouldn't show it twice.
+        if (stack.lastOrNull() != screen) stack.add(screen)
     }
 }
 
@@ -186,7 +188,7 @@ fun MainScreen(nav: Nav) {
                             icon = {
                                 Icon(
                                     when (tab) {
-                                        Tab.Playlist -> Icons.Default.Home
+                                        Tab.Home -> Icons.Default.Home
                                         Tab.Library -> Icons.Default.LibraryMusic
                                         Tab.Search -> Icons.Default.Search
                                     },
@@ -217,10 +219,11 @@ fun MainScreen(nav: Nav) {
                 is Screen.Album -> AlbumScreen(top.id, nav)
                 is Screen.Artist -> ArtistScreen(top.id, nav)
                 is Screen.Playlist -> PlaylistScreen(top.id, nav)
+                is Screen.Genre -> GenreScreen(top.name, nav)
                 Screen.Settings -> SettingsScreen(nav)
                 Screen.NowPlaying -> NowPlayingScreen(nav)
                 else -> when (nav.tab) {
-                    Tab.Playlist -> HomeScreen(nav)
+                    Tab.Home -> HomeScreen(nav)
                     Tab.Library -> LibraryScreen(nav)
                     Tab.Search -> SearchScreen(nav)
                 }

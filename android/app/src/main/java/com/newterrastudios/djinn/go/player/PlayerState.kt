@@ -4,6 +4,7 @@ import com.newterrastudios.djinn.go.data.OfflineSong
 import com.newterrastudios.djinn.go.data.keptMediaId
 import android.content.ComponentName
 import android.content.Context
+import android.os.Bundle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -31,6 +32,18 @@ import kotlinx.coroutines.launch
 private const val RADIO_LOW = 5
 private const val RADIO_EXCLUDE = 400
 
+private const val ARTIST_ID = "com.newterrastudios.djinn.go.artist_id"
+private const val ALBUM_ID = "com.newterrastudios.djinn.go.album_id"
+
+/** The song's artist on the server in use, if it can be opened there. */
+val MediaItem.artistId: Long? get() = libraryId(ARTIST_ID)
+
+/** The song's album on the server in use, if it can be opened there. */
+val MediaItem.albumId: Long? get() = libraryId(ALBUM_ID)
+
+private fun MediaItem.libraryId(key: String): Long? =
+    mediaMetadata.extras?.takeIf { it.containsKey(key) }?.getLong(key)
+
 fun Track.toMediaItem(api: GoApi): MediaItem = MediaItem.Builder()
     .setMediaId(id.toString())
     .setMediaMetadata(
@@ -40,6 +53,12 @@ fun Track.toMediaItem(api: GoApi): MediaItem = MediaItem.Builder()
             .setAlbumTitle(album)
             .setDurationMs(durationMs)
             .setArtworkUri(api.artUrl(artHash, 512)?.toUri())
+            .setExtras(
+                Bundle().apply {
+                    artistId?.let { putLong(ARTIST_ID, it) }
+                    albumId?.let { putLong(ALBUM_ID, it) }
+                },
+            )
             // A library list is refused without these.
             .setIsBrowsable(false)
             .setIsPlayable(true)
@@ -47,7 +66,10 @@ fun Track.toMediaItem(api: GoApi): MediaItem = MediaItem.Builder()
     )
     .build()
 
-/** A kept song from another server: no picture, since that server may be out of reach. */
+/**
+ * A kept song from another server: no picture, since that server may be out of
+ * reach, and no artist or album to open, since those ids are that server's.
+ */
 fun OfflineSong.toKeptItem(): MediaItem = MediaItem.Builder()
     .setMediaId(keptMediaId(server, id))
     .setMediaMetadata(
@@ -162,6 +184,13 @@ class PlayerState(private val api: GoApi) {
         player.setMediaItems(songs.map { it.toMediaItem(api) }, start, 0)
         player.prepare()
         player.play()
+    }
+
+    /** Turns shuffle on and starts from any of the songs. */
+    fun playShuffled(songs: List<Track>) {
+        if (songs.isEmpty()) return
+        controller?.shuffleModeEnabled = true
+        play(songs, songs.indices.random())
     }
 
     /** Plays kept songs from any server, in order. */

@@ -1,6 +1,27 @@
 # Changelog
 
-## Unreleased
+## 2026.11.03 (November 3, 2026)
+
+### Search
+
+- A song, album or artist whose name begins with exactly what you typed now comes first. Short names like **S&M** could be buried by thousands of other matches and never show up.
+
+### Library
+
+- Years that can't be real, like the 9999 some files carry as a placeholder, now count as unknown, and a song's year can be next year at the latest. One bad year could stretch the year lists by thousands of years. Your files aren't changed.
+
+### DJINN GO for Android
+
+- **Browse by genre**, and jump through artists, albums, songs and genres with an **A to Z (or year) strip** beside the list.
+- On Now Playing, **tap the artist or album** to open its page.
+- **Search uses the server's AI** when it's on and allowed for your account, for searches like "music for cooking dinner".
+- The first tab is called **Home** again.
+- The import box says whether YouTube links are on for your server.
+
+### Fixes
+
+- On Windows, audio should come back after an HDMI output switches off and on, such as a TV and receiver sharing a remote, without restarting DJINN.
+- The log no longer fills with harmless notes from reading song files, which could be nearly all of a day's lines. A song that can't play still shows up as a failed play.
 
 ### Playlists
 

@@ -201,7 +201,9 @@ fn fill_from_tags(track: &mut ScannedTrack, file: &TaggedFile) -> (Vec<String>, 
     track.genre = text(tag.genre());
     track.track_no = tag.track().map(i64::from);
     track.disc_no = tag.disk().map(i64::from);
-    track.year = tag.date().map(|d| i64::from(d.year));
+    track.year = tag
+        .date()
+        .and_then(|d| djinn_store::real_year(i64::from(d.year)));
     let number = |key: ItemKey| tag.get_string(key).and_then(parse_replay_gain);
     track.replay_gain = ReplayGainTags {
         track_gain: number(ItemKey::ReplayGainTrackGain),

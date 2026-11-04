@@ -56,6 +56,7 @@ tokio-stream = { version = "0.1.19", features = ["sync"] }
 tower = { workspace = true, features = ["util"] }
 tower-http.workspace = true
 tracing.workspace = true
+tracing-log = "0.2"
 tracing-subscriber.workspace = true
 zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 

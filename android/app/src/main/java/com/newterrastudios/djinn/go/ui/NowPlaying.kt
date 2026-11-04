@@ -9,7 +9,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.material3.minimumInteractiveComponentSize
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.CustomAccessibilityAction
+import com.newterrastudios.djinn.go.player.albumId
+import com.newterrastudios.djinn.go.player.artistId
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.zIndex
@@ -92,6 +96,26 @@ import com.newterrastudios.djinn.go.work.DownloadWorker
 import kotlinx.serialization.encodeToString
 import kotlinx.coroutines.launch
 import java.io.IOException
+
+/** The artist or album under the title. Opens it when it has an id on this server. */
+@Composable
+private fun SongLink(name: CharSequence?, id: Long?, action: String, open: (Long) -> Unit) {
+    if (name.isNullOrEmpty()) return
+    Text(
+        name.toString(),
+        textAlign = TextAlign.Center,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        color = if (id != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = if (id != null) {
+            Modifier
+                .minimumInteractiveComponentSize()
+                .clickable(role = Role.Button, onClickLabel = action) { open(id) }
+        } else {
+            Modifier
+        },
+    )
+}
 
 @UnstableApi
 @Composable
@@ -187,13 +211,12 @@ fun NowPlayingScreen(nav: Nav) {
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(top = 20.dp),
                 )
-                Text(
-                    listOfNotNull(item.mediaMetadata.artist, item.mediaMetadata.albumTitle).joinToString(" · "),
-                    textAlign = TextAlign.Center,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                SongLink(item.mediaMetadata.artist, item.artistId, "Open artist") {
+                    nav.goTo(Screen.Artist(it))
+                }
+                SongLink(item.mediaMetadata.albumTitle, item.albumId, "Open album") {
+                    nav.goTo(Screen.Album(it))
+                }
                 Slider(
                     value = dragging ?: player.positionMs.toFloat(),
                     onValueChange = { dragging = it },

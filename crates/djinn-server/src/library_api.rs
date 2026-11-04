@@ -355,8 +355,11 @@ async fn edit_tracks(
         return Err(ApiError::bad_request("pick 1 to 5000 songs"));
     }
     if let Some(Some(year)) = body.year {
-        if !(1..=9999).contains(&year) {
-            return Err(ApiError::bad_request("the year should be 1 to 9999"));
+        if djinn_store::real_year(year).is_none() {
+            return Err(ApiError::bad_request(format!(
+                "the year should be 1000 to {}",
+                djinn_store::latest_year()
+            )));
         }
     }
     let change = TagChange {
