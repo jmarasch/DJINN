@@ -86,9 +86,7 @@ impl Output {
         follower: bool,
     ) -> Result<Self, EngineError> {
         let device = match device {
-            OutputDevice::Default => host
-                .default_output_device()
-                .ok_or_else(|| EngineError::Output("no default output device".to_owned()))?,
+            OutputDevice::Default => default_device(host)?,
             OutputDevice::Id(id) => {
                 let id: DeviceId = id
                     .parse()
@@ -365,6 +363,23 @@ fn start_stream(
         shared,
         errors,
     })
+}
+
+/// The default device as the endpoint it is right now. On Windows, cpal's own
+/// default device activates through `ActivateAudioInterfaceAsync`, which can
+/// keep failing with `RPC_E_CHANGED_MODE` once the device has been lost (an HDMI
+/// receiver switching off), until DJINN restarts. A named endpoint activates
+/// directly, and `Outputs::watch` already reopens when the default changes, so
+/// nothing relies on cpal's rerouting.
+fn default_device(host: &cpal::Host) -> Result<cpal::Device, EngineError> {
+    let device = host
+        .default_output_device()
+        .ok_or_else(|| EngineError::Output("no default output device".to_owned()))?;
+    #[cfg(windows)]
+    if let Some(endpoint) = device.id().ok().and_then(|id| host.device_by_id(&id)) {
+        return Ok(endpoint);
+    }
+    Ok(device)
 }
 
 /// Prefers the master rate in stereo f32, then the master rate in any
