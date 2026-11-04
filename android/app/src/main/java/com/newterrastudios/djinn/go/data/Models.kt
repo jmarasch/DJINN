@@ -84,6 +84,8 @@ data class SearchResults(
     val albums: List<Album> = emptyList(),
     val artists: List<Artist> = emptyList(),
     val described: Described? = null,
+    /** The server's AI reader might understand this better: see [GoApi.ask]. */
+    val ask: Boolean = false,
 )
 
 /** The search read as a description, like "80's hair metal". */
@@ -92,6 +94,10 @@ data class Described(
     val summary: List<String> = emptyList(),
     val tracks: List<Track> = emptyList(),
 )
+
+/** Whether this server can read YouTube playlist links. */
+@Serializable
+data class YoutubeLinks(@SerialName("has_key") val hasKey: Boolean = false)
 
 /** Every genre in the library, by name. */
 @Serializable

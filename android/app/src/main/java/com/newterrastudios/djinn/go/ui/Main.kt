@@ -61,7 +61,7 @@ sealed interface Screen {
     data object Cover : Screen
 }
 
-enum class Tab(val label: String) { Playlist("Playlist"), Library("Library"), Search("Search") }
+enum class Tab(val label: String) { Home("Home"), Library("Library"), Search("Search") }
 
 /** Where you are in the app, and what every screen needs. */
 @UnstableApi
@@ -87,7 +87,7 @@ class Nav(
     val askStorage: suspend () -> Boolean,
     private val onOfflineChange: () -> Unit,
 ) {
-    var tab by mutableStateOf(Tab.Playlist)
+    var tab by mutableStateOf(Tab.Home)
     // How the library's lists are ordered, until the app closes.
     var artistSort by mutableStateOf(ARTIST_SORTS.first().first)
     var albumSort by mutableStateOf(ALBUM_SORTS.first().first)
@@ -188,7 +188,7 @@ fun MainScreen(nav: Nav) {
                             icon = {
                                 Icon(
                                     when (tab) {
-                                        Tab.Playlist -> Icons.Default.Home
+                                        Tab.Home -> Icons.Default.Home
                                         Tab.Library -> Icons.Default.LibraryMusic
                                         Tab.Search -> Icons.Default.Search
                                     },
@@ -223,7 +223,7 @@ fun MainScreen(nav: Nav) {
                 Screen.Settings -> SettingsScreen(nav)
                 Screen.NowPlaying -> NowPlayingScreen(nav)
                 else -> when (nav.tab) {
-                    Tab.Playlist -> HomeScreen(nav)
+                    Tab.Home -> HomeScreen(nav)
                     Tab.Library -> LibraryScreen(nav)
                     Tab.Search -> SearchScreen(nav)
                 }

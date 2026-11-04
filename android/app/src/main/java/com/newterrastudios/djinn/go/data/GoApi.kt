@@ -213,6 +213,10 @@ class GoApi(private val account: Account) {
     suspend fun search(query: String): SearchResults =
         get("/api/search?q=${URLEncoder.encode(query, "UTF-8")}")
 
+    /** The search read by the server's AI reader, which takes a few seconds. Null if it can't. */
+    suspend fun ask(query: String): Described? =
+        get("/api/search/ask?q=${URLEncoder.encode(query, "UTF-8")}")
+
     suspend fun likedIds(): LikedIds = get("/api/go/likes/ids")
     suspend fun setLike(id: Long, on: Boolean) = withContext(Dispatchers.IO) {
         send(if (on) "PUT" else "DELETE", "/api/go/likes/track/$id")
@@ -260,6 +264,8 @@ class GoApi(private val account: Account) {
     suspend fun playlists(): List<GoPlaylist> = get("/api/go/playlists")
 
     /** Makes playlists from a file or pasted songs. */
+    suspend fun youtubeLinks(): YoutubeLinks = get("/api/playlists/youtube-key")
+
     suspend fun importPlaylist(text: String, filename: String?): ImportResult = withContext(Dispatchers.IO) {
         json.decodeFromString(send("POST", "/api/playlists/import", json.encodeToString(ImportRequest(text, filename))))
     }

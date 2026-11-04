@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Search
+
+- A song, album or artist whose name begins with exactly what you typed now comes first. Short names like **S&M** could be buried by thousands of other matches and never show up.
+
+### DJINN GO for Android
+
+- **Browse by genre**, and jump through artists, albums and songs with an **A to Z (or year) strip** beside the list.
+- On Now Playing, **tap the artist or album** to open its page.
+- **Search uses the server's AI** when it's on and allowed for your account, for searches like "music for cooking dinner".
+- The first tab is called **Home** again.
+- The import box says whether YouTube links are on for your server.
+
 ### Playlists
 
 - **One set of playlists.** Your playlists are now the same in the jukebox app, on GO and in the Android app. They're private until you share them with everyone or with particular people. Anyone signed in can request from their playlists, and a new role permission lets chosen people start one as the auto mix. Guests don't have playlists. Existing party playlists are shared with everyone, so admins keep them. A song listed twice in a GO playlist now keeps only its first place.

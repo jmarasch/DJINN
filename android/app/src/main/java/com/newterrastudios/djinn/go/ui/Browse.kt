@@ -6,6 +6,7 @@ import com.newterrastudios.djinn.go.data.importText
 import com.newterrastudios.djinn.go.data.ShareTarget
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.rememberLauncherForActivityResult
 import android.provider.OpenableColumns
@@ -54,6 +55,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -516,6 +518,7 @@ private fun PlaylistsTab(nav: Nav) {
     }
     if (pasting) {
         ImportDialog(
+            nav,
             onFile = {
                 pasting = false
                 pick.launch(arrayOf("*/*"))
@@ -546,8 +549,16 @@ private fun PlaylistsTab(nav: Nav) {
 
 /** Bring in a playlist: names only, never music. */
 @Composable
-private fun ImportDialog(onFile: () -> Unit, onPaste: (String) -> Unit, onCancel: () -> Unit) {
+private fun ImportDialog(nav: Nav, onFile: () -> Unit, onPaste: (String) -> Unit, onCancel: () -> Unit) {
     var text by remember { mutableStateOf("") }
+    var youtubeOn by remember { mutableStateOf<Boolean?>(null) }
+    LaunchedEffect(Unit) {
+        youtubeOn = try {
+            nav.api.youtubeLinks().hasKey
+        } catch (_: IOException) {
+            null
+        }
+    }
     AlertDialog(
         onDismissRequest = onCancel,
         title = { Text("Import a playlist") },
@@ -555,17 +566,24 @@ private fun ImportDialog(onFile: () -> Unit, onPaste: (String) -> Unit, onCancel
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
                     "This brings in the list, not the music. Songs you don't have stay in the list, flagged, " +
-                        "and are skipped. Paste a YouTube playlist link if your server has YouTube links on. " +
-                        "For other services, get a file from Tune My Music or Soundiiz.",
+                        "and are skipped. For other services, get a file from Tune My Music or Soundiiz.",
                     style = MaterialTheme.typography.bodySmall,
                 )
+                when (youtubeOn) {
+                    true -> Text("You can paste a YouTube playlist link too.", style = MaterialTheme.typography.bodySmall)
+                    false -> Text(
+                        "YouTube links are off on this server. An admin can turn them on under Admin > Library.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    null -> Unit
+                }
                 FilledTonalButton(onClick = onFile) { Text("Choose a file") }
                 OutlinedTextField(
                     value = text,
                     onValueChange = { text = it },
                     minLines = 3,
                     maxLines = 6,
-                    label = { Text("Or paste songs, or a YouTube link") },
+                    label = { Text(if (youtubeOn == false) "Or paste songs" else "Or paste songs, or a YouTube link") },
                     placeholder = { Text("Artist - Title") },
                 )
             }
@@ -1091,23 +1109,40 @@ fun SearchScreen(nav: Nav) {
     var query by rememberSaveable { mutableStateOf("") }
     var results by remember { mutableStateOf<SearchResults?>(null) }
     var failed by remember { mutableStateOf(false) }
+    var thinking by remember { mutableStateOf(false) }
     LaunchedEffect(query) {
         failed = false
+        thinking = false
         if (query.isBlank()) {
             results = null
             return@LaunchedEffect
         }
         // Wait for typing to stop.
         delay(250)
-        try {
-            results = nav.api.search(query.trim())
+        val found = try {
+            nav.api.search(query.trim())
         } catch (e: ApiException) {
             failed = true
+            return@LaunchedEffect
         } catch (_: IOException) {
             // Away from the server: what's on this phone.
             results = SearchResults(
                 tracks = nav.offline.dao.search(nav.server, "%${query.trim()}%").map { it.toTrack() },
             )
+            return@LaunchedEffect
+        }
+        results = found
+        if (!found.ask) return@LaunchedEffect
+        // Words only the server's AI reader might know: it takes a few
+        // seconds, so wait a little longer for typing to stop.
+        thinking = true
+        try {
+            delay(600)
+            nav.api.ask(query.trim())?.let { results = found.copy(described = it) }
+        } catch (_: IOException) {
+            // Keep what was found.
+        } finally {
+            thinking = false
         }
     }
     Column(Modifier.fillMaxSize()) {
@@ -1126,7 +1161,13 @@ fun SearchScreen(nav: Nav) {
         val empty = found.tracks.isEmpty() && found.albums.isEmpty() && found.artists.isEmpty() &&
             found.described?.tracks.isNullOrEmpty()
         LazyColumn(Modifier.fillMaxSize()) {
-            if (empty) item { Note("Nothing found.") }
+            if (thinking) {
+                item {
+                    LinearProgressIndicator(Modifier.fillMaxWidth())
+                    Note("Asking the server's AI...")
+                }
+            }
+            if (empty && !thinking) item { Note("Nothing found.") }
             if (found.artists.isNotEmpty()) {
                 item { Heading("Artists") }
                 items(found.artists) { artist ->
