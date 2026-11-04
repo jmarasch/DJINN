@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2026.11.03 (November 3, 2026)
 
 ### Search
 
@@ -17,6 +17,11 @@
 - **Search uses the server's AI** when it's on and allowed for your account, for searches like "music for cooking dinner".
 - The first tab is called **Home** again.
 - The import box says whether YouTube links are on for your server.
+
+### Fixes
+
+- On Windows, audio should come back after an HDMI output switches off and on, such as a TV and receiver sharing a remote, without restarting DJINN.
+- The log no longer fills with harmless notes from reading song files, which could be nearly all of a day's lines. A song that can't play still shows up as a failed play.
 
 ### Playlists
 
