@@ -349,6 +349,8 @@ export interface Album {
   art_hash: string | null
   /** Comma separated, from MusicBrainz. */
   genres: string | null
+  /** Its folder's name, when another album has the same name and artist. */
+  label: string | null
 }
 
 export interface Artist {
@@ -626,6 +628,8 @@ export interface Settings {
   show_collaboration_artists: boolean
   /** A file's original release date wins over its own (reissue) date. */
   original_years: boolean
+  /** Albums with one name stay apart when their folders hold different releases. */
+  album_folders: boolean
   /** The TV page (/tv) works without signing in. */
   tv_page: boolean
   /** The TV page can play the party without signing in. */

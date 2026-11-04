@@ -802,7 +802,7 @@ private fun Choices(choices: List<Pair<String, String>>, chosen: String, choose:
 private fun AlbumRow(album: Album, nav: Nav) {
     Row2(
         title = album.title,
-        subtitle = listOfNotNull(album.artist, album.year?.toString()).joinToString(" · "),
+        subtitle = listOfNotNull(album.artist, album.year?.toString(), album.label).joinToString(" · "),
         art = { Art(nav.api.artUrl(album.artHash), 44.dp) },
         onClick = { nav.push(Screen.Album(album.id)) },
     )
@@ -825,7 +825,7 @@ fun AlbumScreen(id: Long, nav: Nav) {
                     Art(nav.api.artUrl(album.artHash, 512), 200.dp)
                     Text(album.title, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(top = 12.dp))
                     Text(
-                        listOfNotNull(album.artist, album.year?.toString()).joinToString(" · "),
+                        listOfNotNull(album.artist, album.year?.toString(), album.label).joinToString(" · "),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     FilledTonalButton(

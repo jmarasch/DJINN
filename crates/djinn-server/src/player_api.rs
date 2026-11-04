@@ -294,6 +294,9 @@ struct Settings {
     /// A file's original release date wins over its own (reissue) date.
     #[serde(default = "default_true")]
     original_years: bool,
+    /// Albums with one name stay apart when their folders hold different releases.
+    #[serde(default = "default_true")]
+    album_folders: bool,
     /// The TV page (/tv) works without signing in.
     #[serde(default = "default_true")]
     tv_page: bool,
@@ -351,6 +354,7 @@ async fn settings(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json
         original_years: djinn_library::original_years(store)
             .await
             .map_err(anyhow::Error::from)?,
+        album_folders: settings::flag(store, djinn_store::ALBUM_FOLDERS_KEY, true).await?,
         tv_page: crate::tv_api::enabled(&state).await?,
         tv_sound: settings::flag(store, crate::tv_api::TV_SOUND, false).await?,
         play_here: settings::flag(store, crate::cast_api::PLAY_HERE, false).await?,
@@ -474,6 +478,14 @@ async fn update_settings(
     .await?;
     settings::set_flag(store, settings::ONLINE_INFO, body.online_artist_info).await?;
     // A changed never-split list or year source means re-reading every file.
+    let old_album_folders = settings::flag(store, djinn_store::ALBUM_FOLDERS_KEY, true).await?;
+    settings::set_flag(store, djinn_store::ALBUM_FOLDERS_KEY, body.album_folders).await?;
+    if body.album_folders != old_album_folders {
+        store.refresh_artwork().await?;
+        let _ = state
+            .events
+            .send(crate::events::ServerEvent::LibraryChanged);
+    }
     let old_original_years = djinn_library::original_years(store)
         .await
         .map_err(anyhow::Error::from)?;

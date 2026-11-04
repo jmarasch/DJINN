@@ -29,6 +29,7 @@ impl Store {
     /// deletes artists and albums left with no tracks (unless a playlist
     /// uses them). Run after a scan.
     pub async fn refresh_artwork(&self) -> Result<()> {
+        let apart = self.get_setting(ALBUM_FOLDERS_KEY).await?.as_deref() != Some("0");
         let mut tx = self.pool.begin().await?;
         // Files without an album-artist tag are provisionally filed under
         // their first credited artist. Compare the tracks in each album
@@ -95,6 +96,7 @@ impl Store {
                 }
             }
         }
+        editions::sort_editions(&mut tx, apart).await?;
         // An album's year is the one most of its songs give, the earliest
         // on a tie, so a corrected or re-read song changes it. An album whose
         // songs give none keeps what it has.
@@ -364,7 +366,7 @@ async fn upsert_album(
 ) -> Result<i64> {
     let id = sqlx::query_scalar(
         "INSERT INTO albums (title, artist_id, year) VALUES (?, ?, ?)
-         ON CONFLICT (title, artist_id) DO UPDATE SET year = coalesce(albums.year, excluded.year)
+         ON CONFLICT (title, artist_id, edition) DO UPDATE SET year = coalesce(albums.year, excluded.year)
          RETURNING id",
     )
     .bind(title)

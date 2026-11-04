@@ -23,6 +23,16 @@ This release follows a security review. A few things work differently:
 
 - **Albums show their original release year**, not a reissue's, when the tags have one. **Use the original release year** in Admin > Library turns this off. The next library check re-reads every file once.
 - **Correcting a year on an album's songs now changes the album's year too.**
+- **Albums with the same name stay apart** when their folders hold different releases, such as two different "track 1"s, and each shows its folder's name. Discs of one album stay together, and so does one stray song. **Keep albums with the same name apart** in Admin > Library turns this off.
+- **The genre cloud zooms in.** It opens on the 100 biggest genres, with more of the lines between them. Tap one to center on it with what's near it and what's near those, which reaches every genre; tap the center to open its page. Home, fit and zoom buttons sit in the corners, and you can choose how many genres and lines to show.
+- **Sideways rows show there's more:** the cut-off side fades, and with a mouse there are arrows.
+
+### DJINN GO
+
+- **Genres in GO:** GO on the web gets a Genres page, and GO on both the web and Android has the zooming cloud as well as the list.
+- **Clear the queue at once.** Up next has **Clear upcoming**, which lets the song finish, and **Clear all**, which stops it too. Both can be undone.
+- **When a sign-in ends, the music stops**, including one ended from elsewhere, such as an admin removing a device. That's noticed within about 15 seconds. On Android, casts stop too.
+- **Android: choose what the music does when another app needs to talk**, such as an assistant screening a call or directions: **Lower the music**, **Keep playing** or **Pause**, in Settings. A call you answer always pauses.
 
 ## 2026.11.03 (November 3, 2026)
 

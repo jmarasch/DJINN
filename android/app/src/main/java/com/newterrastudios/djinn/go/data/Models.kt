@@ -53,6 +53,8 @@ data class Album(
     val artist: String,
     val year: Int? = null,
     @SerialName("art_hash") val artHash: String? = null,
+    /** Its folder's name, when another album has the same name and artist. */
+    val label: String? = null,
 )
 
 @Serializable
@@ -63,6 +65,7 @@ data class AlbumDetail(
     val artist: String,
     val year: Int? = null,
     @SerialName("art_hash") val artHash: String? = null,
+    val label: String? = null,
     val tracks: List<Track> = emptyList(),
 )
 

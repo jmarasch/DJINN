@@ -165,6 +165,11 @@
           Use the original release year
         </label>
         <p class="small muted">A reissue's files often carry the reissue's date too. When on, an original release date in the tags wins. Changing this re-reads the library. Years you've corrected in the app stay as you set them.</p>
+        <label class="switch big">
+          <input type="checkbox" bind:checked={settings.album_folders} />
+          Keep albums with the same name apart
+        </label>
+        <p class="small muted">When two folders hold different songs at the same place on an album, such as two different "track 1"s, they show as separate albums, each with its folder's name. Discs of one album stay together.</p>
         <label>
           Names that should never be split, one per line
           <textarea rows="6" bind:value={settings.artist_keep_whole} spellcheck="false"></textarea>
