@@ -60,6 +60,23 @@ pub async fn apply(store: &Store) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// The decoder's notes on harmless oddities in song files, which were almost all
+/// of a day's log. A song that really can't play still fails as a track error.
+const DECODER_NOISE: [&str; 2] = [
+    "symphonia_core::formats::probe",
+    "symphonia_bundle_mp3::layer3",
+];
+
+/// Passes on what libraries log through the `log` crate, less [`DECODER_NOISE`].
+/// Those records all reach [`enabled`] with the target `log`, so it can't pick them out.
+pub fn pass_on_log_crate() -> anyhow::Result<()> {
+    tracing_log::LogTracer::builder()
+        .with_max_level(tracing_log::log::LevelFilter::Trace)
+        .ignore_all(DECODER_NOISE)
+        .init()?;
+    Ok(())
+}
+
 /// Filter used by every output layer, so the setting affects the file,
 /// console, and the in-memory viewer together.
 pub fn enabled(meta: &Metadata<'_>) -> bool {
@@ -345,6 +362,26 @@ pub fn all() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn decoder_noise_stays_out_of_the_log() {
+        use tracing_log::log;
+        pass_on_log_crate().unwrap();
+        let wanted = |target: &str| {
+            let meta = log::Metadata::builder()
+                .level(log::Level::Warn)
+                .target(target)
+                .build();
+            log::logger().enabled(&meta)
+        };
+        let subscriber = tracing_subscriber::fmt().with_writer(|| Recent).finish();
+        tracing::subscriber::with_default(subscriber, || {
+            assert!(!wanted("symphonia_core::formats::probe"));
+            assert!(!wanted("symphonia_bundle_mp3::layer3"));
+            assert!(wanted("symphonia_format_isomp4::demuxer"));
+            assert!(wanted("sqlx::query"));
+        });
+    }
 
     #[test]
     fn recording_level_changes_on_the_same_callsite() {

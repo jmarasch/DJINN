@@ -482,11 +482,12 @@ fn init_logging(file: Option<&std::path::Path>, console: bool) -> anyhow::Result
         .with_ansi(false)
         .with_writer(|| logs::Recent)
         .with_filter(dynamic_filter_fn(|meta, _| logs::enabled(meta)));
-    tracing_subscriber::registry()
+    let subscriber = tracing_subscriber::registry()
         .with(to_file)
         .with(to_console)
-        .with(recent)
-        .init();
+        .with(recent);
+    tracing::subscriber::set_global_default(subscriber)?;
+    logs::pass_on_log_crate()?;
     Ok(())
 }
 
