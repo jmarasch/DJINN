@@ -6,9 +6,13 @@ use std::net::{IpAddr, SocketAddr};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use axum::extract::ConnectInfo;
-use axum::http::HeaderMap;
+use axum::extract::{ConnectInfo, Request};
+use axum::http::{header, HeaderMap, HeaderValue, Method};
+use axum::middleware::Next;
+use axum::response::{IntoResponse, Response};
 use ipnet::IpNet;
+
+use crate::error::ApiError;
 
 /// Proxies (or tunnels like cloudflared) whose forwarding headers DJINN
 /// believes, one address or range per line or comma.
@@ -118,71 +122,276 @@ pub fn is_home(ip: IpAddr) -> bool {
     }
 }
 
-/// Failed sign-ins allowed per account, and per address, in a window.
-const ACCOUNT_TRIES: usize = 5;
+/// What pages on the party port may load: its own files, and the photos an
+/// admin chose to show straight from Unsplash.
+pub const PARTY_CSP: HeaderValue = HeaderValue::from_static(
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; \
+     img-src 'self' data: blob: https://images.unsplash.com; media-src 'self' blob:; \
+     connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; \
+     frame-ancestors 'none'",
+);
+/// The same for DJINN GO's page.
+pub const GO_CSP: HeaderValue = HeaderValue::from_static(
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; \
+     img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; \
+     object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+);
+
+/// Security headers for a response. HSTS only through a proxy's HTTPS: on
+/// DJINN's own certificate, which browsers warn about, it would leave no way
+/// past the warning.
+pub fn set_headers(headers: &mut HeaderMap, csp: HeaderValue, proxied_https: bool) {
+    headers.insert(header::CONTENT_SECURITY_POLICY, csp);
+    headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    headers.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
+    headers.insert(
+        header::REFERRER_POLICY,
+        HeaderValue::from_static("same-origin"),
+    );
+    if proxied_https {
+        headers.insert(
+            header::STRICT_TRANSPORT_SECURITY,
+            HeaderValue::from_static("max-age=31536000"),
+        );
+    }
+}
+
+/// Whether a browser says this request was made by a page from somewhere
+/// else. Cookies keep to their site but not their port, so another program on
+/// this computer could otherwise press DJINN's buttons for someone signed in.
+/// Forwarding headers mean a proxy may have changed the Host; pages can't add
+/// those to a request without asking first, which DJINN never allows.
+fn from_another_origin(headers: &HeaderMap, authority: Option<&str>) -> bool {
+    let Some(origin) = headers.get(header::ORIGIN).and_then(|v| v.to_str().ok()) else {
+        return false;
+    };
+    if [
+        "x-forwarded-for",
+        "x-forwarded-host",
+        "cf-connecting-ip",
+        "forwarded",
+    ]
+    .iter()
+    .any(|name| headers.contains_key(*name))
+    {
+        return false;
+    }
+    let host = headers
+        .get(header::HOST)
+        .and_then(|v| v.to_str().ok())
+        .or(authority);
+    let Some(host) = host else { return false };
+    let from = origin.split_once("://").map_or(origin, |(_, rest)| rest);
+    !from.eq_ignore_ascii_case(host)
+}
+
+/// Refuses changes asked for by pages from somewhere else. Apps send no
+/// Origin, and Subsonic calls carry their own sign-in rather than a cookie.
+pub async fn same_origin(request: Request, next: Next) -> Response {
+    let reads = matches!(
+        *request.method(),
+        Method::GET | Method::HEAD | Method::OPTIONS
+    );
+    if !reads
+        && !request.uri().path().starts_with("/rest/")
+        && from_another_origin(
+            request.headers(),
+            request.uri().authority().map(|a| a.as_str()),
+        )
+    {
+        return ApiError::forbidden().into_response();
+    }
+    next.run(request).await
+}
+
+/// Tries allowed in a window: one account from one address, one address on
+/// any accounts, and one account from everywhere. A stranger can use up the
+/// first two but not the owner's own, so they can't lock anyone out without
+/// many addresses; the last one still stops guessing spread across many.
+const PAIR_TRIES: usize = 5;
 const ADDRESS_TRIES: usize = 20;
+const ACCOUNT_TRIES: usize = 50;
+/// Two-step codes for one account, from anywhere. Only someone who has the
+/// password gets this far, so a right password doesn't start these over.
+const CODE_TRIES: usize = 5;
 const WINDOW: Duration = Duration::from_secs(15 * 60);
 /// How many names and addresses to remember before forgetting old ones.
 const MAX_TRACKED: usize = 10_000;
 
-/// Slows password guessing: after too many failures for an account or
-/// from an address, sign-ins wait until the window passes.
+/// One thing being counted, and how many of it a window allows.
+struct Rule {
+    key: String,
+    allowed: usize,
+}
+
+fn tries_rules(account: Option<&str>, ip: Option<IpAddr>) -> Vec<Rule> {
+    let mut rules = Vec::with_capacity(3);
+    if let Some(account) = account.map(|a| a.trim().to_lowercase()) {
+        let from = ip.map(|ip| ip.to_string()).unwrap_or_default();
+        rules.push(Rule {
+            key: format!("pair:{account}|{from}"),
+            allowed: PAIR_TRIES,
+        });
+        rules.push(Rule {
+            key: format!("account:{account}"),
+            allowed: ACCOUNT_TRIES,
+        });
+    }
+    if let Some(ip) = ip {
+        rules.push(Rule {
+            key: format!("address:{ip}"),
+            allowed: ADDRESS_TRIES,
+        });
+    }
+    rules
+}
+
+fn code_rules(account: &str, ip: Option<IpAddr>) -> Vec<Rule> {
+    let mut rules = vec![Rule {
+        key: format!("code:{}", account.trim().to_lowercase()),
+        allowed: CODE_TRIES,
+    }];
+    rules.extend(tries_rules(None, ip));
+    rules
+}
+
+/// Slows password guessing. Password sign-ins and two-step codes are counted
+/// before they're checked, so tries sent all at once count too; app passwords
+/// and passwords asked of someone already signed in are counted only when
+/// wrong, since those checks cost next to nothing.
 #[derive(Default)]
 pub struct Limiter {
     failures: Mutex<HashMap<String, Vec<Instant>>>,
 }
 
 impl Limiter {
-    /// How long until `account` from `ip` may try again; None if now.
-    pub fn wait(&self, account: &str, ip: Option<IpAddr>) -> Option<Duration> {
-        let now = Instant::now();
-        let failures = self.failures.lock().ok()?;
-        let wait_for = |key: &str, allowed: usize| {
-            let recent: Vec<&Instant> = failures
-                .get(key)?
-                .iter()
-                .filter(|t| now.duration_since(**t) < WINDOW)
-                .collect();
-            (recent.len() >= allowed).then(|| WINDOW.saturating_sub(now.duration_since(*recent[0])))
-        };
-        let by_account = wait_for(&account_key(account), ACCOUNT_TRIES);
-        let by_address = ip.and_then(|ip| wait_for(&address_key(ip), ADDRESS_TRIES));
-        by_account.max(by_address)
+    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, Vec<Instant>>> {
+        // A panic elsewhere must not switch the limits off.
+        self.failures
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    pub fn failed(&self, account: &str, ip: Option<IpAddr>) {
-        let now = Instant::now();
-        let Ok(mut failures) = self.failures.lock() else {
-            return;
-        };
+    fn wait_for(
+        failures: &HashMap<String, Vec<Instant>>,
+        rules: &[Rule],
+        now: Instant,
+    ) -> Option<Duration> {
+        rules
+            .iter()
+            .filter_map(|rule| {
+                let recent: Vec<&Instant> = failures
+                    .get(&rule.key)?
+                    .iter()
+                    .filter(|t| now.duration_since(**t) < WINDOW)
+                    .collect();
+                (recent.len() >= rule.allowed)
+                    .then(|| WINDOW.saturating_sub(now.duration_since(*recent[0])))
+            })
+            .max()
+    }
+
+    fn count(failures: &mut HashMap<String, Vec<Instant>>, rules: &[Rule], now: Instant) {
         if failures.len() > MAX_TRACKED {
             failures.retain(|_, times| times.iter().any(|t| now.duration_since(*t) < WINDOW));
         }
-        let mut add = |key: String| {
-            let times = failures.entry(key).or_default();
+        // Still full of recent names: forget the one quiet longest.
+        while failures.len() > MAX_TRACKED {
+            let quietest = failures
+                .iter()
+                .min_by_key(|(_, times)| times.last().copied())
+                .map(|(key, _)| key.clone());
+            match quietest {
+                Some(key) => failures.remove(&key),
+                None => break,
+            };
+        }
+        for rule in rules {
+            let times = failures.entry(rule.key.clone()).or_default();
             times.retain(|t| now.duration_since(*t) < WINDOW);
             times.push(now);
-        };
-        add(account_key(account));
-        if let Some(ip) = ip {
-            add(address_key(ip));
         }
     }
 
-    /// A right password clears the account's failures (not the address's).
-    pub fn succeeded(&self, account: &str) {
-        if let Ok(mut failures) = self.failures.lock() {
-            failures.remove(&account_key(account));
+    fn begin(&self, rules: &[Rule]) -> Result<(), Duration> {
+        let now = Instant::now();
+        let mut failures = self.lock();
+        if let Some(wait) = Self::wait_for(&failures, rules, now) {
+            return Err(wait);
+        }
+        Self::count(&mut failures, rules, now);
+        Ok(())
+    }
+
+    /// Takes back the newest try under each rule.
+    fn take_back(&self, rules: &[Rule]) {
+        let mut failures = self.lock();
+        for rule in rules {
+            if let Some(times) = failures.get_mut(&rule.key) {
+                times.pop();
+                if times.is_empty() {
+                    failures.remove(&rule.key);
+                }
+            }
         }
     }
-}
 
-fn account_key(account: &str) -> String {
-    format!("account:{}", account.trim().to_lowercase())
-}
+    /// Counts a password sign-in, or says how long until one is allowed.
+    pub fn begin_sign_in(&self, account: &str, ip: Option<IpAddr>) -> Result<(), Duration> {
+        self.begin(&tries_rules(Some(account), ip))
+    }
 
-fn address_key(ip: IpAddr) -> String {
-    format!("address:{ip}")
+    /// The server couldn't check that try, so it doesn't count.
+    pub fn undo_sign_in(&self, account: &str, ip: Option<IpAddr>) {
+        self.take_back(&tries_rules(Some(account), ip));
+    }
+
+    /// The password was right: this try doesn't count, nor do this address's
+    /// earlier ones for the account. Two-step codes aren't touched.
+    pub fn sign_in_ok(&self, account: &str, ip: Option<IpAddr>) {
+        let rules = tries_rules(Some(account), ip);
+        self.take_back(&rules);
+        if let Some(pair) = rules.first() {
+            self.lock().remove(&pair.key);
+        }
+    }
+
+    /// Counts a two-step code, or says how long until one is allowed.
+    pub fn begin_code(&self, account: &str, ip: Option<IpAddr>) -> Result<(), Duration> {
+        self.begin(&code_rules(account, ip))
+    }
+
+    /// The code was right: the sign-in is finished, and the count starts over.
+    pub fn code_ok(&self, account: &str, ip: Option<IpAddr>) {
+        let rules = code_rules(account, ip);
+        self.take_back(&rules);
+        if let Some(code) = rules.first() {
+            self.lock().remove(&code.key);
+        }
+    }
+
+    /// How long until `account` from `ip` may try again; None if now. With no
+    /// account, as for app keys that don't name one, only the address counts.
+    pub fn wait(&self, account: Option<&str>, ip: Option<IpAddr>) -> Option<Duration> {
+        Self::wait_for(&self.lock(), &tries_rules(account, ip), Instant::now())
+    }
+
+    pub fn failed(&self, account: Option<&str>, ip: Option<IpAddr>) {
+        Self::count(&mut self.lock(), &tries_rules(account, ip), Instant::now());
+    }
+
+    /// Counts something an address may only do so often, like making
+    /// accounts. Requests with no known address aren't limited.
+    pub fn allow(&self, what: &str, ip: Option<IpAddr>, allowed: usize) -> Result<(), Duration> {
+        let Some(ip) = ip else { return Ok(()) };
+        self.begin(&[Rule {
+            key: format!("{what}:{ip}"),
+            allowed,
+        }])
+    }
 }
 
 #[cfg(test)]
@@ -237,21 +446,166 @@ mod tests {
     }
 
     #[test]
-    fn limiter_locks_accounts_then_addresses() {
+    fn pages_from_elsewhere_are_noticed() {
+        let with = |pairs: &[(&'static str, &'static str)]| {
+            let mut headers = HeaderMap::new();
+            for (name, value) in pairs {
+                headers.insert(*name, HeaderValue::from_static(value));
+            }
+            from_another_origin(&headers, None)
+        };
+        let host = ("host", "192.168.1.5:8066");
+        assert!(!with(&[host]), "an app sends no Origin");
+        assert!(!with(&[host, ("origin", "http://192.168.1.5:8066")]));
+        assert!(!with(&[host, ("origin", "https://192.168.1.5:8066")]));
+        assert!(!with(&[
+            ("host", "Music.example.com"),
+            ("origin", "https://music.example.com")
+        ]));
+        assert!(
+            with(&[host, ("origin", "http://192.168.1.5:9000")]),
+            "another port"
+        );
+        assert!(with(&[host, ("origin", "https://evil.example")]));
+        assert!(with(&[host, ("origin", "null")]));
+        assert!(
+            !with(&[
+                host,
+                ("origin", "https://music.example.com"),
+                ("x-forwarded-for", "1.2.3.4")
+            ]),
+            "a proxy may have changed the Host"
+        );
+    }
+
+    #[test]
+    fn a_stranger_cant_lock_the_owner_out() {
+        let limiter = Limiter::default();
+        let stranger = Some(ip("8.8.8.8"));
+        let owner = Some(ip("1.1.1.1"));
+        for _ in 0..PAIR_TRIES {
+            assert_eq!(limiter.begin_sign_in("Sam", stranger), Ok(()));
+        }
+        assert!(limiter.begin_sign_in("SAM", stranger).is_err());
+        assert_eq!(limiter.begin_sign_in("sam", owner), Ok(()), "the owner");
+        limiter.sign_in_ok("sam", owner);
+    }
+
+    #[test]
+    fn addresses_and_accounts_have_their_own_limits() {
         let limiter = Limiter::default();
         let a = Some(ip("8.8.8.8"));
-        for _ in 0..ACCOUNT_TRIES {
-            assert_eq!(limiter.wait("Sam", a), None);
-            limiter.failed("sam", a);
-        }
-        assert!(limiter.wait("SAM", None).is_some(), "account locked");
-        assert_eq!(limiter.wait("jo", a), None, "address not yet");
         for i in 0..ADDRESS_TRIES {
-            limiter.failed(&format!("name{i}"), a);
+            assert_eq!(limiter.begin_sign_in(&format!("name{i}"), a), Ok(()));
         }
-        assert!(limiter.wait("jo", a).is_some(), "address locked");
-        assert_eq!(limiter.wait("jo", Some(ip("1.1.1.1"))), None);
-        limiter.succeeded("sam");
-        assert_eq!(limiter.wait("sam", None), None);
+        assert!(limiter.begin_sign_in("jo", a).is_err(), "address locked");
+        assert_eq!(limiter.begin_sign_in("jo", Some(ip("1.1.1.1"))), Ok(()));
+
+        // Guessing at one account from many addresses.
+        let limiter = Limiter::default();
+        for i in 0..ACCOUNT_TRIES {
+            let from = IpAddr::from([10, 0, 0, u8::try_from(i).unwrap()]);
+            assert_eq!(limiter.begin_sign_in("sam", Some(from)), Ok(()));
+        }
+        assert!(limiter.begin_sign_in("sam", Some(ip("1.1.1.1"))).is_err());
+    }
+
+    #[test]
+    fn tries_sent_at_once_count_before_any_is_checked() {
+        let limiter = Limiter::default();
+        let a = Some(ip("8.8.8.8"));
+        let started = (0..100)
+            .filter(|_| limiter.begin_sign_in("sam", a).is_ok())
+            .count();
+        assert_eq!(started, PAIR_TRIES);
+    }
+
+    #[test]
+    fn a_right_password_clears_only_its_own_tries() {
+        let limiter = Limiter::default();
+        let a = Some(ip("8.8.8.8"));
+        for _ in 0..PAIR_TRIES - 1 {
+            limiter.begin_sign_in("sam", a).unwrap();
+        }
+        limiter.begin_sign_in("sam", a).unwrap();
+        limiter.sign_in_ok("sam", a);
+        for _ in 0..PAIR_TRIES {
+            assert_eq!(limiter.begin_sign_in("sam", a), Ok(()));
+        }
+        assert!(limiter.begin_sign_in("sam", a).is_err());
+    }
+
+    #[test]
+    fn a_failure_the_server_caused_doesnt_count() {
+        let limiter = Limiter::default();
+        let a = Some(ip("8.8.8.8"));
+        for _ in 0..PAIR_TRIES * 2 {
+            limiter.begin_sign_in("sam", a).unwrap();
+            limiter.undo_sign_in("sam", a);
+        }
+        assert_eq!(limiter.begin_sign_in("sam", a), Ok(()));
+    }
+
+    #[test]
+    fn a_right_password_doesnt_start_codes_over() {
+        let limiter = Limiter::default();
+        let a = Some(ip("8.8.8.8"));
+        for _ in 0..CODE_TRIES {
+            limiter.begin_sign_in("sam", a).unwrap();
+            limiter.sign_in_ok("sam", a);
+            assert_eq!(limiter.begin_code("sam", a), Ok(()));
+        }
+        limiter.begin_sign_in("sam", a).unwrap();
+        limiter.sign_in_ok("sam", a);
+        assert!(limiter.begin_code("sam", a).is_err(), "still locked");
+        // From anywhere else too.
+        assert!(limiter.begin_code("sam", Some(ip("1.1.1.1"))).is_err());
+
+        let limiter = Limiter::default();
+        limiter.begin_code("sam", a).unwrap();
+        limiter.code_ok("sam", a);
+        for _ in 0..CODE_TRIES {
+            assert_eq!(limiter.begin_code("sam", a), Ok(()), "a right code clears");
+        }
+    }
+
+    #[test]
+    fn app_keys_only_count_the_address() {
+        let limiter = Limiter::default();
+        let a = Some(ip("8.8.8.8"));
+        for _ in 0..PAIR_TRIES {
+            limiter.failed(None, a);
+        }
+        assert_eq!(limiter.wait(None, a), None, "under the address's limit");
+        assert_eq!(limiter.wait(None, Some(ip("1.1.1.1"))), None);
+        for _ in PAIR_TRIES..ADDRESS_TRIES {
+            limiter.failed(None, a);
+        }
+        assert!(limiter.wait(None, a).is_some());
+        assert_eq!(
+            limiter.wait(None, Some(ip("1.1.1.1"))),
+            None,
+            "others go on"
+        );
+    }
+
+    #[test]
+    fn counts_things_an_address_does_often() {
+        let limiter = Limiter::default();
+        let a = Some(ip("8.8.8.8"));
+        assert_eq!(limiter.allow("signup", a, 2), Ok(()));
+        assert_eq!(limiter.allow("signup", a, 2), Ok(()));
+        assert!(limiter.allow("signup", a, 2).is_err());
+        assert_eq!(limiter.allow("guest", a, 2), Ok(()), "counted apart");
+        assert_eq!(limiter.allow("signup", None, 2), Ok(()));
+    }
+
+    #[test]
+    fn the_list_of_names_stays_bounded() {
+        let limiter = Limiter::default();
+        for i in 0..MAX_TRACKED + 50 {
+            limiter.failed(Some(&format!("name{i}")), None);
+        }
+        assert!(limiter.lock().len() <= MAX_TRACKED + 2);
     }
 }

@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+### Security
+
+This release follows a security review. A few things work differently:
+
+- **Away from home, signing in to DJINN GO over plain HTTP is refused**, since passwords would cross the internet readable. The app and `https://` addresses work as before. If you need it anyway, for a Subsonic app that can't accept DJINN's certificate, Admin > GO has **Also allow unencrypted connections from outside**.
+- **App passwords are only shown when they're made**, and making one asks for your password. Changing your password, or an admin turning the account off, removes it, so apps need a new one after that.
+- **Setting up two-step sign-in, or moving it to a new phone, asks for your password.**
+- **The TV page in a browser is silent unless you turn on** Admin > Rules > **Sound on the TV page**, because anyone who can open the page can listen. Casting to a TV still has sound. The casting section of Admin can give the live stream a **new address**.
+- Wrong passwords from someone else no longer lock you out of your account: tries count per account and address, with higher limits per address and per account.
+- A phone's sign-in only works on GO's port, and song links end when their session does.
+- Bursts of sign-ins can't use up the computer's memory, and each port limits how many connections it keeps.
+- On Linux, the database and logs can only be read by your own account. A backup left half downloaded no longer stays on disk, and backups only bring art cache files with them.
+- The party port now sends the same security headers GO does, and pages from elsewhere can't press its buttons.
+- Over DJINN's own HTTPS the sign-in cookie is marked secure.
+- DJINN GO for Android: other apps on the phone get play and pause buttons, not the library.
+- The Linux installer checks the release's signature when OpenSSL 3 is available.
+
 ## 2026.11.03 (November 3, 2026)
 
 ### Search

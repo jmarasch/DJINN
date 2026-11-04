@@ -103,8 +103,9 @@
   {:else}
     <p class="small muted">
       One file with everything DJINN knows: settings, accounts, playlists, history, party styles, speakers and
-      casts, tag corrections and artwork. Not your music or the AI models. Keep it private, since it holds your
-      accounts.
+      casts, tag corrections and artwork. Not your music or the AI models. Keep it private: it isn't encrypted and
+      holds your accounts, two-step and app passwords, and API keys. Only restore backups you made yourself, since
+      one replaces every account here.
     </p>
     <div class="actions">
       <a class="button" href="/api/backup" download>Download a backup</a>

@@ -4,6 +4,7 @@ import com.newterrastudios.djinn.go.data.parseKeptMediaId
 import android.app.PendingIntent
 import androidx.media3.session.SessionError
 import android.content.Intent
+import android.os.Process
 import android.os.SystemClock
 import androidx.core.net.toUri
 import androidx.media3.common.AudioAttributes
@@ -27,6 +28,7 @@ import androidx.media3.session.CacheBitmapLoader
 import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
+import androidx.media3.session.SessionCommands
 import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
@@ -316,6 +318,30 @@ class PlaybackService : MediaLibraryService() {
 
     private inner class Callback : MediaLibrarySession.Callback {
         /**
+         * Android lets any app on the phone connect, as play and pause buttons
+         * of its own for example. Those keep working, but only the app itself,
+         * the car, the watch and the system see what's in the library or choose
+         * what plays.
+         */
+        override fun onConnect(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo,
+        ): MediaSession.ConnectionResult {
+            val full = controller.uid == Process.myUid() ||
+                controller.uid == Process.SYSTEM_UID ||
+                controller.isTrusted ||
+                session.isAutoCompanionController(controller) ||
+                session.isAutomotiveController(controller) ||
+                session.isMediaNotificationController(controller) ||
+                mayBrowse(controller.packageName)
+            if (full) return super.onConnect(session, controller)
+            return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
+                .setAvailableSessionCommands(SessionCommands.EMPTY)
+                .setAvailablePlayerCommands(REMOTE_BUTTONS)
+                .build()
+        }
+
+        /**
          * Controllers only send which song; here it gets how to fetch it. A
          * voice request sends words instead, and plays what they find. The car
          * sends just an id, so the rest is looked up.
@@ -507,3 +533,13 @@ class PlaybackService : MediaLibraryService() {
         const val ALBUM_PREFIX = "album-"
     }
 }
+
+/** What an app that isn't [mayBrowse] can do: buttons, and what's playing. */
+private val REMOTE_BUTTONS = Player.Commands.Builder()
+    .addAll(
+        Player.COMMAND_PLAY_PAUSE,
+        Player.COMMAND_SEEK_TO_NEXT,
+        Player.COMMAND_SEEK_TO_PREVIOUS,
+        Player.COMMAND_GET_CURRENT_MEDIA_ITEM,
+    )
+    .build()

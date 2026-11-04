@@ -100,6 +100,8 @@ pub struct SessionUser {
     pub session_id: i64,
     /// When the session was last used (or started), Unix ms.
     pub last_seen_at: i64,
+    /// An app's token, which only GO's port accepts.
+    pub device: bool,
 }
 
 /// A signed-in device.
@@ -253,7 +255,7 @@ impl Store {
     }
 
     /// Approves, turns off or turns back on an account. Anything but active
-    /// signs it out everywhere.
+    /// signs it out everywhere, app password included.
     pub async fn set_status(&self, id: i64, status: AccountStatus) -> Result<bool> {
         let mut tx = self.pool.begin().await?;
         let result = sqlx::query("UPDATE users SET status = ? WHERE id = ? AND role != 'guest'")
@@ -262,10 +264,7 @@ impl Store {
             .execute(&mut *tx)
             .await?;
         if status != AccountStatus::Active {
-            sqlx::query("DELETE FROM sessions WHERE user_id = ?")
-                .bind(id)
-                .execute(&mut *tx)
-                .await?;
+            sign_out_everywhere(&mut tx, id).await?;
         }
         tx.commit().await?;
         Ok(result.rows_affected() > 0)
@@ -280,7 +279,8 @@ impl Store {
         Ok(result.rows_affected() > 0)
     }
 
-    /// Sets a new password and signs the user out everywhere.
+    /// Sets a new password and signs the user out everywhere, app password
+    /// included: whoever the password was changed to keep out may have it.
     pub async fn set_password(&self, id: i64, password_hash: &str) -> Result<bool> {
         let mut tx = self.pool.begin().await?;
         let result =
@@ -289,10 +289,7 @@ impl Store {
                 .bind(id)
                 .execute(&mut *tx)
                 .await?;
-        sqlx::query("DELETE FROM sessions WHERE user_id = ?")
-            .bind(id)
-            .execute(&mut *tx)
-            .await?;
+        sign_out_everywhere(&mut tx, id).await?;
         tx.commit().await?;
         Ok(result.rows_affected() > 0)
     }
@@ -426,11 +423,37 @@ impl Store {
         ip: Option<&str>,
         user_agent: Option<&str>,
     ) -> Result<()> {
+        self.insert_session(user_id, token_hash, expires_at, ip, user_agent, false)
+            .await
+    }
+
+    /// Starts an app's session, whose token only GO's port accepts.
+    pub async fn create_device_session(
+        &self,
+        user_id: i64,
+        token_hash: &[u8],
+        expires_at: i64,
+        ip: Option<&str>,
+        user_agent: Option<&str>,
+    ) -> Result<()> {
+        self.insert_session(user_id, token_hash, expires_at, ip, user_agent, true)
+            .await
+    }
+
+    async fn insert_session(
+        &self,
+        user_id: i64,
+        token_hash: &[u8],
+        expires_at: i64,
+        ip: Option<&str>,
+        user_agent: Option<&str>,
+        device: bool,
+    ) -> Result<()> {
         let now = now_ms();
         sqlx::query(
             "INSERT INTO sessions (user_id, token_hash, created_at, expires_at, last_seen_at, ip,
-                                   user_agent)
-             VALUES (?, ?, ?, ?, ?, ?, ?)",
+                                   user_agent, device)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(user_id)
         .bind(token_hash)
@@ -439,6 +462,7 @@ impl Store {
         .bind(now)
         .bind(ip)
         .bind(user_agent)
+        .bind(device)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -454,7 +478,7 @@ impl Store {
         let found = sqlx::query_as(concat!(
             "SELECT ",
             user_columns!(),
-            ", s.id AS session_id, coalesce(s.last_seen_at, s.created_at) AS last_seen_at
+            ", s.id AS session_id, coalesce(s.last_seen_at, s.created_at) AS last_seen_at, s.device
              FROM sessions s JOIN users u ON u.id = s.user_id
              WHERE s.token_hash = ? AND s.expires_at > ? AND u.status = 'active'"
         ))
@@ -463,6 +487,19 @@ impl Store {
         .fetch_optional(&self.pool)
         .await?;
         Ok(found)
+    }
+
+    /// Whether a session still lets its account in.
+    pub async fn session_is_live(&self, session_id: i64) -> Result<bool> {
+        let live = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM sessions s JOIN users u ON u.id = s.user_id
+                            WHERE s.id = ? AND s.expires_at > ? AND u.status = 'active')",
+        )
+        .bind(session_id)
+        .bind(now_ms())
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(live)
     }
 
     /// Notes that a session was just used, and from where. Account sessions
@@ -550,6 +587,19 @@ impl Store {
     }
 }
 
+/// Ends every way an account is signed in.
+async fn sign_out_everywhere(tx: &mut Transaction<'_, Sqlite>, user_id: i64) -> Result<()> {
+    sqlx::query("DELETE FROM sessions WHERE user_id = ?")
+        .bind(user_id)
+        .execute(&mut **tx)
+        .await?;
+    sqlx::query("DELETE FROM subsonic_keys WHERE user_id = ?")
+        .bind(user_id)
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
+}
+
 /// Inserts an account inside a transaction.
 pub(crate) async fn insert_account(
     tx: &mut Transaction<'_, Sqlite>,
@@ -577,6 +627,22 @@ pub(crate) async fn insert_account(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn signing_out_everywhere_includes_the_app_password() {
+        let store = Store::open_in_memory().await.unwrap();
+        let sam = store.create_user("sam", "h", Role::User).await.unwrap();
+        store.set_subsonic_key(sam.id, "key").await.unwrap();
+        store.set_password(sam.id, "h2").await.unwrap();
+        assert_eq!(store.subsonic_key(sam.id).await.unwrap(), None);
+
+        store.set_subsonic_key(sam.id, "key").await.unwrap();
+        store
+            .set_status(sam.id, AccountStatus::Disabled)
+            .await
+            .unwrap();
+        assert_eq!(store.subsonic_key(sam.id).await.unwrap(), None);
+    }
 
     #[tokio::test]
     async fn pending_and_disabled_accounts_cannot_use_sessions() {
@@ -633,6 +699,17 @@ mod tests {
             (found.id, hash.as_str(), found.role),
             (admin.id, "h1", Role::Admin)
         );
+
+        // An app's session says so; the other kind doesn't.
+        store
+            .create_device_session(admin.id, b"phone", now_ms() + 60_000, None, None)
+            .await
+            .unwrap();
+        let phone = store.session(b"phone").await.unwrap().unwrap();
+        assert!(phone.device);
+        assert!(store.session_is_live(phone.session_id).await.unwrap());
+        store.delete_session(b"phone").await.unwrap();
+        assert!(!store.session_is_live(phone.session_id).await.unwrap());
 
         store
             .create_session(admin.id, b"live", now_ms() + 60_000)

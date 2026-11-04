@@ -41,6 +41,63 @@ pub const RESTORE_DIR: &str = "restore";
 const UPLOAD: &str = "backup.zip";
 const PLAN: &str = "plan.json";
 
+/// A folder only this account can open.
+fn private_dir(path: &Path) -> io::Result<()> {
+    fs::create_dir_all(path)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
+    }
+    Ok(())
+}
+
+/// A new file only this account can read.
+fn private_file(path: &Path) -> io::Result<File> {
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    options.open(path)
+}
+
+/// At start: keeps the data folder to this account when it's DJINN's own, and
+/// clears away any backup a crash left half made or half sent.
+pub fn protect_data(db: &Path) {
+    let Some(dir) = db.parent() else { return };
+    if crate::config::own_folder().as_deref() == Some(dir) && dir.is_dir() {
+        if let Err(e) = private_dir(dir) {
+            tracing::warn!(error = %e, "couldn't make the data folder private");
+        }
+    }
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let is_backup = name
+            .to_str()
+            .and_then(|n| n.strip_prefix("backup-"))
+            .is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()));
+        if is_backup && entry.path().is_dir() {
+            let _ = fs::remove_dir_all(entry.path());
+        }
+    }
+}
+
+/// A backup being made. It holds every secret DJINN has, so it goes away
+/// however things end, including someone leaving before the download finishes.
+struct WorkDir(PathBuf);
+
+impl Drop for WorkDir {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 struct Manifest {
     format: u32,
@@ -80,39 +137,25 @@ pub fn data_dir(state: &AppState) -> PathBuf {
 }
 
 async fn download(_: AdminUser, State(state): State<AppState>) -> ApiResult<Response> {
-    let work = data_dir(&state).join(format!("backup-{}", now_ms()));
-    fs::create_dir_all(&work).map_err(anyhow::Error::from)?;
-    let made = make_backup(&state, &work).await;
-    let zip = match made {
-        Ok(zip) => zip,
-        Err(e) => {
-            let _ = fs::remove_dir_all(&work);
-            return Err(e.into());
-        }
-    };
+    let work = WorkDir(data_dir(&state).join(format!("backup-{}", now_ms())));
+    private_dir(&work.0).map_err(anyhow::Error::from)?;
+    let zip = make_backup(&state, &work.0).await?;
     let file = tokio::fs::File::open(&zip)
         .await
         .map_err(anyhow::Error::from)?;
     let name = format!("djinn-backup-{}.zip", date(now_ms()));
-    // Sends the file, then removes the working folder.
+    // Sends the file. The working folder goes with the stream, whenever that
+    // ends, after the file closes (Windows can't remove an open file).
     let body = futures_util::stream::unfold(Some((file, work)), |open| async move {
         let (mut file, work) = open?;
         let mut buf = vec![0; 256 * 1024];
         match tokio::io::AsyncReadExt::read(&mut file, &mut buf).await {
-            Ok(0) => {
-                drop(file);
-                let _ = tokio::fs::remove_dir_all(&work).await;
-                None
-            }
+            Ok(0) => None,
             Ok(n) => {
                 buf.truncate(n);
                 Some((Ok(Bytes::from(buf)), Some((file, work))))
             }
-            Err(e) => {
-                drop(file);
-                let _ = tokio::fs::remove_dir_all(&work).await;
-                Some((Err(e), None))
-            }
+            Err(e) => Some((Err(e), None)),
         }
     });
     Ok((
@@ -217,9 +260,7 @@ async fn upload(
 ) -> ApiResult<Json<Uploaded>> {
     let dir = data_dir(&state).join(RESTORE_DIR);
     let _ = tokio::fs::remove_dir_all(&dir).await;
-    tokio::fs::create_dir_all(&dir)
-        .await
-        .map_err(anyhow::Error::from)?;
+    private_dir(&dir).map_err(anyhow::Error::from)?;
     let path = dir.join(UPLOAD);
     let saved = save_body(body, &path).await;
     let checked = match saved {
@@ -373,7 +414,7 @@ pub fn put_in_place(db: &Path, art_dir: &Path) -> Option<Restored> {
 fn swap(db: &Path, art_dir: &Path, zip_path: &Path, plan: Plan) -> anyhow::Result<Restored> {
     let mut zip = zip::ZipArchive::new(File::open(zip_path)?)?;
     let incoming = with_suffix(db, ".restoring");
-    io::copy(&mut zip.by_name(DB_ENTRY)?, &mut File::create(&incoming)?)?;
+    io::copy(&mut zip.by_name(DB_ENTRY)?, &mut private_file(&incoming)?)?;
     fs::create_dir_all(art_dir)?;
     for i in 0..zip.len() {
         let mut entry = zip.by_index(i)?;
@@ -385,7 +426,7 @@ fn swap(db: &Path, art_dir: &Path, zip_path: &Path, plan: Plan) -> anyhow::Resul
             continue;
         };
         // Cache files are flat, named by hash: anything else is skipped.
-        if name.is_empty() || name.contains(['/', '\\']) || name.starts_with('.') {
+        if !art_file_name(&name) {
             continue;
         }
         let target = art_dir.join(&name);
@@ -407,6 +448,16 @@ fn swap(db: &Path, art_dir: &Path, zip_path: &Path, plan: Plan) -> anyhow::Resul
         moves: plan.moves,
         before,
     })
+}
+
+/// Whether a name in a backup could be one of the art cache's own files. A
+/// colon, say, would mean another drive or a hidden stream on Windows.
+fn art_file_name(name: &str) -> bool {
+    !name.is_empty()
+        && !name.starts_with('.')
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
 }
 
 /// `path` with `suffix` added to its file name.
@@ -458,6 +509,70 @@ mod tests {
         assert!(newer("0.3.0", "0.2.5"));
         assert!(!newer("0.2.5", "0.2.5"));
         assert!(!newer("0.2.0", "0.10.0"));
+    }
+
+    #[test]
+    fn only_art_cache_names_come_out_of_a_backup() {
+        for good in ["aa.jpg", "0123abcdef.img", "old_name-1.png", "plainhash"] {
+            assert!(art_file_name(good), "{good}");
+        }
+        for bad in [
+            "",
+            ".hidden",
+            "..",
+            "../evil",
+            "a\\b",
+            "C:evil.exe",
+            "song.jpg:stream",
+            "a b.jpg",
+        ] {
+            assert!(!art_file_name(bad), "{bad}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn what_holds_secrets_is_kept_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("djinn-private-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let folder = dir.join("work");
+        private_dir(&folder).unwrap();
+        assert_eq!(
+            fs::metadata(&folder).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        let file = folder.join("copy.db");
+        private_file(&file).unwrap();
+        assert_eq!(
+            fs::metadata(&file).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn leftovers_are_cleared_at_start_and_the_rest_left_alone() {
+        let dir = std::env::temp_dir().join(format!("djinn-leftovers-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("backup-1793830181509")).unwrap();
+        fs::write(dir.join("backup-1793830181509/backup.zip"), b"secrets").unwrap();
+        fs::create_dir_all(dir.join("backup-holiday")).unwrap();
+        fs::write(dir.join("backup-123"), b"a file, not ours").unwrap();
+        protect_data(&dir.join("djinn.db"));
+        assert!(!dir.join("backup-1793830181509").exists());
+        assert!(dir.join("backup-holiday").exists());
+        assert!(dir.join("backup-123").exists());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_backup_goes_when_its_stream_does() {
+        let dir = std::env::temp_dir().join(format!("djinn-workdir-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("backup.zip"), b"secrets").unwrap();
+        drop(WorkDir(dir.clone()));
+        assert!(!dir.exists());
     }
 
     #[test]

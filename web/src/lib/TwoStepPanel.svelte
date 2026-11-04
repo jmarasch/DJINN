@@ -15,6 +15,8 @@
   let error = $state('')
   let busy = $state(false)
   let turningOff = $state(false)
+  /** Asking for the password before showing a new code to scan. */
+  let starting = $state(false)
 
   onMount(load)
 
@@ -38,10 +40,14 @@
     }
   }
 
-  const begin = () =>
-    run(async () => {
-      setup = await api.startTwoStep()
+  const begin = (e: SubmitEvent) => {
+    e.preventDefault()
+    return run(async () => {
+      setup = await api.startTwoStep(password)
+      password = ''
+      starting = false
     })
+  }
 
   const confirm = (e: SubmitEvent) => {
     e.preventDefault()
@@ -100,7 +106,12 @@
     <button class="link" onclick={() => (setup = null)}>Cancel</button>
   {:else if status.on}
     <p>On. Signing in asks for a code from your authenticator app. {status.recovery_codes_left} recovery {status.recovery_codes_left === 1 ? 'code' : 'codes'} left.</p>
-    {#if turningOff}
+    {#if starting}
+      <form class="row" onsubmit={begin}>
+        <input type="password" bind:value={password} autocomplete="current-password" placeholder="Your password" required aria-label="Your password" />
+        <button class="primary" disabled={busy}>Continue</button>
+      </form>
+    {:else if turningOff}
       <form class="row" onsubmit={turnOff}>
         <input type="password" bind:value={password} autocomplete="current-password" placeholder="Your password" required aria-label="Your password" />
         <button disabled={busy}>Turn off</button>
@@ -108,7 +119,7 @@
       {#if status.required}<p class="small muted">DJINN GO needs it for your account, so GO stops working until you turn it on again.</p>{/if}
     {:else}
       <div class="row">
-        <button onclick={begin} disabled={busy}>New phone or new codes</button>
+        <button onclick={() => (starting = true)} disabled={busy}>New phone or new codes</button>
         <button onclick={() => (turningOff = true)}>Turn off</button>
       </div>
     {/if}
@@ -117,7 +128,14 @@
       {status.required ? 'DJINN GO needs this for your account.' : 'Off.'}
       After your password, signing in also asks for a code from an app on your phone, so a stolen password isn't enough.
     </p>
-    <button class="primary" onclick={begin} disabled={busy}>Set up two-step sign-in</button>
+    {#if starting}
+      <form class="row" onsubmit={begin}>
+        <input type="password" bind:value={password} autocomplete="current-password" placeholder="Your password" required aria-label="Your password" />
+        <button class="primary" disabled={busy}>Continue</button>
+      </form>
+    {:else}
+      <button class="primary" onclick={() => (starting = true)} disabled={busy}>Set up two-step sign-in</button>
+    {/if}
   {/if}
   {#if error}<p class="error">{error}</p>{/if}
 </section>

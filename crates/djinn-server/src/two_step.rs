@@ -221,11 +221,20 @@ struct Setup {
     qr_svg: String,
 }
 
-/// Starts turning two-step sign-in on: a new secret to scan. Nothing
-/// changes until a code from it is confirmed.
-async fn start(me: CurrentSession, State(state): State<AppState>) -> ApiResult<Json<Setup>> {
+/// Starts turning two-step sign-in on, or moving it to a new phone: a new
+/// secret to scan. Nothing changes until a code from it is confirmed. Asks for
+/// the password, since whoever finishes this decides who can sign in, and a
+/// stolen session must not be enough for that.
+async fn start(
+    me: CurrentSession,
+    State(state): State<AppState>,
+    Json(body): Json<Password>,
+) -> ApiResult<Json<Setup>> {
     if me.user.role == Role::Guest {
         return Err(ApiError::forbidden());
+    }
+    if !crate::auth::check_own_password(&state, &me.user, body.password).await? {
+        return Err(ApiError::new(StatusCode::FORBIDDEN, "wrong password"));
     }
     let secret = new_secret()?;
     state.store.begin_two_step(me.user.id, &secret).await?;

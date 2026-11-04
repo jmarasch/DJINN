@@ -71,6 +71,7 @@ impl Store {
         if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
             std::fs::create_dir_all(dir).map_err(sqlx::Error::Io)?;
         }
+        keep_private(path).map_err(sqlx::Error::Io)?;
         let options = SqliteConnectOptions::new()
             .filename(path)
             .create_if_missing(true)
@@ -257,6 +258,35 @@ mod playback_pool_tests {
         browse.close().await;
         std::fs::remove_dir_all(dir).unwrap();
     }
+}
+
+/// Only this account can read the database: it holds password hashes, two-step
+/// secrets, app passwords and API keys. SQLite gives its side files the same
+/// permissions. On Windows the folder DJINN installs to is private already.
+#[cfg(unix)]
+fn keep_private(path: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .mode(0o600)
+        .open(path)?;
+    let name = path.as_os_str();
+    for suffix in ["", "-wal", "-shm"] {
+        let mut file = name.to_owned();
+        file.push(suffix);
+        match std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e),
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn keep_private(_: &Path) -> std::io::Result<()> {
+    Ok(())
 }
 
 #[cfg(test)]
@@ -453,6 +483,33 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(hits, 0);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn only_this_account_can_read_the_database() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!(
+            "djinn-private-db-{}-{}",
+            std::process::id(),
+            now_ms()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("djinn.db");
+        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+
+        let store = Store::open(&path).await.unwrap();
+        store.set_setting("a", "b").await.unwrap();
+        assert_eq!(mode(&path), 0o600, "new");
+        assert_eq!(mode(&dir.join("djinn.db-wal")), 0o600, "its side file");
+        store.close().await;
+
+        // One from before, as a default umask left it.
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let store = Store::open(&path).await.unwrap();
+        assert_eq!(mode(&path), 0o600, "existing");
+        store.close().await;
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[tokio::test]

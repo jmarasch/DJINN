@@ -3,7 +3,10 @@
 //!
 //! The stream URL carries a random token instead of a session cookie,
 //! because Chromecasts, TVs, and Sonos speakers fetch it themselves and
-//! can't sign in. Only DJINN hands the URL out.
+//! can't sign in. Only DJINN hands the URL out: to whoever Play here is on for,
+//! to the TV page when the admin allows sound there, and to the devices it
+//! casts to. An admin can change it, which ends what's listening with the old
+//! one.
 
 use axum::body::{Body, Bytes};
 use std::net::IpAddr;
@@ -49,6 +52,7 @@ pub fn router() -> Router<AppState> {
         .route("/cast", get(list))
         .route("/cast/discover", post(discover))
         .route("/cast/stop-all", post(stop_all))
+        .route("/cast/new-link", post(new_link))
         .route("/cast/{id}/start", post(start))
         .route("/cast/{id}/stop", post(stop))
         .route("/cast/{id}/volume", put(volume))
@@ -94,7 +98,7 @@ async fn listen(
             .stream
             .as_ref()
             .filter(|_| on && !on_server(device.addr))
-            .map(|_| stream_path(&state.cast_token)),
+            .map(|_| stream_path(&state.stream_token())),
     }))
 }
 
@@ -184,6 +188,32 @@ async fn stop_all(_: AdminUser, State(state): State<AppState>) -> ApiResult<Stat
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// Changes the secret in the stream's address, for when it has got around.
+/// Casts carry on with the new one; browsers playing Play here ask for it.
+async fn new_link(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json<CastList>> {
+    let targets = cast_targets(&state);
+    state.caster.stop_all().await;
+    for _ in 0..50 {
+        if state.caster.active().is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let token = new_stream_token()?;
+    state.store.set_setting(CAST_TOKEN, &token).await?;
+    if let Ok(mut current) = state.cast_token.write() {
+        *current = token;
+    }
+    tracing::warn!("the live stream has a new address");
+    for line in &targets {
+        let (id, mode) = parse_target(line);
+        if let Err(e) = start_cast(&state, id, mode).await {
+            tracing::warn!(device = id, error = ?e, "couldn't start the cast again");
+        }
+    }
+    Ok(Json(cast_list(&state)))
+}
+
 #[derive(Deserialize)]
 struct Volume {
     /// 0.0 to 1.0.
@@ -211,10 +241,10 @@ async fn start_cast(state: &AppState, id: &str, mode: Mode) -> ApiResult<()> {
         ));
     }
     let base = state.join_url.trim_end_matches('/');
-    let token = state.cast_token.as_str();
+    let token = state.stream_token();
     let media = match mode {
         Mode::Audio => CastMedia::Stream {
-            url: format!("{base}{}", stream_path(token)),
+            url: format!("{base}{}", stream_path(&token)),
             meta: Metadata {
                 title: "DJINN".to_owned(),
                 subtitle: "Scan the code to add songs".to_owned(),
@@ -228,7 +258,8 @@ async fn start_cast(state: &AppState, id: &str, mode: Mode) -> ApiResult<()> {
                 ));
             }
             CastMedia::Page {
-                url: format!("{base}/tv?cast=1"),
+                // The page plays the stream itself, so it gets the secret.
+                url: format!("{base}/tv?cast={token}"),
             }
         }
     };
@@ -250,6 +281,15 @@ fn cast_targets(state: &AppState) -> Vec<String> {
             format!("{}\t{}", s.device.id, mode.as_str())
         })
         .collect()
+}
+
+/// One line of `cast_targets`.
+fn parse_target(line: &str) -> (&str, Mode) {
+    match line.split_once('\t') {
+        Some((id, "page")) => (id, Mode::Page),
+        Some((id, _)) => (id, Mode::Audio),
+        None => (line, Mode::Audio),
+    }
 }
 
 async fn save_targets(state: &AppState) -> ApiResult<()> {
@@ -282,11 +322,7 @@ pub fn spawn_background(state: &AppState) {
         };
         resume.caster.discover(DISCOVERY).await;
         for line in targets.lines().map(str::trim).filter(|t| !t.is_empty()) {
-            let (id, mode) = match line.split_once('\t') {
-                Some((id, "page")) => (id, Mode::Page),
-                Some((id, _)) => (id, Mode::Audio),
-                None => (line, Mode::Audio),
-            };
+            let (id, mode) = parse_target(line);
             match start_cast(&resume, id, mode).await {
                 Ok(()) => tracing::info!(device = id, "resuming cast"),
                 Err(_) => tracing::info!(device = id, "cast device not found; not resuming"),
@@ -297,7 +333,7 @@ pub fn spawn_background(state: &AppState) {
 
 /// The join QR code as a PNG: what TVs show while they play the party.
 async fn join_png(State(state): State<AppState>, Path(token): Path<String>) -> Response {
-    if *state.cast_token != token {
+    if state.stream_token() != token {
         return StatusCode::NOT_FOUND.into_response();
     }
     let Ok(code) = qrcode::QrCode::new(state.join_url.as_bytes()) else {
@@ -319,11 +355,15 @@ pub async fn token(store: &Store) -> anyhow::Result<String> {
     if let Some(token) = store.get_setting(CAST_TOKEN).await? {
         return Ok(token);
     }
-    let mut bytes = [0u8; 16];
-    getrandom::fill(&mut bytes).map_err(|e| anyhow::anyhow!("no system randomness: {e}"))?;
-    let token: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+    let token = new_stream_token()?;
     store.set_setting(CAST_TOKEN, &token).await?;
     Ok(token)
+}
+
+fn new_stream_token() -> anyhow::Result<String> {
+    let mut bytes = [0u8; 16];
+    getrandom::fill(&mut bytes).map_err(|e| anyhow::anyhow!("no system randomness: {e}"))?;
+    Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
 }
 
 /// Path of the live stream, relative to the server.
@@ -336,7 +376,11 @@ async fn live(
     Path(token): Path<String>,
     headers: axum::http::HeaderMap,
 ) -> Response {
-    let Some(stream) = state.stream.as_ref().filter(|_| *state.cast_token == token) else {
+    let Some(stream) = state
+        .stream
+        .as_ref()
+        .filter(|_| state.stream_token() == token)
+    else {
         return StatusCode::NOT_FOUND.into_response();
     };
     // Internet radio players (Sonos, many receivers, VLC) ask for song
@@ -354,6 +398,7 @@ async fn live(
         stream,
         title.map(|t| (t, state.events.subscribe())),
         state.shutdown.subscribe(),
+        (token, std::sync::Arc::clone(&state.cast_token)),
     )
 }
 
@@ -399,11 +444,18 @@ struct LiveBody {
     pending: Bytes,
     /// Ends the stream when DJINN shuts down, so it can exit.
     shutdown: tokio::sync::watch::Receiver<bool>,
+    /// The secret this listener came with, and the one in use: when an admin
+    /// changes it, whoever has the old one stops getting music.
+    token: String,
+    current: std::sync::Arc<std::sync::RwLock<String>>,
 }
 
 impl LiveBody {
     async fn next_chunk(&mut self) -> Option<Bytes> {
         loop {
+            if self.current.read().map_or(true, |now| *now != self.token) {
+                return None;
+            }
             if !self.pending.is_empty() {
                 return Some(std::mem::take(&mut self.pending));
             }
@@ -458,6 +510,7 @@ fn live_response(
     stream: &LiveStream,
     titles: Option<(String, tokio::sync::broadcast::Receiver<ServerEvent>)>,
     shutdown: tokio::sync::watch::Receiver<bool>,
+    (token, current): (String, std::sync::Arc<std::sync::RwLock<String>>),
 ) -> Response {
     let stream::Listener {
         backlog,
@@ -473,6 +526,8 @@ fn live_response(
         until_title: ICY_METAINT,
         pending: Bytes::new(),
         shutdown,
+        token,
+        current,
     };
     let body = futures_util::stream::unfold(state, |mut state| async move {
         let chunk = state.next().await?;
@@ -595,5 +650,70 @@ mod tests {
             let body = to_bytes(response.into_body(), 1024).await.unwrap();
             assert_eq!(body.as_ref(), expected.as_bytes(), "client {address}");
         }
+    }
+
+    #[tokio::test]
+    async fn the_stream_stays_private_until_allowed() {
+        use crate::test_util::{call, get_body, session};
+        use djinn_store::Role;
+
+        let (_tap, reader) = djinn_engine::stream_tap(1.0, 48_000);
+        let stream = LiveStream::start(reader, 48_000).unwrap();
+        let state = AppState::for_tests()
+            .await
+            .with_stream(stream, "secret".into());
+        let admin = session(&state, "ana", Role::Admin).await;
+        let snapshot = |path: &'static str| {
+            let state = state.clone();
+            let admin = admin.clone();
+            async move {
+                let (_, text) = get_body(&state, path, &admin).await;
+                let json: serde_json::Value = serde_json::from_str(&text).unwrap();
+                json["stream_url"].clone()
+            }
+        };
+        assert!(snapshot("/api/tv").await.is_null(), "the TV feed is public");
+        assert!(snapshot("/api/tv?key=wrong").await.is_null());
+        assert_eq!(
+            snapshot("/api/tv?key=secret").await,
+            "/cast/secret/live.mp3"
+        );
+        state
+            .store
+            .set_setting(crate::tv_api::TV_SOUND, "1")
+            .await
+            .unwrap();
+        assert_eq!(snapshot("/api/tv").await, "/cast/secret/live.mp3");
+
+        let (status, _) = call(
+            &state,
+            axum::http::Method::POST,
+            "/api/cast/new-link",
+            None,
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let token = state.stream_token();
+        assert!(token.len() == 32 && token != "secret");
+        assert_eq!(
+            state
+                .store
+                .get_setting(CAST_TOKEN)
+                .await
+                .unwrap()
+                .as_deref(),
+            Some(token.as_str())
+        );
+        assert_eq!(snapshot("/api/tv").await, stream_path(&token).as_str());
+        let (status, _) = call(
+            &state,
+            axum::http::Method::GET,
+            "/cast/secret/live.mp3",
+            None,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "the old address");
     }
 }

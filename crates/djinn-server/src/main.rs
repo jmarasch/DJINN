@@ -59,6 +59,9 @@ mod youtube;
 use std::path::PathBuf;
 
 use anyhow::Context;
+use axum::extract::{Request, State};
+use axum::middleware::{self, Next};
+use axum::response::Response;
 use axum::Router;
 use clap::Parser;
 use djinn_engine::{Engine, EngineConfig};
@@ -143,6 +146,8 @@ async fn run() -> anyhow::Result<()> {
         .path
         .parent()
         .map_or_else(|| PathBuf::from("art"), |dir| dir.join("art"));
+
+    backup::protect_data(&config.database.path);
 
     // A full reset, or a backup waiting to be restored, happens before the
     // database opens.
@@ -359,7 +364,7 @@ async fn run() -> anyhow::Result<()> {
     let server = axum::serve(
         listener,
         // Connection info gives handlers the client's IP (for MAC lookup).
-        app(state).into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        app(state).into_make_service_with_connect_info::<tls::Peer>(),
     )
     .with_graceful_shutdown(async move {
         shutdown_signal(shutdown_request).await;
@@ -506,8 +511,23 @@ fn app(state: AppState) -> Router {
         .nest("/api", api::router())
         .merge(cast_api::stream_router())
         .fallback(web::static_handler)
+        .layer(middleware::from_fn(security::same_origin))
+        .layer(middleware::from_fn_with_state(state.clone(), party_headers))
         .layer(TraceLayer::new_for_http())
+        .layer(middleware::from_fn(client::note_peer))
         .with_state(state)
+}
+
+/// Security headers on everything the party port sends.
+async fn party_headers(State(state): State<AppState>, request: Request, next: Next) -> Response {
+    let origin = security::origin(
+        security::peer(request.extensions()),
+        request.headers(),
+        &state.go.proxies(),
+    );
+    let mut response = next.run(request).await;
+    security::set_headers(response.headers_mut(), security::PARTY_CSP, origin.https);
+    response
 }
 
 /// How long open connections get to finish after a shutdown request.
@@ -580,6 +600,41 @@ mod tests {
     async fn join_page_data_is_public() {
         assert_eq!(status("/api/join").await, StatusCode::OK);
         assert_eq!(status("/api/join/qr.svg").await, StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn pages_get_security_headers() {
+        let response = app(AppState::for_tests().await)
+            .oneshot(Request::get("/api/health").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        for name in [
+            "content-security-policy",
+            "x-content-type-options",
+            "x-frame-options",
+            "referrer-policy",
+        ] {
+            assert!(response.headers().contains_key(name), "{name}");
+        }
+        assert!(!response.headers().contains_key("strict-transport-security"));
+    }
+
+    #[tokio::test]
+    async fn pages_from_elsewhere_cant_press_the_buttons() {
+        let state = AppState::for_tests().await;
+        let admin = test_util::session(&state, "ana", djinn_store::Role::Admin).await;
+        let quit = |origin: &'static str| {
+            app(state.clone()).oneshot(
+                Request::post("/api/system/quit")
+                    .header("host", "10.0.0.2:8066")
+                    .header("origin", origin)
+                    .header("cookie", &admin)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+        };
+        let refused = quit("http://10.0.0.2:9000").await.unwrap();
+        assert_eq!(refused.status(), StatusCode::FORBIDDEN);
     }
 
     #[tokio::test]

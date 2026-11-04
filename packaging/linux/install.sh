@@ -33,6 +33,31 @@ if [ "${1:-}" = "--uninstall" ]; then
     exit 0
 fi
 
+# The public half of DJINN's release key (PUBLIC_KEY in update.rs).
+release_key='-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEArzmY8Bl4FxBssSOq8xUBW4hn3ZHQrNYBJ+Toa+u2n54=
+-----END PUBLIC KEY-----'
+
+# Checks that SHA256SUMS in folder $1 is signed with the release key. Needs
+# OpenSSL 3; without it the checksum alone has to do, and this says so.
+check_signature() {
+    if ! command -v openssl >/dev/null 2>&1 || ! openssl pkeyutl -help 2>&1 | grep -q rawin; then
+        echo "Note: OpenSSL 3 wasn't found, so the release's signature wasn't checked." >&2
+        return 0
+    fi
+    printf '%s\n' "$release_key" > "$1/release-key.pem"
+    hex=$(tr -d '[:space:]' < "$1/SHA256SUMS.sig")
+    : > "$1/signature.bin"
+    while [ -n "$hex" ]; do
+        byte=${hex%"${hex#??}"}
+        hex=${hex#??}
+        # shellcheck disable=SC2059
+        printf "\\$(printf %03o "0x$byte")" >> "$1/signature.bin"
+    done
+    openssl pkeyutl -verify -pubin -inkey "$1/release-key.pem" -rawin \
+        -in "$1/SHA256SUMS" -sigfile "$1/signature.bin" >/dev/null 2>&1
+}
+
 download() {
     if command -v curl >/dev/null 2>&1; then
         curl -fsSL -o "$2" "$1"
@@ -73,6 +98,11 @@ else
     echo "Downloading DJINN..."
     download "$releases/djinn-linux-x86_64.tar.gz" "$tmp/djinn-linux-x86_64.tar.gz"
     download "$releases/SHA256SUMS" "$tmp/SHA256SUMS"
+    download "$releases/SHA256SUMS.sig" "$tmp/SHA256SUMS.sig"
+    if ! check_signature "$tmp"; then
+        echo "This release isn't signed with DJINN's release key, so it wasn't installed." >&2
+        exit 1
+    fi
     if ! (cd "$tmp" && grep ' djinn-linux-x86_64.tar.gz$' SHA256SUMS | sha256sum -c --quiet - >/dev/null 2>&1); then
         echo "The download didn't match the release's checksum; try again." >&2
         exit 1

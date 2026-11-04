@@ -405,8 +405,16 @@ async fn handle(
 /// Checks the app password (plain, `enc:` hex, a salted MD5 token, or an
 /// API key) and that the account may use GO from here.
 async fn sign_in(state: &AppState, params: &Params, device: &Device) -> Result<User, Failure> {
-    let account = params.get("u").unwrap_or("").trim().to_owned();
-    if let Some(wait) = state.limiter.wait(&account, device.addr) {
+    let account = crate::auth::name_tried(params.get("u").unwrap_or(""));
+    // Counted apart from signing in, so an app stuck on an old app password
+    // doesn't lock its owner out of the account. A key names no account: only
+    // the address counts, or five bad ones would shut out everyone's.
+    let tries = params
+        .get("apiKey")
+        .is_none()
+        .then(|| format!("app:{account}"));
+    let tries = tries.as_deref();
+    if let Some(wait) = state.limiter.wait(tries, device.addr) {
         return Err(Failure::new(
             40,
             format!(
@@ -419,7 +427,7 @@ async fn sign_in(state: &AppState, params: &Params, device: &Device) -> Result<U
         state.store.subsonic_key_account(key).await?
     } else {
         let Some((user, secret)) = state.store.subsonic_account(&account).await? else {
-            return Err(refuse(state, device, &account, None).await);
+            return Err(refuse(state, device, tries, &account, None).await);
         };
         let ok = match (params.get("p"), params.get("t"), params.get("s")) {
             (Some(p), _, _) => {
@@ -437,12 +445,12 @@ async fn sign_in(state: &AppState, params: &Params, device: &Device) -> Result<U
             _ => return Err(Failure::missing("p or t and s")),
         };
         if !ok {
-            return Err(refuse(state, device, &account, Some(user.id)).await);
+            return Err(refuse(state, device, tries, &account, Some(user.id)).await);
         }
         Some(user)
     };
     let Some(user) = found else {
-        return Err(refuse(state, device, &account, None).await);
+        return Err(refuse(state, device, tries, &account, None).await);
     };
     if let Ok(Some((_, message))) = go_refusal(state, &user, device).await {
         return Err(Failure::new(50, message));
@@ -456,8 +464,14 @@ async fn sign_in(state: &AppState, params: &Params, device: &Device) -> Result<U
     Ok(user)
 }
 
-async fn refuse(state: &AppState, device: &Device, account: &str, user_id: Option<i64>) -> Failure {
-    state.limiter.failed(account, device.addr);
+async fn refuse(
+    state: &AppState,
+    device: &Device,
+    tries: Option<&str>,
+    account: &str,
+    user_id: Option<i64>,
+) -> Failure {
+    state.limiter.failed(tries, device.addr);
     let _ = crate::auth::log_sign_in(state, device, account, user_id, "wrong_password").await;
     Failure::new(40, "wrong username or app password")
 }

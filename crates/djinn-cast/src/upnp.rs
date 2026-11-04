@@ -2,6 +2,7 @@
 //! device description says where its AVTransport (play, stop) and
 //! RenderingControl (volume) services live, and those take SOAP calls.
 
+use std::net::IpAddr;
 use std::time::Duration;
 
 use reqwest::Url;
@@ -16,6 +17,8 @@ const POLL: Duration = Duration::from_secs(5);
 /// Stopped this many polls in a row (after playing) means someone stopped
 /// it on the device or switched to something else.
 const STOPPED_POLLS: u32 = 2;
+/// Far more than a real device description takes.
+const MAX_DESCRIPTION: usize = 1024 * 1024;
 
 /// Where to send control calls.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -37,8 +40,33 @@ pub(crate) fn client() -> reqwest::Client {
     let _ = rustls::crypto::ring::default_provider().install_default();
     reqwest::Client::builder()
         .timeout(Duration::from_secs(5))
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .unwrap_or_default()
+}
+
+/// A device on the local network, on the address it answered from, so that
+/// anyone on the network answering a search can't send DJINN somewhere else.
+pub(crate) fn describes_itself(location: &str, responder: IpAddr) -> bool {
+    let local = match responder.to_canonical() {
+        IpAddr::V4(ip) => {
+            let [a, b, ..] = ip.octets();
+            ip.is_private() || ip.is_link_local() || (a == 100 && (64..128).contains(&b))
+        }
+        IpAddr::V6(ip) => {
+            let first = ip.segments()[0];
+            (first & 0xfe00) == 0xfc00 || (first & 0xffc0) == 0xfe80
+        }
+    };
+    local
+        && Url::parse(location).is_ok_and(|url| {
+            matches!(url.scheme(), "http" | "https")
+                && url
+                    .host_str()
+                    .map(|host| host.trim_start_matches('[').trim_end_matches(']'))
+                    .and_then(|host| host.parse::<IpAddr>().ok())
+                    .is_some_and(|host| host.to_canonical() == responder.to_canonical())
+        })
 }
 
 /// Fetches and reads a device description. `None` if it can't play media.
@@ -46,14 +74,19 @@ pub(crate) async fn describe(
     client: &reqwest::Client,
     location: &str,
 ) -> Result<Option<Device>, String> {
-    let xml = client
+    let mut response = client
         .get(location)
         .send()
         .await
-        .map_err(|e| e.to_string())?
-        .text()
-        .await
         .map_err(|e| e.to_string())?;
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(|e| e.to_string())? {
+        bytes.extend_from_slice(&chunk);
+        if bytes.len() > MAX_DESCRIPTION {
+            return Err("the description is too big".to_owned());
+        }
+    }
+    let xml = String::from_utf8_lossy(&bytes);
     let addr = Url::parse(location)
         .ok()
         .and_then(|u| u.socket_addrs(|| Some(80)).ok())
@@ -71,6 +104,11 @@ pub(crate) async fn describe(
             upnp: Some(control),
         }),
     )
+}
+
+/// Whether `url` is on the same host as the address the description came from.
+fn same_device(url: &Url, location: &str) -> bool {
+    Url::parse(location).is_ok_and(|from| url.host_str() == from.host_str())
 }
 
 type Description = (String, String, DeviceKind, Option<String>, UpnpControl);
@@ -102,6 +140,10 @@ fn parse_description(xml: &str, location: &str) -> Option<Description> {
             .filter_map(|s| {
                 let kind = child_text(s, "serviceType")?;
                 let control = base.join(&child_text(s, "controlURL")?).ok()?;
+                // Control stays on the device that described itself.
+                if !same_device(&control, location) {
+                    return None;
+                }
                 Some(Service {
                     kind,
                     control_url: control.to_string(),
@@ -321,6 +363,44 @@ fn tag(xml: &str, name: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_devices_describing_themselves_nearby_count() {
+        let ip = |s: &str| s.parse::<IpAddr>().unwrap();
+        let sonos = "http://192.168.0.40:1400/xml/device_description.xml";
+        assert!(describes_itself(sonos, ip("192.168.0.40")));
+        assert!(
+            !describes_itself(sonos, ip("192.168.0.41")),
+            "someone else's"
+        );
+        assert!(!describes_itself(
+            "http://203.0.113.5/x.xml",
+            ip("203.0.113.5")
+        ));
+        assert!(!describes_itself(
+            "http://127.0.0.1:8066/api/x",
+            ip("192.168.0.40")
+        ));
+        assert!(!describes_itself(
+            "http://169.254.169.254/x",
+            ip("192.168.0.40")
+        ));
+        assert!(!describes_itself(
+            "http://printer.lan/x.xml",
+            ip("192.168.0.40")
+        ));
+        assert!(!describes_itself("file:///etc/passwd", ip("192.168.0.40")));
+        assert!(describes_itself("http://[fe80::1]:80/x.xml", ip("fe80::1")));
+    }
+
+    #[test]
+    fn control_stays_on_the_device() {
+        let location = "http://192.168.0.40:1400/desc.xml";
+        let on = |u: &str| same_device(&Url::parse(u).unwrap(), location);
+        assert!(on("http://192.168.0.40:1400/control"));
+        assert!(!on("http://192.168.0.1/control"));
+        assert!(!on("http://127.0.0.1:8066/api/system/quit"));
+    }
 
     const TV: &str = r#"<?xml version="1.0"?>
 <root xmlns="urn:schemas-upnp-org:device-1-0">
