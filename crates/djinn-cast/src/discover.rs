@@ -140,11 +140,14 @@ fn ssdp_search(wait: Duration) -> Vec<String> {
     let mut buf = [0u8; 4096];
     while Instant::now() < deadline {
         for socket in &sockets {
-            while let Ok((n, _)) = socket.recv_from(&mut buf) {
-                if let Some(location) = parse_ssdp_location(&buf[..n]) {
-                    if !locations.contains(&location) {
-                        locations.push(location);
-                    }
+            while let Ok((n, from)) = socket.recv_from(&mut buf) {
+                let Some(location) = parse_ssdp_location(&buf[..n]) else {
+                    continue;
+                };
+                if !upnp::describes_itself(&location, from.ip()) {
+                    tracing::debug!(%location, %from, "ignoring a device description elsewhere");
+                } else if !locations.contains(&location) {
+                    locations.push(location);
                 }
             }
         }

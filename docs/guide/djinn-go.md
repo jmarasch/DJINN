@@ -194,9 +194,10 @@ CarPlay and Android Auto:
 In GO, **Account > Phone apps > Make an app password**. In the app, add a
 Subsonic (or OpenSubsonic) server with GO's address, your username, and
 that app password. The app password only works in these apps, never to sign
-in to DJINN, and it skips two-step sign-in, so keep it to your own devices;
-make a new one (or remove it) any time and apps using the old one stop
-working. Likes, playlists, history and "carry on" are shared between the
+in to DJINN, and it skips two-step sign-in, so keep it to your own devices.
+Making one asks for your password, and it's only shown then, so copy it right
+away. Make a new one (or remove it) any time and apps using the old one stop
+working. Changing your password removes it too. Likes, playlists, history and "carry on" are shared between the
 apps and GO's page. Apps get the original files, whatever quality they ask
 for.
 
