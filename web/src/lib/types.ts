@@ -624,6 +624,8 @@ export interface Settings {
   artist_keep_whole: string
   /** Show artists who appear only as a secondary song credit. */
   show_collaboration_artists: boolean
+  /** A file's original release date wins over its own (reissue) date. */
+  original_years: boolean
   /** The TV page (/tv) works without signing in. */
   tv_page: boolean
   /** The TV page can play the party without signing in. */

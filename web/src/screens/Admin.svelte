@@ -160,6 +160,11 @@
           Show all credited artists in the Artists library
         </label>
         <p class="small muted">When off, secondary "&amp;" and "feat." artists stay searchable and linked from songs, but only artists with their own music appear in Artists.</p>
+        <label class="switch big">
+          <input type="checkbox" bind:checked={settings.original_years} />
+          Use the original release year
+        </label>
+        <p class="small muted">A reissue's files often carry the reissue's date too. When on, an original release date in the tags wins. Changing this re-reads the library. Years you've corrected in the app stay as you set them.</p>
         <label>
           Names that should never be split, one per line
           <textarea rows="6" bind:value={settings.artist_keep_whole} spellcheck="false"></textarea>

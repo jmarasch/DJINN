@@ -19,6 +19,11 @@ This release follows a security review. A few things work differently:
 - DJINN GO for Android: other apps on the phone get play and pause buttons, not the library.
 - The Linux installer checks the release's signature when OpenSSL 3 is available.
 
+### Library
+
+- **Albums show their original release year**, not a reissue's, when the tags have one. **Use the original release year** in Admin > Library turns this off. The next library check re-reads every file once.
+- **Correcting a year on an album's songs now changes the album's year too.**
+
 ## 2026.11.03 (November 3, 2026)
 
 ### Search

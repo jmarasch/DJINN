@@ -25,7 +25,7 @@ impl Store {
         Ok(())
     }
 
-    /// Picks album and artist images from what the scanner found, and
+    /// Picks album years and images from what the scanner found, and
     /// deletes artists and albums left with no tracks (unless a playlist
     /// uses them). Run after a scan.
     pub async fn refresh_artwork(&self) -> Result<()> {
@@ -95,6 +95,18 @@ impl Store {
                 }
             }
         }
+        // An album's year is the one most of its songs give, the earliest
+        // on a tie, so a corrected or re-read song changes it. An album whose
+        // songs give none keeps what it has.
+        sqlx::query(
+            "UPDATE albums SET year = coalesce(
+               (SELECT t.year FROM tracks t
+                WHERE t.album_id = albums.id AND t.removed_at IS NULL AND t.year IS NOT NULL
+                GROUP BY t.year ORDER BY count(*) DESC, t.year LIMIT 1),
+               albums.year)",
+        )
+        .execute(&mut *tx)
+        .await?;
         // Albums: the first listed song's embedded cover, then the album
         // folder's image, then any song's artwork, then a cover found online.
         sqlx::query(

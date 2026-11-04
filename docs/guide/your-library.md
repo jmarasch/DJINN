@@ -90,6 +90,13 @@ how they sound (AcoustID, then MusicBrainz). It only runs when you start it.
 A match must agree with the title and artist already in the file. What you
 keep is stored in DJINN's database; your files aren't changed.
 
+## Album years
+
+A reissue's files often carry the reissue's date. DJINN uses the original
+release date when the tags have one, and an album shows the year most of its
+songs give. To use the file's own date instead, turn off **Use the original
+release year** in Admin > Library; that re-reads the library.
+
 ## Correct tags
 
 Wrong or missing titles, artists, albums, years and genres can be fixed in
