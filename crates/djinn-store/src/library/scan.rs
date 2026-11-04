@@ -218,6 +218,8 @@ async fn save_track(tx: &mut Transaction<'_, Sqlite>, t: &ScannedTrack, now: i64
     // An applied identification fills in what the tags lack.
     let filled = fill_from_identification(tx, t).await?;
     let t = filled.as_ref().unwrap_or(t);
+    // Tags, tag edits and identifications all come through here.
+    let year = t.year.and_then(real_year);
     let credits: Vec<(&str, bool)> = if t.credits.is_empty() {
         t.artist
             .as_deref()
@@ -241,7 +243,7 @@ async fn save_track(tx: &mut Transaction<'_, Sqlite>, t: &ScannedTrack, now: i64
                 .or(credits.first().map(|&(name, _)| name))
                 .unwrap_or(UNKNOWN_ARTIST);
             let album_artist_id = upsert_artist(tx, album_artist).await?;
-            Some(upsert_album(tx, title, album_artist_id, t.year).await?)
+            Some(upsert_album(tx, title, album_artist_id, year).await?)
         }
         None => None,
     };
@@ -283,7 +285,7 @@ async fn save_track(tx: &mut Transaction<'_, Sqlite>, t: &ScannedTrack, now: i64
     .bind(&t.album_artist)
     .bind(t.track_no)
     .bind(t.disc_no)
-    .bind(t.year)
+    .bind(year)
     .bind(&t.genre)
     .bind(t.art_hash())
     .bind(t.sample_rate)

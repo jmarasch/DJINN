@@ -8,7 +8,7 @@
 
 ### Library
 
-- Years that can't be real, like the 9999 some files carry as a placeholder, now count as unknown. One of them could stretch the year lists by thousands of years. Your files aren't changed.
+- Years that can't be real, like the 9999 some files carry as a placeholder, now count as unknown, and a song's year can be next year at the latest. One bad year could stretch the year lists by thousands of years. Your files aren't changed.
 
 ### DJINN GO for Android
 

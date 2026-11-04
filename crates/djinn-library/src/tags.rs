@@ -201,7 +201,9 @@ fn fill_from_tags(track: &mut ScannedTrack, file: &TaggedFile) -> (Vec<String>, 
     track.genre = text(tag.genre());
     track.track_no = tag.track().map(i64::from);
     track.disc_no = tag.disk().map(i64::from);
-    track.year = tag.date().and_then(|d| real_year(i64::from(d.year)));
+    track.year = tag
+        .date()
+        .and_then(|d| djinn_store::real_year(i64::from(d.year)));
     let number = |key: ItemKey| tag.get_string(key).and_then(parse_replay_gain);
     track.replay_gain = ReplayGainTags {
         track_gain: number(ItemKey::ReplayGainTrackGain),
@@ -213,12 +215,6 @@ fn fill_from_tags(track: &mut ScannedTrack, file: &TaggedFile) -> (Vec<String>, 
 }
 
 /// Reads a ReplayGain value like "-6.54 dB", "+1.2dB", or "0.98765".
-/// A year as tagged, unless it's a placeholder like 9999 or 0. Migration 33
-/// uses the same limits.
-fn real_year(year: i64) -> Option<i64> {
-    (1000..=2100).contains(&year).then_some(year)
-}
-
 fn parse_replay_gain(value: &str) -> Option<f64> {
     let value = value.trim();
     let number = value
@@ -279,13 +275,6 @@ fn cached(
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn placeholder_years_count_as_unknown() {
-        assert_eq!(super::real_year(1997), Some(1997));
-        assert_eq!(super::real_year(9999), None);
-        assert_eq!(super::real_year(0), None);
-    }
-
     use super::*;
 
     #[test]

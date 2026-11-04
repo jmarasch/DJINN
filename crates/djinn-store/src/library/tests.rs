@@ -21,25 +21,80 @@ fn fts_query_quotes_prefix_terms() {
     assert_eq!(fts_query("  -- "), None);
 }
 
+#[test]
+fn days_land_in_the_right_year() {
+    for (days, year) in [
+        (0, 1970),
+        (20818, 2026),
+        (20819, 2027),
+        (21243, 2028),
+        (21244, 2028),
+        (47482, 2100),
+    ] {
+        assert_eq!(year_of_day(days), year, "day {days}");
+    }
+}
+
+#[test]
+fn a_year_can_be_next_year_at_the_latest() {
+    let latest = latest_year();
+    // Whenever this runs, and this was written in 2026.
+    assert!(latest >= 2027);
+    assert_eq!(real_year(1997), Some(1997));
+    assert_eq!(real_year(latest), Some(latest));
+    assert_eq!(real_year(latest + 1), None);
+    assert_eq!(real_year(9999), None);
+    assert_eq!(real_year(0), None);
+}
+
+#[tokio::test]
+async fn impossible_years_are_never_saved() {
+    let store = Store::open_in_memory().await.unwrap();
+    let mut song = scanned("/m/1.flac", "Song", "Band", "Album");
+    song.year = Some(latest_year() + 1);
+    store.save_scanned(&[song]).await.unwrap();
+    let track: (Option<i64>,) = sqlx::query_as("SELECT year FROM tracks")
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+    let album: (Option<i64>,) = sqlx::query_as("SELECT year FROM albums")
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+    assert_eq!((track.0, album.0), (None, None));
+}
+
 /// A placeholder year stretched the year strips from 1955 to 9999.
 #[tokio::test]
 async fn impossible_years_already_stored_are_cleared() {
     let store = Store::open_in_memory().await.unwrap();
-    let song = |path: &str, year| {
+    let song = |path: &str| {
         let mut track = scanned(path, "Song", "Band", path);
-        track.year = Some(year);
+        track.year = Some(1997);
         track
     };
     store
-        .save_scanned(&[song("/m/1.flac", 9999), song("/m/2.flac", 1997)])
+        .save_scanned(&[song("/m/1.flac"), song("/m/2.flac"), song("/m/3.flac")])
         .await
         .unwrap();
-    sqlx::raw_sql(include_str!(
-        "../../../../migrations/0033_impossible_years.sql"
-    ))
-    .execute(&store.pool)
-    .await
-    .unwrap();
+    // What an older version could have stored.
+    for table in ["tracks", "albums"] {
+        for (year, like) in [(9999, "1"), (latest_year() + 1, "2")] {
+            let column = if table == "tracks" { "path" } else { "title" };
+            sqlx::raw_sql(sqlx::AssertSqlSafe(format!(
+                "UPDATE {table} SET year = {year} WHERE {column} LIKE '/m/{like}%'"
+            )))
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        }
+    }
+    for migration in [
+        include_str!("../../../../migrations/0033_impossible_years.sql"),
+        include_str!("../../../../migrations/0034_years_not_past_next_year.sql"),
+    ] {
+        sqlx::raw_sql(migration).execute(&store.pool).await.unwrap();
+    }
     let labels: Vec<_> = store
         .track_jumps(TrackSort::Year)
         .await
@@ -52,7 +107,7 @@ async fn impossible_years_already_stored_are_cleared() {
         .fetch_all(&store.pool)
         .await
         .unwrap();
-    assert_eq!(albums, [None, Some(1997)]);
+    assert_eq!(albums, [None, None, Some(1997)]);
 }
 
 #[test]

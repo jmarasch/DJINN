@@ -262,6 +262,33 @@ pub enum TrackSort {
     Oldest,
 }
 
+/// The latest year a song can have: next year, for a release announced ahead
+/// of time.
+pub fn latest_year() -> i64 {
+    let days = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() / 86_400) as i64;
+    year_of_day(days) + 1
+}
+
+/// The year a day falls in, counting days from 1970 (UTC). Howard Hinnant's
+/// days-to-civil, the year part.
+fn year_of_day(days: i64) -> i64 {
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let in_next_year = doy >= 306; // The count's years start in March.
+    yoe + era * 400 + i64::from(in_next_year)
+}
+
+/// A year as given, unless it can't be real, like the placeholders 9999 and 0.
+/// Migrations 33 and 34 use the same limits.
+pub fn real_year(year: i64) -> Option<i64> {
+    (1000..=latest_year()).contains(&year).then_some(year)
+}
+
 /// Where a letter or a year starts in a sorted list, for jumping there.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Jump {
