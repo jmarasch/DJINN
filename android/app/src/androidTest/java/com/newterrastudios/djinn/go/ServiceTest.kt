@@ -15,9 +15,12 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.newterrastudios.djinn.go.player.NowPlayingWidget
 import com.newterrastudios.djinn.go.player.PlaybackService
+import com.newterrastudios.djinn.go.player.albumId
+import com.newterrastudios.djinn.go.player.artistId
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -102,6 +105,36 @@ class ServiceTest {
         }
         waitUntil("the song plays") { browser.isPlaying }
         assertEquals(song.mediaMetadata.title.toString(), main { browser.mediaMetadata.title.toString() })
+    }
+
+    @Test
+    fun aSongsArtistAndAlbumReachTheScreens() {
+        val songs = children(children("albums").first().mediaId)
+        assertNotNull("browsed songs have an artist", songs.first().artistId)
+        assertNotNull("browsed songs have an album", songs.first().albumId)
+        main {
+            browser.setMediaItems(songs)
+            browser.prepare()
+            browser.play()
+        }
+        waitUntil("the album plays") { browser.isPlaying }
+        val playing = main { browser.currentMediaItem }
+        assertEquals(songs.first().artistId, playing?.artistId)
+        assertEquals(songs.first().albumId, playing?.albumId)
+    }
+
+    @Test
+    fun aSongPlayedFromItsIdAloneKnowsItsArtistAndAlbum() {
+        val song = children(children("albums").first().mediaId).first()
+        main {
+            browser.setMediaItem(MediaItem.Builder().setMediaId(song.mediaId).build())
+            browser.prepare()
+            browser.play()
+        }
+        waitUntil("the song plays") { browser.isPlaying }
+        val playing = main { browser.currentMediaItem }
+        assertEquals(song.artistId, playing?.artistId)
+        assertEquals(song.albumId, playing?.albumId)
     }
 
     @Test
