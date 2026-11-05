@@ -225,6 +225,10 @@ export const api = {
   removeStyle: (id: number, genre: string) => del<void>(`/tracks/${id}/styles/${encodeURIComponent(genre)}`),
   restoreStyle: (id: number, genre: string) => put<void>(`/tracks/${id}/styles/${encodeURIComponent(genre)}`, {}),
   genre: (name: string) => get<GenrePage>(`/genres/${encodeURIComponent(name)}`),
+  genreSongs: (name: string, offset: number) =>
+    get<Page<Track>>(`/genres/${encodeURIComponent(name)}/songs?offset=${offset}`),
+  genreArtists: (name: string, offset: number) =>
+    get<Page<ArtistSummary>>(`/genres/${encodeURIComponent(name)}/artists?offset=${offset}`),
   genres: (top?: number, lines?: number) =>
     get<GenreMap>(top && lines ? `/genres?top=${top}&lines=${lines}` : '/genres'),
   playlistFromSongs: (name: string, trackIds: number[]) =>

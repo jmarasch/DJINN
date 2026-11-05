@@ -171,6 +171,15 @@
         </label>
         <p class="small muted">When two folders hold different songs at the same place on an album, such as two different "track 1"s, they show as separate albums, each with its folder's name. Discs of one album stay together.</p>
         <label>
+          Songs and artists a genre page loads at a time
+          <input type="number" min="10" max="500" bind:value={settings.genre_page_size} />
+        </label>
+        <label>
+          Hours before a genre's order is shuffled again
+          <input type="number" min="0" max="8760" bind:value={settings.genre_refresh_hours} />
+          <span class="small muted">Genre pages show everything in a shuffled order, with what's been played most nearer the top. 0 shuffles on every visit.</span>
+        </label>
+        <label>
           Names that should never be split, one per line
           <textarea rows="6" bind:value={settings.artist_keep_whole} spellcheck="false"></textarea>
           <span class="small muted">

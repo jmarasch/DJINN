@@ -403,7 +403,8 @@ impl Store {
                 " FROM tracks t WHERE ",
                 available!(),
                 " ORDER BY (SELECT count(*) FROM request_events r WHERE r.track_id = t.id) DESC,
-                           (SELECT count(*) FROM play_events p WHERE p.track_id = t.id) DESC,
+                           (SELECT count(*) FROM play_events p WHERE p.track_id = t.id) +
+                           (SELECT count(*) FROM go_plays g WHERE g.track_id = t.id AND g.skipped = 0) DESC,
                            t.title COLLATE NOCASE LIMIT ? OFFSET ?"
             ))
             .bind(limit)

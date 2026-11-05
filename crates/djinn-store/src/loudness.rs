@@ -43,7 +43,7 @@ pub struct TrackFacts {
     /// Genre words from the file's tag, its album, and its artists
     /// (MusicBrainz), comma separated, lowercase.
     pub genres: String,
-    /// Times requested plus times played.
+    /// Times requested plus times played, anywhere.
     pub popularity: i64,
 }
 
@@ -225,6 +225,22 @@ impl Store {
         Ok(counts)
     }
 
+    /// Times each song has been requested or played: by the jukebox, and by
+    /// anyone on GO or a phone app, unless skipped early. Songs with none
+    /// aren't listed.
+    pub async fn song_popularity(&self) -> Result<std::collections::HashMap<i64, i64>> {
+        let rows: Vec<(i64, i64)> = sqlx::query_as(
+            "SELECT track_id, sum(n) FROM (
+                SELECT track_id, count(*) AS n FROM request_events GROUP BY track_id
+                UNION ALL SELECT track_id, count(*) FROM play_events GROUP BY track_id
+                UNION ALL SELECT track_id, count(*) FROM go_plays WHERE skipped = 0 GROUP BY track_id
+             ) GROUP BY track_id",
+        )
+        .fetch_all(self.pool())
+        .await?;
+        Ok(rows.into_iter().collect())
+    }
+
     /// Facts about every playable song, for descriptive search. Genres come
     /// from tags and MusicBrainz, or only the song's own once corrected in
     /// the app.
@@ -240,7 +256,8 @@ impl Store {
                                   WHERE ta.track_id = t.id AND ar.genres IS NOT NULL), '') \
                       END) AS genres, \
                     (SELECT count(*) FROM request_events r WHERE r.track_id = t.id) + \
-                    (SELECT count(*) FROM play_events p WHERE p.track_id = t.id) AS popularity \
+                    (SELECT count(*) FROM play_events p WHERE p.track_id = t.id) + \
+                    (SELECT count(*) FROM go_plays g WHERE g.track_id = t.id AND g.skipped = 0) AS popularity \
              FROM tracks t LEFT JOIN albums al ON al.id = t.album_id \
              WHERE t.removed_at IS NULL",
         )

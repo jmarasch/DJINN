@@ -141,6 +141,9 @@ back to the top from anywhere, and your back button goes back a step. Drag to
 move around, and pinch, scroll or use the buttons to zoom. You can choose how
 many genres the top shows, and how many lines to draw.
 
-Each genre's page shows related genres, its artists and songs, and a radio
-button.
+Each genre's page shows related genres, a row of its artists, a radio button,
+and all its songs, loading more as you scroll. They come in a shuffled order
+that favors what's been played, by anyone, on the jukebox, GO or a phone app.
+The same order stays for a while, so you can come back to it. **Admin > Library**
+sets how many load at a time and how many hours until it's shuffled again.
 

@@ -1,23 +1,59 @@
 <script lang="ts">
   // One genre: its songs, artists and related genres.
   import { api } from '../../lib/api'
+  import Art from '../../lib/Art.svelte'
   import Icon from '../../lib/Icon.svelte'
-  import type { GenrePage } from '../../lib/types'
-  import { playList, setShuffle } from '../player.svelte'
-  import SongList from '../SongList.svelte'
+  import InfiniteList from '../../lib/InfiniteList.svelte'
+  import ScrollRow from '../../lib/ScrollRow.svelte'
+  import type { ArtistSummary, GenrePage, Track } from '../../lib/types'
+  import { playList, setShuffle, tapSong } from '../player.svelte'
+  import SongRow from '../SongRow.svelte'
 
   let { name }: { name: string } = $props()
   let page = $state<GenrePage | null>(null)
   let error = $state('')
+  let artists = $state<ArtistSummary[]>([])
+  let fetchingArtists = false
+  /** The songs loaded so far, for playing on from one of them. */
+  let loaded: Track[] = []
 
   $effect(() => {
     page = null
     error = ''
+    artists = []
+    loaded = []
     api
       .genre(name)
-      .then((p) => (page = p))
+      .then((p) => {
+        page = p
+        artists = p.artists
+        loaded = p.tracks
+      })
       .catch((e) => (error = e.message))
   })
+
+  async function moreArtists() {
+    if (fetchingArtists || !page || artists.length >= page.artist_total) return
+    fetchingArtists = true
+    try {
+      const next = await api.genreArtists(name, artists.length)
+      if (next.items.length) artists = [...artists, ...next.items]
+    } finally {
+      fetchingArtists = false
+    }
+  }
+
+  async function moreSongs(offset: number) {
+    const next = await api.genreSongs(name, offset)
+    const known = new Set(loaded.map((t) => t.id))
+    loaded = [...loaded, ...next.items.filter((t) => !known.has(t.id))]
+    return next
+  }
+
+  function playFrom(track: Track) {
+    const at = loaded.findIndex((t) => t.id === track.id)
+    tapSong(track, () => playList(loaded, Math.max(0, at)))
+  }
 
   const title = $derived(name.charAt(0).toUpperCase() + name.slice(1))
 
@@ -34,7 +70,7 @@
 {:else if page}
   <p class="small muted">
     {page.total}
-    {page.total === 1 ? 'song' : 'songs'}{page.total > page.tracks.length ? `; the ${page.tracks.length} most played here` : ''}.
+    {page.total === 1 ? 'song' : 'songs'}, shuffled with the most played nearer the top.
   </p>
   <div class="buttons">
     <button class="primary" onclick={() => page && playList(page.tracks)} disabled={!page.tracks.length}>
@@ -50,16 +86,23 @@
       {/each}
     </div>
   {/if}
-  {#if page.artists.length}
-    <h2>Artists</h2>
-    <div class="chips">
-      {#each page.artists as artist (artist.id)}
-        <a class="chip" href="#/artist/{artist.id}">{artist.name}</a>
+  {#if artists.length}
+    <h2>Artists <span class="muted small">{page.artist_total}</span></h2>
+    <ScrollRow gap={12} nearEnd={moreArtists}>
+      {#each artists as artist (artist.id)}
+        <a class="artist" href="#/artist/{artist.id}">
+          <Art hash={artist.art_hash} size={88} round={999} letter={artist.name[0]} />
+          <span class="small">{artist.name}</span>
+        </a>
       {/each}
-    </div>
+    </ScrollRow>
   {/if}
   <h2>Songs</h2>
-  <SongList tracks={page.tracks} />
+  <InfiniteList cacheKey="go-genre-{name}" load={moreSongs} key={(t) => t.id}>
+    {#snippet item(track)}
+      <SongRow {track} art onplay={() => playFrom(track)} />
+    {/snippet}
+  </InfiniteList>
 {:else}
   <p class="muted">Loading...</p>
 {/if}
@@ -84,5 +127,17 @@
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
+  }
+
+  .artist {
+    display: flex;
+    flex: none;
+    flex-direction: column;
+    gap: 4px;
+    width: 88px;
+    align-items: center;
+    color: inherit;
+    text-decoration: none;
+    text-align: center;
   }
 </style>

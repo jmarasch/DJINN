@@ -25,6 +25,8 @@ This release follows a security review. A few things work differently:
 - **Correcting a year on an album's songs now changes the album's year too.**
 - **Albums with the same name stay apart** when their folders hold different releases, such as two different "track 1"s, and each shows its folder's name. Discs of one album stay together, and so does one stray song. **Keep albums with the same name apart** in Admin > Library turns this off.
 - **The genre cloud zooms in.** It opens on the 100 biggest genres, with more of the lines between them. Tap one to center on it with what's near it and what's near those, which reaches every genre; tap the center to open its page. Home, fit and zoom buttons sit in the corners, and you can choose how many genres and lines to show.
+- **Genre pages show the whole genre.** Artists are a sideways row with pictures, and songs keep loading as you scroll, instead of stopping at 24 artists and 100 songs. Everything comes in a shuffled order that favors what's been played, so a list doesn't stop after a few albums. **Admin > Library** sets how many load at a time and how many hours before a genre is shuffled again.
+- **Plays on GO and phone apps now count toward what's popular**, along with the jukebox. A song skipped early doesn't count.
 - **Sideways rows show there's more:** the cut-off side fades, and with a mouse there are arrows.
 
 ### DJINN GO

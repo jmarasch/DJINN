@@ -6,7 +6,16 @@
   import type { Snippet } from 'svelte'
   import Icon from './Icon.svelte'
 
-  let { children, gap = 14 }: { children: Snippet; gap?: number } = $props()
+  let {
+    children,
+    gap = 14,
+    nearEnd,
+  }: {
+    children: Snippet
+    gap?: number
+    /** Called as the end comes near, to load more. */
+    nearEnd?: () => void
+  } = $props()
 
   let row = $state<HTMLDivElement>()
   let more = $state({ left: false, right: false })
@@ -16,6 +25,7 @@
     const { scrollLeft, scrollWidth, clientWidth } = row
     // Scroll positions can be fractions, so a pixel of slack counts as the end.
     more = { left: scrollLeft > 1, right: scrollLeft + clientWidth < scrollWidth - 1 }
+    if (scrollLeft + clientWidth > scrollWidth - clientWidth) nearEnd?.()
   }
 
   function page(direction: -1 | 1) {

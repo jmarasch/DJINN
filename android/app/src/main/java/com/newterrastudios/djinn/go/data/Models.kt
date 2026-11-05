@@ -124,6 +124,7 @@ data class GenrePage(
     val name: String,
     /** Songs with it, which can be more than are listed. */
     val total: Long = 0,
+    @SerialName("artist_total") val artistTotal: Long = 0,
     val tracks: List<Track> = emptyList(),
     val artists: List<ArtistSummary> = emptyList(),
     val related: List<GenreSummary> = emptyList(),

@@ -630,6 +630,10 @@ export interface Settings {
   original_years: boolean
   /** Albums with one name stay apart when their folders hold different releases. */
   album_folders: boolean
+  /** Songs and artists a genre page loads at a time. */
+  genre_page_size: number
+  /** Hours before a genre's shuffled order is made again; 0 for every visit. */
+  genre_refresh_hours: number
   /** The TV page (/tv) works without signing in. */
   tv_page: boolean
   /** The TV page can play the party without signing in. */
@@ -855,6 +859,7 @@ export interface TrackTags {
 export interface GenrePage {
   name: string
   total: number
+  artist_total: number
   tracks: Track[]
   artists: ArtistSummary[]
   /** Genres linked to it on the genre cloud, strongest first (0 to 1). */

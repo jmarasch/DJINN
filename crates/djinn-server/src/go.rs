@@ -428,6 +428,8 @@ const ROUTES: &[(Method, &str, Access)] = &[
     (Method::GET, "/api/art/*", Access::Listener),
     (Method::GET, "/api/genres", Access::Listener),
     (Method::GET, "/api/genres/*", Access::Listener),
+    (Method::GET, "/api/genres/*/songs", Access::Listener),
+    (Method::GET, "/api/genres/*/artists", Access::Listener),
     (Method::GET, "/api/go/play/*", Access::Listener),
     (Method::GET, "/api/go/offline/*", Access::Listener),
     (Method::POST, "/api/go/offline/versions", Access::Listener),
@@ -1710,6 +1712,20 @@ mod tests {
 
     fn field(json: &str, key: &str) -> serde_json::Value {
         serde_json::from_str::<serde_json::Value>(json).unwrap()[key].clone()
+    }
+
+    #[test]
+    fn a_genres_songs_and_artists_are_open_to_listeners() {
+        for path in [
+            "/api/genres/rock",
+            "/api/genres/rock/songs",
+            "/api/genres/rock/artists",
+        ] {
+            assert!(
+                matches!(access(&Method::GET, path), Some(Access::Listener)),
+                "{path}"
+            );
+        }
     }
 
     #[tokio::test]

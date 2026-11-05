@@ -1,22 +1,42 @@
 <script lang="ts">
   import { api } from '../lib/api'
+  import Art from '../lib/Art.svelte'
   import Icon from '../lib/Icon.svelte'
+  import InfiniteList from '../lib/InfiniteList.svelte'
   import RadioButton from '../lib/RadioButton.svelte'
+  import ScrollRow from '../lib/ScrollRow.svelte'
   import TrackRow from '../lib/TrackRow.svelte'
-  import type { GenrePage } from '../lib/types'
+  import type { ArtistSummary, GenrePage } from '../lib/types'
 
   let { name }: { name: string } = $props()
   let page = $state<GenrePage | null>(null)
   let error = $state('')
+  let artists = $state<ArtistSummary[]>([])
+  let fetchingArtists = false
 
   $effect(() => {
     page = null
     error = ''
+    artists = []
     api
       .genre(name)
-      .then((p) => (page = p))
+      .then((p) => {
+        page = p
+        artists = p.artists
+      })
       .catch((e) => (error = e.message))
   })
+
+  async function moreArtists() {
+    if (fetchingArtists || !page || artists.length >= page.artist_total) return
+    fetchingArtists = true
+    try {
+      const next = await api.genreArtists(name, artists.length)
+      if (next.items.length) artists = [...artists, ...next.items]
+    } finally {
+      fetchingArtists = false
+    }
+  }
 
   const title = $derived(name.charAt(0).toUpperCase() + name.slice(1))
 </script>
@@ -29,9 +49,7 @@
 {:else if page}
   <p class="small muted">
     {page.total}
-    {page.total === 1 ? 'song' : 'songs'}, by their tags or how they sound{page.total > page.tracks.length
-      ? `; the ${page.tracks.length} most played first`
-      : ''}.
+    {page.total === 1 ? 'song' : 'songs'}, by their tags or how they sound, shuffled with the most played nearer the top.
   </p>
   <RadioButton seed={{ kind: 'genre', name: page.name }} label="{title} radio" />
   {#if page.related.length}
@@ -50,19 +68,24 @@
       {/each}
     </div>
   {/if}
-  {#if page.artists.length}
-    <h2>Artists</h2>
-    <div class="chips">
-      {#each page.artists as artist (artist.id)}
-        <a class="chip" href="#/artist/{artist.id}">{artist.name}</a>
+  {#if artists.length}
+    <h2>Artists <span class="muted small">{page.artist_total}</span></h2>
+    <ScrollRow nearEnd={moreArtists}>
+      {#each artists as artist (artist.id)}
+        <a class="artist" href="#/artist/{artist.id}">
+          <Art hash={artist.art_hash} size={96} round={999} letter={artist.name.charAt(0).toUpperCase()} />
+          <span class="ellipsis">{artist.name}</span>
+        </a>
       {/each}
-    </div>
+    </ScrollRow>
   {/if}
   {#if page.tracks.length}
     <h2>Songs</h2>
-    {#each page.tracks as track (track.id)}
-      <TrackRow {track} />
-    {/each}
+    <InfiniteList cacheKey="genre-{name}" load={(offset) => api.genreSongs(name, offset)} key={(t) => t.id}>
+      {#snippet item(track)}
+        <TrackRow {track} />
+      {/snippet}
+    </InfiniteList>
   {:else}
     <p class="muted">No songs with this genre yet.</p>
   {/if}
@@ -89,5 +112,22 @@
 
   h2 {
     margin-top: 18px;
+  }
+
+  .artist {
+    flex: none;
+    width: 96px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    color: var(--text);
+    text-decoration: none;
+    font-size: 0.8125rem;
+    text-align: center;
+  }
+
+  .artist .ellipsis {
+    max-width: 100%;
   }
 </style>
