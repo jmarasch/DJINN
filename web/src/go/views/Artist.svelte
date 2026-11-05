@@ -1,6 +1,7 @@
 <script lang="ts">
   import { api } from '../../lib/api'
   import Art from '../../lib/Art.svelte'
+  import ScrollRow from '../../lib/ScrollRow.svelte'
   import Icon from '../../lib/Icon.svelte'
   import type { ArtistDetail, ArtistSummary } from '../../lib/types'
   import { likes, playList, startRadio, toggleLike } from '../player.svelte'
@@ -53,7 +54,7 @@
   {/if}
   {#if artist.albums.length}
     <h2>Albums</h2>
-    <div class="tiles">
+    <ScrollRow gap={12}>
       {#each artist.albums as album (album.id)}
         <a class="tile" href="#/album/{album.id}">
           <Art hash={album.art_hash} size={120} />
@@ -61,29 +62,29 @@
           {#if album.year}<span class="muted small">{album.year}</span>{/if}
         </a>
       {/each}
-    </div>
+    </ScrollRow>
   {/if}
   {#if artist.appears_on.length}
     <h2>Appears on</h2>
-    <div class="tiles">
+    <ScrollRow gap={12}>
       {#each artist.appears_on as album (album.id)}
         <a class="tile" href="#/album/{album.id}">
           <Art hash={album.art_hash} size={120} />
           <span class="small">{album.title}</span>
         </a>
       {/each}
-    </div>
+    </ScrollRow>
   {/if}
   {#if similar.length}
     <h2>Similar artists</h2>
-    <div class="similar">
+    <ScrollRow>
       {#each similar as other (other.id)}
         <a class="other" href="#/artist/{other.id}">
           <Art hash={other.art_hash} size={96} round={999} letter={other.name.charAt(0).toUpperCase()} />
           <span class="small">{other.name}</span>
         </a>
       {/each}
-    </div>
+    </ScrollRow>
   {/if}
   {#if artist.bio}<p class="bio muted">{artist.bio}</p>{/if}
 {/if}
@@ -115,12 +116,6 @@
     color: var(--accent);
   }
 
-  .tiles {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-    gap: 12px;
-  }
-
   .tile {
     display: flex;
     flex-direction: column;
@@ -133,14 +128,6 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-  }
-
-  .similar {
-    display: flex;
-    gap: 14px;
-    overflow-x: auto;
-    padding-bottom: 6px;
-    scrollbar-width: none;
   }
 
   .other {

@@ -31,6 +31,9 @@ import java.io.File
 import java.io.IOException
 import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
+import com.newterrastudios.djinn.go.player.TalkOver
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 
 private const val DAY_MS = 24L * 60 * 60 * 1000
 
@@ -208,6 +211,27 @@ class Prefs(context: Context, private val scope: () -> String = { "" }) {
             ?: KeepRules()
 
     private val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+
+    private val talkOverNow = MutableStateFlow(TalkOver.named(prefs.getString("talk_over", null)))
+
+    /** What the music does when another app needs to talk. */
+    val talkOverChoice: StateFlow<TalkOver> = talkOverNow
+
+    fun chooseTalkOver(choice: TalkOver) {
+        prefs.edit { putString("talk_over", choice.name) }
+        talkOverNow.value = choice
+    }
+
+    /** Genres as a cloud rather than a list, and how much of it to show. */
+    var genreCloud: Boolean
+        get() = prefs.getBoolean("genre_cloud", false)
+        set(value) = prefs.edit { putBoolean("genre_cloud", value) }
+    var genreTop: Int
+        get() = prefs.getInt("genre_top", 100)
+        set(value) = prefs.edit { putInt("genre_top", value) }
+    var genreLines: Int
+        get() = prefs.getInt("genre_lines", 4)
+        set(value) = prefs.edit { putInt("genre_lines", value) }
 
     /** Bit rate to convert lossless songs to; 0 keeps full quality. */
     var kbps: Int

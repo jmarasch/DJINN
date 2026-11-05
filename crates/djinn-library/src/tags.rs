@@ -20,6 +20,9 @@ pub struct ScanContext<'a> {
     pub keep_whole: &'a [String],
     /// Tag corrections made in the app, by path.
     pub edits: &'a HashMap<String, TagEdit>,
+    /// A file's original release date wins over its own date, which on a
+    /// reissue is the reissue's.
+    pub original_years: bool,
 }
 
 /// Images already resolved during this scan, so each folder is read once.
@@ -72,6 +75,7 @@ pub fn read(
         cache,
         keep_whole,
         edits,
+        original_years,
     } = *scan;
     let mut track = ScannedTrack {
         path: path_str.to_owned(),
@@ -85,7 +89,7 @@ pub fn read(
     let mut album_artists = Vec::new();
     match lofty::read_from_path(path) {
         Ok(file) => {
-            (artists, album_artists) = fill_from_tags(&mut track, &file);
+            (artists, album_artists) = fill_from_tags(&mut track, &file, original_years);
             embedded_art = cover_picture(&file);
         }
         // Still list the file: symphonia may play what lofty can't parse.
@@ -158,7 +162,7 @@ pub struct Basics {
 pub fn basics(path: &Path) -> Option<Basics> {
     let file = lofty::read_from_path(path).ok()?;
     let mut track = ScannedTrack::default();
-    let (artists, album_artists) = fill_from_tags(&mut track, &file);
+    let (artists, album_artists) = fill_from_tags(&mut track, &file, true);
     Some(Basics {
         title: Some(track.title).filter(|t| !t.is_empty()),
         artist: (!artists.is_empty()).then(|| artists.join(" & ")),
@@ -168,7 +172,21 @@ pub fn basics(path: &Path) -> Option<Basics> {
     })
 }
 
-fn fill_from_tags(track: &mut ScannedTrack, file: &TaggedFile) -> (Vec<String>, Vec<String>) {
+/// The year a date tag starts with: "2005", "2005-04-27".
+fn year_of(date: &str) -> Option<i64> {
+    let date = date.trim();
+    let digits = date.get(..4)?;
+    let rest_ok = !date[4..].starts_with(|c: char| c.is_ascii_digit());
+    (rest_ok && digits.bytes().all(|b| b.is_ascii_digit()))
+        .then(|| digits.parse().ok())
+        .flatten()
+}
+
+fn fill_from_tags(
+    track: &mut ScannedTrack,
+    file: &TaggedFile,
+    original_years: bool,
+) -> (Vec<String>, Vec<String>) {
     let props = file.properties();
     track.duration_ms = i64::try_from(props.duration().as_millis()).ok();
     track.sample_rate = props.sample_rate().map(i64::from);
@@ -201,9 +219,15 @@ fn fill_from_tags(track: &mut ScannedTrack, file: &TaggedFile) -> (Vec<String>, 
     track.genre = text(tag.genre());
     track.track_no = tag.track().map(i64::from);
     track.disc_no = tag.disk().map(i64::from);
-    track.year = tag
-        .date()
-        .and_then(|d| djinn_store::real_year(i64::from(d.year)));
+    let original = tag
+        .get_string(ItemKey::OriginalReleaseDate)
+        .filter(|_| original_years)
+        .and_then(year_of)
+        .and_then(djinn_store::real_year);
+    track.year = original.or_else(|| {
+        tag.date()
+            .and_then(|d| djinn_store::real_year(i64::from(d.year)))
+    });
     let number = |key: ItemKey| tag.get_string(key).and_then(parse_replay_gain);
     track.replay_gain = ReplayGainTags {
         track_gain: number(ItemKey::ReplayGainTrackGain),
@@ -308,6 +332,7 @@ mod tests {
             cache: &cache,
             keep_whole: &[],
             edits: &HashMap::new(),
+            original_years: true,
         };
         let t = read(&copy, "rg.flac", 1, 2, None, &scan);
         assert_eq!(
@@ -332,6 +357,7 @@ mod tests {
             cache: &cache,
             keep_whole: &[],
             edits: &HashMap::new(),
+            original_years: true,
         };
         let t = read(&fixture, "tagged.flac", 1, 2, None, &scan);
 
@@ -373,6 +399,7 @@ mod tests {
             cache: &cache,
             keep_whole: &[],
             edits: &edits,
+            original_years: true,
         };
         let t = read(&fixture, "tagged.flac", 1, 2, None, &scan);
 
@@ -384,6 +411,44 @@ mod tests {
         );
         assert_eq!((t.year, t.genre.as_deref()), (Some(1998), Some("Art Pop")));
         let _ = std::fs::remove_dir_all(art_dir);
+    }
+
+    #[test]
+    fn a_date_tag_gives_its_year() {
+        assert_eq!(year_of("2005"), Some(2005));
+        assert_eq!(year_of(" 2005-04-27 "), Some(2005));
+        assert_eq!(year_of("20050427"), None);
+        assert_eq!(year_of("April 2005"), None);
+        assert_eq!(year_of("05"), None);
+    }
+
+    #[test]
+    fn the_original_release_wins_over_a_reissue_unless_turned_off() {
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/tagged.flac");
+        let dir = std::env::temp_dir().join(format!("djinn-year-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let copy = dir.join("reissue.flac");
+        std::fs::copy(&fixture, &copy).unwrap();
+        let mut file = lofty::read_from_path(&copy).unwrap();
+        let tag = file.primary_tag_mut().unwrap();
+        tag.insert_text(ItemKey::RecordingDate, "2015-06-30".into());
+        tag.insert_text(ItemKey::OriginalReleaseDate, "2005-04-27".into());
+        file.save_to_path(&copy, lofty::config::WriteOptions::default())
+            .unwrap();
+
+        let cache = ArtCache::default();
+        let edits = HashMap::new();
+        let mut scan = ScanContext {
+            art_dir: &dir,
+            cache: &cache,
+            keep_whole: &[],
+            edits: &edits,
+            original_years: true,
+        };
+        assert_eq!(read(&copy, "r.flac", 1, 2, None, &scan).year, Some(2005));
+        scan.original_years = false;
+        assert_eq!(read(&copy, "r.flac", 1, 2, None, &scan).year, Some(2015));
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

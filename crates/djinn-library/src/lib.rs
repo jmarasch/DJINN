@@ -31,11 +31,19 @@ const READERS: usize = 4;
 /// Bumped when the scanner starts extracting something new, so the next
 /// scan re-reads every file once. 2: artwork sources, " - Topic" cleanup.
 /// 3: separate artists for collaborations and features. 4: ReplayGain tags.
-const SCAN_VERSION: i64 = 5;
+/// 6: original release years.
+const SCAN_VERSION: i64 = 6;
 /// Set to anything else to make the next scan re-read every file.
 pub const SCAN_VERSION_KEY: &str = "scan_version";
 /// Artist names never split (one per line); unset means the defaults.
 pub const KEEP_WHOLE_KEY: &str = "artist_keep_whole";
+/// Whether a file's original release date wins over its own date.
+pub const ORIGINAL_YEARS_KEY: &str = "original_years";
+
+/// Whether years come from the original release, on unless turned off.
+pub async fn original_years(store: &Store) -> Result<bool, LibraryError> {
+    Ok(store.get_setting(ORIGINAL_YEARS_KEY).await?.as_deref() != Some("0"))
+}
 
 /// The never-split artist names in effect.
 pub async fn keep_whole(store: &Store) -> Result<Vec<String>, LibraryError> {
@@ -294,10 +302,11 @@ fn is_audio(path: &Path) -> bool {
 }
 
 /// What the admin set that changes how files read: artist names never
-/// split, and tag corrections.
+/// split, tag corrections, and which date is a song's year.
 struct Fixes {
     keep_whole: Vec<String>,
     edits: HashMap<String, TagEdit>,
+    original_years: bool,
 }
 
 impl Fixes {
@@ -305,6 +314,7 @@ impl Fixes {
         Ok(Self {
             keep_whole: keep_whole(store).await?,
             edits: store.tag_edits_by_path().await?,
+            original_years: original_years(store).await?,
         })
     }
 }
@@ -320,6 +330,7 @@ fn read_batch(
         cache,
         keep_whole: &fixes.keep_whole,
         edits: &fixes.edits,
+        original_years: fixes.original_years,
     };
     let per_thread = batch.len().div_ceil(READERS).max(1);
     std::thread::scope(|s| {

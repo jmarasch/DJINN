@@ -1,14 +1,97 @@
 <script lang="ts">
   // The genre cloud: each genre a dot sized by its number of songs, with
-  // lines between related genres (songs in common, similar sound). Tap one to
-  // open its page. Laid out once by a small force simulation from a fixed
-  // spiral, so the same library always looks the same. It opens at full size
-  // so labels stay readable on a phone; drag to move around, and pinch,
-  // scroll or use the buttons to zoom, without zooming the page.
+  // lines between related genres (songs in common, similar sound). It opens on
+  // the biggest genres. Tap one to center on it, with what's near it and what's
+  // near those; tap the center to open its page, or another dot to move on.
+  // Each view is laid out by a small force simulation from a fixed spiral, so
+  // the same library always looks the same. The top level opens at full size so
+  // labels stay readable on a phone; drag to move around, and pinch, scroll or
+  // use the buttons to zoom, without zooming the page.
+  import { untrack } from 'svelte'
+  import { api } from './api'
   import Icon from './Icon.svelte'
   import type { GenreMap } from './types'
 
-  let { map, limit = 80 }: { map: GenreMap; limit?: number } = $props()
+  const TOP_CHOICES = [50, 100, 200, 300]
+  const LINE_CHOICES = [
+    { label: 'Fewer', links: 2 },
+    { label: 'Normal', links: 4 },
+    { label: 'More', links: 8 },
+  ]
+  /** A zoomed view's genres near the center, and near each of those. */
+  const NEAR = 14
+  const NEAR_THOSE = 5
+  const MOST_IN_VIEW = 50
+  const MOVE_MS = 350
+
+  function stored(key: string, choices: number[], fallback: number) {
+    try {
+      const value = Number(localStorage.getItem(key))
+      return choices.includes(value) ? value : fallback
+    } catch {
+      return fallback
+    }
+  }
+
+  function store(key: string, value: number) {
+    try {
+      localStorage.setItem(key, String(value))
+    } catch {
+      // Only a convenience.
+    }
+  }
+
+  let top = $state(stored('djinn-genre-top', TOP_CHOICES, 100))
+  let links = $state(
+    stored(
+      'djinn-genre-lines',
+      LINE_CHOICES.map((c) => c.links),
+      4,
+    ),
+  )
+  let map = $state<GenreMap | null>(null)
+  let failed = $state(false)
+  /** How you got here, from the top level; the last is at the center. Each step is a place in the browser's history. */
+  let path = $state<string[]>(history.state?.genreCloud ?? [])
+
+  $effect(() => {
+    const [t, l] = [top, links]
+    store('djinn-genre-top', t)
+    store('djinn-genre-lines', l)
+    api
+      .genres(t, l)
+      .then((m) => {
+        map = m
+        failed = false
+      })
+      .catch(() => (failed = true))
+  })
+
+  $effect(() => {
+    const back = (e: PopStateEvent) => (path = e.state?.genreCloud ?? [])
+    window.addEventListener('popstate', back)
+    return () => window.removeEventListener('popstate', back)
+  })
+
+  function go(next: string[]) {
+    path = next
+    history.pushState({ ...history.state, genreCloud: next }, '')
+  }
+
+  /** Centers on a genre; one already on the way goes back to it. */
+  function centerOn(name: string) {
+    const at = path.indexOf(name)
+    go(at >= 0 ? path.slice(0, at + 1) : [...path, name])
+  }
+
+  function pressed(e: MouseEvent, name: string) {
+    // The center's link opens its page.
+    if (name === center) return
+    e.preventDefault()
+    centerOn(name)
+  }
+
+  const empty: GenreMap = { genres: [], links: [], top_links: [] }
 
   interface Dot {
     name: string
@@ -31,7 +114,19 @@
   const MAX_ZOOM = 3
   /** A press that moves further than this (pixels) is a drag, not a tap. */
   const DRAG_PX = 6
-  const layout = $derived(lay(map, limit))
+  const center = $derived(path.length ? path[path.length - 1] : null)
+  const layout = $derived(lay(map ?? empty, center, top))
+  /** Where each dot was last view, and where a new one comes from. */
+  let last = new Map<string, { x: number; y: number }>()
+  let from = $state(new Map<string, { x: number; y: number }>())
+  let origin = $state({ x: 0, y: 0 })
+  let moved = $state(1)
+  const drawn = $derived(
+    layout.dots.map((d) => {
+      const start = from.get(d.name) ?? origin
+      return { x: start.x + (d.x - start.x) * moved, y: start.y + (d.y - start.y) * moved }
+    }),
+  )
   let hovered = $state<number | null>(null)
   let svg = $state<SVGSVGElement>()
   let boxWidth = $state(0)
@@ -65,12 +160,35 @@
     return set
   })
 
-  // Start at full size in the middle of the cloud.
+  // Start in the middle of the view: at full size at the top level, and with
+  // all of it showing when zoomed. Dots move from where they were.
   $effect(() => {
     const l = layout
-    cx = l.left + l.width / 2
-    cy = l.top + l.height / 2
-    zoom = 1
+    const zoomed = path.length > 0
+    let frame = 0
+    untrack(() => {
+      cx = l.left + l.width / 2
+      cy = l.top + l.height / 2
+      zoom = zoomed ? fit : 1
+      hovered = null
+      const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+      from = last
+      origin = (center && last.get(center)) || { x: 0, y: 0 }
+      last = new Map(l.dots.map((d) => [d.name, { x: d.x, y: d.y }]))
+      if (still || !from.size) {
+        moved = 1
+        return
+      }
+      moved = 0
+      const began = performance.now()
+      const step = (now: number) => {
+        const done = Math.min(1, (now - began) / MOVE_MS)
+        moved = 1 - (1 - done) ** 3
+        if (done < 1) frame = requestAnimationFrame(step)
+      }
+      frame = requestAnimationFrame(step)
+    })
+    return () => cancelAnimationFrame(frame)
   })
 
   /** Zooms by `factor`, keeping the point under (x, y) (pixels in the box)
@@ -178,12 +296,34 @@
     }
   })
 
-  function lay(map: GenreMap, limit: number) {
-    // The biggest genres, if there are a lot.
-    const shown = map.genres
-      .map((_, i) => i)
-      .sort((a, b) => map.genres[b].songs - map.genres[a].songs)
-      .slice(0, limit)
+  /** A genre and what's near it, and near those, strongest first; the genre comes first. */
+  function around(map: GenreMap, at: number) {
+    const near = (g: number) =>
+      map.links
+        .filter((l) => l.a === g || l.b === g)
+        .sort((x, y) => y.strength - x.strength)
+        .map((l) => (l.a === g ? l.b : l.a))
+    const first = near(at).slice(0, NEAR)
+    const shown = new Set([at, ...first])
+    for (const g of first) {
+      for (const next of near(g).slice(0, NEAR_THOSE)) {
+        if (shown.size >= MOST_IN_VIEW) break
+        shown.add(next)
+      }
+    }
+    return [...shown]
+  }
+
+  function lay(map: GenreMap, center: string | null, biggest: number) {
+    const at = center === null ? -1 : map.genres.findIndex((g) => g.name === center)
+    const shown =
+      at >= 0
+        ? around(map, at)
+        : // The biggest genres, ties by name as on the server.
+          map.genres
+            .map((_, i) => i)
+            .sort((a, b) => map.genres[b].songs - map.genres[a].songs)
+            .slice(0, biggest)
     const index = new Map(shown.map((g, i) => [g, i]))
     const most = Math.max(1, ...shown.map((g) => map.genres[g].songs))
     const dots: Dot[] = shown.map((g, i) => {
@@ -202,7 +342,7 @@
         font: 12 + 7 * share,
       }
     })
-    const lines: Line[] = map.links
+    const lines: Line[] = (at >= 0 ? map.links : map.top_links)
       .filter((l) => index.has(l.a) && index.has(l.b))
       .map((l) => ({ a: index.get(l.a)!, b: index.get(l.b)!, strength: l.strength }))
     simulate(dots, lines)
@@ -310,7 +450,30 @@
   }
 </script>
 
-<p class="hint small muted">Drag to move around; pinch, scroll or use + and - to zoom.</p>
+{#if failed}
+  <p class="small muted">Could not load the genres.</p>
+{/if}
+<nav class="trail small" aria-label="Where you are in the cloud">
+  {#if path.length}
+    <button class="link" onclick={() => go([])}>Top</button>
+    {#each path as name, i (name)}
+      <span class="muted">/</span>
+      {#if i === path.length - 1}
+        <strong>{name}</strong>
+      {:else}
+        <button class="link" onclick={() => go(path.slice(0, i + 1))}>{name}</button>
+      {/if}
+    {/each}
+  {:else if map}
+    <span class="muted">Top {layout.dots.length} of {map.genres.length} genres. Bigger means more songs; lines join related genres.</span>
+  {/if}
+</nav>
+<p class="hint small muted">
+  {center
+    ? `Showing ${center} and what's near it. Tap ${center} to open it, or another genre to move there.`
+    : "Tap a genre to see what's near it."}
+  Drag to move around; pinch, scroll or use + and - to zoom.
+</p>
 <div class="cloud" bind:clientWidth={boxWidth} bind:clientHeight={boxHeight}>
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
   <svg
@@ -325,39 +488,59 @@
     onclickcapture={click}
   >
     {#each layout.lines as line, i (i)}
-      {@const a = layout.dots[line.a]}
-      {@const b = layout.dots[line.b]}
-      <line
-        x1={a.x}
-        y1={a.y}
-        x2={b.x}
-        y2={b.y}
-        stroke-width={1 + 2.5 * line.strength}
-        opacity={near && !(near.has(line.a) && near.has(line.b) && (line.a === hovered || line.b === hovered))
-          ? 0.05
-          : 0.15 + 0.5 * line.strength}
-      />
+      {@const a = drawn[line.a]}
+      {@const b = drawn[line.b]}
+      {#if a && b}
+        <line
+          x1={a.x}
+          y1={a.y}
+          x2={b.x}
+          y2={b.y}
+          stroke-width={1 + 2.5 * line.strength}
+          opacity={near && !(near.has(line.a) && near.has(line.b) && (line.a === hovered || line.b === hovered))
+            ? 0.05
+            : 0.15 + 0.5 * line.strength}
+        />
+      {/if}
     {/each}
     {#each layout.dots as dot, i (dot.name)}
+      {@const place = drawn[i] ?? dot}
       <a
         href="#/genre/{encodeURIComponent(dot.name)}"
         class:dim={near !== null && !near.has(i)}
+        class:center={dot.name === center}
+        onclick={(e) => pressed(e, dot.name)}
         onpointerenter={() => (hovered = i)}
         onpointerleave={() => (hovered = null)}
         onfocus={() => (hovered = i)}
         onblur={() => (hovered = null)}
       >
         <title>{dot.name}: {dot.songs} {dot.songs === 1 ? 'song' : 'songs'}</title>
-        <circle cx={dot.x} cy={dot.y} r={dot.r} />
-        <text x={dot.x} y={dot.y + dot.r + dot.font} font-size={dot.font}>{dot.name}</text>
+        <circle cx={place.x} cy={place.y} r={dot.r} />
+        <text x={place.x} y={place.y + dot.r + dot.font} font-size={dot.font}>{dot.name}</text>
       </a>
     {/each}
   </svg>
-  <div class="zoom">
-    <button aria-label="Zoom in" onclick={() => zoomBy(1.4)}><Icon name="plus" size={20} /></button>
-    <button aria-label="Zoom out" onclick={() => zoomBy(1 / 1.4)}><Icon name="minus" size={20} /></button>
-    <button aria-label="Show all" onclick={showAll}><Icon name="fit" size={20} /></button>
-  </div>
+  <button class="corner top-left" aria-label="Back to the top" disabled={!path.length} onclick={() => go([])}>
+    <Icon name="home" size={20} />
+  </button>
+  <button class="corner top-right" aria-label="Fit this view" onclick={showAll}><Icon name="fit" size={20} /></button>
+  <button class="corner bottom-left" aria-label="Zoom in" onclick={() => zoomBy(1.4)}><Icon name="plus" size={20} /></button>
+  <button class="corner bottom-right" aria-label="Zoom out" onclick={() => zoomBy(1 / 1.4)}><Icon name="minus" size={20} /></button>
+</div>
+<div class="choices small">
+  <label>
+    Genres at the top
+    <select bind:value={top}>
+      {#each TOP_CHOICES as choice (choice)}<option value={choice}>{choice}</option>{/each}
+    </select>
+  </label>
+  <label>
+    Lines
+    <select bind:value={links}>
+      {#each LINE_CHOICES as choice (choice.links)}<option value={choice.links}>{choice.label}</option>{/each}
+    </select>
+  </label>
 </div>
 
 <style>
@@ -369,22 +552,73 @@
     background: var(--surface);
   }
 
-  .zoom {
+  .corner {
     position: absolute;
-    top: 10px;
-    right: 10px;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-
-  .zoom button {
     width: 40px;
     min-height: 40px;
     padding: 0;
     border-radius: 10px;
     background: var(--surface-3);
     color: var(--text);
+  }
+
+  .corner:disabled {
+    opacity: 0.45;
+  }
+
+  .top-left {
+    top: 10px;
+    left: 10px;
+  }
+
+  .top-right {
+    top: 10px;
+    right: 10px;
+  }
+
+  .bottom-left {
+    bottom: 10px;
+    left: 10px;
+  }
+
+  .bottom-right {
+    bottom: 10px;
+    right: 10px;
+  }
+
+  .trail {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin: 0 0 4px;
+  }
+
+  .link {
+    padding: 0;
+    min-height: 0;
+    border: 0;
+    background: transparent;
+    color: var(--accent);
+  }
+
+  .choices {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    margin-top: 8px;
+  }
+
+  .choices label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  a.center circle {
+    stroke: var(--text);
+    stroke-width: 2;
+    fill-opacity: 1;
   }
 
   .hint {

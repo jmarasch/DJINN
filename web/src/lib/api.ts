@@ -101,6 +101,13 @@ export class ApiError extends Error {
   }
 }
 
+let unauthorized: (() => void) | null = null
+
+/** Called when the server turns a request down for want of a sign-in. A wrong password answers the same, so check. */
+export function onUnauthorized(handler: () => void) {
+  unauthorized = handler
+}
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(`/api${path}`, {
     method,
@@ -108,6 +115,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     body: body === undefined ? undefined : JSON.stringify(body),
   })
   if (!res.ok) {
+    if (res.status === 401) unauthorized?.()
     let message = `Request failed (${res.status})`
     try {
       const data = await res.json()
@@ -217,7 +225,12 @@ export const api = {
   removeStyle: (id: number, genre: string) => del<void>(`/tracks/${id}/styles/${encodeURIComponent(genre)}`),
   restoreStyle: (id: number, genre: string) => put<void>(`/tracks/${id}/styles/${encodeURIComponent(genre)}`, {}),
   genre: (name: string) => get<GenrePage>(`/genres/${encodeURIComponent(name)}`),
-  genres: () => get<GenreMap>('/genres'),
+  genreSongs: (name: string, offset: number) =>
+    get<Page<Track>>(`/genres/${encodeURIComponent(name)}/songs?offset=${offset}`),
+  genreArtists: (name: string, offset: number) =>
+    get<Page<ArtistSummary>>(`/genres/${encodeURIComponent(name)}/artists?offset=${offset}`),
+  genres: (top?: number, lines?: number) =>
+    get<GenreMap>(top && lines ? `/genres?top=${top}&lines=${lines}` : '/genres'),
   playlistFromSongs: (name: string, trackIds: number[]) =>
     post<PlaylistSummary>('/playlists/from-songs', { name, track_ids: trackIds }),
   tracks: (sort: TrackSort, offset: number) =>

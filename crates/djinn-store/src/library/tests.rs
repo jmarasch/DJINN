@@ -64,6 +64,82 @@ async fn impossible_years_are_never_saved() {
     assert_eq!((track.0, album.0), (None, None));
 }
 
+/// The jukebox, GO on the web, the app and Subsonic apps all count, and a song
+/// skipped early doesn't.
+#[tokio::test]
+async fn every_play_counts_toward_whats_popular() {
+    let store = Store::open_in_memory().await.unwrap();
+    store
+        .save_scanned(&[
+            scanned("/m/a.flac", "Listened", "Band", "Album"),
+            scanned("/m/b.flac", "Skipped", "Band", "Album"),
+        ])
+        .await
+        .unwrap();
+    let id = |title: &'static str| {
+        let store = &store;
+        async move {
+            sqlx::query_scalar::<_, i64>("SELECT id FROM tracks WHERE title = ?")
+                .bind(title)
+                .fetch_one(&store.pool)
+                .await
+                .unwrap()
+        }
+    };
+    let (listened, skipped) = (id("Listened").await, id("Skipped").await);
+    let user = store
+        .create_user("sam", "h", crate::Role::User)
+        .await
+        .unwrap()
+        .id;
+    store
+        .record_go_play(user, listened, crate::SKIP_BEFORE_MS)
+        .await
+        .unwrap();
+    store.record_go_play(user, skipped, 1).await.unwrap();
+    let plays = store.song_popularity().await.unwrap();
+    assert_eq!(plays.get(&listened), Some(&1));
+    assert_eq!(plays.get(&skipped), None);
+    let facts = store.track_facts().await.unwrap();
+    let popularity = |id: i64| facts.iter().find(|f| f.id == id).unwrap().popularity;
+    assert_eq!((popularity(listened), popularity(skipped)), (1, 0));
+    let page = store.tracks_page(TrackSort::Popular, 0, 2).await.unwrap();
+    assert_eq!(page.items[0].id, listened);
+}
+
+#[tokio::test]
+async fn an_album_takes_the_year_most_of_its_songs_give() {
+    let store = Store::open_in_memory().await.unwrap();
+    let mut songs = Vec::new();
+    for (i, year) in [2015, 2005, 2005].into_iter().enumerate() {
+        let mut song = scanned(&format!("/m/{i}.flac"), "Song", "Band", "Album");
+        song.year = Some(year);
+        songs.push(song);
+    }
+    store.save_scanned(&songs).await.unwrap();
+    let year = || async {
+        sqlx::query_scalar::<_, Option<i64>>("SELECT year FROM albums")
+            .fetch_one(&store.pool)
+            .await
+            .unwrap()
+    };
+    assert_eq!(
+        year().await,
+        Some(2015),
+        "the first song seen, until sorted"
+    );
+    store.refresh_artwork().await.unwrap();
+    assert_eq!(year().await, Some(2005));
+
+    // Songs that stop giving a year leave the album's alone.
+    for song in &mut songs {
+        song.year = None;
+    }
+    store.save_scanned(&songs).await.unwrap();
+    store.refresh_artwork().await.unwrap();
+    assert_eq!(year().await, Some(2005));
+}
+
 /// A placeholder year stretched the year strips from 1955 to 9999.
 #[tokio::test]
 async fn impossible_years_already_stored_are_cleared() {

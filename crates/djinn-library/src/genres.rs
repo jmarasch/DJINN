@@ -29,6 +29,28 @@ pub struct GenreMap {
     /// By name.
     pub genres: Vec<Genre>,
     pub links: Vec<Link>,
+    /// Links among the biggest genres only, for the cloud's top level. Among
+    /// all genres, a tiny one can take a big one's places and leave it few
+    /// lines to anything shown.
+    pub top_links: Vec<Link>,
+}
+
+/// How much of the map to keep.
+#[derive(Clone, Copy, Debug)]
+pub struct Shape {
+    /// Genres at the cloud's top level, the biggest.
+    pub top: usize,
+    /// Links each genre keeps, its strongest.
+    pub links_per_genre: usize,
+}
+
+impl Default for Shape {
+    fn default() -> Self {
+        Self {
+            top: 100,
+            links_per_genre: LINKS_PER_GENRE,
+        }
+    }
 }
 
 /// A genre related to another, as on the genre cloud.
@@ -84,6 +106,11 @@ const OVERLAP_DAMPING: f32 = 2.0;
 /// Builds the map from each song's genres and styles (`tags`) and how the
 /// songs sound.
 pub fn map(tags: &HashMap<i64, Vec<String>>, index: &SoundIndex) -> GenreMap {
+    shaped(tags, index, Shape::default())
+}
+
+/// [`map`], keeping as much as `shape` says.
+pub fn shaped(tags: &HashMap<i64, Vec<String>>, index: &SoundIndex, shape: Shape) -> GenreMap {
     let mut songs: HashMap<&str, Vec<i64>> = HashMap::new();
     for (&song, names) in tags {
         let mut seen: Vec<&str> = Vec::new();
@@ -167,11 +194,33 @@ pub fn map(tags: &HashMap<i64, Vec<String>>, index: &SoundIndex) -> GenreMap {
         }
     }
     candidates.sort_by(|x, y| y.strength.total_cmp(&x.strength));
-    let mut kept = vec![0usize; genres.len()];
+    let mut biggest: Vec<usize> = (0..genres.len()).collect();
+    biggest.sort_by_key(|&g| std::cmp::Reverse(genres[g].songs));
+    let mut on_top = vec![false; genres.len()];
+    for g in biggest.into_iter().take(shape.top) {
+        on_top[g] = true;
+    }
+    let top: Vec<Link> = candidates
+        .iter()
+        .filter(|l| on_top[l.a] && on_top[l.b])
+        .cloned()
+        .collect();
+    let top_links = strongest(top, genres.len(), shape.links_per_genre);
+    let links = strongest(candidates, genres.len(), shape.links_per_genre);
+    GenreMap {
+        genres,
+        links,
+        top_links,
+    }
+}
+
+/// Keeps each genre's strongest links, of `candidates` sorted strongest first.
+fn strongest(candidates: Vec<Link>, genres: usize, per_genre: usize) -> Vec<Link> {
+    let mut kept = vec![0usize; genres];
     let mut links = Vec::new();
     let mut left = Vec::new();
     for link in candidates {
-        if kept[link.a] < LINKS_PER_GENRE && kept[link.b] < LINKS_PER_GENRE {
+        if kept[link.a] < per_genre && kept[link.b] < per_genre {
             kept[link.a] += 1;
             kept[link.b] += 1;
             links.push(link);
@@ -187,7 +236,7 @@ pub fn map(tags: &HashMap<i64, Vec<String>>, index: &SoundIndex) -> GenreMap {
             links.push(link);
         }
     }
-    GenreMap { genres, links }
+    links
 }
 
 #[cfg(test)]
@@ -207,6 +256,52 @@ mod tests {
             return false;
         };
         map.links.iter().any(|l| (l.a, l.b) == (a.min(b), a.max(b)))
+    }
+
+    #[test]
+    fn tiny_genres_dont_take_a_big_ones_places_at_the_top_level() {
+        // Rock shares songs with two tiny genres, and more loosely with pop.
+        let mut list: Vec<(i64, Vec<&str>)> = Vec::new();
+        for song in 0..40 {
+            list.push((song, vec!["rock"]));
+        }
+        for song in 40..80 {
+            list.push((song, vec!["pop"]));
+        }
+        for song in 0..20 {
+            list[song as usize].1.push("pop");
+        }
+        for song in 0..3 {
+            list[song as usize].1.push("tiny one");
+        }
+        for song in 3..6 {
+            list[song as usize].1.push("tiny two");
+        }
+        let tags: HashMap<i64, Vec<String>> = list
+            .into_iter()
+            .map(|(song, names)| (song, names.into_iter().map(str::to_owned).collect()))
+            .collect();
+        let map = shaped(
+            &tags,
+            &SoundIndex::default(),
+            Shape {
+                top: 2,
+                links_per_genre: 2,
+            },
+        );
+        let at = |n: &str| map.genres.iter().position(|g| g.name == n).unwrap();
+        let (rock, pop) = (at("rock"), at("pop"));
+        assert!(
+            !map.links
+                .iter()
+                .any(|l| (l.a, l.b) == (rock.min(pop), rock.max(pop))),
+            "over all genres rock's places go to the tiny ones"
+        );
+        assert_eq!(map.top_links.len(), 1);
+        assert_eq!(
+            (map.top_links[0].a, map.top_links[0].b),
+            (rock.min(pop), rock.max(pop))
+        );
     }
 
     #[test]

@@ -285,7 +285,8 @@ impl Store {
             "SELECT ",
             track_columns!(),
             ", (SELECT count(*) FROM request_events r WHERE r.track_id = t.id) AS requests,
-               (SELECT count(*) FROM play_events p WHERE p.track_id = t.id) AS plays
+               (SELECT count(*) FROM play_events p WHERE p.track_id = t.id) +
+               (SELECT count(*) FROM go_plays g WHERE g.track_id = t.id AND g.skipped = 0) AS plays
              FROM tracks t LEFT JOIN albums al ON al.id = t.album_id
              WHERE ",
             available!(),

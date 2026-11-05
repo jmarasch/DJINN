@@ -28,6 +28,7 @@
       <h1>{album.title}</h1>
       <a href="#/artist/{album.artist_id}">{album.artist}</a>
       {#if album.year}<span class="muted"> · {album.year}</span>{/if}
+      {#if album.label}<span class="muted"> · {album.label}</span>{/if}
     </div>
   </header>
   <div class="buttons">

@@ -291,6 +291,18 @@ struct Settings {
     artist_keep_whole: String,
     #[serde(default = "default_true")]
     show_collaboration_artists: bool,
+    /// A file's original release date wins over its own (reissue) date.
+    #[serde(default = "default_true")]
+    original_years: bool,
+    /// Albums with one name stay apart when their folders hold different releases.
+    #[serde(default = "default_true")]
+    album_folders: bool,
+    /// Songs and artists a genre page loads at a time.
+    #[serde(default = "default_genre_page")]
+    genre_page_size: i64,
+    /// Hours before a genre's shuffled order is made again.
+    #[serde(default = "default_genre_refresh")]
+    genre_refresh_hours: i64,
     /// The TV page (/tv) works without signing in.
     #[serde(default = "default_true")]
     tv_page: bool,
@@ -306,6 +318,14 @@ struct Settings {
     /// AcoustID application key, for identifying songs by sound.
     #[serde(default)]
     acoustid_key: String,
+}
+
+fn default_genre_page() -> i64 {
+    crate::smart::GENRE_PAGE_DEFAULT
+}
+
+fn default_genre_refresh() -> i64 {
+    crate::smart::GENRE_REFRESH_DEFAULT
 }
 
 fn default_true() -> bool {
@@ -345,6 +365,22 @@ async fn settings(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json
             .join("\n"),
         show_collaboration_artists: settings::flag(store, "show_collaboration_artists", true)
             .await?,
+        original_years: djinn_library::original_years(store)
+            .await
+            .map_err(anyhow::Error::from)?,
+        album_folders: settings::flag(store, djinn_store::ALBUM_FOLDERS_KEY, true).await?,
+        genre_page_size: settings::number(
+            store,
+            crate::smart::GENRE_PAGE_SIZE,
+            crate::smart::GENRE_PAGE_DEFAULT,
+        )
+        .await?,
+        genre_refresh_hours: settings::number(
+            store,
+            crate::smart::GENRE_REFRESH_HOURS,
+            crate::smart::GENRE_REFRESH_DEFAULT,
+        )
+        .await?,
         tv_page: crate::tv_api::enabled(&state).await?,
         tv_sound: settings::flag(store, crate::tv_api::TV_SOUND, false).await?,
         play_here: settings::flag(store, crate::cast_api::PLAY_HERE, false).await?,
@@ -467,7 +503,36 @@ async fn update_settings(
     )
     .await?;
     settings::set_flag(store, settings::ONLINE_INFO, body.online_artist_info).await?;
-    // A changed never-split list means re-reading every file's artists.
+    // A changed never-split list or year source means re-reading every file.
+    store
+        .set_setting(
+            crate::smart::GENRE_PAGE_SIZE,
+            &body.genre_page_size.clamp(10, 500).to_string(),
+        )
+        .await?;
+    store
+        .set_setting(
+            crate::smart::GENRE_REFRESH_HOURS,
+            &body.genre_refresh_hours.clamp(0, 24 * 365).to_string(),
+        )
+        .await?;
+    let old_album_folders = settings::flag(store, djinn_store::ALBUM_FOLDERS_KEY, true).await?;
+    settings::set_flag(store, djinn_store::ALBUM_FOLDERS_KEY, body.album_folders).await?;
+    if body.album_folders != old_album_folders {
+        store.refresh_artwork().await?;
+        let _ = state
+            .events
+            .send(crate::events::ServerEvent::LibraryChanged);
+    }
+    let old_original_years = djinn_library::original_years(store)
+        .await
+        .map_err(anyhow::Error::from)?;
+    settings::set_flag(
+        store,
+        djinn_library::ORIGINAL_YEARS_KEY,
+        body.original_years,
+    )
+    .await?;
     let keep_whole: Vec<&str> = body
         .artist_keep_whole
         .lines()
@@ -477,10 +542,13 @@ async fn update_settings(
     let old_keep_whole = djinn_library::keep_whole(store)
         .await
         .map_err(anyhow::Error::from)?;
-    if keep_whole != old_keep_whole {
+    let keep_whole_changed = keep_whole != old_keep_whole;
+    if keep_whole_changed {
         store
             .set_setting(djinn_library::KEEP_WHOLE_KEY, &keep_whole.join("\n"))
             .await?;
+    }
+    if keep_whole_changed || body.original_years != old_original_years {
         store
             .set_setting(djinn_library::SCAN_VERSION_KEY, "0")
             .await?;

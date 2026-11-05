@@ -261,6 +261,7 @@ impl Store {
             Option<String>,
             Option<String>,
             Option<String>,
+            Option<String>,
         );
         let rows: Vec<Row> = sqlx::query_as(sql)
             .bind(filter.as_str())
@@ -270,7 +271,7 @@ impl Store {
         let (items, keys) = rows
             .into_iter()
             .map(
-                |(id, title, artist_id, artist, year, art_hash, genres, key)| {
+                |(id, title, artist_id, artist, year, art_hash, genres, label, key)| {
                     let album = Album {
                         id,
                         title,
@@ -279,6 +280,7 @@ impl Store {
                         year,
                         art_hash,
                         genres,
+                        label,
                     };
                     (album, key)
                 },
@@ -401,7 +403,8 @@ impl Store {
                 " FROM tracks t WHERE ",
                 available!(),
                 " ORDER BY (SELECT count(*) FROM request_events r WHERE r.track_id = t.id) DESC,
-                           (SELECT count(*) FROM play_events p WHERE p.track_id = t.id) DESC,
+                           (SELECT count(*) FROM play_events p WHERE p.track_id = t.id) +
+                           (SELECT count(*) FROM go_plays g WHERE g.track_id = t.id AND g.skipped = 0) DESC,
                            t.title COLLATE NOCASE LIMIT ? OFFSET ?"
             ))
             .bind(limit)

@@ -2,7 +2,7 @@
 // stream casts play. It runs a few seconds behind the speakers.
 
 import { api } from './api'
-import { app, isAdmin, toast } from './state.svelte'
+import { app, isAdmin, toast, whenLoggingOut } from './state.svelte'
 
 export const playHere = $state({
   /** The stream; null when the host turned Play here off. */
@@ -82,6 +82,8 @@ export function stopPlayHere() {
   audio.removeAttribute('src')
   audio.load()
 }
+
+whenLoggingOut(stopPlayHere)
 
 // Lock screen and notification controls, showing the song playing.
 if ('mediaSession' in navigator) {

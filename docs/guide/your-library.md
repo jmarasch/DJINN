@@ -90,6 +90,23 @@ how they sound (AcoustID, then MusicBrainz). It only runs when you start it.
 A match must agree with the title and artist already in the file. What you
 keep is stored in DJINN's database; your files aren't changed.
 
+## Album years
+
+A reissue's files often carry the reissue's date. DJINN uses the original
+release date when the tags have one, and an album shows the year most of its
+songs give. To use the file's own date instead, turn off **Use the original
+release year** in Admin > Library; that re-reads the library.
+
+## Albums with the same name
+
+Two releases can share a name and artist, like Weezer's Blue and Green albums.
+When two folders hold different songs at the same place on an album (two
+different "track 1"s), DJINN shows them as separate albums, each with its
+folder's name. Discs of one album stay together, whether in folders like `CD1`
+or with their own disc numbers, and so does one song in the wrong folder. Likes
+and playlists stay with the biggest part. **Keep albums with the same name
+apart** in Admin > Library turns this off.
+
 ## Correct tags
 
 Wrong or missing titles, artists, albums, years and genres can be fixed in
@@ -113,8 +130,20 @@ the files themselves aren't changed.
 
 ## Genres
 
-The Library's **Genres** tab lists every genre with its number of songs, as
-tags or as a cloud: bigger genres have more songs, and lines join genres that
-share songs or sound alike. Drag, pinch or scroll to move around the cloud.
-Each genre's page shows related genres, its artists and songs, and a radio
-button.
+The Library's **Genres** tab lists every genre with its number of songs, or
+shows them as a cloud, where bigger means more songs and lines join related
+genres.
+
+The cloud opens on your 100 biggest genres. Tap one to center on it, with what's
+near it and what's near those; tap it again to open its page, or tap another to
+move there. That way every genre can be reached, however small. **Home** goes
+back to the top from anywhere, and your back button goes back a step. Drag to
+move around, and pinch, scroll or use the buttons to zoom. You can choose how
+many genres the top shows, and how many lines to draw.
+
+Each genre's page shows related genres, a row of its artists, a radio button,
+and all its songs, loading more as you scroll. They come in a shuffled order
+that favors what's been played, by anyone, on the jukebox, GO or a phone app.
+The same order stays for a while, so you can come back to it. **Admin > Library**
+sets how many load at a time and how many hours until it's shuffled again.
+

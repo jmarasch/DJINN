@@ -311,14 +311,10 @@
         AI).
       </p>
     {:else}
-      <p class="muted small">
-        {plural(genres.genres.length, 'genre', 'genres')}{genreView === 'cloud'
-          ? ' · bigger means more songs, lines join related genres'
-          : ''}
-      </p>
       {#if genreView === 'cloud'}
-        <GenreCloud map={genres} />
+        <GenreCloud />
       {:else}
+        <p class="muted small">{plural(genres.genres.length, 'genre', 'genres')}</p>
         <GenreTags map={genres} />
       {/if}
     {/if}

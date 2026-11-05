@@ -76,6 +76,8 @@ pub fn router() -> Router<AppState> {
         .route("/artists/{id}/similar", get(similar_artists))
         .route("/genres", get(genres))
         .route("/genres/{name}", get(genre))
+        .route("/genres/{name}/songs", get(genre_songs))
+        .route("/genres/{name}/artists", get(genre_artists))
 }
 
 impl Catalog {
@@ -217,9 +219,6 @@ fn draw_in_order(ranked: Vec<(i64, f32)>, mut random: impl FnMut() -> f32) -> Ve
 
 /// Songs radio considers at a time.
 const RADIO_SONGS: usize = 150;
-/// Songs and artists shown on a genre's page.
-const GENRE_SONGS: usize = 100;
-const GENRE_ARTISTS: usize = 24;
 
 /// Genres shown next to a song in lists.
 const LIST_GENRES: usize = 2;
@@ -317,87 +316,228 @@ struct GenrePage {
     name: String,
     /// Songs with it (more than shown).
     total: usize,
+    /// Artists with it (more than shown).
+    artist_total: usize,
     tracks: Vec<Track>,
     artists: Vec<ArtistSummary>,
     /// Genres linked to it on the genre cloud, strongest first.
     related: Vec<djinn_library::genres::Related>,
 }
 
+/// How much of the genre map the cloud wants, within reason.
+#[derive(Deserialize)]
+struct GenreShape {
+    top: Option<usize>,
+    lines: Option<usize>,
+}
+
+impl GenreShape {
+    fn shape(&self) -> djinn_library::genres::Shape {
+        let default = djinn_library::genres::Shape::default();
+        djinn_library::genres::Shape {
+            top: self.top.unwrap_or(default.top).clamp(10, 500),
+            links_per_genre: self.lines.unwrap_or(default.links_per_genre).clamp(1, 12),
+        }
+    }
+}
+
 /// Every genre in the library and how they relate, for browsing by genre
 /// and the genre cloud.
-async fn genres(_: CurrentUser, State(state): State<AppState>) -> Json<GenreMap> {
+async fn genres(
+    _: CurrentUser,
+    State(state): State<AppState>,
+    Query(asked): Query<GenreShape>,
+) -> Json<GenreMap> {
+    let shape = asked.shape();
     let map = match (state.catalog.read(), state.sound.read()) {
-        (Ok(catalog), Ok(index)) => djinn_library::genres::map(&catalog.tags, &index),
+        (Ok(catalog), Ok(index)) => djinn_library::genres::shaped(&catalog.tags, &index, shape),
         _ => GenreMap::default(),
     };
     Json(map)
 }
 
-/// A genre's songs (by tags or by sound) and artists, most popular first.
+/// How many songs and artists a genre page gets at a time.
+pub const GENRE_PAGE_SIZE: &str = "genre_page_size";
+pub const GENRE_PAGE_DEFAULT: i64 = 100;
+/// Hours a genre's shuffled order is kept; 0 makes a new one each visit.
+pub const GENRE_REFRESH_HOURS: &str = "genre_refresh_hours";
+pub const GENRE_REFRESH_DEFAULT: i64 = 24;
+/// Most anyone can ask for at once.
+const GENRE_PAGE_MOST: i64 = 500;
+
+/// A genre worked out once: everything in it, in a shuffled order that favors
+/// what's been played, so a long list shows the whole genre and not a few
+/// albums. Kept so paging through it stays in order.
+pub struct GenrePull {
+    made: std::time::Instant,
+    songs: Vec<i64>,
+    artists: Vec<i64>,
+    related: Vec<djinn_library::genres::Related>,
+}
+
+/// Shuffles, with each item's chance of coming early in proportion to its
+/// weight (weighted sampling without replacement: Efraimidis and Spirakis).
+fn weighted_order(items: &[(i64, i64)], rng: &mut impl rand::RngExt) -> Vec<i64> {
+    let mut keyed: Vec<(f64, i64)> = items
+        .iter()
+        .map(|&(id, weight)| {
+            let draw: f64 = rng.random_range(f64::MIN_POSITIVE..1.0);
+            (draw.ln() / weight.max(1) as f64, id)
+        })
+        .collect();
+    keyed.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
+    keyed.into_iter().map(|(_, id)| id).collect()
+}
+
+/// Works a genre out from the catalog.
+fn pull_genre(state: &AppState, name: &str, popularity: &HashMap<i64, i64>) -> GenrePull {
+    let mut pull = GenrePull {
+        made: std::time::Instant::now(),
+        songs: Vec::new(),
+        artists: Vec::new(),
+        related: Vec::new(),
+    };
+    let (Ok(catalog), Ok(index)) = (state.catalog.read(), state.sound.read()) else {
+        return pull;
+    };
+    let songs = catalog.songs_in(name);
+    let in_genre: HashSet<i64> = songs.iter().copied().collect();
+    let plays = |id: &i64| popularity.get(id).copied().unwrap_or(0);
+    let weighted: Vec<(i64, i64)> = songs.iter().map(|id| (*id, 1 + plays(id))).collect();
+    // An artist counts by their songs in it and how much those are played;
+    // one only tagged with it still gets a place.
+    let artists: Vec<(i64, i64)> = catalog
+        .artist_songs
+        .iter()
+        .filter_map(|(artist, ids)| {
+            let tagged = catalog
+                .artist_genres
+                .get(artist)
+                .is_some_and(|g| g.iter().any(|t| vibe::genre_fits(t, name)));
+            let mine: Vec<&i64> = ids.iter().filter(|id| in_genre.contains(id)).collect();
+            let weight: i64 = mine.iter().map(|id| 1 + plays(id)).sum();
+            (tagged || weight > 0).then_some((*artist, weight.max(1)))
+        })
+        .collect();
+    let mut rng = rand::rng();
+    pull.songs = weighted_order(&weighted, &mut rng);
+    pull.artists = weighted_order(&artists, &mut rng);
+    pull.related = djinn_library::genres::map(&catalog.tags, &index).related(name);
+    pull
+}
+
+/// A genre's pull. One that's too old is only replaced at the top of the list,
+/// so someone partway down keeps their order.
+async fn genre_pull(
+    state: &AppState,
+    name: &str,
+    at_top: bool,
+) -> anyhow::Result<std::sync::Arc<GenrePull>> {
+    let hours = crate::settings::number(&state.store, GENRE_REFRESH_HOURS, GENRE_REFRESH_DEFAULT)
+        .await?
+        .max(0);
+    let keep = std::time::Duration::from_secs(u64::try_from(hours).unwrap_or(0) * 3600);
+    let kept = state
+        .genre_pulls
+        .lock()
+        .ok()
+        .and_then(|pulls| pulls.get(name).cloned());
+    if let Some(pull) = kept {
+        if !at_top || pull.made.elapsed() < keep {
+            return Ok(pull);
+        }
+    }
+    // Asked now, since the catalog only hears of plays when it's next rebuilt.
+    let popularity = state.store.song_popularity().await?;
+    let pull = std::sync::Arc::new(pull_genre(state, name, &popularity));
+    if let Ok(mut pulls) = state.genre_pulls.lock() {
+        pulls.insert(name.to_owned(), std::sync::Arc::clone(&pull));
+    }
+    Ok(pull)
+}
+
+/// The part of a list a page asks for.
+fn stretch(list: &[i64], offset: i64, limit: i64) -> &[i64] {
+    let start = usize::try_from(offset.max(0)).unwrap_or(0).min(list.len());
+    let count = usize::try_from(limit.max(0)).unwrap_or(0);
+    &list[start..(start + count).min(list.len())]
+}
+
+async fn genre_page_size(state: &AppState, asked: Option<i64>) -> anyhow::Result<i64> {
+    Ok(match asked {
+        Some(limit) => limit,
+        None => crate::settings::number(&state.store, GENRE_PAGE_SIZE, GENRE_PAGE_DEFAULT).await?,
+    }
+    .clamp(1, GENRE_PAGE_MOST))
+}
+
+#[derive(Deserialize)]
+struct GenreStretch {
+    #[serde(default)]
+    offset: i64,
+    limit: Option<i64>,
+}
+
+/// A genre's first songs and artists, and the genres near it.
 async fn genre(
     _: CurrentUser,
     State(state): State<AppState>,
     Path(name): Path<String>,
 ) -> ApiResult<Json<GenrePage>> {
     let name = vibe::normalize(&name);
-    let (track_ids, total, artist_ids) = {
-        let Ok(catalog) = state.catalog.read() else {
-            return Ok(Json(GenrePage {
-                name,
-                total: 0,
-                tracks: Vec::new(),
-                artists: Vec::new(),
-                related: Vec::new(),
-            }));
-        };
-        let songs = catalog.songs_in(&name);
-        let in_genre: HashSet<i64> = songs.iter().copied().collect();
-        let popularity: HashMap<i64, i64> =
-            catalog.songs.iter().map(|s| (s.id, s.popularity)).collect();
-        let mut ranked = songs;
-        ranked.sort_by_key(|id| {
-            (
-                std::cmp::Reverse(popularity.get(id).copied().unwrap_or(0)),
-                *id,
-            )
-        });
-        let total = ranked.len();
-        ranked.truncate(GENRE_SONGS);
-        // Artists tagged with it first, then by how many of their songs
-        // have it.
-        let mut artists: Vec<(bool, usize, i64)> = catalog
-            .artist_songs
-            .iter()
-            .map(|(artist, ids)| {
-                let tagged = catalog
-                    .artist_genres
-                    .get(artist)
-                    .is_some_and(|g| g.iter().any(|t| vibe::genre_fits(t, &name)));
-                let count = ids.iter().filter(|id| in_genre.contains(id)).count();
-                (tagged, count, *artist)
-            })
-            .filter(|(tagged, count, _)| *tagged || *count > 0)
-            .collect();
-        artists.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)).then(a.2.cmp(&b.2)));
-        let artist_ids: Vec<i64> = artists
-            .into_iter()
-            .take(GENRE_ARTISTS)
-            .map(|(_, _, id)| id)
-            .collect();
-        (ranked, total, artist_ids)
-    };
-    let related = match (state.catalog.read(), state.sound.read()) {
-        (Ok(catalog), Ok(index)) => {
-            djinn_library::genres::map(&catalog.tags, &index).related(&name)
-        }
-        _ => Vec::new(),
-    };
+    let pull = genre_pull(&state, &name, true).await?;
+    let size = genre_page_size(&state, None).await?;
     Ok(Json(GenrePage {
         name,
-        total,
-        tracks: state.store.tracks_by_ids(&track_ids).await?,
-        artists: state.store.artists_by_ids(&artist_ids).await?,
-        related,
+        total: pull.songs.len(),
+        artist_total: pull.artists.len(),
+        tracks: state
+            .store
+            .tracks_by_ids(stretch(&pull.songs, 0, size))
+            .await?,
+        artists: state
+            .store
+            .artists_by_ids(stretch(&pull.artists, 0, size))
+            .await?,
+        related: pull.related.clone(),
+    }))
+}
+
+/// More of a genre's songs, in the same order.
+async fn genre_songs(
+    _: CurrentUser,
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+    Query(asked): Query<GenreStretch>,
+) -> ApiResult<Json<djinn_store::Page<Track>>> {
+    let name = vibe::normalize(&name);
+    let pull = genre_pull(&state, &name, asked.offset <= 0).await?;
+    let size = genre_page_size(&state, asked.limit).await?;
+    Ok(Json(djinn_store::Page {
+        items: state
+            .store
+            .tracks_by_ids(stretch(&pull.songs, asked.offset, size))
+            .await?,
+        total: i64::try_from(pull.songs.len()).unwrap_or(i64::MAX),
+    }))
+}
+
+/// More of a genre's artists, in the same order.
+async fn genre_artists(
+    _: CurrentUser,
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+    Query(asked): Query<GenreStretch>,
+) -> ApiResult<Json<djinn_store::Page<ArtistSummary>>> {
+    let name = vibe::normalize(&name);
+    let pull = genre_pull(&state, &name, false).await?;
+    let size = genre_page_size(&state, asked.limit).await?;
+    Ok(Json(djinn_store::Page {
+        items: state
+            .store
+            .artists_by_ids(stretch(&pull.artists, asked.offset, size))
+            .await?,
+        total: i64::try_from(pull.artists.len()).unwrap_or(i64::MAX),
     }))
 }
 
@@ -1016,5 +1156,67 @@ mod draw_tests {
         }
         // Three times the weight comes first about three times in four.
         assert!((680..820).contains(&heavy_first), "{heavy_first}");
+    }
+}
+
+#[cfg(test)]
+mod genre_pull_tests {
+    use super::*;
+    use rand::SeedableRng;
+
+    #[test]
+    fn a_weighted_order_keeps_everything_once() {
+        let items: Vec<(i64, i64)> = (0..500).map(|id| (id, 1 + id % 7)).collect();
+        let mut rng = rand::rngs::StdRng::seed_from_u64(1);
+        let mut order = weighted_order(&items, &mut rng);
+        order.sort_unstable();
+        assert_eq!(order, (0..500).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn played_songs_come_early_more_often_but_not_always() {
+        // One song played 50 times among 99 never played.
+        let items: Vec<(i64, i64)> = (0..100)
+            .map(|id| (id, if id == 0 { 51 } else { 1 }))
+            .collect();
+        let mut rng = rand::rngs::StdRng::seed_from_u64(2);
+        let runs = 2000;
+        let mut in_top_ten = 0;
+        let mut first = 0;
+        for _ in 0..runs {
+            let order = weighted_order(&items, &mut rng);
+            let at = order.iter().position(|&id| id == 0).unwrap();
+            in_top_ten += i32::from(at < 10);
+            first += i32::from(at == 0);
+        }
+        // A fair shuffle would have it in the top ten a tenth of the time.
+        assert!(in_top_ten > runs * 8 / 10, "top ten {in_top_ten} of {runs}");
+        assert!(
+            first < runs * 6 / 10,
+            "first {first} of {runs}: still a shuffle"
+        );
+    }
+
+    #[test]
+    fn songs_of_one_album_dont_clump_when_nothing_has_been_played() {
+        // Ten albums of ten songs in id order, as a tie on plays used to come out.
+        let items: Vec<(i64, i64)> = (0..100).map(|id| (id, 1)).collect();
+        let mut rng = rand::rngs::StdRng::seed_from_u64(3);
+        let order = weighted_order(&items, &mut rng);
+        let albums: HashSet<i64> = order[..10].iter().map(|id| id / 10).collect();
+        assert!(
+            albums.len() >= 4,
+            "first ten songs from {} albums",
+            albums.len()
+        );
+    }
+
+    #[test]
+    fn a_stretch_never_runs_off_the_list() {
+        let list = [1, 2, 3, 4, 5];
+        assert_eq!(stretch(&list, 0, 2), [1, 2]);
+        assert_eq!(stretch(&list, 4, 10), [5]);
+        assert!(stretch(&list, 9, 2).is_empty());
+        assert_eq!(stretch(&list, -3, 1), [1]);
     }
 }

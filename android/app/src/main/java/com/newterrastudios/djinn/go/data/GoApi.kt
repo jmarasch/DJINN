@@ -201,8 +201,11 @@ class GoApi(private val account: Account) {
     suspend fun albumJumps(sort: String, filter: String): List<Jump> =
         get("/api/albums/jumps?sort=$sort&filter=$filter")
     suspend fun songJumps(sort: String): List<Jump> = get("/api/tracks/jumps?sort=$sort")
-    suspend fun genres(): GenreList = get("/api/genres")
+    suspend fun genres(top: Int, lines: Int): GenreList = get("/api/genres?top=$top&lines=$lines")
     suspend fun genre(name: String): GenrePage = get(genrePath(name))
+    suspend fun genreSongs(name: String, offset: Int): Page<Track> = get(genrePath(name) + "/songs?offset=$offset")
+    suspend fun genreArtists(name: String, offset: Int): Page<ArtistSummary> =
+        get(genrePath(name) + "/artists?offset=$offset")
     suspend fun album(id: Long): AlbumDetail = get("/api/albums/$id")
     suspend fun artist(id: Long): ArtistDetail = get("/api/artists/$id")
     suspend fun playlist(id: Long): GoPlaylistDetail = get("/api/go/playlists/$id")

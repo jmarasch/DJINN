@@ -47,6 +47,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.guava.future
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -74,6 +76,7 @@ class PlaybackService : MediaLibraryService() {
     /** Telling the server what happened outlives the service. */
     private val reports = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var reporter: Reporter? = null
+    private var talkOverFocus: TalkOverFocus? = null
     private val links = ConcurrentHashMap<Long, HeldLink>()
     private var session: MediaLibrarySession? = null
     private val searches = ConcurrentHashMap<String, List<Track>>()
@@ -94,6 +97,16 @@ class PlaybackService : MediaLibraryService() {
             app.account.current.collect {
                 links.clear()
                 searches.clear()
+            }
+        }
+        // However a sign-in ends, here or from the server, the music ends with
+        // it. A dead one shows within SAVE_EVERY_MS, when saving the place fails.
+        scope.launch {
+            app.account.signedIn.drop(1).filter { !it }.collect {
+                session?.player?.run {
+                    stop()
+                    clearMediaItems()
+                }
             }
         }
         val network = OkHttpDataSource.Factory(app.api.http)
@@ -119,19 +132,25 @@ class PlaybackService : MediaLibraryService() {
                 .setAudioProcessors(arrayOf(TeeAudioProcessor(Spectrum)))
                 .build()
         }
+        val attributes = AudioAttributes.Builder()
+            .setUsage(C.USAGE_MEDIA)
+            .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+            .build()
         val player = ExoPlayer.Builder(this, renderers)
             .setMediaSourceFactory(DefaultMediaSourceFactory(this).setDataSourceFactory(sources))
-            .setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setUsage(C.USAGE_MEDIA)
-                    .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
-                    .build(),
-                true,
-            )
+            .setAudioAttributes(attributes, true)
             .setHandleAudioBecomingNoisy(true)
             .setWakeMode(C.WAKE_MODE_NETWORK)
             .build()
         reporter = Reporter(player).also(player::addListener)
+        val focus = TalkOverFocus(this, player).also(player::addListener)
+        talkOverFocus = focus
+        scope.launch {
+            app.prefs.talkOverChoice.collect { choice ->
+                player.setAudioAttributes(attributes, choice == TalkOver.LOWER)
+                focus.choose(choice)
+            }
+        }
         val open = PendingIntent.getActivity(
             this,
             0,
@@ -158,6 +177,7 @@ class PlaybackService : MediaLibraryService() {
 
     override fun onDestroy() {
         reporter?.finish()
+        talkOverFocus?.release()
         session?.run {
             player.release()
             release()

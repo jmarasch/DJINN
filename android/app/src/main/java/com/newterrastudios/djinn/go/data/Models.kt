@@ -53,6 +53,8 @@ data class Album(
     val artist: String,
     val year: Int? = null,
     @SerialName("art_hash") val artHash: String? = null,
+    /** Its folder's name, when another album has the same name and artist. */
+    val label: String? = null,
 )
 
 @Serializable
@@ -63,6 +65,7 @@ data class AlbumDetail(
     val artist: String,
     val year: Int? = null,
     @SerialName("art_hash") val artHash: String? = null,
+    val label: String? = null,
     val tracks: List<Track> = emptyList(),
 )
 
@@ -101,7 +104,16 @@ data class YoutubeLinks(@SerialName("has_key") val hasKey: Boolean = false)
 
 /** Every genre in the library, by name. */
 @Serializable
-data class GenreList(val genres: List<GenreSummary> = emptyList())
+data class GenreList(
+    val genres: List<GenreSummary> = emptyList(),
+    /** Related genres, as places in [genres]. */
+    val links: List<GenreLink> = emptyList(),
+    /** Links among the biggest genres only, for the cloud's top level. */
+    @SerialName("top_links") val topLinks: List<GenreLink> = emptyList(),
+)
+
+@Serializable
+data class GenreLink(val a: Int, val b: Int, val strength: Float)
 
 @Serializable
 data class GenreSummary(val name: String, val songs: Long = 0)
@@ -112,6 +124,7 @@ data class GenrePage(
     val name: String,
     /** Songs with it, which can be more than are listed. */
     val total: Long = 0,
+    @SerialName("artist_total") val artistTotal: Long = 0,
     val tracks: List<Track> = emptyList(),
     val artists: List<ArtistSummary> = emptyList(),
     val related: List<GenreSummary> = emptyList(),

@@ -1,6 +1,14 @@
 package com.newterrastudios.djinn.go.ui
 
 import kotlinx.coroutines.withContext
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.BubbleChart
+import androidx.compose.runtime.mutableIntStateOf
 import kotlinx.coroutines.Dispatchers
 import com.newterrastudios.djinn.go.data.importText
 import com.newterrastudios.djinn.go.data.ShareTarget
@@ -799,7 +807,7 @@ private fun Choices(choices: List<Pair<String, String>>, chosen: String, choose:
 private fun AlbumRow(album: Album, nav: Nav) {
     Row2(
         title = album.title,
-        subtitle = listOfNotNull(album.artist, album.year?.toString()).joinToString(" · "),
+        subtitle = listOfNotNull(album.artist, album.year?.toString(), album.label).joinToString(" · "),
         art = { Art(nav.api.artUrl(album.artHash), 44.dp) },
         onClick = { nav.push(Screen.Album(album.id)) },
     )
@@ -822,7 +830,7 @@ fun AlbumScreen(id: Long, nav: Nav) {
                     Art(nav.api.artUrl(album.artHash, 512), 200.dp)
                     Text(album.title, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(top = 12.dp))
                     Text(
-                        listOfNotNull(album.artist, album.year?.toString()).joinToString(" · "),
+                        listOfNotNull(album.artist, album.year?.toString(), album.label).joinToString(" · "),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     FilledTonalButton(
@@ -881,12 +889,50 @@ private fun genreTitle(name: String) = name.replaceFirstChar { it.uppercase() }
 @UnstableApi
 @Composable
 private fun GenresTab(nav: Nav) {
-    Loaded(key = "genres", load = { nav.api.genres() }) { list: GenreList ->
+    var cloud by remember { mutableStateOf(nav.prefs.genreCloud) }
+    var top by remember { mutableIntStateOf(nav.prefs.genreTop) }
+    var lines by remember { mutableIntStateOf(nav.prefs.genreLines) }
+    Loaded(key = "genres-$top-$lines", load = { nav.api.genres(top, lines) }) { list: GenreList ->
         val entries = remember(list) { jumpEntries(letterJumps(list.genres.map { it.name }), "name") }
         val state = rememberLazyListState()
         val scope = rememberCoroutineScope()
         var pressedLabel by remember { mutableStateOf<String?>(null) }
-        Box(Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize()) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            IconButton(onClick = {
+                cloud = !cloud
+                nav.prefs.genreCloud = cloud
+            }) {
+                if (cloud) {
+                    Icon(Icons.AutoMirrored.Filled.List, "Show as a list")
+                } else {
+                    Icon(Icons.Default.BubbleChart, "Show as a cloud")
+                }
+            }
+        }
+        if (cloud && list.genres.isNotEmpty()) {
+            GenreCloud(
+                list,
+                nav,
+                top,
+                lines,
+                onTop = {
+                    top = it
+                    nav.prefs.genreTop = it
+                },
+                onLines = {
+                    lines = it
+                    nav.prefs.genreLines = it
+                },
+                modifier = Modifier.weight(1f),
+            )
+            return@Column
+        }
+        Box(
+            Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+        ) {
             Row(Modifier.fillMaxSize()) {
                 LazyColumn(
                     Modifier
@@ -914,6 +960,55 @@ private fun GenresTab(nav: Nav) {
             }
             pressedLabel?.let { JumpBubble(it, Modifier.align(Alignment.Center)) }
         }
+        }
+    }
+}
+
+/** Songs from the end when a genre's list asks for more. */
+private const val GENRE_LOAD_AHEAD = 20
+
+/** A genre's artists, side to side, loading more toward the end. */
+@UnstableApi
+@Composable
+private fun GenreArtists(name: String, page: GenrePage, nav: Nav) {
+    var artists by remember(name) { mutableStateOf(page.artists) }
+    var fetching by remember(name) { mutableStateOf(false) }
+    val row = rememberLazyListState()
+    LaunchedEffect(name) {
+        snapshotFlow { row.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0 }.collect { last ->
+            if (fetching || last < artists.size - 8 || artists.size >= page.artistTotal) return@collect
+            fetching = true
+            try {
+                artists = artists + nav.api.genreArtists(name, artists.size).items
+            } catch (_: IOException) {
+                // Scrolling again asks again.
+            } finally {
+                fetching = false
+            }
+        }
+    }
+    LazyRow(
+        state = row,
+        contentPadding = PaddingValues(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        items(artists, key = { it.id }) { artist ->
+            Column(
+                Modifier
+                    .width(88.dp)
+                    .clickable { nav.push(Screen.Artist(artist.id)) },
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Art(nav.api.artUrl(artist.artHash), 80.dp, CircleShape)
+                Text(
+                    artist.name,
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
+                )
+            }
+        }
     }
 }
 
@@ -922,14 +1017,33 @@ private fun GenresTab(nav: Nav) {
 @Composable
 fun GenreScreen(name: String, nav: Nav) {
     Loaded(key = name, load = { nav.api.genre(name) }) { page: GenrePage ->
-        LazyColumn(Modifier.fillMaxSize()) {
+        // The header scrolls with the songs: it's too tall to come and go as a
+        // list's options do, which moves everything under your finger.
+        val songs = remember(name) { mutableStateListOf<Track>().apply { addAll(page.tracks) } }
+        var failed by remember(name) { mutableStateOf(false) }
+        val list = rememberLazyListState()
+        LaunchedEffect(name, failed) {
+            if (failed) return@LaunchedEffect
+            snapshotFlow { list.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0 }.collect { last ->
+                // Songs start after the header's rows, so this is a little early, which is the idea.
+                if (last < songs.size - GENRE_LOAD_AHEAD || songs.size >= page.total) return@collect
+                try {
+                    val next = nav.api.genreSongs(name, songs.size).items
+                    val known = songs.mapTo(HashSet()) { it.id }
+                    songs.addAll(next.filter { it.id !in known })
+                    if (next.isEmpty()) failed = true
+                } catch (_: IOException) {
+                    failed = true
+                }
+            }
+        }
+        LazyColumn(Modifier.fillMaxSize(), state = list) {
             item {
                 Column(Modifier.padding(16.dp)) {
                     Text(genreTitle(name), style = MaterialTheme.typography.headlineSmall)
-                    val shown = page.tracks.size
                     Text(
                         (if (page.total == 1L) "1 song" else "${page.total} songs") +
-                            if (page.total > shown) "; the $shown most played here." else ".",
+                            ", shuffled with the most played nearer the top.",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Row(
@@ -937,15 +1051,15 @@ fun GenreScreen(name: String, nav: Nav) {
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         FilledTonalButton(
-                            onClick = { nav.player.play(page.tracks) },
-                            enabled = page.tracks.isNotEmpty(),
+                            onClick = { nav.player.play(songs.toList()) },
+                            enabled = songs.isNotEmpty(),
                         ) {
                             Icon(Icons.Default.PlayArrow, contentDescription = null)
                             Text("Play", modifier = Modifier.padding(start = 8.dp))
                         }
                         FilledTonalButton(
-                            onClick = { nav.player.playShuffled(page.tracks) },
-                            enabled = page.tracks.isNotEmpty(),
+                            onClick = { nav.player.playShuffled(songs.toList()) },
+                            enabled = songs.isNotEmpty(),
                         ) {
                             Icon(Icons.Default.Shuffle, contentDescription = null)
                             Text("Shuffle", modifier = Modifier.padding(start = 8.dp))
@@ -960,12 +1074,21 @@ fun GenreScreen(name: String, nav: Nav) {
                 }
             }
             if (page.artists.isNotEmpty()) {
-                item { Heading("Artists") }
+                item { Heading("Artists (${page.artistTotal})") }
+                item { GenreArtists(name, page, nav) }
+            }
+            if (songs.isNotEmpty()) item { Heading("Songs") }
+            itemsIndexed(songs, key = { _, song -> song.id }) { index, song ->
+                SongRow(song, nav) { nav.player.play(songs.toList(), index) }
+            }
+            if (failed && songs.size < page.total) {
                 item {
-                    Chips(page.artists.map { it.name to { nav.push(Screen.Artist(it.id)) } })
+                    Column(Modifier.padding(16.dp)) {
+                        Text("Couldn't load more.", color = MaterialTheme.colorScheme.error)
+                        FilledTonalButton(onClick = { failed = false }) { Text("Try again") }
+                    }
                 }
             }
-            songSection("Songs", page.tracks, nav)
         }
     }
 }

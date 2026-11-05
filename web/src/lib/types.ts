@@ -349,6 +349,8 @@ export interface Album {
   art_hash: string | null
   /** Comma separated, from MusicBrainz. */
   genres: string | null
+  /** Its folder's name, when another album has the same name and artist. */
+  label: string | null
 }
 
 export interface Artist {
@@ -624,6 +626,14 @@ export interface Settings {
   artist_keep_whole: string
   /** Show artists who appear only as a secondary song credit. */
   show_collaboration_artists: boolean
+  /** A file's original release date wins over its own (reissue) date. */
+  original_years: boolean
+  /** Albums with one name stay apart when their folders hold different releases. */
+  album_folders: boolean
+  /** Songs and artists a genre page loads at a time. */
+  genre_page_size: number
+  /** Hours before a genre's shuffled order is made again; 0 for every visit. */
+  genre_refresh_hours: number
   /** The TV page (/tv) works without signing in. */
   tv_page: boolean
   /** The TV page can play the party without signing in. */
@@ -849,6 +859,7 @@ export interface TrackTags {
 export interface GenrePage {
   name: string
   total: number
+  artist_total: number
   tracks: Track[]
   artists: ArtistSummary[]
   /** Genres linked to it on the genre cloud, strongest first (0 to 1). */
@@ -861,6 +872,8 @@ export interface GenreMap {
   genres: { name: string; songs: number }[]
   /** Related genres, as indexes into `genres`; strength 0 to 1. */
   links: { a: number; b: number; strength: number }[]
+  /** Links among the biggest genres only, for the cloud's top level. */
+  top_links: { a: number; b: number; strength: number }[]
 }
 
 /** Version and updates (Admin > About). */

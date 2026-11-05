@@ -64,11 +64,13 @@ pub struct Album {
     /// Comma separated, from MusicBrainz, or from its songs once their
     /// genres are corrected in the app (album pages only).
     pub genres: Option<String>,
+    /// Its folder's name, when another album has the same name and artist.
+    pub label: Option<String>,
 }
 
 macro_rules! album_columns {
     () => {
-        "al.id, al.title, al.artist_id, ar.name AS artist, al.year, al.art_hash, al.genres"
+        "al.id, al.title, al.artist_id, ar.name AS artist, al.year, al.art_hash, al.genres, al.label"
     };
 }
 pub(crate) use album_columns;
@@ -797,7 +799,9 @@ fn in_order<T>(ids: &[i64], found: Vec<T>, id: impl Fn(&T) -> i64) -> Vec<T> {
 
 mod browse;
 pub(crate) use browse::BrowseMemo;
+mod editions;
 mod info;
 mod scan;
+pub use editions::ALBUM_FOLDERS_KEY;
 #[cfg(test)]
 mod tests;

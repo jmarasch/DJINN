@@ -7,6 +7,7 @@
   import ArtistSlideshow from '../lib/ArtistSlideshow.svelte'
   import ArtistMediaManager from '../lib/ArtistMediaManager.svelte'
   import Art from '../lib/Art.svelte'
+  import ScrollRow from '../lib/ScrollRow.svelte'
   import Icon from '../lib/Icon.svelte'
   import SortChoice from '../lib/SortChoice.svelte'
   import TagEditor from '../lib/TagEditor.svelte'
@@ -180,14 +181,14 @@
     {/if}
     {#if similar.length}
       <h2>Similar artists</h2>
-      <div class="artists">
+      <ScrollRow>
         {#each similar as other (other.id)}
           <a class="artist" href="#/artist/{other.id}">
             <Art hash={other.art_hash} size={96} round={999} letter={other.name.charAt(0).toUpperCase()} />
             <span class="ellipsis">{other.name}</span>
           </a>
         {/each}
-      </div>
+      </ScrollRow>
     {/if}
   </div>
   {#if editing}
@@ -320,14 +321,6 @@
     padding: 0;
     background: transparent;
     color: var(--accent);
-  }
-
-  .artists {
-    display: flex;
-    gap: 14px;
-    overflow-x: auto;
-    padding-bottom: 6px;
-    scrollbar-width: none;
   }
 
   .artist {

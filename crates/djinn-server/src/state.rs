@@ -49,6 +49,9 @@ pub struct AppState {
     pub sound: Arc<std::sync::RwLock<djinn_library::sound::SoundIndex>>,
     /// Song facts for search by description.
     pub catalog: Arc<std::sync::RwLock<crate::smart::Catalog>>,
+    /// Genres worked out, by name, until they're too old.
+    pub genre_pulls:
+        Arc<std::sync::Mutex<std::collections::HashMap<String, Arc<crate::smart::GenrePull>>>>,
     /// Optional AI listening.
     pub ai: Arc<crate::ai::AiState>,
     /// Version checks and self-updates.
@@ -116,6 +119,7 @@ impl AppState {
             caster: djinn_cast::Caster::new(),
             sound: Arc::default(),
             catalog: Arc::default(),
+            genre_pulls: Arc::default(),
             ai: Arc::new(crate::ai::AiState::new(&art_dir_for_models)),
             update: Arc::default(),
             go: Arc::default(),
