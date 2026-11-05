@@ -964,6 +964,9 @@ private fun GenresTab(nav: Nav) {
     }
 }
 
+/** Songs from the end when a genre's list asks for more. */
+private const val GENRE_LOAD_AHEAD = 20
+
 /** A genre's artists, side to side, loading more toward the end. */
 @UnstableApi
 @Composable
@@ -1014,57 +1017,77 @@ private fun GenreArtists(name: String, page: GenrePage, nav: Nav) {
 @Composable
 fun GenreScreen(name: String, nav: Nav) {
     Loaded(key = name, load = { nav.api.genre(name) }) { page: GenrePage ->
-        // The songs loaded so far, for playing on from one of them.
-        val loaded = remember(name) { LinkedHashMap<Long, Track>().apply { page.tracks.forEach { put(it.id, it) } } }
-        PagedList<Track>(
-            "genre-$name",
-            { offset ->
-                nav.api.genreSongs(name, offset).also { next -> next.items.forEach { loaded[it.id] = it } }
-            },
-            options = {
-                Column {
-                    Column(Modifier.padding(16.dp)) {
-                        Text(genreTitle(name), style = MaterialTheme.typography.headlineSmall)
-                        Text(
-                            (if (page.total == 1L) "1 song" else "${page.total} songs") +
-                                ", shuffled with the most played nearer the top.",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Row(
-                            Modifier.padding(top = 8.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        // The header scrolls with the songs: it's too tall to come and go as a
+        // list's options do, which moves everything under your finger.
+        val songs = remember(name) { mutableStateListOf<Track>().apply { addAll(page.tracks) } }
+        var failed by remember(name) { mutableStateOf(false) }
+        val list = rememberLazyListState()
+        LaunchedEffect(name, failed) {
+            if (failed) return@LaunchedEffect
+            snapshotFlow { list.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0 }.collect { last ->
+                // Songs start after the header's rows, so this is a little early, which is the idea.
+                if (last < songs.size - GENRE_LOAD_AHEAD || songs.size >= page.total) return@collect
+                try {
+                    val next = nav.api.genreSongs(name, songs.size).items
+                    val known = songs.mapTo(HashSet()) { it.id }
+                    songs.addAll(next.filter { it.id !in known })
+                    if (next.isEmpty()) failed = true
+                } catch (_: IOException) {
+                    failed = true
+                }
+            }
+        }
+        LazyColumn(Modifier.fillMaxSize(), state = list) {
+            item {
+                Column(Modifier.padding(16.dp)) {
+                    Text(genreTitle(name), style = MaterialTheme.typography.headlineSmall)
+                    Text(
+                        (if (page.total == 1L) "1 song" else "${page.total} songs") +
+                            ", shuffled with the most played nearer the top.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Row(
+                        Modifier.padding(top = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        FilledTonalButton(
+                            onClick = { nav.player.play(songs.toList()) },
+                            enabled = songs.isNotEmpty(),
                         ) {
-                            FilledTonalButton(
-                                onClick = { nav.player.play(loaded.values.toList()) },
-                                enabled = page.tracks.isNotEmpty(),
-                            ) {
-                                Icon(Icons.Default.PlayArrow, contentDescription = null)
-                                Text("Play", modifier = Modifier.padding(start = 8.dp))
-                            }
-                            FilledTonalButton(
-                                onClick = { nav.player.playShuffled(loaded.values.toList()) },
-                                enabled = page.tracks.isNotEmpty(),
-                            ) {
-                                Icon(Icons.Default.Shuffle, contentDescription = null)
-                                Text("Shuffle", modifier = Modifier.padding(start = 8.dp))
-                            }
+                            Icon(Icons.Default.PlayArrow, contentDescription = null)
+                            Text("Play", modifier = Modifier.padding(start = 8.dp))
+                        }
+                        FilledTonalButton(
+                            onClick = { nav.player.playShuffled(songs.toList()) },
+                            enabled = songs.isNotEmpty(),
+                        ) {
+                            Icon(Icons.Default.Shuffle, contentDescription = null)
+                            Text("Shuffle", modifier = Modifier.padding(start = 8.dp))
                         }
                     }
-                    if (page.related.isNotEmpty()) {
-                        Heading("Related genres")
-                        Chips(page.related.map { genreTitle(it.name) to { nav.push(Screen.Genre(it.name)) } })
-                    }
-                    if (page.artists.isNotEmpty()) {
-                        Heading("Artists (${page.artistTotal})")
-                        GenreArtists(name, page, nav)
-                    }
-                    Heading("Songs")
                 }
-            },
-        ) { song ->
-            SongRow(song, nav) {
-                val songs = loaded.values.toList()
-                nav.player.play(songs, songs.indexOfFirst { it.id == song.id }.coerceAtLeast(0))
+            }
+            if (page.related.isNotEmpty()) {
+                item { Heading("Related genres") }
+                item {
+                    Chips(page.related.map { genreTitle(it.name) to { nav.push(Screen.Genre(it.name)) } })
+                }
+            }
+            if (page.artists.isNotEmpty()) {
+                item { Heading("Artists (${page.artistTotal})") }
+                item { GenreArtists(name, page, nav) }
+            }
+            if (songs.isNotEmpty()) item { Heading("Songs") }
+            itemsIndexed(songs, key = { _, song -> song.id }) { index, song ->
+                SongRow(song, nav) { nav.player.play(songs.toList(), index) }
+            }
+            if (failed && songs.size < page.total) {
+                item {
+                    Column(Modifier.padding(16.dp)) {
+                        Text("Couldn't load more.", color = MaterialTheme.colorScheme.error)
+                        FilledTonalButton(onClick = { failed = false }) { Text("Try again") }
+                    }
+                }
             }
         }
     }
