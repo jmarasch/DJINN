@@ -222,6 +222,15 @@ class Prefs(context: Context, private val scope: () -> String = { "" }) {
         talkOverNow.value = choice
     }
 
+    /** Ask when the server has a newer version of the app. */
+    var askAboutUpdates: Boolean
+        get() = prefs.getBoolean("ask_about_updates", true)
+        set(value) = prefs.edit { putBoolean("ask_about_updates", value) }
+    /** The version answered "Not now", which isn't asked about again. */
+    var updateDeclined: Long
+        get() = prefs.getLong("update_declined", 0)
+        set(value) = prefs.edit { putLong("update_declined", value) }
+
     /** Genres as a cloud rather than a list, and how much of it to show. */
     var genreCloud: Boolean
         get() = prefs.getBoolean("genre_cloud", false)

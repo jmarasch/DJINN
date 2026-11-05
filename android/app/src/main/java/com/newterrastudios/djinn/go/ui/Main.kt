@@ -120,6 +120,12 @@ class Nav(
     val stack = mutableStateListOf<Screen>()
     var menuFor by mutableStateOf<Track?>(null)
     val liked = mutableStateListOf<Long>()
+    val likedAlbums = mutableStateListOf<Long>()
+    val likedArtists = mutableStateListOf<Long>()
+    /** Library lists show only what you like. */
+    var favoritesOnly by mutableStateOf(false)
+    /** The update you've been asked about since opening the app. */
+    var askedAboutUpdate by mutableStateOf(false)
     /** A song to start radio from. */
     var radioFor by mutableStateOf<Track?>(null)
 
@@ -265,6 +271,7 @@ fun MainScreen(nav: Nav) {
         }
     }
     nav.menuFor?.let { SongMenu(it, nav) }
+    UpdatePrompt(nav)
 }
 
 /** The song playing, along the bottom. Opens Now Playing. */

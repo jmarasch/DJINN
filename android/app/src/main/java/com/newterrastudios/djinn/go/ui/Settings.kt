@@ -1,6 +1,8 @@
 package com.newterrastudios.djinn.go.ui
 
 import com.newterrastudios.djinn.go.data.ApiException
+import com.newterrastudios.djinn.go.data.AppRelease
+import com.newterrastudios.djinn.go.data.shouldAskAboutUpdate
 import com.newterrastudios.djinn.go.player.TalkOver
 import com.newterrastudios.djinn.go.BuildConfig
 import android.content.Context
@@ -166,6 +168,11 @@ fun SettingsScreen(nav: Nav) {
         }
         item {
             UpdateOffer(nav)
+            var askUpdates by remember { mutableStateOf(prefs.askAboutUpdates) }
+            Toggle("Ask when there's a new version", null, askUpdates) {
+                askUpdates = it
+                prefs.askAboutUpdates = it
+            }
             Note("DJINN GO version ${BuildConfig.VERSION_NAME}")
         }
         item { TapSettings(nav) }
@@ -275,6 +282,52 @@ fun SettingsScreen(nav: Nav) {
     }
 }
 
+/** Fetches a new version and hands it to Android, which asks before installing. Says what went wrong, if anything. */
+@UnstableApi
+suspend fun Nav.installUpdate(release: AppRelease): String? = try {
+    updater.install(updater.fetch(release))
+    null
+} catch (e: IOException) {
+    if (e is ApiException) e.message else e.message ?: "Couldn't reach the server."
+}
+
+/** Asks about a new version once when the app opens, unless that's turned off. */
+@UnstableApi
+@Composable
+fun UpdatePrompt(nav: Nav) {
+    val release = nav.update ?: return
+    if (nav.askedAboutUpdate || !shouldAskAboutUpdate(release, nav.prefs.askAboutUpdates, nav.prefs.updateDeclined)) return
+    var busy by remember { mutableStateOf(false) }
+    var problem by remember { mutableStateOf<String?>(null) }
+    AlertDialog(
+        onDismissRequest = { nav.askedAboutUpdate = true },
+        title = { Text("Update DJINN GO?") },
+        text = {
+            Text(problem ?: "Version ${release.version} is available from this server.")
+        },
+        confirmButton = {
+            TextButton(
+                enabled = !busy,
+                onClick = {
+                    busy = true
+                    problem = null
+                    nav.scope.launch {
+                        problem = nav.installUpdate(release)
+                        busy = false
+                        if (problem == null) nav.askedAboutUpdate = true
+                    }
+                },
+            ) { Text(if (busy) "Downloading..." else "Update") }
+        },
+        dismissButton = {
+            TextButton(onClick = {
+                nav.prefs.updateDeclined = release.versionCode
+                nav.askedAboutUpdate = true
+            }) { Text("Not now") }
+        },
+    )
+}
+
 /** A newer version from the server, when there is one. Android asks before installing it. */
 @UnstableApi
 @Composable
@@ -291,13 +344,8 @@ fun UpdateOffer(nav: Nav) {
                 busy = true
                 problem = null
                 nav.scope.launch {
-                    try {
-                        nav.updater.install(nav.updater.fetch(release))
-                    } catch (e: IOException) {
-                        problem = if (e is ApiException) e.message else e.message ?: "Couldn't reach the server."
-                    } finally {
-                        busy = false
-                    }
+                    problem = nav.installUpdate(release)
+                    busy = false
                 }
             },
         ) { Text(if (busy) "Downloading..." else "Update") }

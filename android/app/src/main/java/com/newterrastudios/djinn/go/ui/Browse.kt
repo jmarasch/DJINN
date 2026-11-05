@@ -1,6 +1,10 @@
 package com.newterrastudios.djinn.go.ui
 
 import kotlinx.coroutines.withContext
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.foundation.layout.size
+import com.newterrastudios.djinn.go.data.Liked
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.width
@@ -710,12 +714,20 @@ fun LibraryScreen(nav: Nav) {
             SecondaryScrollableTabRow(selectedTabIndex = tab, edgePadding = 0.dp, minTabWidth = 0.dp, tabs = tabs)
         }
         when (tab) {
+            0, 1, 2 -> if (nav.favoritesOnly) {
+                Favorites(tab, nav)
+            } else when (tab) {
             0 -> {
                 val sort = nav.artistSort
                 PagedList<ArtistSummary>(
                     "artists-$sort",
                     { nav.api.artists(sort, it) },
-                    options = { Choices(ARTIST_SORTS, nav.artistSort) { nav.artistSort = it } },
+                    options = {
+                        Column {
+                            FavoritesChip(nav)
+                            Choices(ARTIST_SORTS, nav.artistSort) { nav.artistSort = it }
+                        }
+                    },
                     jumps = { jumpEntries(nav.api.artistJumps(sort), sort) },
                 ) { artist ->
                     Row2(
@@ -734,6 +746,7 @@ fun LibraryScreen(nav: Nav) {
                     { nav.api.albums(sort, filter, it) },
                     options = {
                         Column {
+                            FavoritesChip(nav)
                             Choices(ALBUM_FILTERS, nav.albumFilter) { nav.albumFilter = it }
                             Choices(ALBUM_SORTS, nav.albumSort) { nav.albumSort = it }
                         }
@@ -748,11 +761,17 @@ fun LibraryScreen(nav: Nav) {
                 PagedList<Track>(
                     "songs-$sort",
                     { nav.api.songs(sort, it) },
-                    options = { Choices(SONG_SORTS, nav.songSort) { nav.songSort = it } },
+                    options = {
+                        Column {
+                            FavoritesChip(nav)
+                            Choices(SONG_SORTS, nav.songSort) { nav.songSort = it }
+                        }
+                    },
                     jumps = { jumpEntries(nav.api.songJumps(sort), sort) },
                 ) { song ->
                     SongRow(song, nav) { nav.startRadio(song) }
                 }
+            }
             }
             3 -> GenresTab(nav)
             4 -> PlaylistsTab(nav)
@@ -785,6 +804,83 @@ val SONG_SORTS = listOf(
     "year" to "Newest",
     "oldest" to "Oldest",
 )
+
+/** Switches the library's lists to only what you like. */
+@UnstableApi
+@Composable
+private fun FavoritesChip(nav: Nav) {
+    FilterChip(
+        selected = nav.favoritesOnly,
+        onClick = { nav.favoritesOnly = !nav.favoritesOnly },
+        label = { Text("Favorites") },
+        leadingIcon = { Icon(Icons.Default.Favorite, contentDescription = null, Modifier.size(18.dp)) },
+        modifier = Modifier.padding(horizontal = 12.dp),
+    )
+}
+
+/** What you like, for one library tab. Taking a heart off leaves the list at once. */
+@UnstableApi
+@Composable
+private fun Favorites(tab: Int, nav: Nav) {
+    Column(Modifier.fillMaxSize()) {
+        FavoritesChip(nav)
+        Loaded(key = "favorites-$tab", load = { nav.api.liked() }) { liked: Liked ->
+            LazyColumn(Modifier.fillMaxSize()) {
+                when (tab) {
+                    0 -> {
+                        val artists = liked.artists.filter { it.id in nav.likedArtists }
+                        if (artists.isEmpty()) item { Note("No favorite artists yet. Tap the heart on an artist's page.") }
+                        items(artists, key = { it.id }) { artist ->
+                            Row2(
+                                title = artist.name,
+                                subtitle = "${artist.trackCount} songs",
+                                art = { Art(nav.api.artUrl(artist.artHash), 44.dp, CircleShape) },
+                                onClick = { nav.push(Screen.Artist(artist.id)) },
+                            )
+                        }
+                    }
+                    1 -> {
+                        val albums = liked.albums.filter { it.id in nav.likedAlbums }
+                        if (albums.isEmpty()) item { Note("No favorite albums yet. Tap the heart on an album's page.") }
+                        items(albums, key = { it.id }) { AlbumRow(it, nav) }
+                    }
+                    else -> {
+                        val songs = liked.tracks.filter { it.id in nav.liked }
+                        if (songs.isEmpty()) item { Note("No favorite songs yet. Tap the heart on a song.") }
+                        itemsIndexed(songs, key = { _, song -> song.id }) { index, song ->
+                            SongRow(song, nav) { nav.player.play(songs, index) }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** A heart for an album or artist. Shows at once, and goes back if the server can't be told. */
+@UnstableApi
+@Composable
+private fun LikeHeart(id: Long, likes: MutableList<Long>, name: String, set: suspend (Long, Boolean) -> Unit, nav: Nav) {
+    val liked = id in likes
+    IconButton(onClick = {
+        val on = !liked
+        if (on) likes.add(id) else likes.remove(id)
+        nav.scope.launch {
+            try {
+                set(id, on)
+            } catch (_: IOException) {
+                if (on) likes.remove(id) else likes.add(id)
+                nav.message = "Couldn't reach the server, so that wasn't changed."
+            }
+        }
+    }) {
+        Icon(
+            if (liked) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+            if (liked) "Unlike $name" else "Like $name",
+            tint = if (liked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
 
 /** A row of choices above a list, which scrolls if they don't all fit. */
 @Composable
@@ -833,11 +929,13 @@ fun AlbumScreen(id: Long, nav: Nav) {
                         listOfNotNull(album.artist, album.year?.toString(), album.label).joinToString(" · "),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    FilledTonalButton(
-                        onClick = { nav.player.play(album.tracks) },
-                        enabled = album.tracks.isNotEmpty(),
-                        modifier = Modifier.padding(top = 8.dp),
-                    ) { Text("Play album") }
+                    Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        FilledTonalButton(
+                            onClick = { nav.player.play(album.tracks) },
+                            enabled = album.tracks.isNotEmpty(),
+                        ) { Text("Play album") }
+                        LikeHeart(album.id, nav.likedAlbums, album.title, nav.api::setAlbumLike, nav)
+                    }
                     DownloadAll(album.tracks, nav)
                 }
             }
@@ -856,7 +954,10 @@ fun ArtistScreen(id: Long, nav: Nav) {
             item {
                 Column(Modifier.padding(16.dp)) {
                     Art(nav.api.artUrl(artist.artHash, 512), 160.dp, CircleShape)
-                    Text(artist.name, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(top = 12.dp))
+                    Row(Modifier.padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(artist.name, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f, fill = false))
+                        LikeHeart(artist.id, nav.likedArtists, artist.name, nav.api::setArtistLike, nav)
+                    }
                     artist.bio?.let {
                         Text(
                             it,

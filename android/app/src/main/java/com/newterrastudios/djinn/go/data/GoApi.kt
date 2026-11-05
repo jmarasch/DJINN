@@ -221,6 +221,15 @@ class GoApi(private val account: Account) {
         get("/api/search/ask?q=${URLEncoder.encode(query, "UTF-8")}")
 
     suspend fun likedIds(): LikedIds = get("/api/go/likes/ids")
+    suspend fun liked(): Liked = get("/api/go/likes")
+    suspend fun setAlbumLike(id: Long, on: Boolean) = withContext(Dispatchers.IO) {
+        send(if (on) "PUT" else "DELETE", "/api/go/likes/album/$id")
+        Unit
+    }
+    suspend fun setArtistLike(id: Long, on: Boolean) = withContext(Dispatchers.IO) {
+        send(if (on) "PUT" else "DELETE", "/api/go/likes/artist/$id")
+        Unit
+    }
     suspend fun setLike(id: Long, on: Boolean) = withContext(Dispatchers.IO) {
         send(if (on) "PUT" else "DELETE", "/api/go/likes/track/$id")
         Unit

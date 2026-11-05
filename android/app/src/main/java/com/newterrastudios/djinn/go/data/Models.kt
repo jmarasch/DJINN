@@ -225,7 +225,19 @@ data class GoHome(
 )
 
 @Serializable
-data class LikedIds(val tracks: List<Long> = emptyList())
+data class LikedIds(
+    val tracks: List<Long> = emptyList(),
+    val albums: List<Long> = emptyList(),
+    val artists: List<Long> = emptyList(),
+)
+
+/** Everything you like, newest first. */
+@Serializable
+data class Liked(
+    val tracks: List<Track> = emptyList(),
+    val albums: List<Album> = emptyList(),
+    val artists: List<ArtistSummary> = emptyList(),
+)
 
 @Serializable
 data class PlayLinks(

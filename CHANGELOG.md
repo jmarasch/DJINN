@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Updates
+
+- **Choose Stable or Nightly** in Admin > System > Updates. Stable gets a tested release about once a week. Nightly gets the newest work every morning there's something new, and may have rough edges.
+
+### DJINN GO for Android
+
+- **Favorites:** Artists, Albums and Songs in the Library have a **Favorites** filter.
+- **Hearts on album and artist pages.**
+- **The app asks when your server has a new version,** once per version. You can turn this off in Settings.
+
 ## 2026.11.05 (November 5, 2026)
 
 ### Fixes

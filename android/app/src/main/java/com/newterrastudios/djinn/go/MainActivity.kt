@@ -1,6 +1,8 @@
 package com.newterrastudios.djinn.go
 
 import com.newterrastudios.djinn.go.data.offeredUpdate
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import com.newterrastudios.djinn.go.data.securityCode
 import android.Manifest
 import android.app.SearchManager
@@ -167,8 +169,11 @@ class MainActivity : ComponentActivity() {
         LaunchedEffect(Unit) {
             app.account.signedIn.drop(1).filter { !it }.collect { cast.stop() }
         }
+        // Each time the app comes to the front, since it can stay open for days.
         LaunchedEffect(Unit) {
-            nav.update = offeredUpdate(api.appRelease(), BuildConfig.VERSION_CODE.toLong())
+            lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                nav.update = offeredUpdate(api.appRelease(), BuildConfig.VERSION_CODE.toLong())
+            }
         }
         LaunchedEffect(Unit) {
             // The admin may have renamed it since.
@@ -180,10 +185,15 @@ class MainActivity : ComponentActivity() {
         LaunchedEffect(Unit) {
             nav.liked.addAll(app.prefs.likedIds)
             try {
-                val liked = api.likedIds().tracks
+                val ids = api.likedIds()
+                val liked = ids.tracks
                 nav.liked.clear()
                 nav.liked.addAll(liked)
                 app.prefs.likedIds = liked.toSet()
+                nav.likedAlbums.clear()
+                nav.likedAlbums.addAll(ids.albums)
+                nav.likedArtists.clear()
+                nav.likedArtists.addAll(ids.artists)
             } catch (_: IOException) {
                 // Hearts stay as they were last seen.
             }

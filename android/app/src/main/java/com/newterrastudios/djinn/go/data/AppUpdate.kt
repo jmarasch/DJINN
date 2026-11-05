@@ -25,6 +25,10 @@ data class AppRelease(
 fun offeredUpdate(release: AppRelease?, installedCode: Long): AppRelease? =
     release?.takeIf { it.versionCode > installedCode }
 
+/** Whether to ask about an update when the app opens: once a version, unless turned off. */
+fun shouldAskAboutUpdate(release: AppRelease?, asking: Boolean, declined: Long): Boolean =
+    asking && release != null && release.versionCode != declined
+
 internal fun sha256Of(file: File): String {
     val digest = MessageDigest.getInstance("SHA-256")
     file.inputStream().use { input ->
