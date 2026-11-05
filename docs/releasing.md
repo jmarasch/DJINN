@@ -8,6 +8,47 @@ DJINN's release key. The public half of that key is `PUBLIC_KEY` in
 
 Before a first release, the About tab says "No releases published yet".
 
+## Stable and nightly
+
+There are two branches and two kinds of release:
+
+- **`dev`** is where work lands. Feature branches open their pull requests
+  against `dev`.
+- **`main`** is stable. It only moves when `dev` is ready to become a
+  stable release: open a pull request from `dev` to `main`, merge it, and
+  tag it (below).
+- **Nightly builds.** Each night at 08:00 UTC (3 AM Eastern in winter,
+  4 AM in summer) the Release workflow looks at `dev`. If it moved since
+  the last nightly or stable release, it builds everything a stable release
+  has, numbered by the date (`2027.1.5-nightly` in Cargo, tag
+  `v2027.01.05-nightly`), signs it with the same key, and publishes it as a
+  GitHub **pre-release**. If `dev` hasn't moved, it stops after a few
+  seconds and builds nothing. The newest 7 nightlies are kept and older
+  ones are deleted. Nothing is committed: the version is set in the
+  workflow's checkout by `.github/scripts/set-version.sh`.
+
+Admin > System > Updates has an **Update channel**. On Stable (the
+default), DJINN asks GitHub for its "latest" release, which never includes
+a pre-release, so stable installs never see nightlies. On Nightly it takes the
+newest of the recent stable releases and nightlies. A nightly sorts after
+the day before's release and before the stable release of its own date. A
+copy that is itself a nightly starts on the Nightly channel. Switching a
+nightly copy back to Stable keeps it as it is until a newer stable release
+comes out.
+
+Android follows the same order. `versionCode` is the date times 100, plus 50
+for a stable release (2026.11.05 is 2026110550, 2026.11.05-nightly is
+2026110500); `go_app.rs` and `android/app/build.gradle.kts` must agree.
+Phones get the app their server carries, so a nightly server offers its
+phones the nightly app. A phone can't go back to an older number without
+uninstalling, so it stays on that app until its server carries a newer one.
+
+The schedule always uses `main`'s copy of `release.yml`, so changes to the
+workflow only take effect once they're on `main`. To publish a nightly
+straight away, even if `dev` hasn't moved, run the Release workflow from
+the Actions tab with **Publish a nightly** ticked. Run it from the same day
+again and it replaces that day's nightly.
+
 ## The release key
 
 The secret key is `~/.config/djinn-release/signing.key` on the

@@ -6,11 +6,13 @@ plugins {
 }
 
 // The app is released with the server and numbered by the same date, so each
-// release is an upgrade to Android and the server can tell what's newer.
-val release: List<Int> = (
-    providers.gradleProperty("djinnVersion").orNull
-        ?: Regex("(?m)^version = \"([0-9.]+)\"").find(rootDir.resolve("../Cargo.toml").readText())!!.groupValues[1]
-    ).split('.').map(String::toInt)
+// release is an upgrade to Android and the server can tell what's newer. A
+// nightly (2026.11.5-nightly) comes just before that day's stable release; the
+// server works the number out the same way (version_code in go_app.rs).
+val djinnVersion: String = providers.gradleProperty("djinnVersion").orNull
+    ?: Regex("(?m)^version = \"([0-9.]+(?:-nightly)?)\"").find(rootDir.resolve("../Cargo.toml").readText())!!.groupValues[1]
+val nightly = djinnVersion.endsWith("-nightly")
+val release: List<Int> = djinnVersion.removeSuffix("-nightly").split('.').map(String::toInt)
 
 android {
     namespace = "com.newterrastudios.djinn.go"
@@ -21,8 +23,8 @@ android {
         // The lowest the libraries allow: Cast and WorkManager need 24.
         minSdk = 24
         targetSdk = 37
-        versionCode = release[0] * 10_000 + release[1] * 100 + release[2]
-        versionName = "%04d.%02d.%02d".format(release[0], release[1], release[2])
+        versionCode = (release[0] * 10_000 + release[1] * 100 + release[2]) * 100 + if (nightly) 0 else 50
+        versionName = "%04d.%02d.%02d".format(release[0], release[1], release[2]) + if (nightly) "-nightly" else ""
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 

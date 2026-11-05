@@ -885,6 +885,10 @@ export interface About {
   contact: string
   check_updates: boolean
   auto_update: boolean
+  /** Takes nightly builds as well as stable releases. */
+  nightly: boolean
+  /** This copy is a nightly build. */
+  nightly_build: boolean
   /** Unix ms of the last check. */
   checked_at: number | null
   latest: Release | null
