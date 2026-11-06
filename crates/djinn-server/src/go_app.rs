@@ -31,15 +31,29 @@ pub struct AppRelease {
     pub size: u64,
 }
 
-/// The number Android orders releases by, from a date version: 2026.11.02 is 20261102.
+/// The number Android orders releases by, from a date version: 2026.11.02 is
+/// 2026110250 and that day's nightly, 2026.11.02-nightly, is 2026110200, so a
+/// day's nightly comes before its stable release and both after the day
+/// before. Same as `versionCode` in android/app/build.gradle.kts.
 fn version_code(version: &str) -> Option<u32> {
-    let mut parts = version.split('.').map(str::parse::<u32>);
+    let (date, nightly) = match version.strip_suffix("-nightly") {
+        Some(date) => (date, true),
+        None => (version, false),
+    };
+    let mut parts = date.split('.').map(str::parse::<u32>);
     let (year, month, day) = (
         parts.next()?.ok()?,
         parts.next()?.ok()?,
         parts.next()?.ok()?,
     );
-    Some(year * 10_000 + month * 100 + day)
+    if parts.next().is_some() {
+        return None;
+    }
+    let day_code = year
+        .checked_mul(10_000)?
+        .checked_add(month * 100 + day)?
+        .checked_mul(100)?;
+    day_code.checked_add(if nightly { 0 } else { 50 })
 }
 
 pub fn release() -> Option<AppRelease> {
@@ -86,12 +100,25 @@ mod tests {
 
     #[test]
     fn version_codes_go_up_with_the_date() {
-        assert_eq!(version_code("2026.11.02"), Some(20_261_102));
+        assert_eq!(version_code("2026.11.02"), Some(2_026_110_250));
         assert!(version_code("2026.11.03") > version_code("2026.11.02"));
         assert!(version_code("2026.12.01") > version_code("2026.11.30"));
         assert!(version_code("2027.01.01") > version_code("2026.12.31"));
         assert_eq!(version_code("not a date"), None);
         assert_eq!(version_code("2026.11"), None);
+        // Every new code is above the old numbering (2026.11.04 was 20261104).
+        assert!(version_code("2026.11.05-nightly") > Some(20_261_104));
+    }
+
+    #[test]
+    fn nightlies_come_between_stable_releases() {
+        assert_eq!(version_code("2026.11.05-nightly"), Some(2_026_110_500));
+        assert!(version_code("2026.11.05-nightly") > version_code("2026.11.04"));
+        assert!(version_code("2026.11.05-nightly") < version_code("2026.11.05"));
+        assert!(version_code("2026.11.06-nightly") > version_code("2026.11.05"));
+        assert_eq!(version_code("2026.11.05-beta"), None);
+        // Android's limit is 2,100,000,000.
+        assert!(version_code("2099.12.31").is_some_and(|c| c < 2_100_000_000));
     }
 
     #[test]

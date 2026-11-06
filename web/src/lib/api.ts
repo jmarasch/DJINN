@@ -393,7 +393,8 @@ export const api = {
   systemReset: (what: SystemReset) => post<{ restarting: boolean }>('/system/reset', { what }),
   checkForUpdate: () => post<About>('/update/check'),
   installUpdate: () => post<void>('/update/install'),
-  setUpdateSettings: (s: { check_updates: boolean; auto_update: boolean }) => put<void>('/update/settings', s),
+  setUpdateSettings: (s: { check_updates: boolean; auto_update: boolean; nightly: boolean }) =>
+    put<void>('/update/settings', s),
   applyIdentified: (trackIds: number[]) => post<void>('/identify/apply', { track_ids: trackIds }),
   dismissIdentified: (trackIds: number[]) => post<void>('/identify/dismiss', { track_ids: trackIds }),
   ai: () => get<AiStatus>('/ai'),

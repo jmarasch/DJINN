@@ -32,9 +32,13 @@ const PUBLIC_KEY: &str = "af3998f0197817106cb123aaf315015b8867dd91d0acd60127e4e8
 /// Set for the new process after an update restarts DJINN.
 pub const RESTARTED: &str = "DJINN_RESTARTED";
 
-/// Setting keys: check GitHub once a day; install updates by themselves.
+/// Setting keys: check GitHub once a day; install updates by themselves;
+/// take nightly builds as well as stable releases.
 const CHECK_UPDATES: &str = "update_check";
 const AUTO_UPDATE: &str = "update_auto";
+const NIGHTLY: &str = "update_nightly";
+/// How many releases to look through for the newest nightly.
+const NIGHTLY_LOOKBACK: usize = 30;
 const CHECK_EVERY_MS: i64 = 24 * 60 * 60 * 1000;
 /// How often the background job wakes to see if it's time to check or
 /// install.
@@ -162,6 +166,10 @@ struct About {
     contact: &'static str,
     check_updates: bool,
     auto_update: bool,
+    /// The admin takes nightly builds.
+    nightly: bool,
+    /// This copy is a nightly build.
+    nightly_build: bool,
     checked_at: Option<i64>,
     latest: Option<Release>,
     update_available: bool,
@@ -184,6 +192,8 @@ async fn about_info(state: &AppState) -> ApiResult<About> {
         contact: CONTACT,
         check_updates: settings::flag(&state.store, CHECK_UPDATES, true).await?,
         auto_update: settings::flag(&state.store, AUTO_UPDATE, false).await?,
+        nightly: nightly_channel(state).await?,
+        nightly_build: built_nightly(),
         checked_at: checked.at,
         update_available: available.is_some(),
         cannot_install: available.and_then(|r| update.blocker(r)),
@@ -221,6 +231,9 @@ async fn install_now(_: AdminUser, State(state): State<AppState>) -> ApiResult<S
 struct Settings {
     check_updates: bool,
     auto_update: bool,
+    /// Left out by pages from before there were nightlies.
+    #[serde(default)]
+    nightly: Option<bool>,
 }
 
 async fn set_settings(
@@ -230,6 +243,15 @@ async fn set_settings(
 ) -> ApiResult<StatusCode> {
     settings::set_flag(&state.store, CHECK_UPDATES, body.check_updates).await?;
     settings::set_flag(&state.store, AUTO_UPDATE, body.auto_update).await?;
+    if let Some(nightly) = body.nightly {
+        if nightly != nightly_channel(&state).await? {
+            settings::set_flag(&state.store, NIGHTLY, nightly).await?;
+            // What's newest depends on the channel, so look again.
+            if body.check_updates {
+                check(&state).await;
+            }
+        }
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -351,9 +373,23 @@ pub fn client() -> Result<reqwest::Client, String> {
         .map_err(|e| e.to_string())
 }
 
-/// Asks GitHub for the latest release.
+/// True if this copy is a nightly build (see docs/releasing.md).
+fn built_nightly() -> bool {
+    env!("DJINN_CHANNEL") == "nightly"
+}
+
+/// True if the admin takes nightly builds. Someone who installed a nightly
+/// gets nightlies until they say otherwise.
+async fn nightly_channel(state: &AppState) -> anyhow::Result<bool> {
+    settings::flag(&state.store, NIGHTLY, built_nightly()).await
+}
+
+/// Asks GitHub for the latest release, or the latest nightly.
 async fn check(state: &AppState) {
-    let result = latest().await;
+    let result = match nightly_channel(state).await {
+        Ok(nightly) => latest(nightly).await,
+        Err(e) => Err(e.to_string()),
+    };
     state.update.update(|s| {
         s.at = Some(now_ms());
         match result {
@@ -369,6 +405,10 @@ async fn check(state: &AppState) {
 #[derive(Deserialize)]
 struct GitHubRelease {
     tag_name: String,
+    #[serde(default)]
+    prerelease: bool,
+    #[serde(default)]
+    draft: bool,
     html_url: String,
     #[serde(default)]
     body: Option<String>,
@@ -385,13 +425,51 @@ struct GitHubAsset {
     size: u64,
 }
 
-async fn latest() -> Result<Option<Release>, String> {
+async fn latest(nightly: bool) -> Result<Option<Release>, String> {
+    if nightly {
+        return latest_nightly().await;
+    }
     // For testing against a stand-in server; downloads still need the
-    // release key's signature.
+    // release key's signature. GitHub's latest is never a nightly, since
+    // nightlies are published as pre-releases.
     let url = std::env::var("DJINN_RELEASES_URL")
         .unwrap_or_else(|_| format!("https://api.github.com/repos/{REPOSITORY}/releases/latest"));
     let release = github_release(&client()?, url).await?;
     Ok(release.map(|release| from_github(release, &asset_name())))
+}
+
+/// The newest of the recent stable releases and nightlies.
+async fn latest_nightly() -> Result<Option<Release>, String> {
+    let url = std::env::var("DJINN_RELEASES_LIST_URL").unwrap_or_else(|_| {
+        format!("https://api.github.com/repos/{REPOSITORY}/releases?per_page={NIGHTLY_LOOKBACK}")
+    });
+    let response = client()?
+        .get(url)
+        .header("accept", "application/vnd.github+json")
+        .send()
+        .await
+        .map_err(|e| format!("cannot reach GitHub: {e}"))?;
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(None);
+    }
+    let releases: Vec<GitHubRelease> = response
+        .error_for_status()
+        .map_err(|e| format!("GitHub said: {e}"))?
+        .json()
+        .await
+        .map_err(|e| format!("unexpected answer from GitHub: {e}"))?;
+    Ok(newest(releases).map(|release| from_github(release, &asset_name())))
+}
+
+/// The newest stable release or nightly among `releases`; other
+/// pre-releases and drafts don't count.
+fn newest(releases: Vec<GitHubRelease>) -> Option<GitHubRelease> {
+    releases
+        .into_iter()
+        .filter(|r| !r.draft && (!r.prerelease || r.tag_name.ends_with("-nightly")))
+        .filter_map(|r| Some((parse_version(&r.tag_name)?, r)))
+        .max_by_key(|(version, _)| *version)
+        .map(|(_, r)| r)
 }
 
 /// A release from GitHub's API; `None` if there isn't one (no releases
@@ -468,13 +546,18 @@ fn asset_name() -> String {
     )
 }
 
-fn parse_version(v: &str) -> Option<(u64, u64, u64)> {
-    let core = v.trim_start_matches('v').split(['-', '+']).next()?;
+/// (year, month, day, stable): a nightly, like any pre-release, comes just
+/// before the stable release of the same number, and after the one before.
+fn parse_version(v: &str) -> Option<(u64, u64, u64, bool)> {
+    let v = v.trim_start_matches('v');
+    let core = v.split(['-', '+']).next()?;
+    let stable = !v[core.len()..].starts_with('-');
     let mut parts = core.split('.').map(|p| p.parse::<u64>().ok());
     Some((
         parts.next()??,
         parts.next()??,
         parts.next().flatten().unwrap_or(0),
+        stable,
     ))
 }
 
@@ -649,14 +732,62 @@ mod tests {
 
     #[test]
     fn versions() {
-        assert_eq!(parse_version("v2027.01.05"), Some((2027, 1, 5)));
-        assert_eq!(parse_version("v1.2.3"), Some((1, 2, 3)));
-        assert_eq!(parse_version("0.10"), Some((0, 10, 0)));
-        assert_eq!(parse_version("2.0.0-beta.1"), Some((2, 0, 0)));
+        assert_eq!(parse_version("v2027.01.05"), Some((2027, 1, 5, true)));
+        assert_eq!(parse_version("v1.2.3"), Some((1, 2, 3, true)));
+        assert_eq!(parse_version("0.10"), Some((0, 10, 0, true)));
+        assert_eq!(parse_version("2.0.0-beta.1"), Some((2, 0, 0, false)));
+        assert_eq!(parse_version("1.2.3+build"), Some((1, 2, 3, true)));
         assert_eq!(parse_version("nightly"), None);
+        // A nightly comes after the day before and before its own day's release.
+        assert!(parse_version("v2027.01.05-nightly") > parse_version("v2027.01.04"));
+        assert!(parse_version("v2027.01.05-nightly") < parse_version("v2027.01.05"));
+        assert!(parse_version("2027.1.5-nightly") == parse_version("v2027.01.05-nightly"));
         assert!(is_newer("v9999.12.31"));
         assert!(!is_newer(env!("CARGO_PKG_VERSION")));
         assert!(!is_newer("0.0.1"));
+    }
+
+    fn github(tag: &str, prerelease: bool, draft: bool) -> GitHubRelease {
+        GitHubRelease {
+            tag_name: tag.into(),
+            prerelease,
+            draft,
+            html_url: String::new(),
+            body: None,
+            published_at: None,
+            assets: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn the_nightly_channel_takes_the_newest_of_both() {
+        let tag = |releases| newest(releases).map(|r| r.tag_name);
+        assert_eq!(
+            tag(vec![
+                github("v2027.01.04", false, false),
+                github("v2027.01.06-nightly", true, false),
+                github("v2027.01.05-nightly", true, false),
+            ]),
+            Some("v2027.01.06-nightly".into())
+        );
+        // A stable release beats that day's nightly.
+        assert_eq!(
+            tag(vec![
+                github("v2027.01.06-nightly", true, false),
+                github("v2027.01.06", false, false),
+            ]),
+            Some("v2027.01.06".into())
+        );
+        // Other pre-releases and drafts never count.
+        assert_eq!(
+            tag(vec![
+                github("v2027.01.04", false, false),
+                github("v2027.02.01-beta", true, false),
+                github("v2027.03.01-nightly", true, true),
+            ]),
+            Some("v2027.01.04".into())
+        );
+        assert_eq!(tag(Vec::new()), None);
     }
 
     #[test]
@@ -706,6 +837,8 @@ mod tests {
         let release = from_github(
             GitHubRelease {
                 tag_name: "v0.2.0".into(),
+                prerelease: false,
+                draft: false,
                 html_url: "https://github.com/x".into(),
                 body: Some("Notes".into()),
                 published_at: None,

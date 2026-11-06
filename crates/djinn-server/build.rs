@@ -12,8 +12,13 @@ fn git(args: &[&str]) -> Option<String> {
 }
 
 /// Cargo needs unpadded numeric parts; releases display a padded date.
+/// A nightly keeps its suffix: 2027.1.5-nightly is 2027.01.05-nightly.
 fn release_version(version: &str) -> String {
-    let parts: Vec<_> = version.split('.').collect();
+    let (core, suffix) = match version.split_once('-') {
+        Some((core, suffix)) => (core, format!("-{suffix}")),
+        None => (version, String::new()),
+    };
+    let parts: Vec<_> = core.split('.').collect();
     if let [year, month, day] = parts.as_slice() {
         if let (Ok(year), Ok(month), Ok(day)) = (
             year.parse::<u32>(),
@@ -21,7 +26,7 @@ fn release_version(version: &str) -> String {
             day.parse::<u32>(),
         ) {
             if year >= 1000 && (1..=12).contains(&month) && (1..=31).contains(&day) {
-                return format!("{year:04}.{month:02}.{day:02}");
+                return format!("{year:04}.{month:02}.{day:02}{suffix}");
             }
         }
     }
@@ -46,6 +51,13 @@ fn main() {
         "cargo:rustc-env=DJINN_RELEASE_VERSION={}",
         release_version(&cargo_version)
     );
+    // Nightly builds are numbered like 2027.1.5-nightly (see docs/releasing.md).
+    let channel = if cargo_version.ends_with("-nightly") {
+        "nightly"
+    } else {
+        "stable"
+    };
+    println!("cargo:rustc-env=DJINN_CHANNEL={channel}");
 
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         let icon = "../../packaging/windows/djinn.ico";
@@ -72,5 +84,6 @@ mod tests {
         assert_eq!(release_version("2027.1.5"), "2027.01.05");
         assert_eq!(release_version("2026.10.31"), "2026.10.31");
         assert_eq!(release_version("0.4.5"), "0.4.5");
+        assert_eq!(release_version("2027.1.5-nightly"), "2027.01.05-nightly");
     }
 }

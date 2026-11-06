@@ -1,11 +1,13 @@
 name: CI
 
-# Pull requests only: work is pushed once per release, so a release builds
-# twice in all (this, then the release workflow on its tag). Merging doesn't
-# run it again; the PR already checked that code. Docs-only PRs skip it, and
+# Pull requests into main only: work is pushed once per release, so a release
+# builds twice in all (this, then the release workflow on its tag). PRs into
+# dev don't run it; the nightly builds dev instead. Merging doesn't run it
+# again; the PR already checked that code. Docs-only PRs skip it, and
 # a newer push cancels the run it replaces.
 on:
   pull_request:
+    branches: [main]
     paths-ignore: ['**.md', 'docs/**', 'LICENSE*']
 
 permissions:

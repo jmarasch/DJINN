@@ -55,12 +55,18 @@
     }
   }
 
-  async function setUpdates(change: Partial<Pick<About, 'check_updates' | 'auto_update'>>) {
+  async function setUpdates(change: Partial<Pick<About, 'check_updates' | 'auto_update' | 'nightly'>>) {
     if (!about) return
-    const next = { check_updates: about.check_updates, auto_update: about.auto_update, ...change }
+    const next = {
+      check_updates: about.check_updates,
+      auto_update: about.auto_update,
+      nightly: about.nightly,
+      ...change,
+    }
     try {
       await api.setUpdateSettings(next)
-      about = { ...about, ...next }
+      // Changing the channel checks again, so fetch what it found.
+      about = 'nightly' in change ? await api.about() : { ...about, ...next }
     } catch (e) {
       toast(e instanceof Error ? e.message : 'That did not work', true)
     }
@@ -117,6 +123,27 @@
     {/if}
 
     <div class="options">
+      <label class="channel">
+        <span class="small">Update channel</span>
+        <select
+          value={about.nightly ? 'nightly' : 'stable'}
+          onchange={(e) => setUpdates({ nightly: e.currentTarget.value === 'nightly' })}
+        >
+          <option value="stable">Stable</option>
+          <option value="nightly">Nightly</option>
+        </select>
+      </label>
+      <p class="small muted">
+        {#if about.nightly}
+          Nightly builds have the newest changes, built each night there are some. They're tested less, so something
+          may break.
+        {:else}
+          Stable releases come out less often and have had more testing.
+        {/if}
+        {#if about.nightly_build && !about.nightly}
+          This copy is a nightly build, so it stays as it is until a newer stable release comes out.
+        {/if}
+      </p>
       <label class="switch">
         <input
           type="checkbox"
@@ -169,5 +196,11 @@
 
   .small-button {
     align-self: flex-start;
+  }
+
+  .channel {
+    display: flex;
+    align-items: center;
+    gap: 10px;
   }
 </style>
