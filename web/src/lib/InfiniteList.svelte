@@ -76,7 +76,13 @@
     lastRow = Math.max(firstRow, Math.min(last, rows))
   }
 
-  /** Measures the rows on the page. They're all the same height. */
+  /** Take the next measurement as it is. Otherwise a row only grows while
+   * scrolling: if rows ever differ in height, each new measurement would
+   * move the rows on the page and change the next one, round and round
+   * without the page ever drawing again. */
+  let fresh = true
+
+  /** Measures the rows on the page. They should all be the same height. */
   function measure() {
     const children = container?.children
     if (!children?.length) return
@@ -89,12 +95,20 @@
         ? children[across].getBoundingClientRect().top - top
         : children[0].getBoundingClientRect().height
     if (height <= 0) return
-    if (height !== rowHeight || across !== columns) {
+    const take = fresh || across !== columns || height > rowHeight + 0.5
+    fresh = false
+    if (take && (height !== rowHeight || across !== columns)) {
       rowHeight = height
       columns = across
       rowSizes.set(sizeKey, { height, columns: across })
     }
     place()
+  }
+
+  /** After the window changes size, rows may be shorter as well as taller. */
+  function remeasure() {
+    fresh = true
+    measure()
   }
 
   let framed = false
@@ -109,10 +123,10 @@
 
   $effect(() => {
     addEventListener('scroll', schedule, { passive: true })
-    addEventListener('resize', measure, { passive: true })
+    addEventListener('resize', remeasure, { passive: true })
     return () => {
       removeEventListener('scroll', schedule)
-      removeEventListener('resize', measure)
+      removeEventListener('resize', remeasure)
     }
   })
 
@@ -129,10 +143,15 @@
   })
 
   // After anything that changes which rows there are or how big they are.
+  /** Whether the rows last measured were tiles. */
+  let shownAs: boolean | undefined
   $effect(() => {
     void shown.length
-    void grid
+    const asGrid = grid
     untrack(() => {
+      // Tiles and rows are different sizes.
+      if (shownAs !== undefined && asGrid !== shownAs) fresh = true
+      shownAs = asGrid
       tick().then(measure)
     })
   })

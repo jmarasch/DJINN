@@ -493,8 +493,13 @@
     text-align: center;
   }
 
+  /* Square whatever the picture's shape: the list assumes every row is the
+     same height. Without overflow hidden, a tall picture stretches the box
+     past its aspect ratio. */
   .cover {
     aspect-ratio: 1;
+    min-height: 0;
+    overflow: hidden;
   }
 
   .cover :global(.art) {
