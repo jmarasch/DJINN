@@ -19,7 +19,7 @@ cargo run -p djinn-server -- --config config.example.toml
 cargo build --release                  # single binary: target/release/djinn
 ```
 
-**Branches: `dev` and `main`.** Work lands on `dev` (feature PRs target `dev`); `main` is stable and only moves when `dev` is promoted to a stable release (PR `dev` to `main`, merge, tag). Every night the Release workflow publishes `dev` as a nightly pre-release if it changed (see `docs/releasing.md`, "Stable and nightly"). Claude may commit, open PRs and merge on `dev`; pushing or merging to `main`, and tagging, need the owner's go-ahead every time.
+**Branches: `dev` and `main`.** Work is committed straight to `dev` (no PRs); `main` is stable and only moves when `dev` is promoted to a stable release (PR `dev` to `main`, merge, tag). Every night the Release workflow publishes `dev` as a nightly pre-release if it changed (see `docs/releasing.md`, "Stable and nightly"). Claude may commit and push to `dev`; pushing or merging to `main`, and tagging, need the owner's go-ahead every time.
 
 **Weekly rhythm.** Thursday night is cleanup on `dev`, so that night's nightly gives a day of testing. Friday night `dev` goes to `main` as the weekly stable release, unless testing found something to fix first. Thursday cleanup is behavior-neutral only:
 
