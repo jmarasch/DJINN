@@ -53,9 +53,12 @@
     min-width: 0;
   }
 
+  /* Square whatever the picture's shape (see Browse's .cover). */
   .cover {
     position: relative;
     aspect-ratio: 1;
+    min-height: 0;
+    overflow: hidden;
   }
 
   .art {
