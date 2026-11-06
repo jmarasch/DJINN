@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026.11.05 (November 5, 2026)
+
+### Fixes
+
+- **The library no longer freezes while scrolling in grid view.** An album cover that wasn't square made its tile taller, and the page could lock up trying to lay out rows of different heights. This was easiest to hit scrolling albums in DJINN GO on a phone. Covers in grids are now always square, and the lists can't get stuck like that again even if rows differ.
+
 ## 2026.11.04 (November 4, 2026)
 
 ### Security
