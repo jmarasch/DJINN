@@ -19,9 +19,19 @@ cargo run -p djinn-server -- --config config.example.toml
 cargo build --release                  # single binary: target/release/djinn
 ```
 
-**Branches: `dev` and `main`.** Work lands on `dev` (feature PRs target `dev`); `main` is stable and only moves when `dev` is promoted to a stable release (PR `dev` to `main`, merge, tag). Every night the Release workflow publishes `dev` as a nightly pre-release if it changed (see `docs/releasing.md`, "Stable and nightly").
+**Branches: `dev` and `main`.** Work lands on `dev` (feature PRs target `dev`); `main` is stable and only moves when `dev` is promoted to a stable release (PR `dev` to `main`, merge, tag). Every night the Release workflow publishes `dev` as a nightly pre-release if it changed (see `docs/releasing.md`, "Stable and nightly"). Claude may commit, open PRs and merge on `dev`; pushing or merging to `main`, and tagging, need the owner's go-ahead every time.
 
-**GitHub builds only for releases and nightlies.** Every push to an open PR runs CI (Linux and Windows), a tag runs the release workflow, and the nightly builds `dev` at most once a day (merging doesn't run CI). Don't push work in progress: commit locally, run the checks above locally (they're what CI runs), and push only when it's ready for a nightly or a release. Batch follow-up fixes into that push instead of pushing each one. Test builds for the Windows machine are made locally and sent over the LAN, or come from a published release or nightly.
+**Weekly rhythm.** Thursday night is cleanup on `dev`, so that night's nightly gives a day of testing. Friday night `dev` goes to `main` as the weekly stable release, unless testing found something to fix first. Thursday cleanup is behavior-neutral only:
+
+- `cargo fmt`, clippy warnings, `npm run check` issues; dead code, unused imports and settings, stale comments.
+- This file's code map drifting from the code (files, settings, migrations).
+- Em dashes in UI copy, comments and docs.
+- Missing tests for queue logic, shuffle bag and transition math (spec section 16).
+- Android: hardcoded strings, unused resources.
+- Not features, behavior-changing refactors or breaking dependency upgrades.
+- Finish with the checks below and a short summary of what changed for Friday's testing.
+
+**GitHub builds only for releases and nightlies.** CI (Linux and Windows) runs on PRs into `main`, at every push to one (PRs into `dev` don't run it; the nightly builds what they merge), a tag runs the release workflow, and the nightly builds `dev` at most once a day (merging doesn't run CI). Don't push work in progress: commit locally, run the checks above locally (they're what CI runs), and push only when it's ready for a nightly or a release. Batch follow-up fixes into that push instead of pushing each one. Test builds for the Windows machine are made locally and sent over the LAN, or come from a published release or nightly.
 
 Linux build prerequisite: `libasound2-dev` and `pkg-config`.
 
