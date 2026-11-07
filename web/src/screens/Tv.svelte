@@ -222,6 +222,7 @@
       <p>{error}</p>
     </div>
   {:else}
+    <div class="left">
     <main class="now">
       {#if current}
         <div class="cover">
@@ -260,6 +261,18 @@
         </div>
       {/if}
     </main>
+
+      <div class="join">
+        <img src="/api/join/qr.svg" alt="QR code to join" />
+        <div>
+          <div class="join-title">Add a song</div>
+          <div class="join-steps">
+            Scan with your phone camera{guestMode ? ', type your name,' : ' and sign in,'} then pick a song.
+          </div>
+          {#if joinUrl}<div class="url">{joinUrl.replace(/^https?:\/\//, '')}</div>{/if}
+        </div>
+      </div>
+    </div>
 
     <aside class="side">
       {#if upNext.length}
@@ -308,16 +321,6 @@
       {/if}
 
 
-      <div class="join">
-        <img src="/api/join/qr.svg" alt="QR code to join" />
-        <div>
-          <div class="join-title">Add a song</div>
-          <div class="join-steps">
-            Scan with your phone camera{guestMode ? ', type your name,' : ' and sign in,'} then pick a song.
-          </div>
-          {#if joinUrl}<div class="url">{joinUrl.replace(/^https?:\/\//, '')}</div>{/if}
-        </div>
-      </div>
     </aside>
   {/if}
 
@@ -393,11 +396,20 @@
     background: linear-gradient(90deg, rgb(10 8 16 / 0.55), rgb(10 8 16 / 0.85));
   }
 
+  .left,
   .now,
   .side,
   .message {
     position: relative;
     min-width: 0;
+  }
+
+  /* Now playing at the top, how to add a song right under it. */
+  .left {
+    display: flex;
+    flex-direction: column;
+    gap: 5vh;
+    min-height: 0;
   }
 
   .now {
@@ -580,9 +592,10 @@
 
   .join {
     display: flex;
+    align-self: flex-start;
     align-items: center;
     gap: 1em;
-    margin-top: auto;
+    max-width: 32em;
     padding: 1em;
     border-radius: 1em;
     background: rgb(255 255 255 / 0.1);
