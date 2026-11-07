@@ -264,6 +264,12 @@ async fn run() -> anyhow::Result<()> {
         .lock()
         .await
         .set_mixer(std::sync::Arc::new(smart::SmartMixer::new(&state)));
+    state
+        .jukebox
+        .lock()
+        .await
+        .set_copies(std::sync::Arc::new(duplicates::KnownCopies::new(&state)));
+    duplicates::refresh(&state);
 
     let guest_mode = settings::flag(&store, settings::GUEST_MODE, false).await?;
     state

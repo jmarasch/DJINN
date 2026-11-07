@@ -297,6 +297,14 @@
         Songs before a shuffled playlist song can repeat
         <input type="number" min="0" max="500" bind:value={settings.history_window} />
       </label>
+      <label class="switch big">
+        <input type="checkbox" bind:checked={settings.avoid_copies} />
+        Don't play another copy of a song that just played
+      </label>
+      <p class="small muted">
+        When your library has the same song more than once (see Possible duplicates under Library), the auto mix
+        treats every copy as played.
+      </p>
       <button class="primary">Save</button>
     </form>
   </section>

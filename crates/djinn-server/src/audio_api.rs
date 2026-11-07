@@ -387,6 +387,7 @@ pub async fn start_analysis(state: &AppState) {
                 "songs analyzed"
             );
             crate::smart::refresh(&state).await;
+            crate::duplicates::refresh(&state);
         }
         if let Ok(status) = loudness_status(&state).await {
             let _ = state.events.send(ServerEvent::Loudness(status));

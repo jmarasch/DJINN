@@ -11,10 +11,10 @@ use djinn_engine::Command;
 use djinn_store::PlaySource;
 
 use super::bag::ShuffleBag;
-use super::mix::{self, Learned, Mixer, Radio, RadioSeed, SongLinks};
+use super::mix::{self, Copies, Learned, Mixer, Radio, RadioSeed, SongLinks};
 use super::{
-    Jukebox, Pending, ACTIVE_PLAYLIST, DEFAULT_HISTORY_WINDOW, HISTORY_WINDOW, PLAYLIST_CURSOR,
-    RADIO, WILD_PLAY,
+    Jukebox, Pending, ACTIVE_PLAYLIST, AVOID_COPIES, DEFAULT_HISTORY_WINDOW, HISTORY_WINDOW,
+    PLAYLIST_CURSOR, RADIO, WILD_PLAY,
 };
 use crate::events::{PlaylistRef, ServerEvent};
 use crate::settings;
@@ -77,6 +77,10 @@ impl Jukebox {
 
     pub fn set_mixer(&mut self, mixer: Arc<dyn Mixer>) {
         self.mixer = Some(mixer);
+    }
+
+    pub fn set_copies(&mut self, copies: Arc<dyn Copies>) {
+        self.copies = Some(copies);
     }
 
     /// Starts a radio from `seed` (named `name`), like a playlist: a song
@@ -306,8 +310,32 @@ impl Jukebox {
             .collect();
         let upcoming = recent.len();
         recent.extend(self.store.recent_track_ids(window).await?);
-        Ok((recent, usize::try_from(window).unwrap_or(0) + upcoming))
+        let counted = usize::try_from(window).unwrap_or(0) + upcoming;
+        match &self.copies {
+            Some(copies) if settings::flag(&self.store, AVOID_COPIES, true).await? => {
+                Ok(with_copies(&recent, counted, copies.as_ref()))
+            }
+            _ => Ok((recent, counted)),
+        }
     }
+}
+
+/// `recent` with each counted song's copies right after it, so they count
+/// as played too, and how many now count.
+pub(super) fn with_copies(
+    recent: &[i64],
+    counted: usize,
+    copies: &dyn Copies,
+) -> (Vec<i64>, usize) {
+    let counted = counted.min(recent.len());
+    let mut out = Vec::with_capacity(recent.len());
+    for &id in &recent[..counted] {
+        out.push(id);
+        out.extend(copies.copies_of(id));
+    }
+    let now_counted = out.len();
+    out.extend_from_slice(&recent[counted..]);
+    (out, now_counted)
 }
 
 /// The closest song before `anchor` in `order` that's in `playable`.

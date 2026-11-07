@@ -259,6 +259,9 @@ async fn set_crossfade(
 #[derive(Serialize, Deserialize)]
 struct Settings {
     history_window: i64,
+    /// A copy of a song that played recently counts as played.
+    #[serde(default = "default_true")]
+    avoid_copies: bool,
     per_user_limit: i64,
     /// Most songs the whole queue may hold; 0 means no cap.
     max_queue: i64,
@@ -341,6 +344,7 @@ async fn settings(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json
             jukebox::DEFAULT_HISTORY_WINDOW,
         )
         .await?,
+        avoid_copies: settings::flag(store, jukebox::AVOID_COPIES, true).await?,
         per_user_limit: settings::number(
             store,
             jukebox::PER_USER_LIMIT,
@@ -465,6 +469,7 @@ async fn update_settings(
     store
         .set_setting(jukebox::HISTORY_WINDOW, &body.history_window.to_string())
         .await?;
+    settings::set_flag(store, jukebox::AVOID_COPIES, body.avoid_copies).await?;
     store
         .set_setting(jukebox::PER_USER_LIMIT, &body.per_user_limit.to_string())
         .await?;

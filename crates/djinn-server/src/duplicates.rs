@@ -94,6 +94,39 @@ pub async fn current(state: &AppState) -> anyhow::Result<Arc<Duplicates>> {
     Ok(found)
 }
 
+/// Works the groups out again in the background if anything changed, so
+/// the jukebox has them without waiting.
+pub fn refresh(state: &AppState) {
+    let state = state.clone();
+    tokio::spawn(async move {
+        if let Err(e) = current(&state).await {
+            tracing::warn!(error = %format!("{e:#}"), "looking for copies of songs failed");
+        }
+    });
+}
+
+/// The jukebox's view: the groups last worked out, never waiting for new
+/// ones (while they're being worked out, no song has copies).
+pub struct KnownCopies(Arc<tokio::sync::Mutex<Option<Arc<Duplicates>>>>);
+
+impl KnownCopies {
+    pub fn new(state: &AppState) -> Self {
+        Self(Arc::clone(&state.duplicates))
+    }
+}
+
+impl crate::jukebox::Copies for KnownCopies {
+    fn copies_of(&self, id: i64) -> Vec<i64> {
+        let Ok(cached) = self.0.try_lock() else {
+            return Vec::new();
+        };
+        cached
+            .as_ref()
+            .map(|d| d.copies_of(id).collect())
+            .unwrap_or_default()
+    }
+}
+
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/library/duplicates", get(list))

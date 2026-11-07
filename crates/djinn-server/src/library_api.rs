@@ -1411,6 +1411,7 @@ pub fn start_artist_lookup(state: &AppState, force: bool) -> bool {
                         }
                     }
                     let _ = state.events.send(ServerEvent::LibraryChanged);
+                    crate::duplicates::refresh(&state);
                     // New genres change search by description and similar
                     // artists.
                     if did_work {

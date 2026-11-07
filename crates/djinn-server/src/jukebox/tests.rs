@@ -828,3 +828,49 @@ async fn a_restart_carries_on_with_the_song_playing() {
         "one play, finished"
     );
 }
+
+/// Songs 0 and 1 are copies of each other.
+struct PairCopies(i64, i64);
+
+impl Copies for PairCopies {
+    fn copies_of(&self, id: i64) -> Vec<i64> {
+        if id == self.0 {
+            vec![self.1]
+        } else if id == self.1 {
+            vec![self.0]
+        } else {
+            Vec::new()
+        }
+    }
+}
+
+#[tokio::test]
+async fn the_auto_mix_skips_copies_of_songs_just_played() {
+    for round in 0..8 {
+        let mut h = Harness::new(4).await;
+        h.jukebox
+            .set_copies(Arc::new(PairCopies(h.tracks[0], h.tracks[1])));
+        h.jukebox.load_active().await.unwrap();
+        h.event(EngineEvent::NextNeeded { after: None }).await;
+        let mut played = Vec::new();
+        for _ in 0..3 {
+            let id = h.play_next().await;
+            played.push(id);
+            h.finish(id).await;
+        }
+        let copies = played
+            .iter()
+            .filter(|&&id| id == h.tracks[0] || id == h.tracks[1])
+            .count();
+        assert_eq!(copies, 1, "round {round}: {played:?}");
+    }
+}
+
+#[test]
+fn copies_count_right_after_their_song() {
+    let (recent, counted) = auto::with_copies(&[5, 0, 9], 2, &PairCopies(0, 1));
+    assert_eq!(recent, [5, 0, 1, 9]);
+    assert_eq!(counted, 3);
+    let (recent, counted) = auto::with_copies(&[0], 5, &PairCopies(0, 1));
+    assert_eq!((recent, counted), (vec![0, 1], 2));
+}

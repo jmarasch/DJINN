@@ -44,6 +44,7 @@ const RESET_SETTINGS: &[&str] = &[
     "fanart_api_key",
     "artist_source_audiodb",
     "audiodb_api_key",
+    "avoid_copies",
     "artist_source_unsplash",
     "unsplash_access_key",
     "artist_remote_images",

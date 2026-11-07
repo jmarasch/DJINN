@@ -606,6 +606,8 @@ export interface FolderListing {
 
 export interface Settings {
   history_window: number
+  /** A copy of a song that played recently counts as played. */
+  avoid_copies: boolean
   per_user_limit: number
   /** 0 means no cap. */
   max_queue: number

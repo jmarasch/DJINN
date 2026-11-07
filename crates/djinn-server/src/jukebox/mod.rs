@@ -36,13 +36,16 @@ use self::bag::ShuffleBag;
 pub use self::gain::{
     ReplayGain, ReplayGainMode, MAX_PREAMP_DB, REPLAY_GAIN_MODE, REPLAY_GAIN_PREAMP,
 };
-pub use self::mix::{Learned, Mixer, Radio, RadioSeed, SongLinks};
+pub use self::mix::{Copies, Learned, Mixer, Radio, RadioSeed, SongLinks};
 use crate::events::{
     Entry, NowPlaying, OutputStatus, PlayState, PlayerState, PlaylistRef, ServerEvent,
 };
 use crate::settings;
 
 pub const HISTORY_WINDOW: &str = "history_window";
+/// Whether a copy of a song that played recently counts as played (on
+/// unless turned off).
+pub const AVOID_COPIES: &str = "avoid_copies";
 pub const PER_USER_LIMIT: &str = "per_user_limit";
 pub const VOLUME: &str = "volume";
 /// Most requests the whole queue may hold; 0 means no cap.
@@ -234,6 +237,8 @@ pub struct Jukebox {
     equalizer: EqualizerSettings,
     /// Picks radio songs (set once the server's sound index exists).
     mixer: Option<Arc<dyn Mixer>>,
+    /// Knows which songs are copies of one another.
+    copies: Option<Arc<dyn Copies>>,
     /// The radio, while it's the active "playlist".
     radio: Option<Radio>,
     /// Each song's party weight, and when it was read.
@@ -323,6 +328,7 @@ impl Jukebox {
             replay_gain,
             equalizer,
             mixer: None,
+            copies: None,
             radio: None,
             party: None,
             resuming: None,

@@ -40,6 +40,13 @@ pub trait Mixer: Send + Sync {
     }
 }
 
+/// Which songs are copies of one another, so the auto mix treats a copy
+/// of a song that played recently as played too.
+pub trait Copies: Send + Sync {
+    /// The other copies of a song (none if it has none or nobody knows).
+    fn copies_of(&self, id: i64) -> Vec<i64>;
+}
+
 /// How much a song weighs in wild play and radio after what parties did
 /// with it: requested songs more (up to 5x), often skipped ones less (down
 /// to 0.15x). Songs with no history weigh 1.
