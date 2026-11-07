@@ -722,7 +722,8 @@ fun LibraryScreen(nav: Nav) {
                 ) { artist ->
                     Row2(
                         title = artist.name,
-                        subtitle = "${artist.trackCount} songs",
+                        subtitle = (listOf("${artist.trackCount} songs") + countParts(artist.plays, artist.likes))
+                            .joinToString(" · "),
                         art = { Art(nav.api.artUrl(artist.artHash), 44.dp, CircleShape) },
                         onClick = { nav.push(Screen.Artist(artist.id)) },
                         end = { LikeHeart(artist.id, nav.likedArtists, artist.name, nav.api::setArtistLike, nav) },
@@ -941,7 +942,8 @@ private fun Choices(choices: List<Pair<String, String>>, chosen: String, choose:
 private fun AlbumRow(album: Album, nav: Nav) {
     Row2(
         title = album.title,
-        subtitle = listOfNotNull(album.artist, album.year?.toString(), album.label).joinToString(" · "),
+        subtitle = (listOfNotNull(album.artist, album.year?.toString(), album.label) + countParts(album.plays, album.likes))
+            .joinToString(" · "),
         art = { Art(nav.api.artUrl(album.artHash), 44.dp) },
         onClick = { nav.push(Screen.Album(album.id)) },
         end = { LikeHeart(album.id, nav.likedAlbums, album.title, nav.api::setAlbumLike, nav) },

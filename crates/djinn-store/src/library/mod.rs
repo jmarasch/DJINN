@@ -839,6 +839,8 @@ fn in_order<T>(ids: &[i64], found: Vec<T>, id: impl Fn(&T) -> i64) -> Vec<T> {
 
 mod browse;
 pub(crate) use browse::BrowseMemo;
+mod counts;
+pub use counts::Counts;
 mod editions;
 mod info;
 mod scan;

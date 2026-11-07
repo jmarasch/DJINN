@@ -338,6 +338,10 @@ export interface Track {
   art_hash: string | null
   /** A genre or two, in the library's song list. */
   genres?: string[]
+  /** In the library lists: plays, party and GO, skipped or not. */
+  plays?: number
+  /** In the library lists: how many people favorited it. */
+  likes?: number
 }
 
 export interface Album {
@@ -351,6 +355,10 @@ export interface Album {
   genres: string | null
   /** Its folder's name, when another album has the same name and artist. */
   label: string | null
+  /** In the library lists: plays, party and GO, skipped or not. */
+  plays?: number
+  /** In the library lists: how many people favorited it. */
+  likes?: number
 }
 
 export interface Artist {
@@ -697,6 +705,10 @@ export interface ArtistSummary {
   name: string
   art_hash: string | null
   track_count: number
+  /** In the library lists: plays, party and GO, skipped or not. */
+  plays?: number
+  /** In the library lists: how many people favorited it. */
+  likes?: number
 }
 
 /** Year is newest first, oldest is by year oldest first. */

@@ -101,11 +101,17 @@ fun Row2(
     }
 }
 
+/** "12 plays" and "♥ 3" (people who favorited it) for a row's subtitle; none when zero. */
+fun countParts(plays: Long, likes: Long): List<String> = listOfNotNull(
+    if (plays > 0) "%,d %s".format(plays, if (plays == 1L) "play" else "plays") else null,
+    if (likes > 0) "\u2665 %,d".format(likes) else null,
+)
+
 /** One song: tap to play, dots for everything else. */
 @UnstableApi
 @Composable
 fun SongRow(track: Track, nav: Nav, onClick: () -> Unit) {
-    val line = listOfNotNull(track.artist, track.album).joinToString(" · ")
+    val line = (listOfNotNull(track.artist, track.album) + countParts(track.plays, track.likes)).joinToString(" · ")
     Row2(
         title = track.title,
         subtitle = line,

@@ -1,7 +1,7 @@
 //! Browsing the library: search, tracks, albums, artists, art, rescans,
 //! and tag corrections.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::Ordering;
 
 use axum::body::{to_bytes, Body};
@@ -12,8 +12,8 @@ use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use djinn_library::{art, ScanProgress};
 use djinn_store::{
-    Album, AlbumDetail, AlbumFilter, AlbumSort, ArtistDetail, ArtistSort, ArtistSummary, Jump,
-    Page, SearchResults, TagChange, TagEdit, Track, TrackSort,
+    Album, AlbumDetail, AlbumFilter, AlbumSort, ArtistDetail, ArtistSort, ArtistSummary, Counts,
+    Jump, Page, SearchResults, TagChange, TagEdit, Track, TrackSort,
 };
 use serde::{Deserialize, Serialize};
 
@@ -161,11 +161,39 @@ struct ArtistQuery {
     sort: ArtistSort,
 }
 
+/// A row in the library's artist or album list, with how often its songs
+/// were played and how many people favorited it.
+#[derive(Serialize)]
+struct Counted<T> {
+    #[serde(flatten)]
+    item: T,
+    #[serde(flatten)]
+    counts: Counts,
+}
+
+fn counted<T>(
+    page: Page<T>,
+    id: impl Fn(&T) -> i64,
+    mut counts: HashMap<i64, Counts>,
+) -> Page<Counted<T>> {
+    Page {
+        total: page.total,
+        items: page
+            .items
+            .into_iter()
+            .map(|item| Counted {
+                counts: counts.remove(&id(&item)).unwrap_or_default(),
+                item,
+            })
+            .collect(),
+    }
+}
+
 async fn artists(
     _: CurrentUser,
     State(state): State<AppState>,
     Query(query): Query<ArtistQuery>,
-) -> ApiResult<Json<Page<ArtistSummary>>> {
+) -> ApiResult<Json<Page<Counted<ArtistSummary>>>> {
     let (offset, limit) = PageQuery {
         offset: query.offset,
         limit: query.limit,
@@ -173,12 +201,13 @@ async fn artists(
     }
     .bounds();
     let show = settings::flag(&state.store, "show_collaboration_artists", true).await?;
-    Ok(Json(
-        state
-            .store
-            .artists_page_filtered(query.sort, show, offset, limit)
-            .await?,
-    ))
+    let page = state
+        .store
+        .artists_page_filtered(query.sort, show, offset, limit)
+        .await?;
+    let ids: Vec<i64> = page.items.iter().map(|a| a.id).collect();
+    let counts = state.store.artist_counts(&ids).await?;
+    Ok(Json(counted(page, |a| a.id, counts)))
 }
 
 #[derive(Deserialize)]
@@ -196,19 +225,20 @@ async fn albums(
     _: CurrentUser,
     State(state): State<AppState>,
     Query(query): Query<AlbumQuery>,
-) -> ApiResult<Json<Page<Album>>> {
+) -> ApiResult<Json<Page<Counted<Album>>>> {
     let page = PageQuery {
         offset: query.offset,
         limit: query.limit,
         sort: TrackSort::default(),
     };
     let (offset, limit) = page.bounds();
-    Ok(Json(
-        state
-            .store
-            .albums_page_filtered(query.sort, query.filter, offset, limit)
-            .await?,
-    ))
+    let page = state
+        .store
+        .albums_page_filtered(query.sort, query.filter, offset, limit)
+        .await?;
+    let ids: Vec<i64> = page.items.iter().map(|a| a.id).collect();
+    let counts = state.store.album_counts(&ids).await?;
+    Ok(Json(counted(page, |a| a.id, counts)))
 }
 
 /// Where each letter starts in the artist list, for the jump strip.
@@ -252,6 +282,8 @@ struct ListedTrack {
     #[serde(flatten)]
     track: Track,
     genres: Vec<String>,
+    #[serde(flatten)]
+    counts: Counts,
 }
 
 async fn tracks(
@@ -262,6 +294,8 @@ async fn tracks(
     let (offset, limit) = page.bounds();
     let found = state.store.tracks_page(page.sort, offset, limit).await?;
     let mut genres = crate::smart::list_genres(&state, found.items.iter().map(|t| t.id));
+    let ids: Vec<i64> = found.items.iter().map(|t| t.id).collect();
+    let mut counts = state.store.track_counts(&ids).await?;
     Ok(Json(Page {
         total: found.total,
         items: found
@@ -269,6 +303,7 @@ async fn tracks(
             .into_iter()
             .map(|track| ListedTrack {
                 genres: genres.remove(&track.id).unwrap_or_default(),
+                counts: counts.remove(&track.id).unwrap_or_default(),
                 track,
             })
             .collect(),

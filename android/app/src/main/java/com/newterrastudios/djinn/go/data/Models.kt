@@ -25,6 +25,9 @@ data class Track(
     @SerialName("track_no") val trackNo: Int? = null,
     @SerialName("duration_ms") val durationMs: Long? = null,
     @SerialName("art_hash") val artHash: String? = null,
+    /** In the library lists: plays (party and GO) and how many people favorited it. */
+    val plays: Long = 0,
+    val likes: Long = 0,
 )
 
 @Serializable
@@ -36,6 +39,9 @@ data class ArtistSummary(
     val name: String,
     @SerialName("art_hash") val artHash: String? = null,
     @SerialName("track_count") val trackCount: Long = 0,
+    /** In the library lists: plays (party and GO) and how many people favorited it. */
+    val plays: Long = 0,
+    val likes: Long = 0,
 )
 
 @Serializable
@@ -55,6 +61,9 @@ data class Album(
     @SerialName("art_hash") val artHash: String? = null,
     /** Its folder's name, when another album has the same name and artist. */
     val label: String? = null,
+    /** In the library lists: plays (party and GO) and how many people favorited it. */
+    val plays: Long = 0,
+    val likes: Long = 0,
 )
 
 @Serializable

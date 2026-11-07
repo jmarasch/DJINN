@@ -9,6 +9,7 @@
   import GenreTags from '../lib/GenreTags.svelte'
   import Icon from '../lib/Icon.svelte'
   import InfiniteList from '../lib/InfiniteList.svelte'
+  import Counts from '../lib/Counts.svelte'
   import JumpStrip from '../lib/JumpStrip.svelte'
   import { watchScroll } from '../lib/scrollWatch.svelte'
   import { jumpCache } from '../lib/listCache'
@@ -286,7 +287,9 @@
             <a class="tile" href="#/artist/{artist.id}">
               <div class="cover"><Art hash={artist.art_hash} size={160} round={999} letter={initial(artist.name)} /></div>
               <span class="ellipsis center-text">{artist.name}</span>
-              <span class="muted small center-text">{plural(artist.track_count, 'song', 'songs')}</span>
+              <span class="muted small center-text"
+                >{plural(artist.track_count, 'song', 'songs')}<Counts plays={artist.plays} likes={artist.likes} /></span
+              >
             </a>
             {#if like}<div class="tile-like">{@render like('artist', artist.id, artist.name)}</div>{/if}
           </div>
@@ -295,7 +298,9 @@
             <a class="row" href="#/artist/{artist.id}">
               <Art hash={artist.art_hash} size={44} round={999} letter={initial(artist.name)} />
               <span class="name ellipsis">{artist.name}</span>
-              <span class="muted small">{plural(artist.track_count, 'song', 'songs')}</span>
+              <span class="muted small counts"
+                >{plural(artist.track_count, 'song', 'songs')}<Counts plays={artist.plays} likes={artist.likes} /></span
+              >
             </a>
             {#if like}{@render like('artist', artist.id, artist.name)}{/if}
           </div>
@@ -335,7 +340,12 @@
             <a class="tile" href="#/album/{album.id}">
               <div class="cover"><Art hash={album.art_hash} size={160} round={10} /></div>
               <span class="ellipsis">{album.title}</span>
-              <span class="muted small ellipsis">{album.artist}{byYear && album.year ? ` · ${album.year}` : ''}</span>
+              <span class="muted small ellipsis"
+                >{album.artist}{byYear && album.year ? ` · ${album.year}` : ''}<Counts
+                  plays={album.plays}
+                  likes={album.likes}
+                /></span
+              >
             </a>
             {#if like}<div class="tile-like">{@render like('album', album.id, album.title)}</div>{/if}
           </div>
@@ -346,7 +356,7 @@
               <span class="name">
                 <span class="ellipsis block">{album.title}</span>
                 <span class="muted small ellipsis block">
-                  {album.artist}{album.year ? ` · ${album.year}` : ''}
+                  {album.artist}{album.year ? ` · ${album.year}` : ''}<Counts plays={album.plays} likes={album.likes} />
                 </span>
               </span>
             </a>
@@ -429,6 +439,12 @@
     background: var(--surface-3);
     color: var(--text);
     font-weight: 600;
+  }
+
+  /* An artist's song and play counts stay on one line beside the name. */
+  .counts {
+    flex: none;
+    white-space: nowrap;
   }
 
   .row {

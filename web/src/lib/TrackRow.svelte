@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Counts from './Counts.svelte'
   // One song: tap its picture or title to queue it; the artist and album
   // names go to their pages.
   import Art from './Art.svelte'
@@ -46,6 +47,7 @@
       {/if}
       {#if track.duration_ms}<span class="meta"> · {duration(track.duration_ms)}</span>{/if}
       {#if note}<span class="meta"> · {note}</span>{/if}
+      <Counts plays={track.plays} likes={track.likes} />
       {#each track.genres ?? [] as genre, i (genre)}
         <span class="meta">{i === 0 ? ' · ' : ', '}</span><a class="genre" href="#/genre/{encodeURIComponent(genre)}"
           >{genre}</a

@@ -1218,3 +1218,70 @@ async fn compaction_runs_once() {
     let store = Store::open_in_memory().await.unwrap();
     assert_eq!(store.get_setting("compact_database").await.unwrap(), None);
 }
+
+/// The library lists' counts: party and GO plays (skipped ones too, as on
+/// the Stats page) and favorites, for songs, their album and their artist.
+#[tokio::test]
+async fn plays_and_favorites_are_counted_per_song_album_and_artist() {
+    let store = Store::open_in_memory().await.unwrap();
+    store
+        .save_scanned(&[
+            scanned("/m/a.flac", "One", "Band", "Album"),
+            scanned("/m/b.flac", "Two", "Band", "Album"),
+        ])
+        .await
+        .unwrap();
+    let (one, two, album, artist): (i64, i64, i64, i64) = sqlx::query_as(
+        "SELECT a.id, b.id, a.album_id, a.artist_id FROM tracks a, tracks b
+         WHERE a.title = 'One' AND b.title = 'Two'",
+    )
+    .fetch_one(&store.pool)
+    .await
+    .unwrap();
+    let sam = store
+        .create_user("sam", "h", crate::Role::User)
+        .await
+        .unwrap()
+        .id;
+    let kim = store
+        .create_user("kim", "h", crate::Role::User)
+        .await
+        .unwrap()
+        .id;
+    for track in [one, one, two] {
+        sqlx::query("INSERT INTO play_events (track_id, source, started_at) VALUES (?, 'pool', 1)")
+            .bind(track)
+            .execute(&store.pool)
+            .await
+            .unwrap();
+    }
+    store
+        .record_go_play(sam, one, crate::SKIP_BEFORE_MS)
+        .await
+        .unwrap();
+    store.record_go_play(sam, two, 1).await.unwrap();
+    for user in [sam, kim] {
+        store
+            .set_like(user, crate::LikeKind::Track, one, true)
+            .await
+            .unwrap();
+    }
+    store
+        .set_like(kim, crate::LikeKind::Album, album, true)
+        .await
+        .unwrap();
+    store
+        .set_like(sam, crate::LikeKind::Artist, artist, true)
+        .await
+        .unwrap();
+
+    let songs = store.track_counts(&[one, two, 999]).await.unwrap();
+    assert_eq!(songs[&one], Counts { plays: 3, likes: 2 });
+    assert_eq!(songs[&two], Counts { plays: 2, likes: 0 });
+    assert_eq!(songs[&999], Counts::default());
+    let albums = store.album_counts(&[album]).await.unwrap();
+    assert_eq!(albums[&album], Counts { plays: 5, likes: 1 });
+    let artists = store.artist_counts(&[artist]).await.unwrap();
+    assert_eq!(artists[&artist], Counts { plays: 5, likes: 1 });
+    assert!(store.track_counts(&[]).await.unwrap().is_empty());
+}
