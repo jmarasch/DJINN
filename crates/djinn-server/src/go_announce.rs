@@ -61,7 +61,7 @@ pub async fn server_name(store: &Store) -> anyhow::Result<String> {
     })
 }
 
-async fn server_id(store: &Store) -> anyhow::Result<String> {
+pub async fn server_id(store: &Store) -> anyhow::Result<String> {
     if let Some(id) = store.get_setting(SERVER_ID).await? {
         if !id.is_empty() {
             return Ok(id);

@@ -1316,3 +1316,27 @@ export interface LyricsSettings {
   lookup: boolean
   page: boolean
 }
+
+/** Another DJINN box playing a room on its own speakers. */
+export interface HouseNode {
+  id: number
+  node_id: string
+  name: string
+  status: 'pending' | 'approved'
+  room_id: number
+  address: string | null
+  version: string | null
+  platform: string | null
+  requested_at: number
+  approved_at: number | null
+  last_seen: number | null
+  /** The code the node's own screen shows, to compare. */
+  code: string
+}
+
+export interface NodeList {
+  join_open: boolean
+  /** This server's security code, which a node shows when it first connects. */
+  security_code: string | null
+  nodes: HouseNode[]
+}

@@ -37,6 +37,7 @@ mod likes_api;
 mod logs;
 mod lyrics;
 mod network;
+mod nodes;
 mod party_api;
 mod player_api;
 mod playlist_api;

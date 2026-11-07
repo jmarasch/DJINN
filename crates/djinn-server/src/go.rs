@@ -228,7 +228,10 @@ pub async fn apply(state: &AppState) -> anyhow::Result<()> {
 /// connection, on both ports, so nothing has to restart.
 pub async fn apply_encryption(state: &AppState) -> anyhow::Result<()> {
     let encryption = &state.go.encryption;
-    if !settings::flag(&state.store, ENCRYPTION, true).await? {
+    // Nodes always connect encrypted, so it stays on while they can join.
+    if !settings::flag(&state.store, ENCRYPTION, true).await?
+        && !crate::nodes::wants_encryption(state).await?
+    {
         encryption.set(None);
     } else if !encryption.is_on() {
         let dir = state

@@ -20,6 +20,10 @@ export const adminGroups = [
     ],
   },
   {
+    label: 'House',
+    tabs: [{ id: 'nodes', label: 'Nodes' }],
+  },
+  {
     label: 'Library',
     tabs: [
       { id: 'library', label: 'Library' },
