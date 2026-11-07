@@ -233,7 +233,9 @@
   <StatsPanel />
   <SearchesWishes />
 {:else if tab === 'problems'}
-  <p class="small muted">Files that didn't make it in, copies of songs and the nightly check are under <a href="#/admin/problems">Problems</a>.</p>
+  <ScheduledCheck />
+  <LibraryProblems />
+  <LibraryDuplicates />
 {:else if tab === 'library'}
   <section class="card">
     <h2>Music folders</h2>
@@ -265,9 +267,7 @@
     <button disabled={scanning} onclick={checkForChanges}>Check for changes</button>
   </section>
 
-  <ScheduledCheck />
-  <LibraryProblems />
-  <LibraryDuplicates />
+  <p class="small muted">Files that didn't make it in, copies of songs and the nightly check are under <a href="#/admin/problems">Problems</a>.</p>
 
   {#if settings}
     <section class="card">
