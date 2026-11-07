@@ -36,6 +36,86 @@
 
   let { tab = 'home' }: { tab?: AdminTab } = $props()
 
+  // Two layouts: one section at a time, or every section on one page with
+  // the menu jumping to each section and card. This browser remembers.
+  type Layout = 'sections' | 'page'
+  let layout = $state<Layout>(storedLayout())
+  const allTabs: AdminTab[] = adminGroups.flatMap((g) => g.tabs.map((t) => t.id))
+
+  function storedLayout(): Layout {
+    try {
+      return localStorage.getItem('djinn-admin-layout') === 'page' ? 'page' : 'sections'
+    } catch {
+      return 'sections'
+    }
+  }
+
+  function setLayout(next: Layout) {
+    layout = next
+    try {
+      localStorage.setItem('djinn-admin-layout', next)
+    } catch {
+      // Only a convenience.
+    }
+    if (next === 'page') void loadAll()
+  }
+
+  // On one page: each section's cards for the menu, read off the page, and
+  // the section in view.
+  let content = $state<HTMLElement>()
+  let cards = $state<Record<string, { title: string; el: HTMLElement }[]>>({})
+  let inView = $state<AdminTab>('home')
+
+  function readCards() {
+    if (!content) return
+    const found: Record<string, { title: string; el: HTMLElement }[]> = {}
+    for (const section of content.querySelectorAll<HTMLElement>('.admin-section')) {
+      found[section.dataset.tab ?? ''] = [...section.querySelectorAll<HTMLElement>('section.card')]
+        .map((el) => ({ title: el.querySelector('h2, h3')?.textContent?.trim() ?? '', el }))
+        .filter((c) => c.title)
+    }
+    cards = found
+  }
+
+  $effect(() => {
+    if (layout !== 'page' || !content) return
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const observer = new MutationObserver(() => {
+      clearTimeout(timer)
+      timer = setTimeout(readCards, 300)
+    })
+    observer.observe(content, { childList: true, subtree: true })
+    readCards()
+    const onScroll = () => {
+      let current: AdminTab = 'home'
+      for (const section of content?.querySelectorAll<HTMLElement>('.admin-section') ?? []) {
+        if (section.getBoundingClientRect().top < 140) current = section.dataset.tab as AdminTab
+      }
+      inView = current
+    }
+    window.addEventListener('scroll', onScroll, { passive: true })
+    onScroll()
+    return () => {
+      observer.disconnect()
+      clearTimeout(timer)
+      window.removeEventListener('scroll', onScroll)
+    }
+  })
+
+  function jump(el: Element | null | undefined) {
+    el?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
+  // A link to a section (#/admin/rules) scrolls to it on one page.
+  $effect(() => {
+    const target = tab
+    if (layout === 'page' && target !== 'home') void tick().then(() => jump(document.getElementById(`admin-${target}`)))
+  })
+
+  async function loadAll() {
+    await Promise.all([load('library'), load('log')]).catch((e) => toast(e.message, true))
+  }
+
   // Finding a setting: what's typed, the setting to highlight once its
   // section shows, settings changed from their defaults, and problems.
   let query = $state('')
@@ -57,12 +137,13 @@
     query = ''
     showChanged = false
     finding = entry
-    if (tab !== entry.tab) location.hash = `#/admin/${entry.tab}`
+    if (layout === 'page') void highlight(entry)
+    else if (tab !== entry.tab) location.hash = `#/admin/${entry.tab}`
     else void highlight(entry)
   }
 
   $effect(() => {
-    if (finding && finding.tab === tab) void highlight(finding)
+    if (finding && (layout === 'page' || finding.tab === tab)) void highlight(finding)
   })
 
   /** Scrolls to the setting's text on the page and flashes it. Sections
@@ -93,7 +174,8 @@
   let picking = $state(false)
 
   $effect(() => {
-    load(tab).catch((e) => toast(e.message, true))
+    if (layout === 'page') void loadAll()
+    else load(tab).catch((e) => toast(e.message, true))
   })
 
   async function load(which: AdminTab) {
@@ -170,73 +252,17 @@
     new Date(ms).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 </script>
 
-<div class="admin">
-<aside class="side">
-  <input class="find" type="search" placeholder="Find a setting" aria-label="Find a setting" bind:value={query} />
-  {#if query.trim()}
-    <ul class="results">
-      {#each results.slice(0, 12) as entry (entry.tab + entry.label)}
-        <li>
-          <button onclick={() => find(entry)}>
-            <span>{entry.label}</span>
-            <span class="small muted">{adminTabLabel(entry.tab)}{entry.key && changed.includes(entry.key) ? ', changed' : ''}</span>
-          </button>
-        </li>
-      {:else}
-        <li class="small muted">Nothing matches.</li>
-      {/each}
-    </ul>
-  {:else}
-    <nav aria-label="Admin sections">
-      {#each adminGroups as group (group.label)}
-        <div class="group">
-          <div class="group-label">{group.label}</div>
-          <div class="links">
-            {#each group.tabs as t (t.id)}
-              <a href="#/admin/{t.id}" class:active={tab === t.id} aria-current={tab === t.id ? 'page' : undefined}>
-                {t.label}
-                {#if t.id === 'problems' && trouble > 0}<span class="badge">{trouble.toLocaleString()}</span>{/if}
-                {#if changedTabs.has(t.id)}<span class="changed-dot" title="Has settings changed from the default"></span>{/if}
-              </a>
-            {/each}
-          </div>
-        </div>
-      {/each}
-    </nav>
-    {#if changedEntries.length}
-      <button class="link small" onclick={() => (showChanged = !showChanged)}>
-        {showChanged ? 'Hide' : 'Show'} settings changed from the default ({changedEntries.length})
-      </button>
-      {#if showChanged}
-        <ul class="results">
-          {#each changedEntries as entry (entry.key)}
-            <li>
-              <button onclick={() => find(entry)}>
-                <span>{entry.label}</span>
-                <span class="small muted">{adminTabLabel(entry.tab)}</span>
-              </button>
-            </li>
-          {/each}
-        </ul>
-      {/if}
-    {/if}
-  {/if}
-</aside>
-
-<div class="admin-content">
-<h1>{tab === 'home' ? 'Admin' : adminTabLabel(tab)}</h1>
-<PublicNetworkNote />
-
-{#if tab === 'home'}
+{#snippet sectionContent(t: AdminTab)}
+{#if t === 'home'}
   <AdminHome />
-{:else if tab === 'stats'}
+{:else if t === 'stats'}
   <StatsPanel />
   <SearchesWishes />
-{:else if tab === 'problems'}
+{:else if t === 'problems'}
   <ScheduledCheck />
   <LibraryProblems />
   <LibraryDuplicates />
-{:else if tab === 'library'}
+{:else if t === 'library'}
   <section class="card">
     <h2>Music folders</h2>
     {#each roots as root (root.path)}
@@ -326,21 +352,21 @@
       <FolderPicker onpick={addRoot} />
     </Sheet>
   {/if}
-{:else if tab === 'audio'}
+{:else if t === 'audio'}
   <CrossfadePanel />
   <OutputsPanel />
   <CastPanel />
   <ReplayGainPanel />
   <EqualizerPanel />
-{:else if tab === 'smart'}
+{:else if t === 'smart'}
   <SmartPlayPanel />
-{:else if tab === 'ai'}
+{:else if t === 'ai'}
   <AiPanel />
-{:else if tab === 'users'}
+{:else if t === 'users'}
   <UsersPanel />
-{:else if tab === 'go'}
+{:else if t === 'go'}
   <GoPanel />
-{:else if tab === 'log'}
+{:else if t === 'log'}
   <section class="card">
     <div class="log-head">
       <h2>Request log</h2>
@@ -360,7 +386,7 @@
       <p class="muted">No requests since the log was last cleared.</p>
     {/each}
   </section>
-{:else if tab === 'rules' && settings}
+{:else if t === 'rules' && settings}
   <section class="card">
     <h2>Rules</h2>
     <form class="settings" onsubmit={saveSettings}>
@@ -425,14 +451,102 @@
       <button class="primary">Save</button>
     </form>
   </section>
-{:else if tab === 'system'}
+{:else if t === 'system'}
   <SystemStatus />
   <UpdatePanel />
   <BackupPanel />
   <LogViewer />
   <ResetPanel />
-{:else if tab === 'about'}
+{:else if t === 'about'}
   <AboutPanel />
+{/if}
+{/snippet}
+
+<div class="admin" class:one-page={layout === 'page'}>
+<aside class="side">
+  <div class="layout" role="group" aria-label="Layout">
+    <button class:active={layout === 'page'} aria-pressed={layout === 'page'} onclick={() => setLayout('page')}>One page</button>
+    <button class:active={layout === 'sections'} aria-pressed={layout === 'sections'} onclick={() => setLayout('sections')}>Sections</button>
+  </div>
+  <input class="find" type="search" placeholder="Find a setting" aria-label="Find a setting" bind:value={query} />
+  {#if query.trim()}
+    <ul class="results">
+      {#each results.slice(0, 12) as entry (entry.tab + entry.label)}
+        <li>
+          <button onclick={() => find(entry)}>
+            <span>{entry.label}</span>
+            <span class="small muted">{adminTabLabel(entry.tab)}{entry.key && changed.includes(entry.key) ? ', changed' : ''}</span>
+          </button>
+        </li>
+      {:else}
+        <li class="small muted">Nothing matches.</li>
+      {/each}
+    </ul>
+  {:else}
+    <nav aria-label="Admin sections">
+      {#each adminGroups as group (group.label)}
+        <div class="group">
+          <div class="group-label">{group.label}</div>
+          <div class="links">
+            {#each group.tabs as t (t.id)}
+              {#if layout === 'page'}
+                <button class="nav-item" class:active={inView === t.id} onclick={() => jump(document.getElementById(`admin-${t.id}`))}>
+                  {t.label}
+                  {#if t.id === 'problems' && trouble > 0}<span class="badge">{trouble.toLocaleString()}</span>{/if}
+                  {#if changedTabs.has(t.id)}<span class="changed-dot" title="Has settings changed from the default"></span>{/if}
+                </button>
+                {#if (cards[t.id]?.length ?? 0) > 1}
+                  <div class="cards">
+                    {#each cards[t.id] as card, i (i)}
+                      <button onclick={() => jump(card.el)}>{card.title}</button>
+                    {/each}
+                  </div>
+                {/if}
+              {:else}
+                <a href="#/admin/{t.id}" class:active={tab === t.id} aria-current={tab === t.id ? 'page' : undefined}>
+                  {t.label}
+                  {#if t.id === 'problems' && trouble > 0}<span class="badge">{trouble.toLocaleString()}</span>{/if}
+                  {#if changedTabs.has(t.id)}<span class="changed-dot" title="Has settings changed from the default"></span>{/if}
+                </a>
+              {/if}
+            {/each}
+          </div>
+        </div>
+      {/each}
+    </nav>
+    {#if changedEntries.length}
+      <button class="link small" onclick={() => (showChanged = !showChanged)}>
+        {showChanged ? 'Hide' : 'Show'} settings changed from the default ({changedEntries.length})
+      </button>
+      {#if showChanged}
+        <ul class="results">
+          {#each changedEntries as entry (entry.key)}
+            <li>
+              <button onclick={() => find(entry)}>
+                <span>{entry.label}</span>
+                <span class="small muted">{adminTabLabel(entry.tab)}</span>
+              </button>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    {/if}
+  {/if}
+</aside>
+
+<div class="admin-content" bind:this={content}>
+{#if layout === 'sections'}<h1>{tab === 'home' ? 'Admin' : adminTabLabel(tab)}</h1>{/if}
+<PublicNetworkNote />
+
+{#if layout === 'page'}
+  {#each allTabs as t (t)}
+    <section class="admin-section" id="admin-{t}" data-tab={t}>
+      <h1 class="section-title">{t === 'home' ? 'Home' : adminTabLabel(t)}</h1>
+      {@render sectionContent(t)}
+    </section>
+  {/each}
+{:else}
+  {@render sectionContent(tab)}
 {/if}
 
 <a class="button account-link" href="#/account">Your account (password, two-step sign-in)</a>
@@ -482,6 +596,108 @@
 
   .find {
     width: 100%;
+  }
+
+  .layout {
+    display: flex;
+    gap: 4px;
+    padding: 3px;
+    border-radius: 10px;
+    background: var(--surface-2);
+  }
+
+  .layout button {
+    flex: 1;
+    min-height: 32px;
+    padding: 0 8px;
+    border-radius: 8px;
+    background: none;
+    color: var(--muted);
+    font-size: 0.8125rem;
+  }
+
+  .layout button.active {
+    background: var(--surface-3);
+    color: var(--text);
+    font-weight: 600;
+  }
+
+  .nav-item {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 6px;
+    width: 100%;
+    min-height: 34px;
+    padding: 0 12px;
+    border-radius: 8px;
+    background: none;
+    color: var(--muted);
+    text-align: left;
+  }
+
+  .nav-item.active {
+    background: var(--surface-3);
+    color: var(--text);
+    font-weight: 600;
+  }
+
+  .cards {
+    display: flex;
+    flex-direction: column;
+    margin: 0 0 4px 12px;
+    border-left: 1px solid var(--line);
+  }
+
+  .cards button {
+    min-height: 26px;
+    padding: 2px 10px;
+    background: none;
+    color: var(--muted);
+    font-size: 0.8125rem;
+    text-align: left;
+    justify-content: flex-start;
+  }
+
+  .cards button:hover,
+  .nav-item:hover {
+    color: var(--text);
+  }
+
+  /* Phones: on one page the menu keeps just the sections. */
+  @media (max-width: 899px) {
+    .cards {
+      display: none;
+    }
+
+    .one-page .links {
+      flex-direction: row;
+      flex-wrap: wrap;
+    }
+
+    .one-page .nav-item {
+      width: auto;
+    }
+  }
+
+  .admin-section {
+    scroll-margin-top: calc(var(--nav-height, 60px) + 12px);
+    margin-bottom: 28px;
+  }
+
+  .admin-section :global(section.card) {
+    scroll-margin-top: calc(var(--nav-height, 60px) + 12px);
+  }
+
+  .section-title {
+    margin: 8px 0 12px;
+    padding-top: 8px;
+    border-top: 1px solid var(--line);
+    font-size: 1.4rem;
+  }
+
+  .admin-section:first-child .section-title {
+    border-top: 0;
   }
 
   .group-label {

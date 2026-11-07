@@ -10,6 +10,7 @@
 ### Admin
 
 - **A new Admin page.** Sections are grouped in a side menu (Party, People, Library, System), which sits at the top on phones. **Find a setting** searches every setting by name or a word like "skip" or "backup", opens its section and highlights it. A dot marks sections with settings changed from the default, and a list shows them all.
+- **One page or sections.** A switch at the top of the Admin menu shows every section on one long page, with the menu listing each section's cards and jumping straight to them, or one section at a time as before. Your browser remembers which.
 - **Admin Home** shows how DJINN is doing at a glance: what's playing and on which speakers, whether extra speakers and casts are in time, library problems, the nightly check, the computer's processor, memory and disk, when you last saved a backup, and whether an update is waiting. Each line links to where to fix it.
 - Library problems, possible duplicates and the nightly check have their own **Problems** section, with a count in the menu.
 - **Stats.** Admin > Stats shows the songs played and asked for most, top artists, who asked most, songs skipped most, and the busiest hours and days, for the last party, today, 7 or 30 days, this year or all time, for everyone or one person, at the party, on DJINN GO or both. Download the lists as a spreadsheet, or clear just that stretch of history (it says how much first).
