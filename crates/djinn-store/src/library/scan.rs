@@ -317,6 +317,21 @@ async fn save_track(tx: &mut Transaction<'_, Sqlite>, t: &ScannedTrack, now: i64
     .bind(t.replay_gain.album_peak)
     .fetch_one(&mut **tx)
     .await?;
+    // Whether its tags could be read this time.
+    sqlx::query("DELETE FROM scan_problems WHERE path = ?")
+        .bind(&t.path)
+        .execute(&mut **tx)
+        .await?;
+    if let Some(problem) = &t.tag_problem {
+        sqlx::query(
+            "INSERT INTO scan_problems (path, kind, detail, noticed_at) VALUES (?, 'tags', ?, ?)",
+        )
+        .bind(&t.path)
+        .bind(problem)
+        .bind(now)
+        .execute(&mut **tx)
+        .await?;
+    }
     // A file that changed gets another chance to play.
     sqlx::query(
         "DELETE FROM track_problems WHERE track_id = ? AND (size IS NOT ? OR mtime IS NOT ?)",

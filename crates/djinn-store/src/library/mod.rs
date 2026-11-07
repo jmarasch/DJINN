@@ -409,6 +409,9 @@ pub struct ScannedTrack {
     /// `album_artist`, then the first credit.
     pub album_owner: Option<String>,
     pub replay_gain: ReplayGainTags,
+    /// Why the tags couldn't be read, if they couldn't. The song is still
+    /// listed, under its file name; Admin > Library > Problems shows it.
+    pub tag_problem: Option<String>,
 }
 
 /// ReplayGain values from a file's tags.

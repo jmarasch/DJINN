@@ -748,6 +748,46 @@ export interface Schedule {
 /** Why background work is waiting. */
 export type Held = { reason: 'music' } | { reason: 'hours'; from: number; until: number }
 
+export type ProblemKind =
+  | 'missing_folder'
+  | 'unreadable'
+  | 'bad_name'
+  | 'unsupported'
+  | 'tags'
+  | 'wont_play'
+  | 'no_artist'
+  | 'no_album'
+  | 'album_no_cover'
+  | 'album_no_year'
+  | 'album_no_genre'
+
+export interface ProblemCount {
+  kind: ProblemKind
+  count: number
+  /** Not added, or added but broken, rather than a gap in the tags. */
+  trouble: boolean
+  /** Rows are albums. */
+  per_album: boolean
+  hidden: boolean
+}
+
+export interface ProblemSummary {
+  kinds: ProblemCount[]
+  /** Trouble the admin hasn't hidden. */
+  trouble: number
+}
+
+export interface ProblemItem {
+  path: string | null
+  detail: string
+  track_id: number | null
+  album_id: number | null
+  title: string | null
+  artist: string | null
+  album: string | null
+  noticed_at: number | null
+}
+
 export interface LibraryStatus {
   scanning: boolean
   last_scan: ScanProgress | null

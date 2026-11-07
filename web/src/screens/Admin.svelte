@@ -6,6 +6,7 @@
   import BackupPanel from '../lib/BackupPanel.svelte'
   import LibraryExtras from '../lib/LibraryExtras.svelte'
   import LibraryProgress from '../lib/LibraryProgress.svelte'
+  import LibraryProblems from '../lib/LibraryProblems.svelte'
   import { clearListCache } from '../lib/listCache'
   import LogViewer from '../lib/LogViewer.svelte'
   import ResetPanel from '../lib/ResetPanel.svelte'
@@ -150,6 +151,8 @@
     {/if}
     <button disabled={scanning} onclick={checkForChanges}>Check for changes</button>
   </section>
+
+  <LibraryProblems />
 
   {#if settings}
     <section class="card">

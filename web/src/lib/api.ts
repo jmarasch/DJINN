@@ -58,6 +58,9 @@ import type {
   OutputList,
   OutputStatus,
   Page,
+  ProblemItem,
+  ProblemKind,
+  ProblemSummary,
   PartyStyle,
   PlayerState,
   ImportResult,
@@ -428,4 +431,8 @@ export const api = {
   libraryStatus: () => get<LibraryStatus>('/library/status'),
   openArtFolder: () => post<void>('/library/open-art-folder'),
   rescan: () => post<StartResponse>('/library/rescan'),
+  libraryProblems: () => get<ProblemSummary>('/library/problems'),
+  libraryProblemList: (kind: ProblemKind, offset = 0) =>
+    get<ProblemItem[]>(`/library/problems/${kind}?offset=${offset}&limit=100`),
+  hideLibraryProblems: (kinds: ProblemKind[]) => put<{ kinds: ProblemKind[] }>('/library/problems/hidden', { kinds }),
 }

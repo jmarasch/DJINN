@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Library
+
+- **Library problems.** Admin > Library has a **Problems** list: files a library check couldn't add (formats DJINN doesn't play, folders it isn't allowed to open, names it can't read, music folders that aren't there), songs that won't play or whose tags couldn't be read, and gaps such as songs with no artist or albums with no cover. Each kind says what to do about it. Hide kinds you already know about, or download the whole list as a spreadsheet. The first library check after updating reads every file once.
+- A file that crashed the tag reader used to take the files read alongside it out of the library. Now only that file is affected, and it's listed under its name.
+
 ### Updates
 
 - **Choose Stable or Nightly** in Admin > System > Updates. Stable gets a tested release about once a week. Nightly gets the newest work every morning there's something new, and may have rough edges.

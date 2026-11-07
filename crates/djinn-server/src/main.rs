@@ -37,6 +37,7 @@ mod party_api;
 mod player_api;
 mod playlist_api;
 mod playlist_import;
+mod problems_api;
 mod reader;
 mod security;
 mod settings;
