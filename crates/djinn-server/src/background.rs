@@ -9,7 +9,6 @@ use std::time::Duration;
 use chrono::Timelike;
 use serde::{Deserialize, Serialize};
 
-use crate::events::PlayState;
 use crate::state::AppState;
 
 /// Setting key: "any", "idle" (no music playing) or "hours".
@@ -125,7 +124,7 @@ pub async fn held(state: &AppState) -> Option<Held> {
     if schedule.when == When::Any {
         return None;
     }
-    let playing = state.jukebox.lock().await.player_state().state == PlayState::Playing;
+    let playing = state.anything_playing().await;
     let hour = u8::try_from(chrono::Local::now().hour()).unwrap_or(0);
     schedule.held(playing, hour)
 }

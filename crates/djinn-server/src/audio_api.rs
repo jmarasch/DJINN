@@ -50,13 +50,8 @@ pub fn engine_configs(rows: &[OutputRow]) -> Vec<OutputConfig> {
 
 /// Sends the stored outputs to the engine.
 async fn apply(state: &AppState) -> ApiResult<Vec<OutputRow>> {
-    let rows = state.store.outputs().await?;
-    state
-        .jukebox
-        .lock()
-        .await
-        .set_outputs(engine_configs(&rows));
-    Ok(rows)
+    crate::rooms_rt::apply_outputs(state).await?;
+    Ok(state.store.outputs().await?)
 }
 
 #[derive(Serialize)]

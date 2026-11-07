@@ -49,9 +49,14 @@ impl Jukebox {
     /// is not cut off.
     pub async fn play_playlist(&mut self, id: i64, from_track: Option<i64>) -> anyhow::Result<()> {
         self.store
-            .set_setting(ACTIVE_PLAYLIST, &id.to_string())
+            .set_setting(
+                &super::room_key(self.room, ACTIVE_PLAYLIST),
+                &id.to_string(),
+            )
             .await?;
-        self.store.set_setting(PLAYLIST_CURSOR, "0").await?;
+        self.store
+            .set_setting(&super::room_key(self.room, PLAYLIST_CURSOR), "0")
+            .await?;
         self.planned.clear();
         self.bag = ShuffleBag::default();
         self.cursor = None;
@@ -97,27 +102,33 @@ impl Jukebox {
             started_at: djinn_store::now_ms(),
         };
         self.store
-            .set_setting(RADIO_SETTING, &serde_json::to_string(&radio)?)
+            .set_setting(
+                &super::room_key(self.room, RADIO_SETTING),
+                &serde_json::to_string(&radio)?,
+            )
             .await?;
         self.play_playlist(RADIO, first).await
     }
 
     /// No playlist plays when the requests run out.
     pub async fn stop_auto_mix(&mut self) -> anyhow::Result<()> {
-        self.store.set_setting(ACTIVE_PLAYLIST, "0").await?;
+        self.store
+            .set_setting(&super::room_key(self.room, ACTIVE_PLAYLIST), "0")
+            .await?;
         self.auto_mix_changed().await
     }
 
     pub(super) async fn load_active(&mut self) -> anyhow::Result<()> {
         self.clear_plan();
-        let id = settings::number(&self.store, ACTIVE_PLAYLIST, 0).await?;
+        let id =
+            settings::number(&self.store, &super::room_key(self.room, ACTIVE_PLAYLIST), 0).await?;
         self.radio = None;
         self.active = match id {
             0 => None,
             RADIO => {
                 let radio: Option<Radio> = self
                     .store
-                    .get_setting(RADIO_SETTING)
+                    .get_setting(&super::room_key(self.room, RADIO_SETTING))
                     .await?
                     .and_then(|json| serde_json::from_str(&json).ok());
                 self.radio = radio;
@@ -377,9 +388,14 @@ impl Jukebox {
     /// those lined up (`ahead`) and on their way, on top of the configured
     /// window of history.
     async fn recent(&self, ahead: &[i64]) -> anyhow::Result<(Vec<i64>, usize)> {
-        let window = settings::number(&self.store, HISTORY_WINDOW, DEFAULT_HISTORY_WINDOW)
-            .await?
-            .max(0);
+        let window = super::room_number(
+            &self.store,
+            self.room,
+            HISTORY_WINDOW,
+            DEFAULT_HISTORY_WINDOW,
+        )
+        .await?
+        .max(0);
         // Newest first: what's lined up (latest first), then on its way,
         // then playing.
         let mut recent: Vec<i64> = ahead

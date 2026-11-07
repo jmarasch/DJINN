@@ -43,35 +43,83 @@ impl Audience {
     }
 }
 
+/// What a room's player says (the rest is about the whole house).
+fn from_a_room(event: &ServerEvent) -> bool {
+    matches!(
+        event,
+        ServerEvent::NowPlaying(_)
+            | ServerEvent::Position { .. }
+            | ServerEvent::QueueChanged(_)
+            | ServerEvent::PlayerState(_)
+            | ServerEvent::OutputStatus(_)
+    )
+}
+
+/// A page's room, from `?room=` (Main when missing).
+#[derive(serde::Deserialize)]
+pub struct RoomQuery {
+    pub room: Option<i64>,
+}
+
 pub async fn events(
-    _: CurrentUser,
+    CurrentUser(user): CurrentUser,
     State(state): State<AppState>,
 ) -> ApiResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {
-    live(state, Audience::Member).await
+    let room = state.room_of(user.id).await;
+    live(state, Audience::Member, room).await
 }
 
 /// The TV page's feed. Public while the TV page is on.
 pub async fn tv_events(
     State(state): State<AppState>,
+    axum::extract::Query(query): axum::extract::Query<RoomQuery>,
 ) -> ApiResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {
     crate::tv_api::check_enabled(&state).await?;
-    live(state, Audience::Tv).await
+    live(
+        state,
+        Audience::Tv,
+        query.room.unwrap_or(djinn_store::MAIN_ROOM),
+    )
+    .await
 }
 
 pub async fn lyrics_events(
     State(state): State<AppState>,
+    axum::extract::Query(query): axum::extract::Query<RoomQuery>,
 ) -> ApiResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {
     crate::lyrics::check_page(&state).await?;
-    live(state, Audience::Tv).await
+    live(
+        state,
+        Audience::Tv,
+        query.room.unwrap_or(djinn_store::MAIN_ROOM),
+    )
+    .await
 }
 
 async fn live(
     state: AppState,
     audience: Audience,
+    room: i64,
 ) -> ApiResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {
-    // Subscribe before taking the snapshot so nothing falls in between.
-    let updates = BroadcastStream::new(state.events.subscribe());
-    let initial = snapshot(&state).await?;
+    let room = state.rooms.leader(room);
+    // Subscribe before taking the snapshot so nothing falls in between. A
+    // room other than Main has its own channel for what its player says;
+    // the house-wide channel then only brings the rest.
+    let own = state.room_events(room);
+    let house = BroadcastStream::new(state.events.subscribe());
+    let updates: std::pin::Pin<Box<dyn Stream<Item = _> + Send>> = match own {
+        Some(own) => {
+            let house = house.filter(|item| {
+                std::future::ready(!matches!(item, Ok(event) if from_a_room(event)))
+            });
+            let own = BroadcastStream::new(own.subscribe()).filter(|item| {
+                std::future::ready(!matches!(item, Ok(event) if !from_a_room(event)))
+            });
+            Box::pin(stream::select(house, own))
+        }
+        None => Box::pin(house),
+    };
+    let initial = snapshot(&state, room).await?;
 
     let resync_state = state.clone();
     let updates = updates.then(move |item| {
@@ -82,7 +130,7 @@ async fn live(
                 // This client fell behind; send current state instead of
                 // the events it missed.
                 Err(BroadcastStreamRecvError::Lagged(_)) => {
-                    snapshot(&state).await.unwrap_or_default()
+                    snapshot(&state, room).await.unwrap_or_default()
                 }
             }
         }
@@ -99,9 +147,10 @@ async fn live(
     Ok(Sse::new(stream).keep_alive(KeepAlive::new().interval(Duration::from_secs(15))))
 }
 
-async fn snapshot(state: &AppState) -> anyhow::Result<Vec<ServerEvent>> {
+async fn snapshot(state: &AppState, room: i64) -> anyhow::Result<Vec<ServerEvent>> {
     let mut events = {
-        let jukebox = state.jukebox.lock().await;
+        let jukebox = state.jukebox_for(room);
+        let jukebox = jukebox.lock().await;
         vec![
             ServerEvent::Hello {
                 web_build: crate::web::build_id(),
@@ -111,9 +160,7 @@ async fn snapshot(state: &AppState) -> anyhow::Result<Vec<ServerEvent>> {
             ServerEvent::OutputStatus(jukebox.output_status()),
         ]
     };
-    events.push(ServerEvent::QueueChanged(
-        state.store.queue(djinn_store::MAIN_ROOM).await?,
-    ));
+    events.push(ServerEvent::QueueChanged(state.store.queue(room).await?));
     events.push(ServerEvent::ArtistLookup(
         crate::library_api::lookup_status(state),
     ));

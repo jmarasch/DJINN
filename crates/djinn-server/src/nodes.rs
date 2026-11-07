@@ -288,9 +288,10 @@ pub struct Upcoming {
 /// Songs playing and coming up in Main's room, in order, at most this many.
 const UPCOMING: usize = 12;
 
-async fn upcoming(state: &AppState) -> ApiResult<Vec<Upcoming>> {
-    let now_playing = state.jukebox.lock().await.now_playing();
-    let queue = state.store.queue(djinn_store::MAIN_ROOM).await?;
+async fn upcoming(state: &AppState, room: i64) -> ApiResult<Vec<Upcoming>> {
+    let room = state.rooms.leader(room);
+    let now_playing = state.jukebox_for(room).lock().await.now_playing();
+    let queue = state.store.queue(room).await?;
     let mut ids: Vec<i64> = Vec::new();
     let mut push = |id: i64| {
         if !ids.contains(&id) {
@@ -349,7 +350,7 @@ async fn me(
         .await?;
     let audio = AudioSettings::of(&node);
     let upcoming = if node.status == "approved" {
-        upcoming(&state).await?
+        upcoming(&state, node.room_id).await?
     } else {
         Vec::new()
     };

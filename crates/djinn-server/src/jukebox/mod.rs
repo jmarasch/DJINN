@@ -276,20 +276,56 @@ pub enum QueueError {
     Other(#[from] anyhow::Error),
 }
 
+/// A setting's key for `room`: Main's own key for Main, a prefixed one for
+/// the others (each room has its own playlist, volume, rules).
+pub fn room_key(room: i64, key: &str) -> String {
+    if room == djinn_store::MAIN_ROOM {
+        key.to_owned()
+    } else {
+        format!("room{room}.{key}")
+    }
+}
+
+/// A number setting for `room`, falling back to Main's when the room has
+/// none of its own (so a new room starts with the house rules).
+pub async fn room_number(store: &Store, room: i64, key: &str, default: i64) -> anyhow::Result<i64> {
+    if room != djinn_store::MAIN_ROOM {
+        if let Some(value) = store.get_setting(&room_key(room, key)).await? {
+            if let Ok(n) = value.trim().parse() {
+                return Ok(n);
+            }
+        }
+    }
+    settings::number(store, key, default).await
+}
+
 impl Jukebox {
+    /// Main's jukebox.
     pub async fn new(
         store: Store,
         engine: EngineSink,
         events: broadcast::Sender<ServerEvent>,
     ) -> anyhow::Result<Self> {
-        let volume = settings::number(&store, VOLUME, DEFAULT_VOLUME)
+        Self::for_room(store, djinn_store::MAIN_ROOM, engine, events).await
+    }
+
+    /// The jukebox for one room, with that room's queue and settings.
+    pub async fn for_room(
+        store: Store,
+        room: i64,
+        engine: EngineSink,
+        events: broadcast::Sender<ServerEvent>,
+    ) -> anyhow::Result<Self> {
+        let volume = room_number(&store, room, VOLUME, DEFAULT_VOLUME)
             .await?
             .clamp(0, 100) as u8;
-        let cursor = settings::number(&store, PLAYLIST_CURSOR, 0).await?;
-        let crossfade = settings::number(&store, CROSSFADE, 0)
+        let cursor = settings::number(&store, &room_key(room, PLAYLIST_CURSOR), 0).await?;
+        let crossfade = room_number(&store, room, CROSSFADE, 0)
             .await?
             .clamp(0, i64::from(djinn_engine::MAX_CROSSFADE_SECS)) as u8;
-        let skip_votes_needed = settings::number(&store, SKIP_VOTES, 0).await?.clamp(0, 100) as u32;
+        let skip_votes_needed = room_number(&store, room, SKIP_VOTES, 0)
+            .await?
+            .clamp(0, 100) as u32;
         let replay_gain = ReplayGain {
             mode: ReplayGainMode::parse(
                 store
@@ -327,7 +363,7 @@ impl Jukebox {
             skip_votes: HashSet::new(),
             skip_votes_needed,
             songs_started: 0,
-            room: djinn_store::MAIN_ROOM,
+            room,
             skip_voted_on: HashMap::new(),
             output: OutputStatus::default(),
             last_position_second: None,
@@ -353,7 +389,7 @@ impl Jukebox {
 
     /// Picks up the song a restart cut off; it goes to the engine first.
     async fn load_resume(&mut self) -> anyhow::Result<()> {
-        let saved = self.store.get_setting(RESUME).await?;
+        let saved = self.store.get_setting(&room_key(self.room, RESUME)).await?;
         let Some(resume) = saved.and_then(|s| serde_json::from_str::<Resume>(&s).ok()) else {
             return Ok(());
         };
@@ -400,12 +436,19 @@ impl Jukebox {
         match resume {
             Some(resume) => {
                 self.store
-                    .set_setting(RESUME, &serde_json::to_string(&resume)?)
+                    .set_setting(
+                        &room_key(self.room, RESUME),
+                        &serde_json::to_string(&resume)?,
+                    )
                     .await?
             }
             // Until it plays again, keep what a restart cut off.
             None if self.carrying_on() => {}
-            None => self.store.set_setting(RESUME, "").await?,
+            None => {
+                self.store
+                    .set_setting(&room_key(self.room, RESUME), "")
+                    .await?
+            }
         }
         Ok(())
     }
@@ -486,10 +529,16 @@ impl Jukebox {
         let limits = if unlimited {
             RequestLimits::default()
         } else {
-            let cap = settings::number(&self.store, MAX_QUEUE, 0).await?;
+            let cap = room_number(&self.store, self.room, MAX_QUEUE, 0).await?;
             RequestLimits {
                 per_user: Some(
-                    settings::number(&self.store, PER_USER_LIMIT, DEFAULT_PER_USER_LIMIT).await?,
+                    room_number(
+                        &self.store,
+                        self.room,
+                        PER_USER_LIMIT,
+                        DEFAULT_PER_USER_LIMIT,
+                    )
+                    .await?,
                 ),
                 queue_cap: (cap > 0).then_some(cap),
             }
@@ -627,7 +676,7 @@ impl Jukebox {
         self.crossfade = secs.min(djinn_engine::MAX_CROSSFADE_SECS as u8);
         (self.engine)(Command::SetCrossfade(u32::from(self.crossfade)));
         self.store
-            .set_setting(CROSSFADE, &self.crossfade.to_string())
+            .set_setting(&room_key(self.room, CROSSFADE), &self.crossfade.to_string())
             .await?;
         self.send(ServerEvent::PlayerState(self.player_state()));
         Ok(())
@@ -637,7 +686,7 @@ impl Jukebox {
         self.volume = volume.min(100);
         (self.engine)(Command::SetVolume(gain(self.volume)));
         self.store
-            .set_setting(VOLUME, &self.volume.to_string())
+            .set_setting(&room_key(self.room, VOLUME), &self.volume.to_string())
             .await?;
         self.send(ServerEvent::PlayerState(self.player_state()));
         Ok(())
@@ -746,7 +795,7 @@ impl Jukebox {
         if pending.source == PlaySource::Pool {
             self.cursor = Some(id);
             self.store
-                .set_setting(PLAYLIST_CURSOR, &id.to_string())
+                .set_setting(&room_key(self.room, PLAYLIST_CURSOR), &id.to_string())
                 .await?;
         }
         // A song carried on after a restart keeps its play.

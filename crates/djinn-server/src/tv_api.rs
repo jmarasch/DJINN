@@ -61,6 +61,8 @@ struct TvSnapshot {
 struct TvQuery {
     /// The stream's secret, from the address a cast opens.
     key: Option<String>,
+    /// Which room to show (Main when missing).
+    room: Option<i64>,
 }
 
 async fn snapshot(
@@ -71,14 +73,18 @@ async fn snapshot(
     let token = state.stream_token();
     let sound = query.key.as_deref() == Some(token.as_str())
         || settings::flag(&state.store, TV_SOUND, false).await?;
+    let room = state
+        .rooms
+        .leader(query.room.unwrap_or(djinn_store::MAIN_ROOM));
     let (now_playing, player) = {
-        let jukebox = state.jukebox.lock().await;
+        let jukebox = state.jukebox_for(room);
+        let jukebox = jukebox.lock().await;
         (jukebox.now_playing(), jukebox.player_state())
     };
     Ok(Json(TvSnapshot {
         now_playing,
         player,
-        queue: state.store.queue(djinn_store::MAIN_ROOM).await?,
+        queue: state.store.queue(room).await?,
         join_url: state.join_url.to_string(),
         guest_mode: state.guest_mode(),
         stream_url: state

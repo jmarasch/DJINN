@@ -21,7 +21,6 @@ use serde::{Deserialize, Serialize};
 use crate::auth::AdminUser;
 use crate::download::CheckedFile;
 use crate::error::{ApiError, ApiResult};
-use crate::events::PlayState;
 use crate::settings;
 use crate::state::AppState;
 
@@ -297,7 +296,7 @@ async fn tick(state: &AppState) {
         return;
     };
     // Never in the middle of the music.
-    let playing = state.jukebox.lock().await.player_state().state == PlayState::Playing;
+    let playing = state.anything_playing().await;
     if !playing && state.update.blocker(&release).is_none() {
         tracing::info!(version = %release.version, "installing an update by itself");
         start_install(state, release);

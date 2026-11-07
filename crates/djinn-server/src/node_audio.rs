@@ -246,8 +246,9 @@ pub async fn stream(
     if node.status != "approved" {
         return Err(ApiError::forbidden());
     }
-    let (first, listening) = state.node_audio.listen();
-    let rate = state.node_audio.rate();
+    let hub = state.hub_for(node.room_id);
+    let (first, listening) = hub.listen();
+    let rate = hub.rate();
     tracing::info!(node = %node.name, "node listening");
     let live = frames_for(first, listening);
     let body = Body::from_stream(futures_util::StreamExt::map(

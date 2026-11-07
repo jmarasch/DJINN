@@ -581,7 +581,9 @@ async fn reset(
     tracing::info!(what = ?body.what, "reset from Admin > System");
     let restarting = match body.what {
         Reset::Queue => {
-            state.jukebox.lock().await.clear_queue().await?;
+            for jukebox in state.all_jukeboxes() {
+                jukebox.lock().await.clear_queue().await?;
+            }
             false
         }
         Reset::TagEdits => {

@@ -130,7 +130,9 @@ async fn clear(
     }
     let done = state.store.clear_history_matching(&body.into()).await?;
     // What the auto mix learned came from these.
-    state.jukebox.lock().await.party_changed();
+    for jukebox in state.all_jukeboxes() {
+        jukebox.lock().await.party_changed();
+    }
     tracing::warn!(
         party_plays = done.party_plays,
         go_plays = done.go_plays,

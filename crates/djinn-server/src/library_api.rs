@@ -1572,8 +1572,10 @@ pub fn start_scan(state: &AppState) -> bool {
                 crate::lyrics::start(&state);
                 // New tracks may have joined albums and artists in the
                 // active playlist.
-                if let Err(e) = state.jukebox.lock().await.auto_mix_changed().await {
-                    tracing::error!(error = %format!("{e:#}"), "refreshing the queue failed");
+                for jukebox in state.all_jukeboxes() {
+                    if let Err(e) = jukebox.lock().await.auto_mix_changed().await {
+                        tracing::error!(error = %format!("{e:#}"), "refreshing the queue failed");
+                    }
                 }
             }
             Err(e) => tracing::error!(error = %e, "library scan failed"),

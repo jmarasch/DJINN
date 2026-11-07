@@ -47,6 +47,8 @@ mod playlist_api;
 mod playlist_import;
 mod problems_api;
 mod reader;
+mod rooms_api;
+mod rooms_rt;
 mod scheduled_check;
 mod security;
 mod settings;
@@ -275,6 +277,10 @@ async fn run() -> anyhow::Result<()> {
     )
     .with_join_url(base_url.clone())
     .with_node_audio(node_audio)
+    .with_rooms(rooms_rt::Rooms::new(
+        config.audio.master_rate,
+        playback_store.clone(),
+    ))
     .with_stream(stream, cast_api::token(&store).await?)
     .with_go_listen(config.go.listen);
 
@@ -289,6 +295,10 @@ async fn run() -> anyhow::Result<()> {
         .await
         .set_copies(std::sync::Arc::new(duplicates::KnownCopies::new(&state)));
     duplicates::refresh(&state);
+    // A player for each room playing its own music.
+    if let Err(e) = rooms_rt::sync(&state).await {
+        tracing::error!(error = %format!("{e:#}"), "starting the rooms failed");
+    }
 
     let guest_mode = settings::flag(&store, settings::GUEST_MODE, false).await?;
     state

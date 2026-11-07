@@ -749,6 +749,7 @@ impl Node {
             s.playing = true;
             s.audio_problem = None;
         });
+        let room = self.status().room_id;
         let mut buffer = Vec::new();
         let mut body = response.bytes_stream();
         while let Some(chunk) = body.next().await {
@@ -781,6 +782,10 @@ impl Node {
             }
             if self.status().pairing != Pairing::Joined {
                 *player = None;
+                break;
+            }
+            // Moved to another room on Main: take that room's music.
+            if self.status().room_id != room {
                 break;
             }
         }

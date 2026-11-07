@@ -53,8 +53,12 @@ pub(crate) fn queue_error(err: QueueError) -> ApiError {
     }
 }
 
-async fn queue(_: CurrentUser, State(state): State<AppState>) -> ApiResult<Json<Vec<QueueItem>>> {
-    Ok(Json(state.store.queue(djinn_store::MAIN_ROOM).await?))
+async fn queue(
+    CurrentUser(user): CurrentUser,
+    State(state): State<AppState>,
+) -> ApiResult<Json<Vec<QueueItem>>> {
+    let room = state.rooms.leader(state.room_of(user.id).await);
+    Ok(Json(state.store.queue(room).await?))
 }
 
 #[derive(Deserialize)]
@@ -82,7 +86,8 @@ async fn add_request(
         ip: ip.map(|ip| ip.to_string()),
     };
     let (item, outcome) = state
-        .jukebox
+        .jukebox_of(user.id)
+        .await
         .lock()
         .await
         .add_request(&user, body.track_id, &origin)
@@ -126,7 +131,8 @@ async fn add_all(
         ip: ip.map(|ip| ip.to_string()),
     };
     let added = state
-        .jukebox
+        .jukebox_of(admin.id)
+        .await
         .lock()
         .await
         .add_requests(&admin, &ids, &origin)
@@ -141,7 +147,8 @@ async fn remove_request(
     Path(id): Path<i64>,
 ) -> ApiResult<StatusCode> {
     state
-        .jukebox
+        .jukebox_of(user.id)
+        .await
         .lock()
         .await
         .remove_request(&user, id)
@@ -157,13 +164,14 @@ struct MoveRequest {
 }
 
 async fn move_request(
-    _: AdminUser,
+    AdminUser(admin): AdminUser,
     State(state): State<AppState>,
     Path(id): Path<i64>,
     Json(body): Json<MoveRequest>,
 ) -> ApiResult<StatusCode> {
     state
-        .jukebox
+        .jukebox_of(admin.id)
+        .await
         .lock()
         .await
         .move_request(id, body.position)
@@ -180,8 +188,12 @@ struct NowPlayingResponse {
     output: OutputStatus,
 }
 
-async fn now_playing(_: CurrentUser, State(state): State<AppState>) -> Json<NowPlayingResponse> {
-    let jukebox = state.jukebox.lock().await;
+async fn now_playing(
+    CurrentUser(user): CurrentUser,
+    State(state): State<AppState>,
+) -> Json<NowPlayingResponse> {
+    let jukebox = state.jukebox_of(user.id).await;
+    let jukebox = jukebox.lock().await;
     Json(NowPlayingResponse {
         now_playing: jukebox.now_playing(),
         player: jukebox.player_state(),
@@ -189,18 +201,18 @@ async fn now_playing(_: CurrentUser, State(state): State<AppState>) -> Json<NowP
     })
 }
 
-async fn play(_: AdminUser, State(state): State<AppState>) -> StatusCode {
-    state.jukebox.lock().await.play();
+async fn play(AdminUser(admin): AdminUser, State(state): State<AppState>) -> StatusCode {
+    state.jukebox_of(admin.id).await.lock().await.play();
     StatusCode::NO_CONTENT
 }
 
-async fn pause(_: AdminUser, State(state): State<AppState>) -> StatusCode {
-    state.jukebox.lock().await.pause();
+async fn pause(AdminUser(admin): AdminUser, State(state): State<AppState>) -> StatusCode {
+    state.jukebox_of(admin.id).await.lock().await.pause();
     StatusCode::NO_CONTENT
 }
 
 async fn skip(AdminUser(admin): AdminUser, State(state): State<AppState>) -> StatusCode {
-    state.jukebox.lock().await.skip(&admin);
+    state.jukebox_of(admin.id).await.lock().await.skip(&admin);
     StatusCode::NO_CONTENT
 }
 
@@ -215,7 +227,8 @@ async fn skip_vote(
     State(state): State<AppState>,
 ) -> ApiResult<Json<SkipVote>> {
     let skipped = state
-        .jukebox
+        .jukebox_of(user.id)
+        .await
         .lock()
         .await
         .vote_skip(&user)
@@ -230,14 +243,20 @@ struct Volume {
 }
 
 async fn set_volume(
-    _: AdminUser,
+    AdminUser(admin): AdminUser,
     State(state): State<AppState>,
     Json(body): Json<Volume>,
 ) -> ApiResult<StatusCode> {
     if body.volume > 100 {
         return Err(ApiError::bad_request("volume must be 0 to 100"));
     }
-    state.jukebox.lock().await.set_volume(body.volume).await?;
+    state
+        .jukebox_of(admin.id)
+        .await
+        .lock()
+        .await
+        .set_volume(body.volume)
+        .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -248,14 +267,20 @@ struct Crossfade {
 }
 
 async fn set_crossfade(
-    _: AdminUser,
+    AdminUser(admin): AdminUser,
     State(state): State<AppState>,
     Json(body): Json<Crossfade>,
 ) -> ApiResult<StatusCode> {
     if u32::from(body.secs) > djinn_engine::MAX_CROSSFADE_SECS {
         return Err(ApiError::bad_request("crossfade must be 0 to 12 seconds"));
     }
-    state.jukebox.lock().await.set_crossfade(body.secs).await?;
+    state
+        .jukebox_of(admin.id)
+        .await
+        .lock()
+        .await
+        .set_crossfade(body.secs)
+        .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

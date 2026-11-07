@@ -69,6 +69,8 @@ pub struct AppState {
     pub duplicates: Arc<tokio::sync::Mutex<Option<Arc<crate::duplicates::Duplicates>>>>,
     /// The mix, timed, for nodes.
     pub node_audio: Arc<crate::node_audio::Hub>,
+    /// Players for the other rooms, and who follows whom.
+    pub rooms: Arc<crate::rooms_rt::Rooms>,
 }
 
 #[derive(Default)]
@@ -133,7 +135,13 @@ impl AppState {
             converter: Arc::default(),
             duplicates: Arc::default(),
             node_audio: Arc::default(),
+            rooms: Arc::default(),
         }
+    }
+
+    pub fn with_rooms(mut self, rooms: crate::rooms_rt::Rooms) -> Self {
+        self.rooms = Arc::new(rooms);
+        self
     }
 
     pub fn with_node_audio(mut self, hub: crate::node_audio::Hub) -> Self {
