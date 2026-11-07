@@ -111,7 +111,9 @@ async fn snapshot(state: &AppState) -> anyhow::Result<Vec<ServerEvent>> {
             ServerEvent::OutputStatus(jukebox.output_status()),
         ]
     };
-    events.push(ServerEvent::QueueChanged(state.store.queue().await?));
+    events.push(ServerEvent::QueueChanged(
+        state.store.queue(djinn_store::MAIN_ROOM).await?,
+    ));
     events.push(ServerEvent::ArtistLookup(
         crate::library_api::lookup_status(state),
     ));

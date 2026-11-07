@@ -335,7 +335,13 @@ async fn plays_from_pool_when_queue_empty() {
     let first = h.play_next().await;
     assert!(h.tracks[..5].contains(&first));
     assert_eq!(h.jukebox.now_playing().current.unwrap().track.id, first);
-    assert_eq!(h.store.recent_track_ids(5).await.unwrap(), [first]);
+    assert_eq!(
+        h.store
+            .recent_track_ids(djinn_store::MAIN_ROOM, 5)
+            .await
+            .unwrap(),
+        [first]
+    );
 
     // The engine already has the next pool track lined up.
     let second = h.last_next().unwrap();
@@ -359,7 +365,12 @@ async fn request_preempts_queued_pool_track_and_leaves_queue_when_audible() {
 
     let started = h.play_next().await;
     assert_eq!(started, requested);
-    assert!(h.store.queue().await.unwrap().is_empty());
+    assert!(h
+        .store
+        .queue(djinn_store::MAIN_ROOM)
+        .await
+        .unwrap()
+        .is_empty());
     let now = h.jukebox.now_playing().current.unwrap();
     assert_eq!(now.requested_by.as_deref(), Some("guest"));
 
@@ -397,13 +408,18 @@ async fn request_replacing_a_track_the_engine_already_took() {
         pool_track
     );
     assert_eq!(
-        h.store.queue().await.unwrap().len(),
+        h.store.queue(djinn_store::MAIN_ROOM).await.unwrap().len(),
         1,
         "request still waiting"
     );
     h.finish(pool_track).await;
     assert_eq!(h.play_next().await, requested);
-    assert!(h.store.queue().await.unwrap().is_empty());
+    assert!(h
+        .store
+        .queue(djinn_store::MAIN_ROOM)
+        .await
+        .unwrap()
+        .is_empty());
 }
 
 #[tokio::test]
@@ -475,7 +491,12 @@ async fn only_owner_or_admin_removes_requests() {
         .unwrap();
     h.jukebox.remove_request(&user, mine.id).await.unwrap();
     h.jukebox.remove_request(&admin, item.id).await.unwrap();
-    assert!(h.store.queue().await.unwrap().is_empty());
+    assert!(h
+        .store
+        .queue(djinn_store::MAIN_ROOM)
+        .await
+        .unwrap()
+        .is_empty());
 }
 
 #[tokio::test]
@@ -516,7 +537,12 @@ async fn broken_request_is_dropped() {
     })
     .await;
     h.event(EngineEvent::NextNeeded { after: None }).await;
-    assert!(h.store.queue().await.unwrap().is_empty());
+    assert!(h
+        .store
+        .queue(djinn_store::MAIN_ROOM)
+        .await
+        .unwrap()
+        .is_empty());
     assert!(h.tracks[..2].contains(&h.last_next().unwrap()));
 }
 

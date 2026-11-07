@@ -78,7 +78,7 @@ async fn snapshot(
     Ok(Json(TvSnapshot {
         now_playing,
         player,
-        queue: state.store.queue().await?,
+        queue: state.store.queue(djinn_store::MAIN_ROOM).await?,
         join_url: state.join_url.to_string(),
         guest_mode: state.guest_mode(),
         stream_url: state

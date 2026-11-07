@@ -15,6 +15,8 @@ pub struct OutputRow {
     pub enabled: bool,
     pub volume_trim: f64,
     pub delay_ms: i64,
+    /// The room its speakers play.
+    pub room_id: i64,
 }
 
 impl OutputRow {
@@ -25,7 +27,7 @@ impl OutputRow {
 
 macro_rules! output_columns {
     () => {
-        "id, device_name, label, enabled, volume_trim, delay_ms"
+        "id, device_name, label, enabled, volume_trim, delay_ms, room_id"
     };
 }
 

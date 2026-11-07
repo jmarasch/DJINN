@@ -54,7 +54,7 @@ pub(crate) fn queue_error(err: QueueError) -> ApiError {
 }
 
 async fn queue(_: CurrentUser, State(state): State<AppState>) -> ApiResult<Json<Vec<QueueItem>>> {
-    Ok(Json(state.store.queue().await?))
+    Ok(Json(state.store.queue(djinn_store::MAIN_ROOM).await?))
 }
 
 #[derive(Deserialize)]
@@ -728,7 +728,7 @@ mod tests {
 
         // Bob backs the first song, so he may step back from it, but the
         // second is Alice's alone.
-        let queue = state.store.queue().await.unwrap();
+        let queue = state.store.queue(djinn_store::MAIN_ROOM).await.unwrap();
         let path = format!("/api/queue/{}", queue[1].id);
         let (status, _) = call(&state, Method::DELETE, &path, None, Some(&bob)).await;
         assert_eq!(status, StatusCode::FORBIDDEN, "not bob's request");

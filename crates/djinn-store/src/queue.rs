@@ -140,11 +140,13 @@ macro_rules! queue_select {
 }
 
 impl Store {
-    /// Appends a request, enforcing `limits` and recording where it came
-    /// from. A song already in the queue gets this person as a backer
-    /// instead (using one of their slots) and moves up one place.
+    /// Appends a request to `room`'s queue, enforcing `limits` (which count
+    /// within the room) and recording where it came from. A song already in
+    /// that queue gets this person as a backer instead (using one of their
+    /// slots) and moves up one place.
     pub async fn add_request(
         &self,
+        room: i64,
         track_id: i64,
         user_id: i64,
         limits: RequestLimits,
@@ -161,12 +163,14 @@ impl Store {
         if !available {
             return Err(AddRequestError::NotFound);
         }
-        let existing: Option<(i64, i64)> =
-            sqlx::query_as("SELECT id, user_id FROM request_queue WHERE track_id = ?")
-                .bind(track_id)
-                .fetch_optional(&mut *tx)
-                .await
-                .map_err(StoreError::from)?;
+        let existing: Option<(i64, i64)> = sqlx::query_as(
+            "SELECT id, user_id FROM request_queue WHERE room_id = ? AND track_id = ?",
+        )
+        .bind(room)
+        .bind(track_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(StoreError::from)?;
         if let Some((queue_id, owner)) = existing {
             let backing: bool = sqlx::query_scalar(
                 "SELECT EXISTS (SELECT 1 FROM request_backers WHERE queue_id = ? AND user_id = ?)",
@@ -180,20 +184,24 @@ impl Store {
                 return Err(AddRequestError::AlreadyYours);
             }
         } else if let Some(cap) = limits.queue_cap {
-            let queued: i64 = sqlx::query_scalar("SELECT count(*) FROM request_queue")
-                .fetch_one(&mut *tx)
-                .await
-                .map_err(StoreError::from)?;
+            let queued: i64 =
+                sqlx::query_scalar("SELECT count(*) FROM request_queue WHERE room_id = ?")
+                    .bind(room)
+                    .fetch_one(&mut *tx)
+                    .await
+                    .map_err(StoreError::from)?;
             if queued >= cap {
                 return Err(AddRequestError::QueueFull(cap));
             }
         }
         if let Some(limit) = limits.per_user {
             let queued: i64 = sqlx::query_scalar(
-                "SELECT (SELECT count(*) FROM request_queue WHERE user_id = ?1) \
-                      + (SELECT count(*) FROM request_backers WHERE user_id = ?1)",
+                "SELECT (SELECT count(*) FROM request_queue WHERE user_id = ?1 AND room_id = ?2) \
+                      + (SELECT count(*) FROM request_backers rb JOIN request_queue q ON q.id = rb.queue_id \
+                         WHERE rb.user_id = ?1 AND q.room_id = ?2)",
             )
             .bind(user_id)
+            .bind(room)
             .fetch_one(&mut *tx)
             .await
             .map_err(StoreError::from)?;
@@ -218,10 +226,12 @@ impl Store {
             }
             None => {
                 let inserted = sqlx::query_scalar(
-                    "INSERT INTO request_queue (track_id, user_id, added_at, position)
-                     VALUES (?, ?, ?, (SELECT coalesce(max(position), 0) + 1 FROM request_queue))
+                    "INSERT INTO request_queue (room_id, track_id, user_id, added_at, position)
+                     VALUES (?1, ?2, ?3, ?4,
+                             (SELECT coalesce(max(position), 0) + 1 FROM request_queue WHERE room_id = ?1))
                      RETURNING id",
                 )
+                .bind(room)
                 .bind(track_id)
                 .bind(user_id)
                 .bind(now)
@@ -237,10 +247,12 @@ impl Store {
             }
         };
         sqlx::query(concat!(
-            "INSERT INTO request_events (track_id, user_id, at, name, mac, ip, style_id)              VALUES (?, ?, ?, ?, ?, ?, ",
+            "INSERT INTO request_events (room_id, track_id, user_id, at, name, mac, ip, style_id) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ",
             style_in_use!(),
             ")"
         ))
+        .bind(room)
         .bind(track_id)
         .bind(user_id)
         .bind(now)
@@ -335,12 +347,13 @@ impl Store {
 
     /// The request queue in play order. Requests for files that have since
     /// gone missing are left out.
-    pub async fn queue(&self) -> Result<Vec<QueueItem>> {
+    pub async fn queue(&self, room: i64) -> Result<Vec<QueueItem>> {
         let items = sqlx::query_as(concat!(
             queue_select!(),
-            " WHERE t.removed_at IS NULL ORDER BY ",
+            " WHERE q.room_id = ? AND t.removed_at IS NULL ORDER BY ",
             queue_order!()
         ))
+        .bind(room)
         .fetch_all(&self.pool)
         .await?;
         Ok(items)
@@ -370,9 +383,11 @@ impl Store {
         let rows: Vec<(i64, i64, i64)> = sqlx::query_as(concat!(
             "SELECT q.id, q.position, ",
             backer_count!(),
-            " FROM request_queue q ORDER BY ",
+            " FROM request_queue q \
+             WHERE q.room_id = (SELECT room_id FROM request_queue WHERE id = ?) ORDER BY ",
             queue_order!()
         ))
+        .bind(id)
         .fetch_all(&mut *tx)
         .await?;
         let Some(from) = rows.iter().position(|&(i, _, _)| i == id) else {
@@ -398,11 +413,13 @@ impl Store {
         Ok(true)
     }
 
-    /// Most recently started tracks, newest first.
-    pub async fn recent_track_ids(&self, limit: i64) -> Result<Vec<i64>> {
+    /// Tracks most recently started in `room`, newest first.
+    pub async fn recent_track_ids(&self, room: i64, limit: i64) -> Result<Vec<i64>> {
         let ids = sqlx::query_scalar(
-            "SELECT track_id FROM play_events ORDER BY started_at DESC, id DESC LIMIT ?",
+            "SELECT track_id FROM play_events WHERE room_id = ? \
+             ORDER BY started_at DESC, id DESC LIMIT ?",
         )
+        .bind(room)
         .bind(limit)
         .fetch_all(&self.pool)
         .await?;
@@ -425,15 +442,18 @@ impl Store {
 
     pub async fn start_play_event(
         &self,
+        room: i64,
         track_id: i64,
         source: PlaySource,
         requested_by: Option<i64>,
     ) -> Result<i64> {
         let id = sqlx::query_scalar(concat!(
-            "INSERT INTO play_events (track_id, source, requested_by, started_at, style_id)              VALUES (?, ?, ?, ?, ",
+            "INSERT INTO play_events (room_id, track_id, source, requested_by, started_at, style_id) \
+             VALUES (?, ?, ?, ?, ?, ",
             style_in_use!(),
             ") RETURNING id"
         ))
+        .bind(room)
         .bind(track_id)
         .bind(source)
         .bind(requested_by)
@@ -516,14 +536,14 @@ mod tests {
         let mut queued = Vec::new();
         for &id in &ids[..4] {
             let (item, _) = store
-                .add_request(id, ana, per_user(None), &origin())
+                .add_request(crate::MAIN_ROOM, id, ana, per_user(None), &origin())
                 .await
                 .unwrap();
             queued.push(item.id);
         }
         let order = |store: Store| async move {
             store
-                .queue()
+                .queue(crate::MAIN_ROOM)
                 .await
                 .unwrap()
                 .iter()
@@ -535,7 +555,7 @@ mod tests {
             let store = store.clone();
             async move {
                 store
-                    .add_request(track, user, per_user(None), &origin())
+                    .add_request(crate::MAIN_ROOM, track, user, per_user(None), &origin())
                     .await
                     .unwrap();
             }
@@ -567,18 +587,18 @@ mod tests {
         let mut queued = Vec::new();
         for &id in &ids[..4] {
             let (item, _) = store
-                .add_request(id, ana, per_user(None), &origin())
+                .add_request(crate::MAIN_ROOM, id, ana, per_user(None), &origin())
                 .await
                 .unwrap();
             queued.push(item.id);
         }
         store
-            .add_request(ids[3], sam, per_user(None), &origin())
+            .add_request(crate::MAIN_ROOM, ids[3], sam, per_user(None), &origin())
             .await
             .unwrap();
         let order = || async {
             store
-                .queue()
+                .queue(crate::MAIN_ROOM)
                 .await
                 .unwrap()
                 .iter()
@@ -605,13 +625,13 @@ mod tests {
         let limit = per_user(Some(2));
         for &id in &ids[..3] {
             store
-                .add_request(id, ana, per_user(None), &origin())
+                .add_request(crate::MAIN_ROOM, id, ana, per_user(None), &origin())
                 .await
                 .unwrap();
         }
         let order = |store: Store| async move {
             store
-                .queue()
+                .queue(crate::MAIN_ROOM)
                 .await
                 .unwrap()
                 .iter()
@@ -621,7 +641,7 @@ mod tests {
 
         // Sam backs the last song: backed songs go first.
         let (item, outcome) = store
-            .add_request(ids[2], sam, limit, &origin())
+            .add_request(crate::MAIN_ROOM, ids[2], sam, limit, &origin())
             .await
             .unwrap();
         assert_eq!(outcome, RequestOutcome::Backed);
@@ -632,21 +652,25 @@ mod tests {
         );
         // Jo backs it too.
         store
-            .add_request(ids[2], jo, limit, &origin())
+            .add_request(crate::MAIN_ROOM, ids[2], jo, limit, &origin())
             .await
             .unwrap();
         assert_eq!(order(store.clone()).await[0], (ids[2], 2));
         // Asking again is refused, and a backing uses up a slot.
         assert!(matches!(
-            store.add_request(ids[2], sam, limit, &origin()).await,
+            store
+                .add_request(crate::MAIN_ROOM, ids[2], sam, limit, &origin())
+                .await,
             Err(AddRequestError::AlreadyYours)
         ));
         store
-            .add_request(ids[3], sam, limit, &origin())
+            .add_request(crate::MAIN_ROOM, ids[3], sam, limit, &origin())
             .await
             .unwrap();
         assert!(matches!(
-            store.add_request(ids[4], sam, limit, &origin()).await,
+            store
+                .add_request(crate::MAIN_ROOM, ids[4], sam, limit, &origin())
+                .await,
             Err(AddRequestError::LimitReached(2))
         ));
 
@@ -677,45 +701,45 @@ mod tests {
     async fn request_rules() {
         let (store, user, ids) = setup().await;
         store
-            .add_request(ids[0], user, per_user(Some(2)), &origin())
+            .add_request(crate::MAIN_ROOM, ids[0], user, per_user(Some(2)), &origin())
             .await
             .unwrap();
         assert!(matches!(
             store
-                .add_request(ids[0], user, per_user(Some(2)), &origin())
+                .add_request(crate::MAIN_ROOM, ids[0], user, per_user(Some(2)), &origin())
                 .await,
             Err(AddRequestError::AlreadyYours)
         ));
         store
-            .add_request(ids[1], user, per_user(Some(2)), &origin())
+            .add_request(crate::MAIN_ROOM, ids[1], user, per_user(Some(2)), &origin())
             .await
             .unwrap();
         assert!(matches!(
             store
-                .add_request(ids[2], user, per_user(Some(2)), &origin())
+                .add_request(crate::MAIN_ROOM, ids[2], user, per_user(Some(2)), &origin())
                 .await,
             Err(AddRequestError::LimitReached(2))
         ));
         // No limit (admin).
         store
-            .add_request(ids[2], user, per_user(None), &origin())
+            .add_request(crate::MAIN_ROOM, ids[2], user, per_user(None), &origin())
             .await
             .unwrap();
         assert!(matches!(
             store
-                .add_request(9999, user, per_user(None), &origin())
+                .add_request(crate::MAIN_ROOM, 9999, user, per_user(None), &origin())
                 .await,
             Err(AddRequestError::NotFound)
         ));
 
-        let queue = store.queue().await.unwrap();
+        let queue = store.queue(crate::MAIN_ROOM).await.unwrap();
         let order: Vec<i64> = queue.iter().map(|q| q.track.id).collect();
         assert_eq!(order, [ids[0], ids[1], ids[2]]);
         assert_eq!(queue[0].username, "u");
 
         store.move_request(queue[2].id, 0).await.unwrap();
         let order: Vec<i64> = store
-            .queue()
+            .queue(crate::MAIN_ROOM)
             .await
             .unwrap()
             .iter()
@@ -724,14 +748,14 @@ mod tests {
         assert_eq!(order, [ids[2], ids[0], ids[1]]);
 
         assert!(store.remove_request(queue[0].id).await.unwrap());
-        assert_eq!(store.queue().await.unwrap().len(), 2);
+        assert_eq!(store.queue(crate::MAIN_ROOM).await.unwrap().len(), 2);
     }
 
     #[tokio::test]
     async fn play_history() {
         let (store, user, ids) = setup().await;
         let first = store
-            .start_play_event(ids[0], PlaySource::Pool, None)
+            .start_play_event(crate::MAIN_ROOM, ids[0], PlaySource::Pool, None)
             .await
             .unwrap();
         store
@@ -739,10 +763,13 @@ mod tests {
             .await
             .unwrap();
         store
-            .start_play_event(ids[1], PlaySource::Request, Some(user))
+            .start_play_event(crate::MAIN_ROOM, ids[1], PlaySource::Request, Some(user))
             .await
             .unwrap();
-        assert_eq!(store.recent_track_ids(10).await.unwrap(), [ids[1], ids[0]]);
+        assert_eq!(
+            store.recent_track_ids(crate::MAIN_ROOM, 10).await.unwrap(),
+            [ids[1], ids[0]]
+        );
     }
 
     #[tokio::test]
@@ -753,19 +780,27 @@ mod tests {
             queue_cap: Some(2),
         };
         store
-            .add_request(ids[0], user, capped, &origin())
+            .add_request(crate::MAIN_ROOM, ids[0], user, capped, &origin())
             .await
             .unwrap();
         store
-            .add_request(ids[1], user, capped, &origin())
+            .add_request(crate::MAIN_ROOM, ids[1], user, capped, &origin())
             .await
             .unwrap();
         assert!(matches!(
-            store.add_request(ids[2], user, capped, &origin()).await,
+            store
+                .add_request(crate::MAIN_ROOM, ids[2], user, capped, &origin())
+                .await,
             Err(AddRequestError::QueueFull(2))
         ));
         store
-            .add_request(ids[2], user, RequestLimits::default(), &origin())
+            .add_request(
+                crate::MAIN_ROOM,
+                ids[2],
+                user,
+                RequestLimits::default(),
+                &origin(),
+            )
             .await
             .unwrap();
 
@@ -785,7 +820,13 @@ mod tests {
         // played once.
         for _ in 0..2 {
             store
-                .add_request(ids[1], user, RequestLimits::default(), &origin())
+                .add_request(
+                    crate::MAIN_ROOM,
+                    ids[1],
+                    user,
+                    RequestLimits::default(),
+                    &origin(),
+                )
                 .await
                 .unwrap();
             let id: i64 = sqlx::query_scalar("SELECT id FROM request_queue")
@@ -795,7 +836,7 @@ mod tests {
             store.remove_request(id).await.unwrap();
         }
         store
-            .start_play_event(ids[2], PlaySource::Pool, None)
+            .start_play_event(crate::MAIN_ROOM, ids[2], PlaySource::Pool, None)
             .await
             .unwrap();
         let artist: i64 = sqlx::query_scalar("SELECT id FROM artists WHERE name = 'A'")

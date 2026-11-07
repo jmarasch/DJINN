@@ -655,11 +655,17 @@ async fn sorting_skips_leading_articles_and_albums_sort_by_year() {
         .id;
     let origin = crate::RequestOrigin::default();
     store
-        .add_request(ids[2], user, crate::RequestLimits::default(), &origin)
+        .add_request(
+            crate::MAIN_ROOM,
+            ids[2],
+            user,
+            crate::RequestLimits::default(),
+            &origin,
+        )
         .await
         .unwrap();
     store
-        .start_play_event(ids[3], crate::PlaySource::Pool, None)
+        .start_play_event(crate::MAIN_ROOM, ids[3], crate::PlaySource::Pool, None)
         .await
         .unwrap();
     let popular = store.tracks_page(TrackSort::Popular, 0, 10).await.unwrap();

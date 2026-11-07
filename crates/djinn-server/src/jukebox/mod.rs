@@ -204,6 +204,8 @@ struct Playing {
 }
 
 pub struct Jukebox {
+    /// The room this jukebox plays for.
+    room: i64,
     store: Store,
     engine: EngineSink,
     events: broadcast::Sender<ServerEvent>,
@@ -325,6 +327,7 @@ impl Jukebox {
             skip_votes: HashSet::new(),
             skip_votes_needed,
             songs_started: 0,
+            room: djinn_store::MAIN_ROOM,
             skip_voted_on: HashMap::new(),
             output: OutputStatus::default(),
             last_position_second: None,
@@ -493,7 +496,7 @@ impl Jukebox {
         };
         let added = self
             .store
-            .add_request(track_id, user.id, limits, origin)
+            .add_request(self.room, track_id, user.id, limits, origin)
             .await?;
         self.queue_changed().await?;
         Ok(added)
@@ -511,7 +514,7 @@ impl Jukebox {
         for &id in track_ids {
             match self
                 .store
-                .add_request(id, admin.id, RequestLimits::default(), origin)
+                .add_request(self.room, id, admin.id, RequestLimits::default(), origin)
                 .await
             {
                 Ok(_) => added += 1,
@@ -752,6 +755,7 @@ impl Jukebox {
             None => (
                 self.store
                     .start_play_event(
+                        self.room,
                         id,
                         pending.source,
                         pending.requested_by.as_ref().map(|(id, _)| *id),
@@ -861,7 +865,7 @@ impl Jukebox {
             let in_flight: Vec<i64> = self.in_flight.iter().filter_map(|p| p.request_id).collect();
             let head = self
                 .store
-                .queue()
+                .queue(self.room)
                 .await?
                 .into_iter()
                 .find(|q| !in_flight.contains(&q.id));
@@ -966,7 +970,9 @@ impl Jukebox {
     }
 
     async fn broadcast_queue(&self) -> anyhow::Result<()> {
-        self.send(ServerEvent::QueueChanged(self.store.queue().await?));
+        self.send(ServerEvent::QueueChanged(
+            self.store.queue(self.room).await?,
+        ));
         Ok(())
     }
 

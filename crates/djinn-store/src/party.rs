@@ -213,6 +213,7 @@ mod tests {
     async fn request_and_play(store: &Store, track: i64, user: i64, skipped: bool) {
         let (item, _) = store
             .add_request(
+                crate::MAIN_ROOM,
                 track,
                 user,
                 RequestLimits::default(),
@@ -221,7 +222,7 @@ mod tests {
             .await
             .unwrap();
         let play = store
-            .start_play_event(track, PlaySource::Request, Some(user))
+            .start_play_event(crate::MAIN_ROOM, track, PlaySource::Request, Some(user))
             .await
             .unwrap();
         store
@@ -279,7 +280,10 @@ mod tests {
 
         assert!(store.clear_party_style(1).await.unwrap());
         assert!(store.party_history(1).await.unwrap().is_empty());
-        assert_eq!(store.recent_track_ids(10).await.unwrap(), vec![track]);
+        assert_eq!(
+            store.recent_track_ids(crate::MAIN_ROOM, 10).await.unwrap(),
+            vec![track]
+        );
         assert!(store.party_history(other.id).await.unwrap().is_empty());
         assert!(!store.clear_party_style(999).await.unwrap());
     }
@@ -317,7 +321,10 @@ mod tests {
         store.use_party_style(1).await.unwrap();
 
         assert!(store.delete_party_style(bbq.id).await.unwrap());
-        assert_eq!(store.recent_track_ids(10).await.unwrap(), vec![track]);
+        assert_eq!(
+            store.recent_track_ids(crate::MAIN_ROOM, 10).await.unwrap(),
+            vec![track]
+        );
         assert!(store.party_history(1).await.unwrap().is_empty());
     }
 }

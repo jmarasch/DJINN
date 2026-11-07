@@ -430,6 +430,7 @@ mod tests {
                 enabled: true,
                 volume_trim: 1.0,
                 delay_ms: 120,
+                room_id: 1,
             },
             OutputRow {
                 id: 2,
@@ -438,6 +439,7 @@ mod tests {
                 enabled: false,
                 volume_trim: 1.5,
                 delay_ms: 5000,
+                room_id: 1,
             },
         ];
         let configs = engine_configs(&rows);

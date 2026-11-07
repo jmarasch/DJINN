@@ -390,7 +390,7 @@ impl Jukebox {
             .chain(self.playing.iter().map(|p| p.pending.track.id))
             .collect();
         let upcoming = recent.len();
-        recent.extend(self.store.recent_track_ids(window).await?);
+        recent.extend(self.store.recent_track_ids(self.room, window).await?);
         let counted = usize::try_from(window).unwrap_or(0) + upcoming;
         match &self.copies {
             Some(copies) if settings::flag(&self.store, AVOID_COPIES, true).await? => {
