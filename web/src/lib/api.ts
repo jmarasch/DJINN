@@ -256,6 +256,9 @@ export const api = {
   linkRoom: (id: number, to: number | null) => put<void>(`/rooms/${id}/link`, { to }),
   placeOutput: (id: number, roomId: number) => put<void>(`/outputs/${id}/room`, { room_id: roomId }),
   setNodeRoom: (id: number, roomId: number) => patch<void>(`/nodes/${id}`, { room_id: roomId }),
+  roomRules: (id: number) => get<{ max_queue: number; per_user_limit: number; skip_votes: number }>(`/rooms/${id}/rules`),
+  setRoomRules: (id: number, rules: { max_queue: number; per_user_limit: number; skip_votes: number }) =>
+    put<void>(`/rooms/${id}/rules`, rules),
   roomQuiet: (id: number) => get<{ follow_main: boolean; takeover: 'now' | 'after_song' }>(`/rooms/${id}/quiet`),
   setRoomQuiet: (id: number, rules: { follow_main: boolean; takeover: 'now' | 'after_song' }) =>
     put<void>(`/rooms/${id}/quiet`, rules),

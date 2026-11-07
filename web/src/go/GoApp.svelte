@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '../lib/i18n.svelte'
   // DJINN GO: your own listening, apart from the party. The song files
   // come as they are and this device plays them.
   import { onMount } from 'svelte'
@@ -162,15 +163,15 @@
   <header bind:offsetHeight={headerHeight}>
     <a class="brand" href="#/">DJINN GO</a>
     <nav aria-label="Main navigation">
-      <button class="back" disabled={!navigation.canGoBack} onclick={goBack} aria-label="Back" title="Back">
-        <Icon name="back" size={28} /><span>Back</span>
+      <button class="back" disabled={!navigation.canGoBack} onclick={goBack} aria-label={t('nav.back')} title={t('nav.back')}>
+        <Icon name="back" size={28} /><span>{t('nav.back')}</span>
       </button>
-      <a href="#/" class:active={section === 'home'} aria-label="Home"><Icon name="home" /><span>Home</span></a>
-      <a href="#/search" class:active={section === 'search'} aria-label="Library"><Icon name="search" /><span>Library</span></a>
-      <a href="#/library" class:active={section === 'library'} aria-label="Your music">
-        <Icon name="heart-outline" /><span>Your music</span>
+      <a href="#/" class:active={section === 'home'} aria-label={t('go.home')}><Icon name="home" /><span>{t('go.home')}</span></a>
+      <a href="#/search" class:active={section === 'search'} aria-label={t('nav.library')}><Icon name="search" /><span>{t('nav.library')}</span></a>
+      <a href="#/library" class:active={section === 'library'} aria-label={t('go.your_music')}>
+        <Icon name="heart-outline" /><span>{t('go.your_music')}</span>
       </a>
-      <a href="#/account" class:active={section === 'account'} aria-label="Account"><Icon name="settings" /><span>Account</span></a>
+      <a href="#/account" class:active={section === 'account'} aria-label={t('go.account')}><Icon name="settings" /><span>{t('go.account')}</span></a>
     </nav>
   </header>
   <main class="go" class:playing={player.index >= 0 && route.path !== '/playing'} style:--nav-height="{headerHeight}px">

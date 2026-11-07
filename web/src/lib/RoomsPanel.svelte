@@ -16,6 +16,22 @@
   let deleting = $state<number | null>(null)
   /** Each room's "when quiet" choices. */
   let quiet = $state<Record<number, { follow_main: boolean; takeover: 'now' | 'after_song' }>>({})
+  /** The room whose queue rules are open, and the rules being edited. */
+  let ruling = $state<number | null>(null)
+  let rules = $state({ max_queue: 0, per_user_limit: 3, skip_votes: 0 })
+
+  async function openRules(room: Room) {
+    if (ruling === room.id) {
+      ruling = null
+      return
+    }
+    try {
+      rules = await api.roomRules(room.id)
+      ruling = room.id
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not load the rules', true)
+    }
+  }
 
   async function load() {
     try {
@@ -60,7 +76,7 @@
   <h2>Rooms</h2>
   <p class="small muted">
     Each room is its own party: its own queue, playlist, volume and skip votes, played on the speakers and nodes you
-    put in it. Link a room to another to play the same music in step there. People pick their room in the app, or scan
+    put in it. A room uses Main's queue rules (Admin &gt; Rules) until you give it its own. Link a room to another to play the same music in step there. People pick their room in the app, or scan
     a room's join code to walk straight in. Your song likes and what the party learns are shared across the house.
   </p>
   <form class="add" onsubmit={add}>
@@ -163,6 +179,24 @@
       {/if}
     </div>
 
+    <button class="small-button rules-toggle" onclick={() => openRules(room)}>
+      {ruling === room.id ? 'Hide queue rules' : 'Queue rules'}
+    </button>
+    {#if ruling === room.id}
+      <form
+        class="rules"
+        onsubmit={(e) => {
+          e.preventDefault()
+          void run(() => api.setRoomRules(room.id, rules), `${room.name}'s rules saved`)
+        }}
+      >
+        <label>Most songs in the queue (0 for no limit) <input type="number" min="0" max="1000" bind:value={rules.max_queue} /></label>
+        <label>Songs each person can have queued <input type="number" min="0" max="100" bind:value={rules.per_user_limit} /></label>
+        <label>Votes needed to skip a song (0 turns voting off) <input type="number" min="0" max="100" bind:value={rules.skip_votes} /></label>
+        <button class="primary">Save {room.name}'s rules</button>
+      </form>
+    {/if}
+
     <div class="links">
       <a href="/api/join/qr.svg?room={room.id}" target="_blank" rel="noopener">Join code</a>
       <a href="/tv?room={room.id}" target="_blank" rel="noopener">TV page</a>
@@ -239,6 +273,21 @@
     align-items: center;
     gap: 8px;
     margin-top: 10px;
+  }
+
+  .rules-toggle {
+    margin-top: 10px;
+  }
+
+  .rules {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 8px;
+  }
+
+  .rules input {
+    max-width: 120px;
   }
 
   .row-pick {

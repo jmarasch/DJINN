@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '../../lib/i18n.svelte'
   // Your library: liked songs, albums and artists, playlists, history.
   import { api } from '../../lib/api'
   import Art from '../../lib/Art.svelte'
@@ -79,11 +80,11 @@
 </script>
 
 <nav class="sections">
-  <a href="#/library" class:active={section === 'liked'}>Liked</a>
-  <a href="#/library/playlists" class:active={section === 'playlists'}>Playlists</a>
-  <a href="#/library/genres" class:active={section === 'genres'}>Genres</a>
-  <a href="#/library/history" class:active={section === 'history'}>History</a>
-  <a href="#/library/year" class:active={section === 'year'}>Your year</a>
+  <a href="#/library" class:active={section === 'liked'}>{t('go.liked')}</a>
+  <a href="#/library/playlists" class:active={section === 'playlists'}>{t('nav.playlists')}</a>
+  <a href="#/library/genres" class:active={section === 'genres'}>{t('library.genres')}</a>
+  <a href="#/library/history" class:active={section === 'history'}>{t('go.history')}</a>
+  <a href="#/library/year" class:active={section === 'year'}>{t('go.your_year')}</a>
   {#if app.me?.permissions?.submit_music}<a href="#/submit">Submit music</a>{/if}
 </nav>
 
@@ -113,7 +114,7 @@
 
 {#if section === 'liked' && liked}
   {#if liked.artists.length}
-    <h2>Artists</h2>
+    <h2>{t('library.artists')}</h2>
     <ScrollRow gap={12}>
       {#each liked.artists as artist (artist.id)}
         <div class="tile-wrap">
@@ -127,7 +128,7 @@
     </ScrollRow>
   {/if}
   {#if liked.albums.length}
-    <h2>Albums</h2>
+    <h2>{t('library.albums')}</h2>
     <ScrollRow gap={12}>
       {#each liked.albums as album (album.id)}
         <div class="tile-wrap">
@@ -142,7 +143,7 @@
     </ScrollRow>
   {/if}
   <div class="head">
-    <h2>Songs</h2>
+    <h2>{t('library.songs')}</h2>
     {#if liked.tracks.length}<button class="small-button" onclick={() => liked && playList(liked.tracks)}>Play all</button>{/if}
   </div>
   {#if liked.tracks.length}

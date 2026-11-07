@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '../../lib/i18n.svelte'
   // Where you left off, what you played lately, your playlists, and
   // what's new.
   import { onMount } from 'svelte'
@@ -44,7 +45,7 @@
   {/if}
 
   {#if home.playlists.length}
-    <h2>Playlists</h2>
+    <h2>{t('nav.playlists')}</h2>
     <div class="chips">
       {#each home.playlists as list (list.id)}
         <a class="chip" href="#/playlist/{list.id}">{list.name}</a>
@@ -53,11 +54,11 @@
   {/if}
 
   {#if home.recent.length}
-    <h2>Played lately</h2>
+    <h2>{t('go.played_lately')}</h2>
     <SongList tracks={home.recent} />
   {/if}
 
-  <h2>New in the library</h2>
+  <h2>{t('go.new_in_library')}</h2>
   <SongList tracks={home.newest} />
 {:else if !error}
   <p class="muted">Loading...</p>

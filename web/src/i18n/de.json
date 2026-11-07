@@ -146,5 +146,16 @@
   "count.plays": {
     "one": "{n}-mal gespielt",
     "other": "{n}-mal gespielt"
-  }
+  },
+  "go.home": "Start",
+  "go.your_music": "Deine Musik",
+  "go.account": "Konto",
+  "go.played_lately": "Zuletzt gehört",
+  "go.new_in_library": "Neu in der Bibliothek",
+  "go.no_songs": "Keine Songs gefunden.",
+  "go.play_all": "Alle abspielen",
+  "go.thinking": "Denke nach...",
+  "go.liked": "Gefällt mir",
+  "go.history": "Verlauf",
+  "go.your_year": "Dein Jahr"
 }

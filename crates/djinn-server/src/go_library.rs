@@ -497,8 +497,10 @@ async fn send_to_party(
         mac: me.user.mac.clone(),
         ip: device.ip.clone(),
     };
+    // Into the room this person is in at the party.
     let (_, outcome) = state
-        .jukebox
+        .jukebox_of(me.user.id)
+        .await
         .lock()
         .await
         .add_request(&me.user, id, &origin)

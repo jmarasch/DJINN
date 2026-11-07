@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '../../lib/i18n.svelte'
   // The whole library: search as you type, or browse by artist, album,
   // song or genre (the same browser as the party app). Tapping a song in
   // the big lists plays it, then songs like it. Descriptions ("chill house",
@@ -95,13 +96,13 @@
 
 {#snippet describedSection()}
   {#if thinking}
-    <p class="small muted thinking"><span class="spinner" aria-hidden="true"></span> Thinking...</p>
+    <p class="small muted thinking"><span class="spinner" aria-hidden="true"></span> {t('go.thinking')}</p>
   {/if}
   {#if described}
     <div class="described-head">
       <h2>
-        Matches <span class="muted">{described.summary.join(' · ')}</span>
-        {#if described.read_by_ai}<span class="tag">read by AI</span>{/if}
+        {t('search.matches')} <span class="muted">{described.summary.join(' · ')}</span>
+        {#if described.read_by_ai}<span class="tag">{t('search.read_by_ai')}</span>{/if}
       </h2>
       {#if described.tracks.length}
         <p class="small muted">
@@ -110,11 +111,11 @@
             : ''}.{described.unknown.length ? ` Not sure about "${described.unknown.join(' ')}".` : ''}
         </p>
         <div class="actions">
-          <button onclick={() => playList(described.tracks)}>Play all</button>
-          <button onclick={savePlaylist}>Save as playlist</button>
+          <button onclick={() => playList(described.tracks)}>{t('go.play_all')}</button>
+          <button onclick={savePlaylist}>{t('search.save_playlist')}</button>
         </div>
       {:else}
-        <p class="small muted">Nothing in the library fits that.</p>
+        <p class="small muted">{t('search.nothing_fits')}</p>
       {/if}
     </div>
     {#if described.artists.length}
@@ -132,7 +133,7 @@
   <input
     class="search"
     type="search"
-    placeholder="Search, or describe: 80s rock, chill house..."
+    placeholder={t('search.placeholder')}
     bind:value={query}
     aria-label="Search"
     autocomplete="off"
@@ -157,7 +158,7 @@
 {:else if results}
   {#if describedFirst}{@render describedSection()}{/if}
   {#if results.artists.length}
-    <h2>Artists</h2>
+    <h2>{t('library.artists')}</h2>
     <ScrollRow gap={12}>
       {#each results.artists as artist (artist.id)}
         <div class="tile-wrap">
@@ -171,7 +172,7 @@
     </ScrollRow>
   {/if}
   {#if results.albums.length}
-    <h2>Albums</h2>
+    <h2>{t('library.albums')}</h2>
     <ScrollRow gap={12}>
       {#each results.albums as album (album.id)}
         <div class="tile-wrap">
@@ -186,14 +187,14 @@
     </ScrollRow>
   {/if}
   {#if results.tracks.length}
-    <h2>Songs</h2>
+    <h2>{t('library.songs')}</h2>
     <SongList tracks={results.tracks} />
   {:else if !described?.tracks.length && !results.lyrics?.length && !thinking}
-    <h2>Songs</h2>
-    <p class="muted">No songs match.</p>
+    <h2>{t('library.songs')}</h2>
+    <p class="muted">{t('go.no_songs')}</p>
   {/if}
   {#if results.lyrics?.length}
-    <h2>Songs with these words</h2>
+    <h2>{t('search.lyric_matches')}</h2>
     {#each results.lyrics as hit (hit.track.id)}
       <SongRow
         track={hit.track}

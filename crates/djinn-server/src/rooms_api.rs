@@ -22,6 +22,7 @@ pub fn router() -> Router<AppState> {
         .route("/outputs/{id}/room", put(place_output))
         .route("/rooms/sync", post(resync))
         .route("/rooms/{id}/quiet", get(get_quiet).put(put_quiet))
+        .route("/rooms/{id}/rules", get(get_rules).put(put_rules))
 }
 
 fn room_error(e: RoomError) -> ApiError {
@@ -195,6 +196,67 @@ async fn put_quiet(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// A room's own queue rules; a room without its own uses Main's.
+#[derive(Serialize, Deserialize)]
+struct RoomRules {
+    /// Most requests the room's queue holds; 0 for no cap.
+    max_queue: i64,
+    /// Requests each person may have waiting in this room.
+    per_user_limit: i64,
+    /// Votes that skip a song; 0 turns skip voting off.
+    skip_votes: i64,
+}
+
+async fn get_rules(
+    _: AdminUser,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> ApiResult<Json<RoomRules>> {
+    use crate::jukebox::{
+        room_number, DEFAULT_PER_USER_LIMIT, MAX_QUEUE, PER_USER_LIMIT, SKIP_VOTES,
+    };
+    Ok(Json(RoomRules {
+        max_queue: room_number(&state.store, id, MAX_QUEUE, 0).await?,
+        per_user_limit: room_number(&state.store, id, PER_USER_LIMIT, DEFAULT_PER_USER_LIMIT)
+            .await?,
+        skip_votes: room_number(&state.store, id, SKIP_VOTES, 0).await?,
+    }))
+}
+
+async fn put_rules(
+    _: AdminUser,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Json(body): Json<RoomRules>,
+) -> ApiResult<StatusCode> {
+    use crate::jukebox::{room_key, MAX_QUEUE, PER_USER_LIMIT, SKIP_VOTES};
+    if state.store.room(id).await?.is_none() {
+        return Err(ApiError::not_found());
+    }
+    if !(0..=1000).contains(&body.max_queue)
+        || !(0..=100).contains(&body.per_user_limit)
+        || !(0..=100).contains(&body.skip_votes)
+    {
+        return Err(ApiError::bad_request("those rules are out of range"));
+    }
+    for (key, value) in [
+        (MAX_QUEUE, body.max_queue),
+        (PER_USER_LIMIT, body.per_user_limit),
+        (SKIP_VOTES, body.skip_votes),
+    ] {
+        state
+            .store
+            .set_setting(&room_key(id, key), &value.to_string())
+            .await?;
+    }
+    state
+        .jukebox_for(id)
+        .lock()
+        .await
+        .set_skip_votes_needed(u32::try_from(body.skip_votes).unwrap_or(0));
+    Ok(StatusCode::NO_CONTENT)
+}
+
 async fn resync(_: AdminUser, State(state): State<AppState>) -> ApiResult<StatusCode> {
     crate::rooms_rt::sync(&state).await?;
     Ok(StatusCode::NO_CONTENT)
@@ -287,5 +349,102 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::NO_CONTENT);
+    }
+
+    #[tokio::test]
+    async fn a_room_can_have_its_own_rules() {
+        let state = AppState::for_tests().await;
+        let admin = session(&state, "boss", Role::Admin).await;
+        let sam = session(&state, "sam", Role::User).await;
+        let songs: Vec<djinn_store::ScannedTrack> = ["a", "b", "c"]
+            .iter()
+            .map(|n| djinn_store::ScannedTrack {
+                path: format!("/m/{n}.flac"),
+                size: 1,
+                mtime: 1,
+                title: n.to_string(),
+                ..Default::default()
+            })
+            .collect();
+        state.store.save_scanned(&songs).await.unwrap();
+        call(
+            &state,
+            Method::POST,
+            "/api/rooms",
+            Some(r#"{"name":"Patio"}"#),
+            Some(&admin),
+        )
+        .await;
+        let patio = state.store.rooms().await.unwrap()[1].id;
+        let (_, body) = get_body(&state, &format!("/api/rooms/{patio}/rules"), &admin).await;
+        assert!(
+            body.contains(r#""per_user_limit":3"#),
+            "Main's by default: {body}"
+        );
+        let rules = r#"{"max_queue":0,"per_user_limit":1,"skip_votes":0}"#;
+        let (status, _) = call(
+            &state,
+            Method::PUT,
+            &format!("/api/rooms/{patio}/rules"),
+            Some(rules),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+
+        // A jukebox for the patio with no engine, so nothing leaves its queue.
+        let mut patio_box = crate::jukebox::Jukebox::for_room(
+            state.store.clone(),
+            patio,
+            Box::new(|_| {}),
+            tokio::sync::broadcast::channel(16).0,
+        )
+        .await
+        .unwrap();
+        let sam_user = state
+            .store
+            .users()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|u| u.username == "sam")
+            .unwrap();
+        let ids: Vec<i64> = state
+            .store
+            .tracks_by_ids(&[1, 2, 3])
+            .await
+            .unwrap()
+            .iter()
+            .map(|t| t.id)
+            .collect();
+        let origin = djinn_store::RequestOrigin::default();
+        assert!(patio_box
+            .add_request(&sam_user, ids[0], &origin)
+            .await
+            .is_ok());
+        assert!(
+            patio_box
+                .add_request(&sam_user, ids[1], &origin)
+                .await
+                .is_err(),
+            "one each in the patio"
+        );
+        // Main keeps its own limit of three.
+        let mut main_box = crate::jukebox::Jukebox::new(
+            state.store.clone(),
+            Box::new(|_| {}),
+            tokio::sync::broadcast::channel(16).0,
+        )
+        .await
+        .unwrap();
+        assert!(main_box
+            .add_request(&sam_user, ids[1], &origin)
+            .await
+            .is_ok());
+        assert!(main_box
+            .add_request(&sam_user, ids[2], &origin)
+            .await
+            .is_ok());
+        let _ = sam;
     }
 }
