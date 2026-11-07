@@ -334,6 +334,9 @@ struct MeAnswer {
     audio: AudioSettings,
     /// Songs to cache, in play order (only once accepted).
     upcoming: Vec<Upcoming>,
+    /// The room whose music it plays now (its room's leader, or Main's while
+    /// a quiet room follows Main); a change means reconnecting.
+    audio_room: i64,
 }
 
 /// A node checking in: still waiting, accepted (and which room), or (401)
@@ -357,6 +360,7 @@ async fn me(
     Ok(Json(MeAnswer {
         audio,
         upcoming,
+        audio_room: state.rooms.audio_leader(node.room_id),
         status: node.status,
         name: node.name,
         room_id: node.room_id,

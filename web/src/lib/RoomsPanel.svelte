@@ -14,6 +14,8 @@
   let renaming = $state<number | null>(null)
   let renameTo = $state('')
   let deleting = $state<number | null>(null)
+  /** Each room's "when quiet" choices. */
+  let quiet = $state<Record<number, { follow_main: boolean; takeover: 'now' | 'after_song' }>>({})
 
   async function load() {
     try {
@@ -22,6 +24,9 @@
       app.rooms = list.rooms
       outputs = out.outputs
       nodes = nodeList.nodes.filter((n) => n.status === 'approved')
+      const others = rooms.filter((r) => r.id !== 1)
+      const rules = await Promise.all(others.map((r) => api.roomQuiet(r.id)))
+      quiet = Object.fromEntries(others.map((r, i) => [r.id, rules[i]]))
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Could not load rooms', true)
     }
@@ -113,6 +118,34 @@
         {/each}
       </select>
     </label>
+    {#if room.id !== 1 && room.linked_to === null && quiet[room.id]}
+      <label class="switch">
+        <input
+          type="checkbox"
+          checked={quiet[room.id].follow_main}
+          onchange={(e) => {
+            const rules = { ...quiet[room.id], follow_main: e.currentTarget.checked }
+            void run(() => api.setRoomQuiet(room.id, rules), rules.follow_main ? `${room.name} plays Main's music when quiet` : 'Saved')
+          }}
+        />
+        When nothing's queued here, play along with Main
+      </label>
+      {#if quiet[room.id].follow_main}
+        <label>
+          A request here takes over
+          <select
+            value={quiet[room.id].takeover}
+            onchange={(e) => {
+              const rules = { ...quiet[room.id], takeover: e.currentTarget.value as 'now' | 'after_song' }
+              void run(() => api.setRoomQuiet(room.id, rules), 'Saved')
+            }}
+          >
+            <option value="now">Right away</option>
+            <option value="after_song">When Main's song ends</option>
+          </select>
+        </label>
+      {/if}
+    {/if}
     {#if followers(room).length}
       <p class="small muted">Playing along here: {followers(room).map((r) => r.name).join(', ')}.</p>
     {/if}

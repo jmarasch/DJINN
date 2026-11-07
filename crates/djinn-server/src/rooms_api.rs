@@ -21,6 +21,7 @@ pub fn router() -> Router<AppState> {
         .route("/me/room", put(choose))
         .route("/outputs/{id}/room", put(place_output))
         .route("/rooms/sync", post(resync))
+        .route("/rooms/{id}/quiet", get(get_quiet).put(put_quiet))
 }
 
 fn room_error(e: RoomError) -> ApiError {
@@ -152,6 +153,45 @@ async fn place_output(
         .await
         .map_err(room_error)?;
     crate::rooms_rt::apply_outputs(&state).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn get_quiet(
+    _: AdminUser,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> ApiResult<Json<crate::rooms_rt::QuietRules>> {
+    Ok(Json(crate::rooms_rt::quiet_rules(&state.store, id).await?))
+}
+
+async fn put_quiet(
+    _: AdminUser,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Json(body): Json<crate::rooms_rt::QuietRules>,
+) -> ApiResult<StatusCode> {
+    if id == djinn_store::MAIN_ROOM || state.store.room(id).await?.is_none() {
+        return Err(ApiError::bad_request(
+            "only rooms other than Main can follow Main",
+        ));
+    }
+    let key = |name: &str| crate::jukebox::room_key(id, name);
+    state
+        .store
+        .set_setting(
+            &key(crate::rooms_rt::FOLLOW_MAIN),
+            if body.follow_main { "1" } else { "0" },
+        )
+        .await?;
+    let takeover = if body.takeover == "after_song" {
+        "after_song"
+    } else {
+        "now"
+    };
+    state
+        .store
+        .set_setting(&key(crate::rooms_rt::TAKEOVER), takeover)
+        .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

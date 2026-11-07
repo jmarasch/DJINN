@@ -299,6 +299,7 @@ async fn run() -> anyhow::Result<()> {
     if let Err(e) = rooms_rt::sync(&state).await {
         tracing::error!(error = %format!("{e:#}"), "starting the rooms failed");
     }
+    rooms_rt::watch_quiet(state.clone());
 
     let guest_mode = settings::flag(&store, settings::GUEST_MODE, false).await?;
     state

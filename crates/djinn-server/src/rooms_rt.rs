@@ -35,6 +35,8 @@ pub struct Rooms {
     players: RwLock<HashMap<i64, Arc<RoomPlayer>>>,
     /// Each linked room and the room it follows.
     links: RwLock<HashMap<i64, i64>>,
+    /// Rooms with nothing to play that are following Main's music for now.
+    following: RwLock<std::collections::HashSet<i64>>,
     /// Main's master rate, for new engines.
     rate: std::sync::atomic::AtomicU32,
     playback: RwLock<Option<Store>>,
@@ -58,6 +60,18 @@ impl Rooms {
             .unwrap_or(room)
     }
 
+    /// The room whose sound `room` plays: its leader, or Main's while a
+    /// quiet room follows Main.
+    pub fn audio_leader(&self, room: i64) -> i64 {
+        let leader = self.leader(room);
+        let following = self.following.read().is_ok_and(|f| f.contains(&leader));
+        if following {
+            self.leader(MAIN_ROOM)
+        } else {
+            leader
+        }
+    }
+
     fn player(&self, room: i64) -> Option<Arc<RoomPlayer>> {
         self.players.read().ok()?.get(&room).cloned()
     }
@@ -73,9 +87,9 @@ impl AppState {
         }
     }
 
-    /// The node feed for `room`.
+    /// The node feed for `room` (Main's while a quiet room follows it).
     pub fn hub_for(&self, room: i64) -> Arc<Hub> {
-        let leader = self.rooms.leader(room);
+        let leader = self.rooms.audio_leader(room);
         match self.rooms.player(leader) {
             Some(player) if leader != MAIN_ROOM => Arc::clone(&player.hub),
             _ => Arc::clone(&self.node_audio),
@@ -236,7 +250,7 @@ pub async fn apply_outputs(state: &AppState) -> anyhow::Result<()> {
     for leader in leaders {
         let mine: Vec<_> = rows
             .iter()
-            .filter(|row| state.rooms.leader(row.room_id) == leader)
+            .filter(|row| state.rooms.audio_leader(row.room_id) == leader)
             .cloned()
             .collect();
         state
@@ -244,6 +258,122 @@ pub async fn apply_outputs(state: &AppState) -> anyhow::Result<()> {
             .lock()
             .await
             .set_outputs(crate::audio_api::engine_configs(&mine));
+    }
+    Ok(())
+}
+
+/// Setting keys (per room): follow Main's music while quiet, and how a
+/// request takes over ("now", or "after_song": when Main's song ends).
+pub const FOLLOW_MAIN: &str = "follow_main";
+pub const TAKEOVER: &str = "takeover";
+
+/// A quiet room's choices.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct QuietRules {
+    pub follow_main: bool,
+    /// "now" or "after_song".
+    pub takeover: String,
+}
+
+pub async fn quiet_rules(store: &Store, room: i64) -> anyhow::Result<QuietRules> {
+    let follow = store
+        .get_setting(&crate::jukebox::room_key(room, FOLLOW_MAIN))
+        .await?
+        .is_some_and(|v| v == "1");
+    let takeover = store
+        .get_setting(&crate::jukebox::room_key(room, TAKEOVER))
+        .await?
+        .filter(|v| v == "after_song")
+        .unwrap_or_else(|| "now".to_owned());
+    Ok(QuietRules {
+        follow_main: follow,
+        takeover,
+    })
+}
+
+/// True if a room's jukebox has nothing to play: no song, no requests, no
+/// playlist or radio.
+async fn is_quiet(state: &AppState, room: i64) -> anyhow::Result<bool> {
+    let jukebox = state.jukebox_for(room);
+    let jukebox = jukebox.lock().await;
+    let idle = jukebox.now_playing().current.is_none() && jukebox.active_playlist().is_none();
+    drop(jukebox);
+    Ok(idle && state.store.queue(room).await?.is_empty())
+}
+
+/// Watches quiet rooms: one with nothing to play follows Main's music (if
+/// its rules say so); a request takes it back, at once or when Main's song
+/// ends. Runs for the life of the server.
+pub fn watch_quiet(state: AppState) {
+    tokio::spawn(async move {
+        // A room waiting to take over, and Main's song when the request came.
+        let mut waiting: HashMap<i64, Option<i64>> = HashMap::new();
+        loop {
+            if let Err(e) = check_quiet(&state, &mut waiting).await {
+                tracing::debug!(error = %format!("{e:#}"), "checking quiet rooms failed");
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        }
+    });
+}
+
+async fn check_quiet(
+    state: &AppState,
+    waiting: &mut HashMap<i64, Option<i64>>,
+) -> anyhow::Result<()> {
+    let rooms: Vec<i64> = match state.rooms.players.read() {
+        Ok(players) => players.keys().copied().collect(),
+        Err(_) => return Ok(()),
+    };
+    let main_song = state
+        .jukebox
+        .lock()
+        .await
+        .now_playing()
+        .current
+        .map(|e| e.track.id);
+    let mut changed = false;
+    for room in rooms {
+        let rules = quiet_rules(&state.store, room).await?;
+        let following = state
+            .rooms
+            .following
+            .read()
+            .is_ok_and(|f| f.contains(&room));
+        let quiet = is_quiet(state, room).await?;
+        let follow = rules.follow_main && quiet;
+        if follow && !following {
+            if let Ok(mut f) = state.rooms.following.write() {
+                f.insert(room);
+            }
+            waiting.remove(&room);
+            changed = true;
+            tracing::info!(room, "quiet room follows Main");
+        } else if following && !quiet {
+            // A request: take over now, or once Main's song ends.
+            let take = if rules.takeover == "after_song" {
+                let asked_during = *waiting.entry(room).or_insert(main_song);
+                asked_during.is_none() || main_song != asked_during
+            } else {
+                true
+            };
+            if take {
+                if let Ok(mut f) = state.rooms.following.write() {
+                    f.remove(&room);
+                }
+                waiting.remove(&room);
+                changed = true;
+                tracing::info!(room, "room plays its own music again");
+            }
+        } else if following && !rules.follow_main {
+            if let Ok(mut f) = state.rooms.following.write() {
+                f.remove(&room);
+            }
+            changed = true;
+        }
+    }
+    if changed {
+        apply_outputs(state).await?;
     }
     Ok(())
 }
@@ -304,5 +434,64 @@ mod tests {
         sync(&state).await.unwrap();
         assert!(state.rooms.player(patio).is_none());
         assert_eq!(state.room_of(sam).await, MAIN_ROOM);
+    }
+
+    #[tokio::test]
+    async fn a_quiet_room_follows_main_and_a_request_takes_it_back() {
+        let state = AppState::for_tests().await;
+        let patio = state.store.create_room("Patio").await.unwrap().id;
+        sync(&state).await.unwrap();
+        let mut waiting = HashMap::new();
+        check_quiet(&state, &mut waiting).await.unwrap();
+        assert_eq!(state.rooms.audio_leader(patio), patio, "off unless asked");
+
+        let key = crate::jukebox::room_key(patio, FOLLOW_MAIN);
+        state.store.set_setting(&key, "1").await.unwrap();
+        check_quiet(&state, &mut waiting).await.unwrap();
+        assert_eq!(
+            state.rooms.audio_leader(patio),
+            MAIN_ROOM,
+            "quiet: Main's music"
+        );
+        assert!(Arc::ptr_eq(&state.hub_for(patio), &state.node_audio));
+        // Requests still go to the patio's own queue.
+        assert!(!Arc::ptr_eq(&state.jukebox_for(patio), &state.jukebox));
+
+        // A request in the patio: it takes over at once (the default).
+        state
+            .store
+            .save_scanned(&[djinn_store::ScannedTrack {
+                path: "/m/a.flac".into(),
+                size: 1,
+                mtime: 1,
+                title: "A".into(),
+                ..Default::default()
+            }])
+            .await
+            .unwrap();
+        let sam = state
+            .store
+            .create_user("sam", "h", djinn_store::Role::User)
+            .await
+            .unwrap()
+            .id;
+        let track = state.store.tracks_by_ids(&[1]).await.unwrap()[0].id;
+        state
+            .store
+            .add_request(
+                patio,
+                track,
+                sam,
+                djinn_store::RequestLimits::default(),
+                &djinn_store::RequestOrigin::default(),
+            )
+            .await
+            .unwrap();
+        check_quiet(&state, &mut waiting).await.unwrap();
+        assert_eq!(
+            state.rooms.audio_leader(patio),
+            patio,
+            "its own music again"
+        );
     }
 }

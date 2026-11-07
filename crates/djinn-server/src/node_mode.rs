@@ -127,6 +127,8 @@ pub struct Status {
     pub offline: bool,
     /// Songs in this node's cache.
     pub cached: usize,
+    /// The room whose music Main sends it now.
+    pub audio_room: Option<i64>,
 }
 
 /// The node's running parts.
@@ -183,6 +185,7 @@ impl Node {
                 audio: None,
                 offline: false,
                 cached: 0,
+                audio_room: None,
             })),
             wake: Arc::new(Notify::new()),
             offset: Arc::new(AtomicI64::new(0)),
@@ -441,6 +444,7 @@ impl Node {
             if let Some(room) = answer["room_id"].as_i64() {
                 s.room_id = Some(room);
             }
+            s.audio_room = answer["audio_room"].as_i64();
         });
         if let Ok(upcoming) =
             serde_json::from_value::<Vec<crate::nodes::Upcoming>>(answer["upcoming"].clone())
@@ -749,7 +753,7 @@ impl Node {
             s.playing = true;
             s.audio_problem = None;
         });
-        let room = self.status().room_id;
+        let room = (self.status().room_id, self.status().audio_room);
         let mut buffer = Vec::new();
         let mut body = response.bytes_stream();
         while let Some(chunk) = body.next().await {
@@ -785,7 +789,7 @@ impl Node {
                 break;
             }
             // Moved to another room on Main: take that room's music.
-            if self.status().room_id != room {
+            if (self.status().room_id, self.status().audio_room) != room {
                 break;
             }
         }
