@@ -421,10 +421,6 @@
       </label>
       {#if settings.tv_page}
         <label class="switch big">
-          <input type="checkbox" bind:checked={settings.tv_stats} />
-          Tonight's numbers on the TV page: songs played, requests, the most requested song and who asked most
-        </label>
-        <label class="switch big">
           <input type="checkbox" bind:checked={settings.tv_sound} />
           <span>
             Sound on the TV page: a button on it plays the party, for a TV browser that isn't cast to.

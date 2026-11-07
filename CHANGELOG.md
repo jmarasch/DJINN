@@ -16,7 +16,7 @@
 - **Stats.** Admin > Stats shows the songs played and asked for most, top artists, who asked most, songs skipped most, and the busiest hours and days, for the last party, today, 7 or 30 days, this year or all time, for everyone or one person, at the party, on DJINN GO or both. Download the lists as a spreadsheet, or clear just that stretch of history (it says how much first).
 - **Party recap.** "Last party" covers everything since the first song after a break of six hours or more.
 - **Search history.** See what people searched for, and especially what found nothing: a shopping list for the library. Typing one search counts once. Turn it off in Stats.
-- **The TV page shows Requests, then Coming up.** Requests are listed first; below them, the next few songs the auto mix will play, in the room the requests leave. The auto mix now plans a few songs ahead, so they play in the order shown, and a request that cuts in puts the next auto mix song back first in line. Optionally, tonight's numbers too (Admin > Rules).
+- **The TV page shows Requests, then Coming up.** Requests are listed first; below them, the next few songs the auto mix will play, in the room the requests leave. The auto mix now plans a few songs ahead, so they play in the order shown, and a request that cuts in puts the next auto mix song back first in line.
 - **Wishlist.** "Not in the library?" under search results lets people ask for a song. Admins see every ask with how many people want it, and a library check that adds the song marks it Got. Only admins see the button until you let everyone use it.
 
 ### Library

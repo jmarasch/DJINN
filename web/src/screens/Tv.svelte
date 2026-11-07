@@ -23,8 +23,6 @@
   let position = $state(0)
   let idleCursor = $state(false)
   let streamUrl = $state<string | null>(null)
-  type Tonight = { songs: number; requests: number; top_song: string | null; top_requester: string | null }
-  let tonight = $state<Tonight | null>(null)
   let soundOn = $state(false)
   let audio = $state<HTMLAudioElement | null>(null)
 
@@ -59,14 +57,13 @@
         return
       }
       const data = await res.json()
-      nowPlaying = { current: data.current, position_ms: data.position_ms, up_next: data.up_next }
+      nowPlaying = { current: data.current, position_ms: data.position_ms, up_next: data.up_next, later: data.later ?? [] }
       setPosition(data.position_ms)
       player = data.player
       queue = data.queue
       joinUrl = data.join_url
       guestMode = data.guest_mode
       streamUrl = data.stream_url
-      tonight = data.tonight ?? null
       error = null
       listen()
       if (casting && !soundOn) setTimeout(toggleSound, 0)
@@ -74,20 +71,6 @@
       error = 'Cannot reach the jukebox. Retrying...'
       setTimeout(load, 5_000)
     }
-  }
-
-  /** Tonight's numbers again, a moment after something changes. */
-  let tonightTimer: ReturnType<typeof setTimeout> | undefined
-  function refreshTonight() {
-    clearTimeout(tonightTimer)
-    tonightTimer = setTimeout(async () => {
-      try {
-        const res = await fetch(castKey ? `/api/tv?key=${encodeURIComponent(castKey)}` : '/api/tv')
-        if (res.ok) tonight = (await res.json()).tonight ?? null
-      } catch {
-        // The next change tries again.
-      }
-    }, 2000)
   }
 
   function listen() {
@@ -99,13 +82,9 @@
     on<NowPlaying>('now_playing', (data) => {
       nowPlaying = data
       setPosition(data.position_ms)
-      refreshTonight()
     })
     on<{ position_ms: number }>('position', (data) => setPosition(data.position_ms))
-    on<QueueItem[]>('queue_changed', (data) => {
-      queue = data
-      refreshTonight()
-    })
+    on<QueueItem[]>('queue_changed', (data) => (queue = data))
     on<PlayerState>('player_state', (data) => {
       setPosition(position)
       player = data
@@ -209,7 +188,11 @@
   /** Auto mix songs coming after the requests, in the room the requests leave. */
   const autoNext = $derived(
     [
-      ...(nowPlaying.up_next && nowPlaying.up_next.source !== 'request' ? [nowPlaying.up_next] : []),
+      ...(nowPlaying.up_next &&
+      nowPlaying.up_next.source !== 'request' &&
+      nowPlaying.up_next.track.id !== nowPlaying.current?.track.id
+        ? [nowPlaying.up_next]
+        : []),
       ...(nowPlaying.later ?? []),
     ].slice(0, Math.max(0, UP_NEXT - upNext.length)),
   )
@@ -324,17 +307,6 @@
         </ol>
       {/if}
 
-      {#if tonight && tonight.songs > 0}
-        <div class="tonight">
-          <h2>Tonight</h2>
-          <p>
-            {tonight.songs.toLocaleString()} {tonight.songs === 1 ? 'song' : 'songs'}{#if tonight.requests}, {tonight.requests.toLocaleString()}
-              {tonight.requests === 1 ? 'request' : 'requests'}{/if}
-          </p>
-          {#if tonight.top_song}<p class="sub">Most requested: {tonight.top_song}</p>{/if}
-          {#if tonight.top_requester}<p class="sub">Asked for the most songs: {tonight.top_requester}</p>{/if}
-        </div>
-      {/if}
 
       <div class="join">
         <img src="/api/join/qr.svg" alt="QR code to join" />
@@ -605,18 +577,6 @@
     margin-top: 1.2em;
   }
 
-  .tonight {
-    margin-top: 1.2em;
-  }
-
-  .tonight p {
-    margin: 0.2em 0 0;
-  }
-
-  .tonight .sub {
-    font-size: 0.85em;
-    color: rgb(255 255 255 / 0.7);
-  }
 
   .join {
     display: flex;

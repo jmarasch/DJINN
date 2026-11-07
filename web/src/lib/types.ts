@@ -611,7 +611,6 @@ export interface Settings {
   /** A copy of a song that played recently counts as played. */
   avoid_copies: boolean
   search_history: boolean
-  tv_stats: boolean
   wishlist_everyone: boolean
   per_user_limit: number
   /** 0 means no cap. */

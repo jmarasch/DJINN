@@ -55,62 +55,6 @@ struct TvSnapshot {
     /// The live stream, so the TV can play the music itself: for a cast,
     /// which is given the secret, or when the admin allows it for everyone.
     stream_url: Option<String>,
-    /// Tonight's numbers, when the admin shows them.
-    tonight: Option<Tonight>,
-}
-
-/// The party so far, for the TV.
-#[derive(Serialize)]
-struct Tonight {
-    songs: i64,
-    requests: i64,
-    /// The song asked for most (at least twice), as "Title, Artist".
-    top_song: Option<String>,
-    /// Who asked for the most songs (at least two).
-    top_requester: Option<String>,
-}
-
-/// Setting key: show tonight's numbers on the TV page (off unless turned on).
-pub const TV_STATS: &str = "tv_stats";
-/// A break this long with nothing playing ends a party.
-const PARTY_GAP_MS: i64 = 6 * 60 * 60 * 1000;
-
-async fn tonight(state: &AppState) -> anyhow::Result<Option<Tonight>> {
-    if !settings::flag(&state.store, TV_STATS, false).await? {
-        return Ok(None);
-    }
-    let Some(from) = state.store.last_party_start(PARTY_GAP_MS).await? else {
-        return Ok(None);
-    };
-    let filter = djinn_store::StatsFilter {
-        from,
-        go: false,
-        ..djinn_store::StatsFilter::default()
-    };
-    let summary = state.store.stats_summary(&filter).await?;
-    let top_song = state
-        .store
-        .top_requested(&filter, 1)
-        .await?
-        .into_iter()
-        .find(|r| r.requests >= 2)
-        .and_then(|r| {
-            r.title
-                .map(|t| r.artist.map_or_else(|| t.clone(), |a| format!("{t}, {a}")))
-        });
-    let top_requester = state
-        .store
-        .top_requesters(&filter, 1)
-        .await?
-        .into_iter()
-        .find(|p| p.requests >= 2)
-        .and_then(|p| p.name);
-    Ok(Some(Tonight {
-        songs: summary.plays,
-        requests: summary.requests,
-        top_song,
-        top_requester,
-    }))
 }
 
 #[derive(Deserialize)]
@@ -142,7 +86,6 @@ async fn snapshot(
             .as_ref()
             .filter(|_| sound)
             .map(|_| crate::cast_api::stream_path(&token)),
-        tonight: tonight(&state).await?,
     }))
 }
 

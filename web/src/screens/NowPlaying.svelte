@@ -21,9 +21,14 @@
 
   const current = $derived(app.nowPlaying.current)
   const next = $derived(app.nowPlaying.up_next)
-  /** "Up next" is a request you're part of, so you can take yours back. */
-  const nextMine = $derived(next ? myRequest(next.track.id) : null)
-  const nextQueued = $derived(next ? app.queue.find((q) => q.track.id === next.track.id) : undefined)
+  /** Auto mix songs after the requests, in the room the requests leave. */
+  const SHOWN = 6
+  const autoNext = $derived(
+    [
+      ...(next && next.source !== 'request' && next.track.id !== current?.track.id ? [next] : []),
+      ...(app.nowPlaying.later ?? []),
+    ].slice(0, Math.max(0, SHOWN - app.queue.length)),
+  )
   const total = $derived(current?.track.duration_ms ?? 0)
   let position = $state(0)
   let volume = $state(app.player.volume)
@@ -222,10 +227,10 @@
 </section>
 
   <aside class="side">
-    <h2>Up next</h2>
+    <h2>Requests</h2>
     {#if app.queue.length}
       <ol class="queue-list">
-        {#each app.queue.slice(0, 6) as item (item.id)}
+        {#each app.queue.slice(0, SHOWN) as item (item.id)}
           {@const mine = myRequest(item.track.id)}
           <li>
             <Art hash={item.track.art_hash} size={56} />
@@ -242,29 +247,22 @@
           </li>
         {/each}
       </ol>
-      {#if app.queue.length > 6}<p class="muted small">and {app.queue.length - 6} more</p>{/if}
-    {:else if next}
-      <div class="next-row">
-        <Art hash={next.track.art_hash} size={40} />
-        <div class="text">
-          <div class="ellipsis">{next.track.title}</div>
-          <div class="muted small ellipsis">
-            {byline(next.track.artist)}{nextQueued
-              ? ` · for ${askedBy(nextQueued)}`
-              : next.requested_by
-                ? ` · for ${next.requested_by}`
-                : ''}
+      {#if app.queue.length > SHOWN}<p class="muted small">and {app.queue.length - SHOWN} more</p>{/if}
+    {:else}
+      <p class="muted small">No requests yet. Yours could be next.</p>
+    {/if}
+
+    {#if autoNext.length}
+      <h2 class="coming">Coming up</h2>
+      {#each autoNext as entry, i (`${entry.track.id}-${i}`)}
+        <div class="next-row">
+          <Art hash={entry.track.art_hash} size={40} />
+          <div class="text">
+            <div class="ellipsis">{entry.track.title}</div>
+            <div class="muted small ellipsis">{byline(entry.track.artist)}</div>
           </div>
         </div>
-        {#if nextMine}
-          <button class="cancel" onclick={() => nextMine && cancelRequest(nextMine.id)}>
-            {involvement(nextMine) === 'backer' ? 'Step back' : 'Cancel'}
-          </button>
-        {/if}
-      </div>
-      <p class="muted small">No requests yet. Yours could be next.</p>
-    {:else}
-      <p class="muted">No requests yet. Yours could be next.</p>
+      {/each}
     {/if}
 
     <div class="join-prompt">
@@ -605,6 +603,10 @@
     font-size: 0.75rem;
     text-transform: uppercase;
     letter-spacing: 0.08em;
+  }
+
+  .coming {
+    margin-top: 16px;
   }
 
   .next-row {

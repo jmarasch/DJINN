@@ -17,7 +17,6 @@ export const adminEntries: AdminEntry[] = [
   { label: 'Guest mode', tab: 'rules', keywords: 'join name no account guests', key: 'guest_mode' },
   { label: 'TV page', tab: 'rules', keywords: 'tv tablet screen join code /tv', key: 'tv_page' },
   { label: 'Sound on the TV page', tab: 'rules', keywords: 'tv audio listen', key: 'tv_sound' },
-  { label: "Tonight's numbers on the TV page", tab: 'rules', keywords: 'tv stats recap', key: 'tv_stats' },
   { label: 'Play here', tab: 'rules', keywords: 'tune in phone listen stream', key: 'play_here' },
   { label: 'Most songs in the queue at once', tab: 'rules', keywords: 'queue limit cap max', key: 'max_queue' },
   { label: 'Songs each person can have queued', tab: 'rules', keywords: 'requests limit per user', key: 'per_user_limit' },
