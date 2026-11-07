@@ -4,8 +4,15 @@
 
 ### DJINN GO
 
+- **Artist pages show every song.** **Show more** under an artist's songs lists the rest, and **Play all** plays every song by the artist, shown or not (it used to miss most songs on their own albums). Album pages get a **Radio** button.
+- **The Android app is laid out like DJINN GO in the browser:** Home, Library (search, with the artist, album, song and genre lists below it while nothing's typed), Your music (Liked, Playlists, History, Your year, On phone) and Account. Liked is its own place instead of a filter, and every song, album and artist row has a heart.
 - **Your year.** See how long you listened, your top songs and artists, your busiest month and your first song of the year, under Library > Your year in the browser, or from Home in the Android app. Pick earlier years too.
 - The Android app has **Not in the library?** under search results, like the browser, when the admin allows it.
+
+### Party app
+
+- **Favorites.** Heart songs, albums and artists in the party app too; they're the same favorites as on DJINN GO. Find them under Playlists > Favorites. Guests don't have favorites or playlists, and don't see hearts.
+- **Show more** under an artist's songs lists every song by them.
 
 ### Admin
 

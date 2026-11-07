@@ -3,7 +3,7 @@
   import Art from '../../lib/Art.svelte'
   import Icon from '../../lib/Icon.svelte'
   import type { AlbumDetail } from '../../lib/types'
-  import { addToEnd, likes, playList, playNext, toggleLike } from '../player.svelte'
+  import { startRadio, addToEnd, likes, playList, playNext, toggleLike } from '../player.svelte'
   import SongList from '../SongList.svelte'
   import { ui } from '../ui.svelte'
 
@@ -33,6 +33,7 @@
   </header>
   <div class="buttons">
     <button class="primary" onclick={() => album && playList(album.tracks)}><Icon name="play" /> Play</button>
+    {#if album.tracks[0]}<button onclick={() => album && startRadio(album.tracks[0])}><Icon name="radio" /> Radio</button>{/if}
     <button onclick={() => album && playNext(album.tracks)}>Play next</button>
     <button onclick={() => album && addToEnd(album.tracks)}>Add to end of queue</button>
     <button onclick={() => album && (ui.adding = album.tracks)}>Add to playlist</button>

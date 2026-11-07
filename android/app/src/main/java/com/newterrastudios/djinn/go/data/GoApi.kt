@@ -313,6 +313,13 @@ class GoApi(private val account: Account) {
 
     suspend fun saveResume(save: ResumeSave) = write("PUT", "/api/go/resume", save)
 
+    /** Every song by an artist, a page at a time (up to 5,000). */
+    suspend fun artistSongs(id: Long, offset: Int, limit: Int): ArtistSongs =
+        get("/api/artists/$id/songs?offset=$offset&limit=$limit")
+
+    /** Songs you played on GO, newest first, 100 at a time. */
+    suspend fun history(offset: Int): List<Track> = get("/api/go/history?offset=$offset")
+
     suspend fun year(year: Int?): GoYear = get(if (year == null) "/api/go/year" else "/api/go/year?year=$year")
 
     /** Whether this account gets "Not in the library?". */

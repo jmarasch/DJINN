@@ -54,7 +54,7 @@ impl FromRequestParts<AppState> for Member {
         if user.role == Role::Guest {
             return Err(ApiError::new(
                 StatusCode::FORBIDDEN,
-                "guests can't have playlists",
+                "guests can't have playlists or favorites",
             ));
         }
         Ok(Self(user))

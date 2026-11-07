@@ -352,6 +352,10 @@ data class YearArtist(
     val plays: Long = 0,
 )
 
+/** A page of an artist's songs, with how many there are in all. */
+@Serializable
+data class ArtistSongs(val total: Long = 0, val tracks: List<Track> = emptyList())
+
 /** Asking the admin for a song the library lacks. */
 @Serializable
 data class NewWish(val artist: String, val title: String)

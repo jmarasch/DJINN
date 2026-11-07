@@ -14,6 +14,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.MoreVert
+import kotlinx.coroutines.launch
+import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.OfflinePin
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -128,6 +131,14 @@ fun SongRow(track: Track, nav: Nav, onClick: () -> Unit) {
                     contentDescription = "On this phone",
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(18.dp),
+                )
+            }
+            val liked = track.id in nav.liked
+            IconButton(onClick = { nav.scope.launch { nav.setLiked(track.id, !liked) } }) {
+                Icon(
+                    if (liked) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                    contentDescription = if (liked) "Unlike ${track.title}" else "Like ${track.title}",
+                    tint = if (liked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             IconButton(onClick = { nav.menuFor = track }) {

@@ -16,6 +16,7 @@
   import Login from './screens/Login.svelte'
   import NowPlaying from './screens/NowPlaying.svelte'
   import Playlists from './screens/Playlists.svelte'
+  import Favorites from './screens/Favorites.svelte'
   import PlaylistView from './screens/PlaylistView.svelte'
   import Queue from './screens/Queue.svelte'
   import Search from './screens/Search.svelte'
@@ -64,7 +65,7 @@
       ? 'search'
       : route.path.startsWith('/queue')
         ? 'queue'
-        : route.path.startsWith('/playlist')
+        : route.path.startsWith('/playlist') || route.path === '/favorites'
           ? 'playlists'
           : route.path.startsWith('/admin')
             ? 'admin'
@@ -131,6 +132,8 @@
       <ArtistView id={artistId} />
     {:else if playlistId && hasPlaylists()}
       <PlaylistView id={playlistId} />
+    {:else if route.path === '/favorites' && hasPlaylists()}
+      <Favorites />
     {:else if tab === 'search'}
       <Search />
     {:else if tab === 'queue'}

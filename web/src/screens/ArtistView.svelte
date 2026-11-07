@@ -2,6 +2,7 @@
   import AddToPlaylist from '../lib/AddToPlaylist.svelte'
   import GenreChips from '../lib/GenreChips.svelte'
   import QueueAll from '../lib/QueueAll.svelte'
+  import Heart from '../lib/Heart.svelte'
   import RadioButton from '../lib/RadioButton.svelte'
   import { api } from '../lib/api'
   import ArtistSlideshow from '../lib/ArtistSlideshow.svelte'
@@ -13,8 +14,8 @@
   import TagEditor from '../lib/TagEditor.svelte'
   import TrackRow from '../lib/TrackRow.svelte'
   import { byName } from '../lib/format'
-  import { isAdmin } from '../lib/state.svelte'
-  import type { Album, ArtistDetail, ArtistPicture, ArtistSummary, TagFields } from '../lib/types'
+  import { isAdmin, toast } from '../lib/state.svelte'
+  import type { Album, ArtistDetail, ArtistPicture, ArtistSummary, TagFields, Track } from '../lib/types'
 
   let { id }: { id: number } = $props()
   let artist = $state<ArtistDetail | null>(null)
@@ -63,8 +64,33 @@
 
   /** Top songs earn the title once anyone has requested or played them. */
   const ranked = $derived(artist?.top_tracks.some((t) => t.requests || t.plays) ?? false)
-  const topIds = $derived(new Set(artist?.top_tracks.map((t) => t.id)))
-  const moreSongs = $derived(artist?.other_tracks.filter((t) => !topIds.has(t.id)) ?? [])
+  // Every song by the artist: the top ones first, the rest on Show more.
+  let allSongs = $state<Track[] | null>(null)
+  let songTotal = $state(0)
+  let loadingSongs = $state(false)
+  const songs = $derived(artist ? (allSongs ?? artist.top_tracks) : [])
+
+  $effect(() => {
+    allSongs = null
+    songTotal = 0
+    api
+      .artistSongs(id, 0, 1)
+      .then((page) => (songTotal = page.total))
+      .catch(() => {})
+  })
+
+  async function showMore() {
+    loadingSongs = true
+    try {
+      const page = await api.artistSongs(id, allSongs?.length ?? 0, 100)
+      allSongs = [...(allSongs ?? []), ...page.tracks]
+      songTotal = page.total
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not load more songs', true)
+    } finally {
+      loadingSongs = false
+    }
+  }
   const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
 
   let albumSort = $state<'year' | 'name'>('year')
@@ -98,6 +124,7 @@
             <div class="genres"><GenreChips genres={artist.genres.split(', ')} /></div>
           {/if}
           <div class="admin-actions">
+            <Heart kind="artist" id={artist.id} name={artist.name} />
             <RadioButton seed={{ kind: 'artist', id: artist.id }} />
             <QueueAll kind="artist" refId={artist.id} />
             <AddToPlaylist kind="artist" refId={artist.id} label={artist.name} />
@@ -135,11 +162,26 @@
       </section>
     {/if}
 
-    {#if artist.top_tracks.length}
-      <h2>{ranked ? 'Top songs' : 'Songs'}</h2>
-      {#each artist.top_tracks as track (track.id)}
-        <TrackRow {track} note={track.requests ? plural(track.requests, 'request') : null} />
-      {/each}
+    {#if songs.length}
+      <h2>
+        {allSongs ? 'All songs' : ranked ? 'Top songs' : 'Songs'}{#if songTotal}<span class="muted small"
+            >{` (${songTotal.toLocaleString()})`}</span
+          >{/if}
+      </h2>
+      {#if allSongs}
+        {#each allSongs as track (track.id)}
+          <TrackRow {track} />
+        {/each}
+      {:else}
+        {#each artist.top_tracks as track (track.id)}
+          <TrackRow {track} note={track.requests ? plural(track.requests, 'request') : null} />
+        {/each}
+      {/if}
+      {#if songs.length < songTotal}
+        <button class="more-songs" disabled={loadingSongs} onclick={showMore}>
+          {allSongs ? 'Show more' : `Show all ${songTotal.toLocaleString()} songs`}
+        </button>
+      {/if}
     {/if}
 
     {#if artist.albums.length}
@@ -173,12 +215,6 @@
       </div>
     {/if}
 
-    {#if moreSongs.length}
-      <h2>More songs</h2>
-      {#each moreSongs as track (track.id)}
-        <TrackRow {track} />
-      {/each}
-    {/if}
     {#if similar.length}
       <h2>Similar artists</h2>
       <ScrollRow>
@@ -214,6 +250,11 @@
 {/if}
 
 <style>
+  .more-songs {
+    width: 100%;
+    margin-top: 8px;
+  }
+
   .artist-page {
     position: relative;
   }

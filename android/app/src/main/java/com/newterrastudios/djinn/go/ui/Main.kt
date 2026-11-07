@@ -16,6 +16,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayCircle
@@ -63,7 +65,7 @@ sealed interface Screen {
     data object Year : Screen
 }
 
-enum class Tab(val label: String) { Home("Home"), Library("Library"), Search("Search") }
+enum class Tab(val label: String) { Home("Home"), Library("Library"), Mine("Your music"), Account("Account") }
 
 /** Where you are in the app, and what every screen needs. */
 @UnstableApi
@@ -124,7 +126,6 @@ class Nav(
     val likedAlbums = mutableStateListOf<Long>()
     val likedArtists = mutableStateListOf<Long>()
     /** Library lists show only what you like. */
-    var favoritesOnly by mutableStateOf(false)
     /** The update you've been asked about since opening the app. */
     var askedAboutUpdate by mutableStateOf(false)
     /** A song to start radio from. */
@@ -201,8 +202,9 @@ fun MainScreen(nav: Nav) {
                                 Icon(
                                     when (tab) {
                                         Tab.Home -> Icons.Default.Home
-                                        Tab.Library -> Icons.Default.LibraryMusic
-                                        Tab.Search -> Icons.Default.Search
+                                        Tab.Library -> Icons.Default.Search
+                                        Tab.Mine -> Icons.Default.Favorite
+                                        Tab.Account -> Icons.Default.Settings
                                     },
                                     contentDescription = null,
                                 )
@@ -237,8 +239,9 @@ fun MainScreen(nav: Nav) {
                 Screen.NowPlaying -> NowPlayingScreen(nav)
                 else -> when (nav.tab) {
                     Tab.Home -> HomeScreen(nav)
-                    Tab.Library -> LibraryScreen(nav)
-                    Tab.Search -> SearchScreen(nav)
+                    Tab.Library -> SearchScreen(nav)
+                    Tab.Mine -> YourMusicScreen(nav)
+                    Tab.Account -> SettingsScreen(nav)
                 }
             }
             LaunchedEffect(nav.message) {

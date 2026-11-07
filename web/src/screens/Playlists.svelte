@@ -62,6 +62,12 @@
   {#if canStartAutoMix()}The playing playlist fills in whenever nobody has requested anything.{/if}
 </p>
 
+<a class="favorites card" href="#/favorites">
+  <Icon name="heart" />
+  <span class="grow">Favorites</span>
+  <span class="small muted">Songs, albums and artists you've hearted</span>
+</a>
+
 {#if app.player.playlist}
   <div class="playing card">
     <span>Playing from <b>{app.player.playlist.name}</b></span>
@@ -111,6 +117,23 @@
 {/each}
 
 <style>
+  .favorites {
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+    color: inherit;
+    text-decoration: none;
+  }
+
+  .favorites :global(svg) {
+    color: var(--accent);
+  }
+
+  .favorites .grow {
+    flex: 1;
+    font-weight: 600;
+  }
+
   .wild {
     width: 100%;
     margin-bottom: 12px;

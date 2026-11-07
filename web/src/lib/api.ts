@@ -473,5 +473,11 @@ export const api = {
   recap: () => get<Stats | null>('/stats/recap'),
   historyCounts: (filter: StatsFilter) => get<HistoryCounts>(`/stats/clear?${statsQuery(filter)}`),
   clearHistory: (filter: StatsFilter) => post<HistoryCounts>('/stats/clear', filter),
+  likeIds: () => get<LikedIds>('/likes/ids'),
+  liked: () => get<Liked>('/likes'),
+  setLike: (kind: LikeKind, id: number, on: boolean) =>
+    on ? put<void>(`/likes/${kind}/${id}`, {}) : del<void>(`/likes/${kind}/${id}`),
+  artistSongs: (id: number, offset = 0, limit = 100) =>
+    get<{ total: number; tracks: Track[] }>(`/artists/${id}/songs?offset=${offset}&limit=${limit}`),
   hideLibraryProblems: (kinds: ProblemKind[]) => put<{ kinds: ProblemKind[] }>('/library/problems/hidden', { kinds }),
 }

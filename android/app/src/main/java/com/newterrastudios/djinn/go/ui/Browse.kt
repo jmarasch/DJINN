@@ -34,6 +34,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.material3.FilterChip
 import androidx.compose.foundation.layout.Column
+import androidx.compose.material.icons.filled.Radio
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -305,16 +306,6 @@ fun HomeScreen(nav: Nav) {
                 }
             }
             songSection("Lately played", home.recent, nav)
-            if (home.recent.isNotEmpty()) {
-                item {
-                    Row2(
-                        title = "Your year",
-                        subtitle = "What you listened to most",
-                        art = {},
-                        onClick = { nav.push(Screen.Year) },
-                    )
-                }
-            }
             songSection("New in the library", home.newest, nav)
         }
     }
@@ -330,9 +321,6 @@ private fun HomeBar(nav: Nav) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text("DJINN GO", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
-        IconButton(onClick = { nav.push(Screen.Settings) }) {
-            Icon(Icons.Default.Settings, contentDescription = "Settings")
-        }
     }
 }
 
@@ -724,20 +712,12 @@ fun LibraryScreen(nav: Nav) {
             SecondaryScrollableTabRow(selectedTabIndex = tab, edgePadding = 0.dp, minTabWidth = 0.dp, tabs = tabs)
         }
         when (tab) {
-            0, 1, 2 -> if (nav.favoritesOnly) {
-                Favorites(tab, nav)
-            } else when (tab) {
             0 -> {
                 val sort = nav.artistSort
                 PagedList<ArtistSummary>(
                     "artists-$sort",
                     { nav.api.artists(sort, it) },
-                    options = {
-                        Column {
-                            FavoritesChip(nav)
-                            Choices(ARTIST_SORTS, nav.artistSort) { nav.artistSort = it }
-                        }
-                    },
+                    options = { Choices(ARTIST_SORTS, nav.artistSort) { nav.artistSort = it } },
                     jumps = { jumpEntries(nav.api.artistJumps(sort), sort) },
                 ) { artist ->
                     Row2(
@@ -745,6 +725,7 @@ fun LibraryScreen(nav: Nav) {
                         subtitle = "${artist.trackCount} songs",
                         art = { Art(nav.api.artUrl(artist.artHash), 44.dp, CircleShape) },
                         onClick = { nav.push(Screen.Artist(artist.id)) },
+                        end = { LikeHeart(artist.id, nav.likedArtists, artist.name, nav.api::setArtistLike, nav) },
                     )
                 }
             }
@@ -756,7 +737,6 @@ fun LibraryScreen(nav: Nav) {
                     { nav.api.albums(sort, filter, it) },
                     options = {
                         Column {
-                            FavoritesChip(nav)
                             Choices(ALBUM_FILTERS, nav.albumFilter) { nav.albumFilter = it }
                             Choices(ALBUM_SORTS, nav.albumSort) { nav.albumSort = it }
                         }
@@ -771,20 +751,38 @@ fun LibraryScreen(nav: Nav) {
                 PagedList<Track>(
                     "songs-$sort",
                     { nav.api.songs(sort, it) },
-                    options = {
-                        Column {
-                            FavoritesChip(nav)
-                            Choices(SONG_SORTS, nav.songSort) { nav.songSort = it }
-                        }
-                    },
+                    options = { Choices(SONG_SORTS, nav.songSort) { nav.songSort = it } },
                     jumps = { jumpEntries(nav.api.songJumps(sort), sort) },
                 ) { song ->
                     SongRow(song, nav) { nav.startRadio(song) }
                 }
             }
+            else -> GenresTab(nav)
+        }
+    }
+}
+
+/** Your music, as in DJINN GO's browser: what you like, your playlists,
+ * what you played, your year, and what's on this phone. */
+@UnstableApi
+@Composable
+fun YourMusicScreen(nav: Nav) {
+    var tab by rememberSaveable { mutableStateOf(0) }
+    Column(Modifier.fillMaxSize()) {
+        SecondaryScrollableTabRow(selectedTabIndex = tab, edgePadding = 0.dp, minTabWidth = 0.dp) {
+            MINE_TABS.forEachIndexed { index, label ->
+                Tab(
+                    selected = tab == index,
+                    onClick = { tab = index },
+                    text = { Text(label, maxLines = 1, softWrap = false) },
+                )
             }
-            3 -> GenresTab(nav)
-            4 -> PlaylistsTab(nav)
+        }
+        when (tab) {
+            0 -> LikedTab(nav)
+            1 -> PlaylistsTab(nav)
+            2 -> HistoryTab(nav)
+            3 -> YearScreen(nav)
             else -> Column {
                 DownloadStatus()
                 Choices(KEPT_VIEWS, nav.keptView) { nav.keptView = it }
@@ -794,7 +792,89 @@ fun LibraryScreen(nav: Nav) {
     }
 }
 
-private val LIBRARY_TABS = listOf("Artists", "Albums", "Songs", "Genres", "Lists", "On phone")
+private val MINE_TABS = listOf("Liked", "Playlists", "History", "Your year", "On phone")
+
+/** The artists, albums and songs you like. Taking a heart off leaves the list at once. */
+@UnstableApi
+@Composable
+private fun LikedTab(nav: Nav) {
+    Loaded(key = "liked", load = { nav.api.liked() }) { liked: Liked ->
+        val artists = liked.artists.filter { it.id in nav.likedArtists }
+        val albums = liked.albums.filter { it.id in nav.likedAlbums }
+        val songs = liked.tracks.filter { it.id in nav.liked }
+        LazyColumn(Modifier.fillMaxSize()) {
+            if (artists.isEmpty() && albums.isEmpty() && songs.isEmpty()) {
+                item { Note("Tap the heart on a song, album or artist to keep it here.") }
+            }
+            if (artists.isNotEmpty()) {
+                item { Heading("Artists") }
+                items(artists, key = { "artist-${it.id}" }) { artist ->
+                    Row2(
+                        title = artist.name,
+                        subtitle = "${artist.trackCount} songs",
+                        art = { Art(nav.api.artUrl(artist.artHash), 44.dp, CircleShape) },
+                        onClick = { nav.push(Screen.Artist(artist.id)) },
+                        end = { LikeHeart(artist.id, nav.likedArtists, artist.name, nav.api::setArtistLike, nav) },
+                    )
+                }
+            }
+            if (albums.isNotEmpty()) {
+                item { Heading("Albums") }
+                items(albums, key = { "album-${it.id}" }) { AlbumRow(it, nav) }
+            }
+            if (songs.isNotEmpty()) {
+                item {
+                    Row(
+                        Modifier.fillMaxWidth().padding(end = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(Modifier.weight(1f)) { Heading("Songs") }
+                        TextButton(onClick = { nav.player.play(songs, 0) }) { Text("Play all") }
+                    }
+                }
+                itemsIndexed(songs, key = { _, song -> "song-${song.id}" }) { index, song ->
+                    SongRow(song, nav) { nav.player.play(songs, index) }
+                }
+            }
+        }
+    }
+}
+
+/** Songs you played on GO, newest first. */
+@UnstableApi
+@Composable
+private fun HistoryTab(nav: Nav) {
+    var more by remember { mutableStateOf(true) }
+    val songs = remember { mutableStateListOf<Track>() }
+    var failed by remember { mutableStateOf(false) }
+    suspend fun load() {
+        try {
+            val page = nav.api.history(songs.size)
+            songs.addAll(page)
+            more = page.size == 100
+        } catch (_: IOException) {
+            failed = true
+        }
+    }
+    LaunchedEffect(Unit) { if (songs.isEmpty()) load() }
+    val scope = rememberCoroutineScope()
+    LazyColumn(Modifier.fillMaxSize()) {
+        if (failed && songs.isEmpty()) item { Note("Couldn't reach the server.") }
+        if (!failed && songs.isEmpty() && !more) item { Note("Songs you play show up here.") }
+        itemsIndexed(songs) { index, song ->
+            SongRow(song, nav) { nav.player.play(songs.toList(), index) }
+        }
+        if (more && songs.isNotEmpty()) {
+            item {
+                TextButton(onClick = { scope.launch { load() } }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Show more")
+                }
+            }
+        }
+    }
+}
+
+private val LIBRARY_TABS = listOf("Artists", "Albums", "Songs", "Genres")
 private const val ROOM_FOR_EVEN_TABS_DP = 576
 
 val KEPT_VIEWS = listOf("here" to "This server", "all" to "All servers")
@@ -815,62 +895,10 @@ val SONG_SORTS = listOf(
     "oldest" to "Oldest",
 )
 
-/** Switches the library's lists to only what you like. */
-@UnstableApi
-@Composable
-private fun FavoritesChip(nav: Nav) {
-    FilterChip(
-        selected = nav.favoritesOnly,
-        onClick = { nav.favoritesOnly = !nav.favoritesOnly },
-        label = { Text("Favorites") },
-        leadingIcon = { Icon(Icons.Default.Favorite, contentDescription = null, Modifier.size(18.dp)) },
-        modifier = Modifier.padding(horizontal = 12.dp),
-    )
-}
-
-/** What you like, for one library tab. Taking a heart off leaves the list at once. */
-@UnstableApi
-@Composable
-private fun Favorites(tab: Int, nav: Nav) {
-    Column(Modifier.fillMaxSize()) {
-        FavoritesChip(nav)
-        Loaded(key = "favorites-$tab", load = { nav.api.liked() }) { liked: Liked ->
-            LazyColumn(Modifier.fillMaxSize()) {
-                when (tab) {
-                    0 -> {
-                        val artists = liked.artists.filter { it.id in nav.likedArtists }
-                        if (artists.isEmpty()) item { Note("No favorite artists yet. Tap the heart on an artist's page.") }
-                        items(artists, key = { it.id }) { artist ->
-                            Row2(
-                                title = artist.name,
-                                subtitle = "${artist.trackCount} songs",
-                                art = { Art(nav.api.artUrl(artist.artHash), 44.dp, CircleShape) },
-                                onClick = { nav.push(Screen.Artist(artist.id)) },
-                            )
-                        }
-                    }
-                    1 -> {
-                        val albums = liked.albums.filter { it.id in nav.likedAlbums }
-                        if (albums.isEmpty()) item { Note("No favorite albums yet. Tap the heart on an album's page.") }
-                        items(albums, key = { it.id }) { AlbumRow(it, nav) }
-                    }
-                    else -> {
-                        val songs = liked.tracks.filter { it.id in nav.liked }
-                        if (songs.isEmpty()) item { Note("No favorite songs yet. Tap the heart on a song.") }
-                        itemsIndexed(songs, key = { _, song -> song.id }) { index, song ->
-                            SongRow(song, nav) { nav.player.play(songs, index) }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
 /** A heart for an album or artist. Shows at once, and goes back if the server can't be told. */
 @UnstableApi
 @Composable
-private fun LikeHeart(id: Long, likes: MutableList<Long>, name: String, set: suspend (Long, Boolean) -> Unit, nav: Nav) {
+internal fun LikeHeart(id: Long, likes: MutableList<Long>, name: String, set: suspend (Long, Boolean) -> Unit, nav: Nav) {
     val liked = id in likes
     IconButton(onClick = {
         val on = !liked
@@ -916,6 +944,7 @@ private fun AlbumRow(album: Album, nav: Nav) {
         subtitle = listOfNotNull(album.artist, album.year?.toString(), album.label).joinToString(" · "),
         art = { Art(nav.api.artUrl(album.artHash), 44.dp) },
         onClick = { nav.push(Screen.Album(album.id)) },
+        end = { LikeHeart(album.id, nav.likedAlbums, album.title, nav.api::setAlbumLike, nav) },
     )
 }
 
@@ -944,6 +973,12 @@ fun AlbumScreen(id: Long, nav: Nav) {
                             onClick = { nav.player.play(album.tracks) },
                             enabled = album.tracks.isNotEmpty(),
                         ) { Text("Play album") }
+                        album.tracks.firstOrNull()?.let { first ->
+                            TextButton(onClick = { nav.startRadio(first) }) {
+                                Icon(Icons.Default.Radio, contentDescription = null, Modifier.size(18.dp))
+                                Text("Radio", Modifier.padding(start = 6.dp))
+                            }
+                        }
                         LikeHeart(album.id, nav.likedAlbums, album.title, nav.api::setAlbumLike, nav)
                     }
                     DownloadAll(album.tracks, nav)
@@ -959,13 +994,44 @@ fun AlbumScreen(id: Long, nav: Nav) {
 @UnstableApi
 @Composable
 fun ArtistScreen(id: Long, nav: Nav) {
+    // Every song by the artist: the top ones first, the rest on Show more.
+    var total by remember(id) { mutableStateOf(0L) }
+    var all by remember(id) { mutableStateOf<List<Track>?>(null) }
+    LaunchedEffect(id) {
+        total = try {
+            nav.api.artistSongs(id, 0, 1).total
+        } catch (_: IOException) {
+            0L
+        }
+    }
+    val scope = nav.scope
     Loaded(key = id, load = { nav.api.artist(id) }) { artist: ArtistDetail ->
+        val shown = all ?: artist.topTracks
         LazyColumn(Modifier.fillMaxSize()) {
             item {
                 Column(Modifier.padding(16.dp)) {
                     Art(nav.api.artUrl(artist.artHash, 512), 160.dp, CircleShape)
-                    Row(Modifier.padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(artist.name, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f, fill = false))
+                    Text(artist.name, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(top = 12.dp))
+                    Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        FilledTonalButton(
+                            enabled = total > 0,
+                            onClick = {
+                                scope.launch {
+                                    try {
+                                        val songs = nav.api.artistSongs(id, 0, 5000).tracks
+                                        if (songs.isNotEmpty()) nav.player.play(songs, 0)
+                                    } catch (_: IOException) {
+                                        nav.message = "Couldn't reach the server."
+                                    }
+                                }
+                            },
+                        ) { Text("Play all") }
+                        artist.topTracks.firstOrNull()?.let { first ->
+                            TextButton(onClick = { nav.startRadio(first) }) {
+                                Icon(Icons.Default.Radio, contentDescription = null, Modifier.size(18.dp))
+                                Text("Radio", Modifier.padding(start = 6.dp))
+                            }
+                        }
                         LikeHeart(artist.id, nav.likedArtists, artist.name, nav.api::setArtistLike, nav)
                     }
                     artist.bio?.let {
@@ -979,7 +1045,30 @@ fun ArtistScreen(id: Long, nav: Nav) {
                     }
                 }
             }
-            songSection("Top songs", artist.topTracks.take(5), nav)
+            if (shown.isNotEmpty()) {
+                item { Heading(if (total > 0) "Songs ($total)" else "Songs") }
+                itemsIndexed(shown, key = { _, song -> song.id }) { index, song ->
+                    SongRow(song, nav) { nav.player.play(shown, index) }
+                }
+                if (shown.size < total) {
+                    item {
+                        TextButton(
+                            onClick = {
+                                scope.launch {
+                                    try {
+                                        val page = nav.api.artistSongs(id, all?.size ?: 0, 100)
+                                        all = (all ?: emptyList()) + page.tracks
+                                        total = page.total
+                                    } catch (_: IOException) {
+                                        nav.message = "Couldn't reach the server."
+                                    }
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text(if (all == null) "Show all $total songs" else "Show more") }
+                    }
+                }
+            }
             if (artist.albums.isNotEmpty()) {
                 item { Heading("Albums") }
                 items(artist.albums) { AlbumRow(it, nav) }
@@ -988,7 +1077,6 @@ fun ArtistScreen(id: Long, nav: Nav) {
                 item { Heading("Appears on") }
                 items(artist.appearsOn) { AlbumRow(it, nav) }
             }
-            songSection("Other songs", artist.otherTracks, nav)
         }
     }
 }
@@ -1406,7 +1494,10 @@ fun SearchScreen(nav: Nav) {
                 .padding(12.dp),
         )
         if (failed) Note("Couldn't reach the server.")
-        val found = results ?: return@Column
+        val found = results ?: run {
+            LibraryScreen(nav)
+            return@Column
+        }
         val empty = found.tracks.isEmpty() && found.albums.isEmpty() && found.artists.isEmpty() &&
             found.described?.tracks.isNullOrEmpty()
         LazyColumn(Modifier.fillMaxSize()) {
@@ -1425,6 +1516,7 @@ fun SearchScreen(nav: Nav) {
                         subtitle = null,
                         art = { Art(nav.api.artUrl(artist.artHash), 44.dp, CircleShape) },
                         onClick = { nav.push(Screen.Artist(artist.id)) },
+                        end = { LikeHeart(artist.id, nav.likedArtists, artist.name, nav.api::setArtistLike, nav) },
                     )
                 }
             }

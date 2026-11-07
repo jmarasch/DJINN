@@ -772,6 +772,43 @@ impl Store {
             other_tracks,
         }))
     }
+
+    /// Every playable song an artist is credited on, a page at a time:
+    /// albums oldest first, each in track order, then songs without one.
+    /// With how many there are in all.
+    pub async fn artist_song_page(
+        &self,
+        id: i64,
+        offset: i64,
+        limit: i64,
+    ) -> Result<(i64, Vec<Track>)> {
+        let total: i64 = sqlx::query_scalar(concat!(
+            "SELECT count(*) FROM tracks t
+             WHERE EXISTS (SELECT 1 FROM track_artists ta WHERE ta.track_id = t.id AND ta.artist_id = ?)
+               AND ",
+            available!()
+        ))
+        .bind(id)
+        .fetch_one(&self.pool)
+        .await?;
+        let tracks = sqlx::query_as(concat!(
+            "SELECT ",
+            track_columns!(),
+            " FROM tracks t
+             LEFT JOIN albums al ON al.id = t.album_id
+             WHERE EXISTS (SELECT 1 FROM track_artists ta WHERE ta.track_id = t.id AND ta.artist_id = ?)
+               AND ",
+            available!(),
+            " ORDER BY al.id IS NULL, al.year, al.title, al.id, t.disc_no, t.track_no, t.title, t.id
+             LIMIT ? OFFSET ?"
+        ))
+        .bind(id)
+        .bind(limit.max(0))
+        .bind(offset.max(0))
+        .fetch_all(&self.pool)
+        .await?;
+        Ok((total, tracks))
+    }
 }
 
 /// Genres from several songs, each once, as "a, b, c"; `None` if there are

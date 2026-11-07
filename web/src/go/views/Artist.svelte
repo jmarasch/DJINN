@@ -3,7 +3,8 @@
   import Art from '../../lib/Art.svelte'
   import ScrollRow from '../../lib/ScrollRow.svelte'
   import Icon from '../../lib/Icon.svelte'
-  import type { ArtistDetail, ArtistSummary } from '../../lib/types'
+  import type { ArtistDetail, ArtistSummary, Track } from '../../lib/types'
+  import { toast } from '../../lib/state.svelte'
   import { likes, playList, startRadio, toggleLike } from '../player.svelte'
   import SongList from '../SongList.svelte'
 
@@ -11,6 +12,43 @@
   let artist = $state<ArtistDetail | null>(null)
   let similar = $state<ArtistSummary[]>([])
   let error = $state('')
+
+  // Every song by the artist: the top ones first, the rest on Show more.
+  let allSongs = $state<Track[] | null>(null)
+  let songTotal = $state(0)
+  let loadingSongs = $state(false)
+
+  $effect(() => {
+    allSongs = null
+    songTotal = 0
+    api
+      .artistSongs(id, 0, 1)
+      .then((page) => (songTotal = page.total))
+      .catch(() => {})
+  })
+
+  async function showMore() {
+    loadingSongs = true
+    try {
+      const page = await api.artistSongs(id, allSongs?.length ?? 0, 100)
+      allSongs = [...(allSongs ?? []), ...page.tracks]
+      songTotal = page.total
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not load more songs', true)
+    } finally {
+      loadingSongs = false
+    }
+  }
+
+  /** Plays every song by the artist, shown or not. */
+  async function playAll() {
+    try {
+      const page = await api.artistSongs(id, 0, 5000)
+      if (page.tracks.length) playList(page.tracks)
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not play them', true)
+    }
+  }
 
   $effect(() => {
     artist = null
@@ -25,8 +63,7 @@
       .catch(() => {})
   })
 
-  /** Every song by the artist: top ones, then the rest. */
-  const songs = $derived(artist ? [...artist.top_tracks, ...artist.other_tracks] : [])
+  const songs = $derived(artist ? (allSongs ?? artist.top_tracks) : [])
 </script>
 
 {#if error}<p class="error">{error}</p>{/if}
@@ -36,7 +73,7 @@
     <h1>{artist.name}</h1>
   </header>
   <div class="buttons">
-    <button class="primary" onclick={() => playList(songs)} disabled={!songs.length}><Icon name="play" /> Play</button>
+    <button class="primary" onclick={playAll} disabled={!songTotal}><Icon name="play" /> Play all</button>
     {#if songs[0]}<button onclick={() => startRadio(songs[0])}><Icon name="radio" /> Radio</button>{/if}
     <button
       class="icon"
@@ -48,9 +85,14 @@
       <Icon name={likes.artist.has(artist.id) ? 'heart' : 'heart-outline'} />
     </button>
   </div>
-  {#if artist.top_tracks.length}
-    <h2>Songs</h2>
-    <SongList tracks={artist.top_tracks} />
+  {#if songs.length}
+    <h2>Songs{#if songTotal}<span class="muted small">{` (${songTotal.toLocaleString()})`}</span>{/if}</h2>
+    <SongList tracks={songs} />
+    {#if songs.length < songTotal}
+      <button class="more" disabled={loadingSongs} onclick={showMore}>
+        {allSongs ? 'Show more' : `Show all ${songTotal.toLocaleString()} songs`}
+      </button>
+    {/if}
   {/if}
   {#if artist.albums.length}
     <h2>Albums</h2>
@@ -90,6 +132,11 @@
 {/if}
 
 <style>
+  .more {
+    width: 100%;
+    margin-top: 8px;
+  }
+
   header {
     display: flex;
     align-items: center;

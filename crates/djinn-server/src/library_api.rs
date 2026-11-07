@@ -43,6 +43,7 @@ pub fn router() -> Router<AppState> {
         .route("/artists", get(artists))
         .route("/artists/jumps", get(artist_jumps))
         .route("/artists/{id}", get(artist))
+        .route("/artists/{id}/songs", get(artist_songs))
         .route(
             "/artists/{id}/pictures",
             get(artist_pictures).post(add_artist_picture),
@@ -533,6 +534,33 @@ async fn album(
         .await?
         .map(Json)
         .ok_or_else(ApiError::not_found)
+}
+
+#[derive(Deserialize)]
+struct SongPage {
+    #[serde(default)]
+    offset: i64,
+    limit: Option<i64>,
+}
+
+#[derive(Serialize)]
+struct ArtistSongs {
+    /// Songs in all.
+    total: i64,
+    tracks: Vec<djinn_store::Track>,
+}
+
+/// Every song by an artist, a page at a time (up to 5,000, enough to play
+/// them all).
+async fn artist_songs(
+    _: CurrentUser,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Query(page): Query<SongPage>,
+) -> ApiResult<Json<ArtistSongs>> {
+    let limit = page.limit.unwrap_or(100).clamp(1, 5000);
+    let (total, tracks) = state.store.artist_song_page(id, page.offset, limit).await?;
+    Ok(Json(ArtistSongs { total, tracks }))
 }
 
 async fn artist(

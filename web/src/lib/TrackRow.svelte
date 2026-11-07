@@ -7,6 +7,7 @@
   import Icon from './Icon.svelte'
   import { tapTrack, toggleRequest, trackStatus } from './state.svelte'
   import TrackMenu from './TrackMenu.svelte'
+  import Heart from './Heart.svelte'
   import type { Track } from './types'
 
   let {
@@ -52,6 +53,7 @@
       {/each}
     </div>
   </div>
+  <Heart kind="track" id={track.id} name={track.title} />
   <TrackMenu {track} />
   <button
     class="queue"
