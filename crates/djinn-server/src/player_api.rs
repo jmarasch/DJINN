@@ -265,6 +265,9 @@ struct Settings {
     /// A copy of a song that played recently counts as played.
     #[serde(default = "default_true")]
     avoid_copies: bool,
+    /// Tonight's numbers on the TV page.
+    #[serde(default = "default_true")]
+    tv_stats: bool,
     /// Keep a history of searches for Admin > Stats.
     #[serde(default = "default_true")]
     search_history: bool,
@@ -355,6 +358,7 @@ async fn settings(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json
         .await?,
         avoid_copies: settings::flag(store, jukebox::AVOID_COPIES, true).await?,
         search_history: settings::flag(store, crate::wishes_api::SEARCH_HISTORY, true).await?,
+        tv_stats: settings::flag(store, crate::tv_api::TV_STATS, true).await?,
         wishlist_everyone: settings::flag(store, crate::wishes_api::WISHLIST_EVERYONE, false)
             .await?,
         per_user_limit: settings::number(
@@ -482,6 +486,7 @@ async fn update_settings(
         .set_setting(jukebox::HISTORY_WINDOW, &body.history_window.to_string())
         .await?;
     settings::set_flag(store, jukebox::AVOID_COPIES, body.avoid_copies).await?;
+    settings::set_flag(store, crate::tv_api::TV_STATS, body.tv_stats).await?;
     settings::set_flag(
         store,
         crate::wishes_api::SEARCH_HISTORY,
