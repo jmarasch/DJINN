@@ -8,6 +8,7 @@ export const adminGroups = [
       { id: 'rules', label: 'Rules' },
       { id: 'smart', label: 'Smart play' },
       { id: 'audio', label: 'Audio' },
+      { id: 'stats', label: 'Stats' },
       { id: 'log', label: 'Request log' },
     ],
   },

@@ -5,6 +5,7 @@
   import Browse from './Browse.svelte'
   import Icon from '../lib/Icon.svelte'
   import TrackRow from '../lib/TrackRow.svelte'
+  import NotInLibrary from '../lib/NotInLibrary.svelte'
   import { hasPlaylists, isAdmin, toast } from '../lib/state.svelte'
   import type { SearchResults } from '../lib/types'
 
@@ -214,6 +215,7 @@
     {/each}
   {/if}
   {#if !describedFirst}{@render describedSection()}{/if}
+  <NotInLibrary {query} />
 {:else if !query.trim()}
   <Browse stuckBelow={searchBox} />
 {/if}

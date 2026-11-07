@@ -12,6 +12,7 @@
   import SongRow from '../SongRow.svelte'
   import LikeButton from '../LikeButton.svelte'
   import SongTile from '../SongTile.svelte'
+  import NotInLibrary from '../../lib/NotInLibrary.svelte'
 
   let searchBar = $state<HTMLElement>()
 
@@ -108,6 +109,7 @@
   {:else}
     <p class="muted">No songs match.</p>
   {/if}
+  <NotInLibrary {query} />
 {/if}
 
 <style>

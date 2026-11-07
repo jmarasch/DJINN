@@ -419,6 +419,8 @@ const ROUTES: &[(Method, &str, Access)] = &[
     (Method::GET, "/api/tracks/*/similar", Access::Listener),
     (Method::GET, "/api/tracks/*/tags", Access::Listener),
     (Method::POST, "/api/tracks/*/report", Access::Listener),
+    (Method::GET, "/api/wishes/enabled", Access::Listener),
+    (Method::POST, "/api/wishes", Access::Listener),
     (Method::GET, "/api/albums", Access::Listener),
     (Method::GET, "/api/albums/jumps", Access::Listener),
     (Method::GET, "/api/albums/*", Access::Listener),

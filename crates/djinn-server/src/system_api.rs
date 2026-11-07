@@ -64,6 +64,7 @@ const RESET_SETTINGS: &[&str] = &[
     "replaygain_mode",
     "replaygain_preamp_db",
     "scheduled_check",
+    "search_history",
     "scheduled_check_hour",
     "skip_votes",
     "smart_play",
@@ -75,6 +76,7 @@ const RESET_SETTINGS: &[&str] = &[
     "update_auto",
     "update_check",
     "volume",
+    "wishlist_everyone",
 ];
 
 /// Next to the database: DJINN starts over from scratch at the next start.

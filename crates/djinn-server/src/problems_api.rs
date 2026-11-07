@@ -212,7 +212,7 @@ async fn csv(_: AdminUser, State(state): State<AppState>) -> ApiResult<impl Into
 
 /// A CSV cell, quoted when needed. A leading =, +, - or @ gets a ' so a
 /// spreadsheet doesn't run it as a formula.
-fn csv_cell(text: &str) -> String {
+pub fn csv_cell(text: &str) -> String {
     let text = if text.starts_with(['=', '+', '-', '@']) {
         format!("'{text}")
     } else {

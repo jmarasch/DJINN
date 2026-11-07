@@ -46,6 +46,7 @@ mod settings;
 mod smart;
 mod sse;
 mod state;
+mod stats_api;
 mod submissions;
 mod subsonic;
 mod system_api;
@@ -57,6 +58,7 @@ mod two_step;
 mod update;
 mod watcher;
 mod web;
+mod wishes_api;
 mod youtube;
 
 use std::path::PathBuf;

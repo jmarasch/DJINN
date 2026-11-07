@@ -44,6 +44,18 @@ export const adminEntries: AdminEntry[] = [
   { label: 'Cast to TVs and speakers', tab: 'audio', keywords: 'chromecast sonos dlna cast stream' },
   { label: 'Volume leveling (ReplayGain)', tab: 'audio', keywords: 'replaygain loudness volume boost' },
   { label: 'Equalizer', tab: 'audio', keywords: 'eq bass treble' },
+  // Stats
+  { label: 'Stats', tab: 'stats', keywords: 'top songs artists requesters skipped busiest hours metrics recap' },
+  { label: 'Clear this history', tab: 'stats', keywords: 'delete plays requests forget' },
+  { label: 'Searches', tab: 'stats', keywords: 'search history nothing found shopping list' },
+  { label: 'Keep a history of searches', tab: 'stats', keywords: 'search log privacy', key: 'search_history' },
+  { label: 'Wishlist', tab: 'stats', keywords: 'wishes not in the library ask missing songs' },
+  {
+    label: 'Let everyone ask for songs that are not in the library',
+    tab: 'stats',
+    keywords: 'wishlist guests',
+    key: 'wishlist_everyone',
+  },
   // Request log
   { label: 'Request log', tab: 'log', keywords: 'requests history who asked' },
   // Users

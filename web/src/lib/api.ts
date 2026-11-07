@@ -58,6 +58,11 @@ import type {
   OutputList,
   OutputStatus,
   Page,
+  Wish,
+  SearchHistory,
+  Stats,
+  StatsFilter,
+  HistoryCounts,
   ScheduledCheck,
   DuplicateListing,
   ProblemItem,
@@ -133,6 +138,17 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   const isJson = res.headers.get('content-type')?.includes('application/json')
   if (res.status === 204 || !isJson) return undefined as T
   return res.json() as Promise<T>
+}
+
+/** A stats filter as query parameters. */
+export function statsQuery(filter: StatsFilter): string {
+  const params = new URLSearchParams()
+  if (filter.from != null) params.set('from', String(filter.from))
+  if (filter.until != null) params.set('until', String(filter.until))
+  if (filter.user != null) params.set('user', String(filter.user))
+  params.set('party', String(filter.party))
+  params.set('go', String(filter.go))
+  return params.toString()
 }
 
 const get = <T>(path: string) => request<T>('GET', path)
@@ -443,5 +459,17 @@ export const api = {
   clearSongReports: (trackId: number) => del<void>(`/library/reports/${trackId}`),
   scheduledCheck: () => get<ScheduledCheck>('/library/scheduled'),
   saveScheduledCheck: (on: boolean, hour: number) => put<ScheduledCheck>('/library/scheduled', { on, hour }),
+  wishesEnabled: () => get<boolean>('/wishes/enabled'),
+  addWish: (artist: string, title: string) => post<number>('/wishes', { artist, title }),
+  wishes: (status: 'open' | 'got' | 'ignored') => get<Wish[]>(`/wishes?status=${status}`),
+  setWish: (id: number, status: 'open' | 'got' | 'ignored') => put<void>(`/wishes/${id}`, { status }),
+  deleteWish: (id: number) => del<void>(`/wishes/${id}`),
+  searchHistory: (since: number, nothingFound: boolean) =>
+    get<SearchHistory>(`/stats/searches?since=${since}&nothing_found=${nothingFound}`),
+  clearSearchHistory: () => del<void>('/stats/searches'),
+  stats: (filter: StatsFilter) => get<Stats>(`/stats?${statsQuery(filter)}`),
+  recap: () => get<Stats | null>('/stats/recap'),
+  historyCounts: (filter: StatsFilter) => get<HistoryCounts>(`/stats/clear?${statsQuery(filter)}`),
+  clearHistory: (filter: StatsFilter) => post<HistoryCounts>('/stats/clear', filter),
   hideLibraryProblems: (kinds: ProblemKind[]) => put<{ kinds: ProblemKind[] }>('/library/problems/hidden', { kinds }),
 }

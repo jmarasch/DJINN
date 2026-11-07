@@ -103,8 +103,14 @@ async fn search(
     let read = allowed.then(|| state.ai.reader.cached(&query.q)).flatten();
     let ask =
         allowed && read.is_none() && crate::smart::worth_asking(&state, &query.q, plain_found);
+    let described = crate::smart::describe(&state, &query.q, plain_found, read.as_ref()).await?;
+    let found = results.tracks.len()
+        + results.albums.len()
+        + results.artists.len()
+        + described.as_ref().map_or(0, |d| d.tracks.len());
+    crate::wishes_api::log_search(&state, user.id, &query.q, found);
     Ok(Json(SearchResponse {
-        described: crate::smart::describe(&state, &query.q, plain_found, read.as_ref()).await?,
+        described,
         results,
         ask,
     }))
@@ -1475,6 +1481,11 @@ pub fn start_scan(state: &AppState) -> bool {
                 let changed = summary.read > 0 || summary.removed > 0;
                 if let Err(e) = crate::playlist_import::after_library_check(&state, changed).await {
                     tracing::error!(error = %format!("{e:#}"), "updating playlists failed");
+                }
+                if changed {
+                    if let Err(e) = crate::wishes_api::grant_wishes(&state).await {
+                        tracing::warn!(error = %format!("{e:#}"), "checking wishes failed");
+                    }
                 }
                 // Nothing new or gone: no artists to look up, no songs to
                 // measure, and the playlist is the same.

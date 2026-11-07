@@ -88,6 +88,9 @@ async fn add_request(
         .add_request(&user, body.track_id, &origin)
         .await
         .map_err(queue_error)?;
+    if let Err(e) = state.store.note_request_after_search(user.id).await {
+        tracing::debug!(error = %e, "noting the search behind a request failed");
+    }
     let status = match outcome {
         RequestOutcome::Added => StatusCode::CREATED,
         RequestOutcome::Backed => StatusCode::OK,
@@ -262,6 +265,12 @@ struct Settings {
     /// A copy of a song that played recently counts as played.
     #[serde(default = "default_true")]
     avoid_copies: bool,
+    /// Keep a history of searches for Admin > Stats.
+    #[serde(default = "default_true")]
+    search_history: bool,
+    /// Everyone gets "Not in the library?", not just admins.
+    #[serde(default)]
+    wishlist_everyone: bool,
     per_user_limit: i64,
     /// Most songs the whole queue may hold; 0 means no cap.
     max_queue: i64,
@@ -345,6 +354,9 @@ async fn settings(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json
         )
         .await?,
         avoid_copies: settings::flag(store, jukebox::AVOID_COPIES, true).await?,
+        search_history: settings::flag(store, crate::wishes_api::SEARCH_HISTORY, true).await?,
+        wishlist_everyone: settings::flag(store, crate::wishes_api::WISHLIST_EVERYONE, false)
+            .await?,
         per_user_limit: settings::number(
             store,
             jukebox::PER_USER_LIMIT,
@@ -470,6 +482,18 @@ async fn update_settings(
         .set_setting(jukebox::HISTORY_WINDOW, &body.history_window.to_string())
         .await?;
     settings::set_flag(store, jukebox::AVOID_COPIES, body.avoid_copies).await?;
+    settings::set_flag(
+        store,
+        crate::wishes_api::SEARCH_HISTORY,
+        body.search_history,
+    )
+    .await?;
+    settings::set_flag(
+        store,
+        crate::wishes_api::WISHLIST_EVERYONE,
+        body.wishlist_everyone,
+    )
+    .await?;
     store
         .set_setting(jukebox::PER_USER_LIMIT, &body.per_user_limit.to_string())
         .await?;

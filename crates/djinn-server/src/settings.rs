@@ -109,6 +109,8 @@ pub const DEFAULTS: &[(&str, Default)] = &[
     (crate::convert::CONVERT_JOBS, Default::Number(1)),
     (crate::convert::CONVERT_CACHE_MB, Default::Number(2048)),
     (crate::submissions::UPLOAD_MAX_MB, Default::Number(15)),
+    (crate::wishes_api::SEARCH_HISTORY, Default::Flag(true)),
+    (crate::wishes_api::WISHLIST_EVERYONE, Default::Flag(false)),
     ("update_check", Default::Flag(true)),
     ("update_auto", Default::Flag(false)),
 ];

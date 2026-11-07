@@ -25,6 +25,8 @@
   import { adminGroups, adminTabLabel, type AdminTab } from '../lib/adminTabs'
   import { adminEntries, searchAdmin, type AdminEntry } from '../lib/adminSearch'
   import AdminHome from '../lib/AdminHome.svelte'
+  import StatsPanel from '../lib/StatsPanel.svelte'
+  import SearchesWishes from '../lib/SearchesWishes.svelte'
   import { tick } from 'svelte'
   import Sheet from '../lib/Sheet.svelte'
   import UsersPanel from '../lib/UsersPanel.svelte'
@@ -95,7 +97,7 @@
   })
 
   async function load(which: AdminTab) {
-    if (which === 'home' || which === 'problems') {
+    if (which === 'home' || which === 'problems' || which === 'stats') {
       // These load their own data.
     } else if (which === 'library') {
       const [r, status, s, rg] = await Promise.all([
@@ -227,6 +229,9 @@
 
 {#if tab === 'home'}
   <AdminHome />
+{:else if tab === 'stats'}
+  <StatsPanel />
+  <SearchesWishes />
 {:else if tab === 'problems'}
   <p class="small muted">Files that didn't make it in, copies of songs and the nightly check are under <a href="#/admin/problems">Problems</a>.</p>
 {:else if tab === 'library'}

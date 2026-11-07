@@ -608,6 +608,8 @@ export interface Settings {
   history_window: number
   /** A copy of a song that played recently counts as played. */
   avoid_copies: boolean
+  search_history: boolean
+  wishlist_everyone: boolean
   per_user_limit: number
   /** 0 means no cap. */
   max_queue: number
@@ -837,6 +839,75 @@ export interface ScheduledCheck {
   /** 0 to 23, the DJINN computer's time. */
   hour: number
   last: CheckSummary | null
+}
+
+export interface Wish {
+  id: number
+  artist: string
+  title: string
+  status: 'open' | 'got' | 'ignored'
+  track_id: number | null
+  askers: number
+  created_at: number
+  updated_at: number
+}
+
+export interface SearchCount {
+  query: string
+  searches: number
+  people: number
+  results: number
+  requested: number
+  last_at: number
+}
+
+export interface SearchHistory {
+  on: boolean
+  searches: SearchCount[]
+}
+
+export interface StatsFilter {
+  from?: number | null
+  until?: number | null
+  user?: number | null
+  party: boolean
+  go: boolean
+}
+
+export interface StatSong {
+  track_id: number
+  title: string
+  artist: string | null
+  album_id: number | null
+  plays: number
+  skips: number
+  listened_ms: number
+}
+
+export interface Stats {
+  from: number | null
+  summary: {
+    plays: number
+    listened_ms: number
+    skips: number
+    songs: number
+    requests: number
+    requesters: number
+  }
+  top_songs: StatSong[]
+  top_artists: { artist_id: number; name: string; plays: number; skips: number }[]
+  top_requested: { track_id: number; title: string | null; artist: string | null; requests: number }[]
+  top_requesters: { user_id: number | null; name: string | null; requests: number }[]
+  most_skipped: StatSong[]
+  by_hour: [number, number][]
+  by_weekday: [number, number][]
+  by_day: [string, number][]
+}
+
+export interface HistoryCounts {
+  party_plays: number
+  go_plays: number
+  requests: number
 }
 
 export interface LibraryStatus {
