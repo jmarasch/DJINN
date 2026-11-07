@@ -58,6 +58,7 @@ mod state;
 mod stats_api;
 mod submissions;
 mod subsonic;
+mod sync_tone;
 mod system_api;
 #[cfg(test)]
 mod test_util;

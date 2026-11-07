@@ -75,6 +75,8 @@ pub const DEFAULT_PER_USER_LIMIT: i64 = 3;
 const DEFAULT_VOLUME: i64 = 80;
 /// Tracks replaced in the engine's slot that it may already have taken.
 const MAX_REPLACED: usize = 8;
+/// The engine's id for the speaker sync tone; never a song's.
+pub const TONE_ID: i64 = -7;
 /// Auto mix songs planned beyond the next one, so screens can show what's
 /// coming and it plays in that order.
 const PLAN_AHEAD: usize = 4;
@@ -617,6 +619,24 @@ impl Jukebox {
         (self.engine)(Command::Play);
     }
 
+    /// Plays the speaker sync tone (a file of evenly spaced clicks) while
+    /// nothing else is lined up. The tone is never a song: nothing is
+    /// recorded. False if music is playing or lined up.
+    pub fn play_tone(&mut self, path: PathBuf) -> bool {
+        if self.playing.is_some() || self.queued.is_some() || !self.in_flight.is_empty() {
+            return false;
+        }
+        (self.engine)(Command::SetNext(Some(djinn_engine::Track {
+            id: TrackId(TONE_ID),
+            path,
+            gapless: false,
+            gain: 1.0,
+            start_ms: 0,
+        })));
+        (self.engine)(Command::Play);
+        true
+    }
+
     pub fn pause(&self) {
         (self.engine)(Command::Pause);
     }
@@ -693,6 +713,28 @@ impl Jukebox {
     }
 
     pub async fn on_engine_event(&mut self, event: EngineEvent) -> anyhow::Result<()> {
+        // The sync tone isn't a song, and a quiet room stays quiet after it
+        // (a request made meanwhile still follows it).
+        let tone = matches!(
+            event,
+            EngineEvent::NextNeeded {
+                after: Some(TrackId(TONE_ID))
+            } | EngineEvent::TrackStarted {
+                id: TrackId(TONE_ID)
+            } | EngineEvent::TrackEnded {
+                id: TrackId(TONE_ID),
+                ..
+            } | EngineEvent::TrackError {
+                id: TrackId(TONE_ID),
+                ..
+            } | EngineEvent::Position {
+                id: TrackId(TONE_ID),
+                ..
+            }
+        );
+        if tone {
+            return Ok(());
+        }
         match event {
             EngineEvent::NextNeeded { after } => {
                 if let Some(TrackId(id)) = after {

@@ -262,6 +262,7 @@ export const api = {
   roomQuiet: (id: number) => get<{ follow_main: boolean; takeover: 'now' | 'after_song' }>(`/rooms/${id}/quiet`),
   setRoomQuiet: (id: number, rules: { follow_main: boolean; takeover: 'now' | 'after_song' }) =>
     put<void>(`/rooms/${id}/quiet`, rules),
+  playSyncTone: (id: number) => post<void>(`/rooms/${id}/sync-tone`),
   nodes: () => get<NodeList>('/nodes'),
   setNodeJoining: (joinOpen: boolean) => put<void>('/nodes/settings', { join_open: joinOpen }),
   acceptNode: (id: number, password: string) => post<void>(`/nodes/${id}/accept`, { password }),

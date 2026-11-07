@@ -179,9 +179,20 @@
       {/if}
     </div>
 
-    <button class="small-button rules-toggle" onclick={() => openRules(room)}>
-      {ruling === room.id ? 'Hide queue rules' : 'Queue rules'}
-    </button>
+    <div class="room-tools">
+      <button class="small-button" onclick={() => openRules(room)}>
+        {ruling === room.id ? 'Hide queue rules' : 'Queue rules'}
+      </button>
+      {#if room.linked_to === null}
+        <button
+          class="small-button"
+          title="30 seconds of clicks through every speaker and node in this room, so you can set each one's delay until they click together. Only while the room is quiet."
+          onclick={() => run(() => api.playSyncTone(room.id), `Clicks playing in ${room.name} for 30 seconds`)}
+        >
+          Sync test clicks
+        </button>
+      {/if}
+    </div>
     {#if ruling === room.id}
       <form
         class="rules"
@@ -275,7 +286,13 @@
     margin-top: 10px;
   }
 
-  .rules-toggle {
+  .room-tools {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .room-tools {
     margin-top: 10px;
   }
 

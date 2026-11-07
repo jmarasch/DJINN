@@ -23,6 +23,7 @@ pub fn router() -> Router<AppState> {
         .route("/rooms/sync", post(resync))
         .route("/rooms/{id}/quiet", get(get_quiet).put(put_quiet))
         .route("/rooms/{id}/rules", get(get_rules).put(put_rules))
+        .route("/rooms/{id}/sync-tone", post(sync_tone))
 }
 
 fn room_error(e: RoomError) -> ApiError {
@@ -255,6 +256,28 @@ async fn put_rules(
         .await
         .set_skip_votes_needed(u32::try_from(body.skip_votes).unwrap_or(0));
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Plays the speaker sync tone in a quiet room, on its speakers and nodes.
+async fn sync_tone(
+    _: AdminUser,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> ApiResult<StatusCode> {
+    if state.store.room(id).await?.is_none() {
+        return Err(ApiError::not_found());
+    }
+    let dir = state.art_dir.parent().map_or_else(
+        || std::path::PathBuf::from("."),
+        std::path::Path::to_path_buf,
+    );
+    let tone = tokio::task::spawn_blocking(move || crate::sync_tone::file(&dir)).await??;
+    if !state.jukebox_for(id).lock().await.play_tone(tone) {
+        return Err(ApiError::conflict(
+            "stop the music in this room first: the tone plays only while it's quiet",
+        ));
+    }
+    Ok(StatusCode::ACCEPTED)
 }
 
 async fn resync(_: AdminUser, State(state): State<AppState>) -> ApiResult<StatusCode> {
