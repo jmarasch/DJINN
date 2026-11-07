@@ -445,6 +445,8 @@ export async function startRadio(track: Track) {
   try {
     const songs = await api.goRadio(track.id)
     if (idle()) {
+      // From the song that just ended: it doesn't start over.
+      if (songs.length > 1 && songs[0]?.id === current()?.id) songs.shift()
       playList(songs, 0, { radio: true, seed: track.id })
       toast(`Radio from "${track.title}"`)
       return

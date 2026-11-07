@@ -1285,3 +1285,69 @@ async fn plays_and_favorites_are_counted_per_song_album_and_artist() {
     assert_eq!(artists[&artist], Counts { plays: 5, likes: 1 });
     assert!(store.track_counts(&[]).await.unwrap().is_empty());
 }
+
+/// Skipping a song you just heard all the way through isn't a skip; one
+/// you haven't heard lately, or only skipped before, still is.
+#[tokio::test]
+async fn a_skip_right_after_hearing_the_song_doesnt_count() {
+    let store = Store::open_in_memory().await.unwrap();
+    store
+        .save_scanned(&[
+            scanned("/m/a.flac", "Favorite", "Band", "Album"),
+            scanned("/m/b.flac", "Other", "Band", "Album"),
+        ])
+        .await
+        .unwrap();
+    let (favorite, other): (i64, i64) = sqlx::query_as(
+        "SELECT a.id, b.id FROM tracks a, tracks b WHERE a.title = 'Favorite' AND b.title = 'Other'",
+    )
+    .fetch_one(&store.pool)
+    .await
+    .unwrap();
+    let sam = store
+        .create_user("sam", "h", crate::Role::User)
+        .await
+        .unwrap()
+        .id;
+    let kim = store
+        .create_user("kim", "h", crate::Role::User)
+        .await
+        .unwrap()
+        .id;
+    let full = crate::SKIP_BEFORE_MS;
+    let now = crate::now_ms();
+    store
+        .record_go_play_at(sam, favorite, full, Some(now - 60_000))
+        .await
+        .unwrap();
+    store.record_go_play(sam, favorite, 1).await.unwrap();
+    store.record_go_play(kim, favorite, 1).await.unwrap();
+    store.record_go_play(sam, other, 1).await.unwrap();
+    store.record_go_play(sam, other, 1).await.unwrap();
+    let skips = |user: i64, track: i64| {
+        let store = &store;
+        async move {
+            sqlx::query_scalar::<_, i64>(
+                "SELECT count(*) FROM go_plays WHERE user_id = ? AND track_id = ? AND skipped = 1",
+            )
+            .bind(user)
+            .bind(track)
+            .fetch_one(&store.pool)
+            .await
+            .unwrap()
+        }
+    };
+    assert_eq!(skips(sam, favorite).await, 0);
+    assert_eq!(skips(kim, favorite).await, 1);
+    assert_eq!(skips(sam, other).await, 2);
+    // Long after, a skip counts again.
+    let later = now + crate::HEARD_RECENTLY_MS + 60_000;
+    sqlx::query("UPDATE go_plays SET at = at - ? WHERE user_id = ?")
+        .bind(later - now)
+        .bind(sam)
+        .execute(&store.pool)
+        .await
+        .unwrap();
+    store.record_go_play(sam, favorite, 1).await.unwrap();
+    assert_eq!(skips(sam, favorite).await, 1);
+}

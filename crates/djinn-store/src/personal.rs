@@ -123,6 +123,12 @@ impl From<PlaylistDetail> for GoPlaylistDetail {
 /// A play counts as skipped when less than this much was heard.
 pub const SKIP_BEFORE_MS: i64 = 30_000;
 
+/// Skipping a song you heard all the way through this recently says you
+/// just heard it, not that you don't like it, so it isn't recorded (radio
+/// from a song that just ended starts with it, for one). Migration 43
+/// cleared earlier skips like that with the same window.
+pub const HEARD_RECENTLY_MS: i64 = 6 * 60 * 60 * 1000;
+
 /// What tapping a song in GO does.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
 #[serde(rename_all = "lowercase")]
@@ -223,6 +229,22 @@ impl Store {
         let at = at
             .filter(|at| (now - OLDEST_REPORT_MS..=now).contains(at))
             .unwrap_or(now);
+        let skipped = ms_played < SKIP_BEFORE_MS;
+        if skipped {
+            let heard: bool = sqlx::query_scalar(
+                "SELECT EXISTS (SELECT 1 FROM go_plays WHERE user_id = ? AND track_id = ?
+                                AND skipped = 0 AND at BETWEEN ? AND ?)",
+            )
+            .bind(user_id)
+            .bind(track_id)
+            .bind(at - HEARD_RECENTLY_MS)
+            .bind(at)
+            .fetch_one(&self.pool)
+            .await?;
+            if heard {
+                return Ok(());
+            }
+        }
         sqlx::query(
             "INSERT INTO go_plays (user_id, track_id, at, ms_played, skipped)
              SELECT ?, id, ?, ?, ? FROM tracks WHERE id = ?",
@@ -230,7 +252,7 @@ impl Store {
         .bind(user_id)
         .bind(at)
         .bind(ms_played.max(0))
-        .bind(ms_played < SKIP_BEFORE_MS)
+        .bind(skipped)
         .bind(track_id)
         .execute(&self.pool)
         .await?;
