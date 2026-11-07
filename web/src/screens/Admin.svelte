@@ -22,14 +22,66 @@
   import PublicNetworkNote from '../lib/PublicNetworkNote.svelte'
   import ReplayGainPanel from '../lib/ReplayGainPanel.svelte'
   import SmartPlayPanel from '../lib/SmartPlayPanel.svelte'
-  import { adminTabRows, type AdminTab } from '../lib/adminTabs'
+  import { adminGroups, adminTabLabel, type AdminTab } from '../lib/adminTabs'
+  import { adminEntries, searchAdmin, type AdminEntry } from '../lib/adminSearch'
+  import AdminHome from '../lib/AdminHome.svelte'
+  import { tick } from 'svelte'
   import Sheet from '../lib/Sheet.svelte'
   import UsersPanel from '../lib/UsersPanel.svelte'
   import GoPanel from '../lib/GoPanel.svelte'
   import { app, logout, toast } from '../lib/state.svelte'
   import type { LibraryRoot, RequestLogEntry, Settings } from '../lib/types'
 
-  let { tab = 'library' }: { tab?: AdminTab } = $props()
+  let { tab = 'home' }: { tab?: AdminTab } = $props()
+
+  // Finding a setting: what's typed, the setting to highlight once its
+  // section shows, settings changed from their defaults, and problems.
+  let query = $state('')
+  let finding = $state<AdminEntry | null>(null)
+  let changed = $state<string[]>([])
+  let showChanged = $state(false)
+  let trouble = $state(0)
+  const results = $derived(searchAdmin(query))
+  const changedEntries = $derived(adminEntries.filter((e) => e.key && changed.includes(e.key)))
+  const changedTabs = $derived(new Set(changedEntries.map((e) => e.tab)))
+
+  $effect(() => {
+    void tab
+    api.changedSettings().then((c) => (changed = c)).catch(() => {})
+    api.libraryProblems().then((p) => (trouble = p.trouble)).catch(() => {})
+  })
+
+  function find(entry: AdminEntry) {
+    query = ''
+    showChanged = false
+    finding = entry
+    if (tab !== entry.tab) location.hash = `#/admin/${entry.tab}`
+    else void highlight(entry)
+  }
+
+  $effect(() => {
+    if (finding && finding.tab === tab) void highlight(finding)
+  })
+
+  /** Scrolls to the setting's text on the page and flashes it. Sections
+   * load their data, so this looks for a few seconds. */
+  async function highlight(entry: AdminEntry) {
+    finding = null
+    await tick()
+    const want = entry.label.toLowerCase().slice(0, 40)
+    for (let i = 0; i < 30; i++) {
+      const found = [...document.querySelectorAll<HTMLElement>('.admin-content :is(h2, h3, label, p, button, dt, a)')]
+        .filter((el) => (el.textContent ?? '').toLowerCase().includes(want))
+        .sort((a, b) => (a.textContent ?? '').length - (b.textContent ?? '').length)[0]
+      if (found) {
+        found.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        found.classList.add('found')
+        setTimeout(() => found.classList.remove('found'), 2500)
+        return
+      }
+      await new Promise((r) => setTimeout(r, 100))
+    }
+  }
 
   let roots = $state<LibraryRoot[]>([])
   let trackCount = $state(0)
@@ -43,7 +95,9 @@
   })
 
   async function load(which: AdminTab) {
-    if (which === 'library') {
+    if (which === 'home' || which === 'problems') {
+      // These load their own data.
+    } else if (which === 'library') {
       const [r, status, s, rg] = await Promise.all([
         api.libraryRoots(),
         api.libraryStatus(),
@@ -102,7 +156,10 @@
 
   async function saveSettings(e: SubmitEvent) {
     e.preventDefault()
-    if (settings && await attempt(() => api.saveSettings(settings!), 'Saved')) clearListCache()
+    if (settings && await attempt(() => api.saveSettings(settings!), 'Saved')) {
+      clearListCache()
+      api.changedSettings().then((c) => (changed = c)).catch(() => {})
+    }
   }
 
   const scanning = $derived(app.scan !== null && !app.scan.done)
@@ -111,19 +168,68 @@
     new Date(ms).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 </script>
 
-<h1>Admin</h1>
-<PublicNetworkNote />
-<nav class="tabs" aria-label="Admin sections">
-  {#each adminTabRows as row, i (i)}
-    <div class="tab-row">
-      {#each row as t (t.id)}
-        <a href="#/admin/{t.id}" class:active={tab === t.id} aria-current={tab === t.id ? 'page' : undefined}>{t.label}</a>
+<div class="admin">
+<aside class="side">
+  <input class="find" type="search" placeholder="Find a setting" aria-label="Find a setting" bind:value={query} />
+  {#if query.trim()}
+    <ul class="results">
+      {#each results.slice(0, 12) as entry (entry.tab + entry.label)}
+        <li>
+          <button onclick={() => find(entry)}>
+            <span>{entry.label}</span>
+            <span class="small muted">{adminTabLabel(entry.tab)}{entry.key && changed.includes(entry.key) ? ', changed' : ''}</span>
+          </button>
+        </li>
+      {:else}
+        <li class="small muted">Nothing matches.</li>
       {/each}
-    </div>
-  {/each}
-</nav>
+    </ul>
+  {:else}
+    <nav aria-label="Admin sections">
+      {#each adminGroups as group (group.label)}
+        <div class="group">
+          <div class="group-label">{group.label}</div>
+          <div class="links">
+            {#each group.tabs as t (t.id)}
+              <a href="#/admin/{t.id}" class:active={tab === t.id} aria-current={tab === t.id ? 'page' : undefined}>
+                {t.label}
+                {#if t.id === 'problems' && trouble > 0}<span class="badge">{trouble.toLocaleString()}</span>{/if}
+                {#if changedTabs.has(t.id)}<span class="changed-dot" title="Has settings changed from the default"></span>{/if}
+              </a>
+            {/each}
+          </div>
+        </div>
+      {/each}
+    </nav>
+    {#if changedEntries.length}
+      <button class="link small" onclick={() => (showChanged = !showChanged)}>
+        {showChanged ? 'Hide' : 'Show'} settings changed from the default ({changedEntries.length})
+      </button>
+      {#if showChanged}
+        <ul class="results">
+          {#each changedEntries as entry (entry.key)}
+            <li>
+              <button onclick={() => find(entry)}>
+                <span>{entry.label}</span>
+                <span class="small muted">{adminTabLabel(entry.tab)}</span>
+              </button>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    {/if}
+  {/if}
+</aside>
 
-{#if tab === 'library'}
+<div class="admin-content">
+<h1>{tab === 'home' ? 'Admin' : adminTabLabel(tab)}</h1>
+<PublicNetworkNote />
+
+{#if tab === 'home'}
+  <AdminHome />
+{:else if tab === 'problems'}
+  <p class="small muted">Files that didn't make it in, copies of songs and the nightly check are under <a href="#/admin/problems">Problems</a>.</p>
+{:else if tab === 'library'}
   <section class="card">
     <h2>Music folders</h2>
     {#each roots as root (root.path)}
@@ -322,37 +428,146 @@
 
 <a class="button account-link" href="#/account">Your account (password, two-step sign-in)</a>
 <button class="signout" onclick={logout}>Sign out</button>
+</div>
+</div>
 
 <style>
-  .tabs {
+  .admin {
+    display: block;
+  }
+
+  /* Wide screens: the menu stays on the left. */
+  @media (min-width: 900px) {
+    .admin {
+      display: grid;
+      grid-template-columns: 220px minmax(0, 1fr);
+      gap: 24px;
+      align-items: start;
+    }
+
+    .side {
+      position: sticky;
+      top: calc(var(--nav-height, 60px) + 12px);
+      max-height: calc(100vh - var(--nav-height, 60px) - 24px);
+      overflow-y: auto;
+    }
+
+    .side .links {
+      flex-direction: column;
+    }
+
+    .side .links a {
+      justify-content: flex-start;
+    }
+  }
+
+  .side {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 10px;
     margin-bottom: 14px;
-    padding: 4px;
+    padding: 10px;
     border-radius: 12px;
     background: var(--surface);
   }
 
-  .tab-row {
+  .find {
+    width: 100%;
+  }
+
+  .group-label {
+    margin: 4px 4px 2px;
+    color: var(--muted);
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .links {
     display: flex;
+    flex-wrap: wrap;
     gap: 4px;
   }
 
-  .tabs a {
-    flex: 1;
-    display: grid;
-    place-items: center;
-    min-height: 40px;
+  .links a {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: 38px;
+    padding: 0 12px;
     border-radius: 8px;
     color: var(--muted);
     text-decoration: none;
   }
 
-  .tabs a.active {
+  .links a.active {
     background: var(--surface-3);
     color: var(--text);
     font-weight: 600;
+  }
+
+  .badge {
+    padding: 0 7px;
+    border-radius: 999px;
+    background: var(--bad);
+    color: #fff;
+    font-size: 0.75rem;
+    font-weight: 600;
+  }
+
+  .changed-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+
+  .results {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .results button {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    width: 100%;
+    min-height: 0;
+    padding: 8px 10px;
+    background: none;
+    color: var(--text);
+    text-align: left;
+  }
+
+  .results button:hover {
+    background: var(--surface-2);
+  }
+
+  .link {
+    min-height: 0;
+    padding: 4px;
+    background: none;
+    color: var(--accent);
+    text-align: left;
+  }
+
+  .admin-content :global(.found) {
+    animation: found 2.5s ease-out;
+    border-radius: 6px;
+  }
+
+  @keyframes found {
+    0%,
+    40% {
+      box-shadow: 0 0 0 3px var(--accent);
+    }
+    100% {
+      box-shadow: 0 0 0 3px transparent;
+    }
   }
 
   .item,

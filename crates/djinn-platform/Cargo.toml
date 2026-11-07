@@ -10,8 +10,11 @@ thiserror.workspace = true
 # The ksni backend talks D-Bus directly on Linux, so no GTK is needed.
 tray-icon = { version = "0.26.1", default-features = false, features = ["ksni"] }
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_System_Console", "Win32_System_LibraryLoader", "Win32_System_Shutdown", "Win32_System_SystemInformation"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_System_Console", "Win32_System_LibraryLoader", "Win32_System_Shutdown", "Win32_System_SystemInformation", "Win32_System_Threading", "Win32_Storage_FileSystem"] }
 
 [dev-dependencies]
 # For the release signing tool (examples/sign.rs).

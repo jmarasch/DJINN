@@ -386,6 +386,7 @@ export const api = {
   stopIdentify: () => post<void>('/identify/stop'),
   about: () => get<About>('/about'),
   systemStatus: () => get<SystemStatus>('/system/status'),
+  changedSettings: () => get<string[]>('/settings/changed'),
   systemPorts: () => get<ServerPorts>('/system/ports'),
   saveSystemPorts: (ports: { party_port: number; go_port: number }) => put<ServerPorts>('/system/ports', ports),
   systemLog: (level: string, q: string) =>

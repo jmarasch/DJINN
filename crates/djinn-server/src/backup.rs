@@ -136,6 +136,9 @@ pub fn data_dir(state: &AppState) -> PathBuf {
         .unwrap_or_default()
 }
 
+/// Setting key: when a backup was last downloaded in full (Unix ms).
+pub const LAST_BACKUP: &str = "last_backup";
+
 async fn download(_: AdminUser, State(state): State<AppState>) -> ApiResult<Response> {
     let work = WorkDir(data_dir(&state).join(format!("backup-{}", now_ms())));
     private_dir(&work.0).map_err(anyhow::Error::from)?;
@@ -145,17 +148,27 @@ async fn download(_: AdminUser, State(state): State<AppState>) -> ApiResult<Resp
         .map_err(anyhow::Error::from)?;
     let name = format!("djinn-backup-{}.zip", date(now_ms()));
     // Sends the file. The working folder goes with the stream, whenever that
-    // ends, after the file closes (Windows can't remove an open file).
-    let body = futures_util::stream::unfold(Some((file, work)), |open| async move {
-        let (mut file, work) = open?;
-        let mut buf = vec![0; 256 * 1024];
-        match tokio::io::AsyncReadExt::read(&mut file, &mut buf).await {
-            Ok(0) => None,
-            Ok(n) => {
-                buf.truncate(n);
-                Some((Ok(Bytes::from(buf)), Some((file, work))))
+    // ends, after the file closes (Windows can't remove an open file). A
+    // backup sent to the end is noted for the health dashboard.
+    let store = state.store.clone();
+    let body = futures_util::stream::unfold(Some((file, work)), move |open| {
+        let store = store.clone();
+        async move {
+            let (mut file, work) = open?;
+            let mut buf = vec![0; 256 * 1024];
+            match tokio::io::AsyncReadExt::read(&mut file, &mut buf).await {
+                Ok(0) => {
+                    if let Err(e) = store.set_setting(LAST_BACKUP, &now_ms().to_string()).await {
+                        tracing::warn!(error = %e, "noting the backup failed");
+                    }
+                    None
+                }
+                Ok(n) => {
+                    buf.truncate(n);
+                    Some((Ok(Bytes::from(buf)), Some((file, work))))
+                }
+                Err(e) => Some((Err(e), None)),
             }
-            Err(e) => Some((Err(e), None)),
         }
     });
     Ok((

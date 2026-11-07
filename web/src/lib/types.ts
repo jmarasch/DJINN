@@ -1141,6 +1141,15 @@ export interface SystemStatus {
   art_bytes: number
   models_bytes: number
   log_file: string | null
+  /** How busy the processor is, 0 to 1. */
+  cpu: number | null
+  memory_total: number | null
+  memory_available: number | null
+  /** The disk holding DJINN's data. */
+  disk_total: number | null
+  disk_available: number | null
+  /** When a backup was last downloaded. */
+  last_backup_ms: number | null
 }
 
 export interface ServerPorts {

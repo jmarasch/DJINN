@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Admin
+
+- **A new Admin page.** Sections are grouped in a side menu (Party, People, Library, System), which sits at the top on phones. **Find a setting** searches every setting by name or a word like "skip" or "backup", opens its section and highlights it. A dot marks sections with settings changed from the default, and a list shows them all.
+- **Admin Home** shows how DJINN is doing at a glance: what's playing and on which speakers, whether extra speakers and casts are in time, library problems, the nightly check, the computer's processor, memory and disk, when you last saved a backup, and whether an update is waiting. Each line links to where to fix it.
+- Library problems, possible duplicates and the nightly check have their own **Problems** section, with a count in the menu.
+
 ### Library
 
 - **Library problems.** Admin > Library has a **Problems** list: files a library check couldn't add (formats DJINN doesn't play, folders it isn't allowed to open, names it can't read, music folders that aren't there), songs that won't play or whose tags couldn't be read, and gaps such as songs with no artist or albums with no cover. Each kind says what to do about it. Hide kinds you already know about, or download the whole list as a spreadsheet. The first library check after updating reads every file once.

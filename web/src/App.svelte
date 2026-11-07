@@ -120,7 +120,7 @@
   {#if !app.connected}
     <div class="offline">Reconnecting to the jukebox...</div>
   {/if}
-  <main class:playing={route.path === '/'} style:--nav-height="{navHeight}px">
+  <main class:playing={route.path === '/'} class:wide={tab === 'admin'} style:--nav-height="{navHeight}px">
     {#if similarId}
       <Similar id={similarId} />
     {:else if genreName}
@@ -169,6 +169,11 @@
 
   main.playing {
     max-width: 1300px;
+  }
+
+  /* Admin's side menu needs room next to the page. */
+  main.wide {
+    max-width: 920px;
   }
 
   nav {

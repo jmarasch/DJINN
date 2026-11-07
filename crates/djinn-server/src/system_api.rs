@@ -19,7 +19,7 @@ use crate::config::Config;
 use crate::error::{ApiError, ApiResult};
 use crate::events::{OutputStatus, PlayState};
 use crate::state::AppState;
-use crate::{folders, library_api, logs};
+use crate::{folders, library_api, logs, settings};
 
 /// Settings a reset puts back to their defaults: the party rules, sound,
 /// smart play, AI and update options. Accounts, music folders, speakers,
@@ -154,6 +154,7 @@ pub fn reset_if_asked(db: &Path, art_dir: &Path) {
 
 pub fn router() -> Router<AppState> {
     Router::new()
+        .route("/settings/changed", get(changed_settings))
         .route("/system/status", get(status))
         .route("/system/ports", get(ports).put(save_ports))
         .route("/system/log", get(log))
@@ -268,6 +269,53 @@ struct Status {
     art_bytes: u64,
     models_bytes: u64,
     log_file: Option<String>,
+    /// How busy the processor is, 0 to 1.
+    cpu: Option<f32>,
+    memory_total: Option<u64>,
+    memory_available: Option<u64>,
+    /// The disk holding DJINN's data.
+    disk_total: Option<u64>,
+    disk_available: Option<u64>,
+    /// When a backup was last downloaded (Unix ms).
+    last_backup_ms: Option<i64>,
+}
+
+/// Settings set to something other than their default, by key.
+async fn changed_settings(
+    _: AdminUser,
+    State(state): State<AppState>,
+) -> ApiResult<Json<Vec<&'static str>>> {
+    Ok(Json(settings::changed(&state.store).await?))
+}
+
+/// The processor reading before the last, to measure how busy it's been
+/// since.
+static CPU: std::sync::Mutex<Option<(std::time::Instant, djinn_platform::system::CpuTimes)>> =
+    std::sync::Mutex::new(None);
+
+/// How busy the processor has been since the last status, or over a
+/// quarter second if that was long ago or never.
+async fn cpu_busy() -> Option<f32> {
+    use djinn_platform::system::cpu_times;
+    let earlier = CPU
+        .lock()
+        .ok()
+        .and_then(|c| *c)
+        .filter(|(at, _)| at.elapsed() < std::time::Duration::from_secs(60))
+        .map(|(_, t)| t);
+    let earlier = match earlier {
+        Some(t) => t,
+        None => {
+            let first = cpu_times()?;
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+            first
+        }
+    };
+    let now = cpu_times()?;
+    if let Ok(mut last) = CPU.lock() {
+        *last = Some((std::time::Instant::now(), now));
+    }
+    now.busy_since(&earlier)
 }
 
 #[derive(Serialize)]
@@ -296,6 +344,8 @@ async fn status(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json<S
         .collect();
     let database = startup.map(|s| s.database.clone());
     let data_dir = state.art_dir.parent().map(Path::to_path_buf);
+    let memory = djinn_platform::system::memory();
+    let disk = data_dir.as_deref().and_then(djinn_platform::system::disk);
     let (database_bytes, art_bytes, models_bytes) = {
         let art = state.art_dir.as_ref().clone();
         tokio::task::spawn_blocking(move || {
@@ -328,6 +378,15 @@ async fn status(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json<S
         art_bytes,
         models_bytes,
         log_file: logs::file().map(|f| f.display().to_string()),
+        cpu: cpu_busy().await,
+        memory_total: memory.map(|m| m.total),
+        memory_available: memory.map(|m| m.available),
+        disk_total: disk.map(|d| d.total),
+        disk_available: disk.map(|d| d.available),
+        last_backup_ms: settings::number(&state.store, crate::backup::LAST_BACKUP, 0)
+            .await
+            .ok()
+            .filter(|&ms| ms > 0),
     }))
 }
 
@@ -616,6 +675,26 @@ mod tests {
         );
         let (status, _) = get_body(&state, "/api/system/log?level=warn", &admin).await;
         assert_eq!(status, StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn changed_settings_are_only_those_off_their_default() {
+        let state = AppState::for_tests().await;
+        let admin = session(&state, "admin", Role::Admin).await;
+        state.store.set_setting("guest_mode", "1").await.unwrap();
+        // Saved, but at its default.
+        state
+            .store
+            .set_setting("per_user_limit", "3")
+            .await
+            .unwrap();
+        let (status, body) = get_body(&state, "/api/settings/changed", &admin).await;
+        assert_eq!(status, StatusCode::OK);
+        let changed: Vec<String> = serde_json::from_str(&body).unwrap();
+        assert_eq!(changed, ["guest_mode"]);
+        let (status, body) = get_body(&state, "/api/system/status", &admin).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(body.contains("\"disk_available\""), "{body}");
     }
 
     #[tokio::test]
