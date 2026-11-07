@@ -446,6 +446,7 @@ const ROUTES: &[(Method, &str, Access)] = &[
     (Method::DELETE, "/api/go/likes/*/*", Access::Listener),
     (Method::POST, "/api/go/plays", Access::Listener),
     (Method::GET, "/api/go/history", Access::Listener),
+    (Method::GET, "/api/go/year", Access::Listener),
     (Method::GET, "/api/go/resume", Access::Listener),
     (Method::PUT, "/api/go/resume", Access::Listener),
     (Method::GET, "/api/go/prefs", Access::Listener),
@@ -2532,6 +2533,21 @@ mod tests {
         assert_eq!(status, StatusCode::NO_CONTENT);
         let (_, text, _) = call(Method::GET, "/api/go/likes/ids".into(), None).await;
         assert_eq!(field(&text, "tracks"), serde_json::json!([ids[1]]));
+
+        // A song played now counts in this year's review.
+        let report = format!(
+            r#"{{"track_id":{},"ms_played":180000,"at":{}}}"#,
+            ids[0],
+            djinn_store::now_ms()
+        );
+        let (status, _, _) = call(Method::POST, "/api/go/plays".into(), Some(report)).await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        let (status, text, _) = call(Method::GET, "/api/go/year".into(), None).await;
+        assert_eq!(status, StatusCode::OK, "{text}");
+        assert_eq!(field(&text, "plays"), 1);
+        assert_eq!(field(&text, "minutes"), 3);
+        assert_eq!(field(&text, "first")["id"], ids[0]);
+        assert_eq!(field(&text, "months").as_array().map(Vec::len), Some(12));
 
         // What tapping a song does: play it now until changed.
         let (_, text, _) = call(Method::GET, "/api/go/prefs".into(), None).await;

@@ -13,8 +13,9 @@
   import SongList from '../SongList.svelte'
   import LikeButton from '../LikeButton.svelte'
   import SongRow from '../SongRow.svelte'
+  import YourYear from './YourYear.svelte'
 
-  let { section = 'liked' }: { section?: 'liked' | 'playlists' | 'genres' | 'history' } = $props()
+  let { section = 'liked' }: { section?: 'liked' | 'playlists' | 'genres' | 'history' | 'year' } = $props()
 
   let liked = $state<Liked | null>(null)
   let lists = $state<GoPlaylist[]>([])
@@ -49,6 +50,7 @@
     if (which === 'liked') liked = await api.goLiked()
     else if (which === 'playlists') lists = await api.goPlaylists()
     else if (which === 'genres') genres = await api.genres()
+    else if (which === 'year') return
     else {
       history = await api.goHistory(0)
       more = history.length === 100
@@ -81,8 +83,13 @@
   <a href="#/library/playlists" class:active={section === 'playlists'}>Playlists</a>
   <a href="#/library/genres" class:active={section === 'genres'}>Genres</a>
   <a href="#/library/history" class:active={section === 'history'}>History</a>
+  <a href="#/library/year" class:active={section === 'year'}>Your year</a>
   {#if app.me?.permissions?.submit_music}<a href="#/submit">Submit music</a>{/if}
 </nav>
+
+{#if section === 'year'}
+  <YourYear />
+{/if}
 
 {#if section === 'genres'}
   <div class="genre-views" role="group" aria-label="Layout">
@@ -178,6 +185,7 @@
 <style>
   .sections {
     display: flex;
+    flex-wrap: wrap;
     gap: 6px;
     margin-bottom: 8px;
   }

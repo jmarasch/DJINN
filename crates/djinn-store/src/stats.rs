@@ -279,6 +279,36 @@ impl Store {
             .await?)
     }
 
+    /// Years (this computer's time) in which someone played songs on GO,
+    /// newest first.
+    pub async fn go_years(&self, user_id: i64) -> Result<Vec<i64>> {
+        Ok(sqlx::query_scalar(
+            "SELECT DISTINCT CAST(strftime('%Y', at / 1000, 'unixepoch', 'localtime') AS INTEGER) AS y
+             FROM go_plays WHERE user_id = ? ORDER BY y DESC",
+        )
+        .bind(user_id)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
+    /// Someone's first song on GO in a stretch of time: (song, when).
+    pub async fn first_go_play(
+        &self,
+        user_id: i64,
+        from: i64,
+        until: i64,
+    ) -> Result<Option<(i64, i64)>> {
+        Ok(sqlx::query_as(
+            "SELECT track_id, at FROM go_plays WHERE user_id = ? AND at >= ? AND at < ?
+             ORDER BY at, id LIMIT 1",
+        )
+        .bind(user_id)
+        .bind(from)
+        .bind(until)
+        .fetch_optional(&self.pool)
+        .await?)
+    }
+
     /// When the latest stretch of party music began: the first play after
     /// a break of at least `gap_ms` with nothing playing. `None` if nothing
     /// has played.

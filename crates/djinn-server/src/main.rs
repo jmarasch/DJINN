@@ -28,6 +28,7 @@ mod go_announce;
 mod go_app;
 mod go_library;
 mod go_upnp;
+mod go_year;
 mod gpu;
 mod identify_api;
 mod jukebox;

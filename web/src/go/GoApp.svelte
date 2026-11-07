@@ -121,7 +121,9 @@
         ? 'genres'
         : route.path === '/library/history'
           ? 'history'
-          : 'liked',
+          : route.path === '/library/year'
+            ? 'year'
+            : 'liked',
   )
 </script>
 

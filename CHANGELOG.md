@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### DJINN GO
+
+- **Your year.** See how long you listened, your top songs and artists, your busiest month and your first song of the year, under Library > Your year in the browser, or from Home in the Android app. Pick earlier years too.
+- The Android app has **Not in the library?** under search results, like the browser, when the admin allows it.
+
 ### Admin
 
 - **A new Admin page.** Sections are grouped in a side menu (Party, People, Library, System), which sits at the top on phones. **Find a setting** searches every setting by name or a word like "skip" or "backup", opens its section and highlights it. A dot marks sections with settings changed from the default, and a list shows them all.

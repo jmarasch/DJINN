@@ -305,6 +305,16 @@ fun HomeScreen(nav: Nav) {
                 }
             }
             songSection("Lately played", home.recent, nav)
+            if (home.recent.isNotEmpty()) {
+                item {
+                    Row2(
+                        title = "Your year",
+                        subtitle = "What you listened to most",
+                        art = {},
+                        onClick = { nav.push(Screen.Year) },
+                    )
+                }
+            }
             songSection("New in the library", home.newest, nav)
         }
     }
@@ -1341,6 +1351,14 @@ fun SearchScreen(nav: Nav) {
     var results by remember { mutableStateOf<SearchResults?>(null) }
     var failed by remember { mutableStateOf(false) }
     var thinking by remember { mutableStateOf(false) }
+    var canWish by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        canWish = try {
+            nav.api.wishesEnabled()
+        } catch (_: IOException) {
+            false
+        }
+    }
     LaunchedEffect(query) {
         failed = false
         thinking = false
@@ -1416,6 +1434,63 @@ fun SearchScreen(nav: Nav) {
             }
             songSection("Songs", found.tracks, nav)
             found.described?.let { songSection(it.summary.joinToString(", "), it.tracks, nav) }
+            if (canWish) item { AskForSong(query.trim(), nav) }
         }
+    }
+}
+
+/** "Not in the library?": asks the admin for a song. */
+@UnstableApi
+@Composable
+private fun AskForSong(query: String, nav: Nav) {
+    var asking by remember { mutableStateOf(false) }
+    var artist by remember { mutableStateOf("") }
+    var title by remember { mutableStateOf("") }
+    val scope = nav.scope
+    TextButton(
+        onClick = {
+            title = query
+            artist = ""
+            asking = true
+        },
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(8.dp),
+    ) { Text("Not in the library? Ask for it") }
+    if (asking) {
+        AlertDialog(
+            onDismissRequest = { asking = false },
+            title = { Text("Ask for a song") },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = artist,
+                        onValueChange = { artist = it.take(200) },
+                        label = { Text("Artist") },
+                        singleLine = true,
+                    )
+                    OutlinedTextField(
+                        value = title,
+                        onValueChange = { title = it.take(200) },
+                        label = { Text("Song") },
+                        singleLine = true,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(enabled = artist.isNotBlank() && title.isNotBlank(), onClick = {
+                    asking = false
+                    scope.launch {
+                        nav.message = try {
+                            nav.api.addWish(artist.trim(), title.trim())
+                            "Asked. The admin will see it."
+                        } catch (e: IOException) {
+                            if (e is ApiException) e.message else "Couldn't reach the server."
+                        }
+                    }
+                }) { Text("Ask") }
+            },
+            dismissButton = { TextButton(onClick = { asking = false }) { Text("Cancel") } },
+        )
     }
 }

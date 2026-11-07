@@ -911,6 +911,21 @@ export interface HistoryCounts {
   requests: number
 }
 
+export interface GoYear {
+  year: number
+  years: number[]
+  plays: number
+  minutes: number
+  songs: number
+  skips: number
+  requests: number
+  top_songs: StatSong[]
+  top_artists: { artist_id: number; name: string; plays: number; skips: number }[]
+  months: number[]
+  busiest_month: number | null
+  first: Track | null
+}
+
 export interface LibraryStatus {
   scanning: boolean
   last_scan: ScanProgress | null

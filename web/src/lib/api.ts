@@ -58,6 +58,7 @@ import type {
   OutputList,
   OutputStatus,
   Page,
+  GoYear,
   Wish,
   SearchHistory,
   Stats,
@@ -189,6 +190,7 @@ export const api = {
   goPlayed: (trackId: number, msPlayed: number) =>
     post<void>('/go/plays', { track_id: trackId, ms_played: Math.round(msPlayed) }),
   goHistory: (offset = 0) => get<Played[]>(`/go/history?offset=${offset}`),
+  goYear: (year?: number) => get<GoYear>(year ? `/go/year?year=${year}` : '/go/year'),
   goResume: () => get<GoResume | null>('/go/resume'),
   goPrefs: () => get<GoPrefs>('/go/prefs'),
   setGoPrefs: (prefs: GoPrefs) => put<void>('/go/prefs', prefs),

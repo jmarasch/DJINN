@@ -43,6 +43,7 @@ pub fn router() -> Router<AppState> {
         .route("/go/offline/versions", post(offline_versions))
         .route("/go/offline-suggested", get(offline_suggested))
         .route("/go/history", get(history))
+        .route("/go/year", get(crate::go_year::year))
         .route("/go/resume", get(resume).put(save_resume))
         .route("/go/prefs", get(prefs).put(set_prefs))
         .route("/go/playlists", get(playlists).post(create_playlist))

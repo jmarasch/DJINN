@@ -313,6 +313,13 @@ class GoApi(private val account: Account) {
 
     suspend fun saveResume(save: ResumeSave) = write("PUT", "/api/go/resume", save)
 
+    suspend fun year(year: Int?): GoYear = get(if (year == null) "/api/go/year" else "/api/go/year?year=$year")
+
+    /** Whether this account gets "Not in the library?". */
+    suspend fun wishesEnabled(): Boolean = get("/api/wishes/enabled")
+
+    suspend fun addWish(artist: String, title: String) = write("POST", "/api/wishes", NewWish(artist, title))
+
     suspend fun reportSong(id: Long, reason: String, note: String?) =
         write("POST", "/api/tracks/$id/report", SongReport(reason, note))
 }

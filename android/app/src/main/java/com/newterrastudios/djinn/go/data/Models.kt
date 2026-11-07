@@ -320,6 +320,42 @@ data class PlayReport(
     val at: Long? = null,
 )
 
+/** Your year on GO, from `/api/go/year`. */
+@Serializable
+data class GoYear(
+    val year: Int,
+    val years: List<Int> = emptyList(),
+    val plays: Long = 0,
+    val minutes: Long = 0,
+    val songs: Long = 0,
+    val requests: Long = 0,
+    @SerialName("top_songs") val topSongs: List<YearSong> = emptyList(),
+    @SerialName("top_artists") val topArtists: List<YearArtist> = emptyList(),
+    val months: List<Long> = emptyList(),
+    @SerialName("busiest_month") val busiestMonth: Int? = null,
+    val first: Track? = null,
+)
+
+@Serializable
+data class YearSong(
+    @SerialName("track_id") val trackId: Long,
+    val title: String,
+    val artist: String? = null,
+    @SerialName("album_id") val albumId: Long? = null,
+    val plays: Long = 0,
+)
+
+@Serializable
+data class YearArtist(
+    @SerialName("artist_id") val artistId: Long,
+    val name: String,
+    val plays: Long = 0,
+)
+
+/** Asking the admin for a song the library lacks. */
+@Serializable
+data class NewWish(val artist: String, val title: String)
+
 /** A listener saying a song needs fixing; `reason` is one of [REPORT_REASONS]. */
 @Serializable
 data class SongReport(val reason: String, val note: String? = null)

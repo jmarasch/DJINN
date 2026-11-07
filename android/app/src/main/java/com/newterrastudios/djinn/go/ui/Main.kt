@@ -60,6 +60,7 @@ sealed interface Screen {
     data object Settings : Screen
     data object Visuals : Screen
     data object Cover : Screen
+    data object Year : Screen
 }
 
 enum class Tab(val label: String) { Home("Home"), Library("Library"), Search("Search") }
@@ -232,6 +233,7 @@ fun MainScreen(nav: Nav) {
                 is Screen.Playlist -> PlaylistScreen(top.id, nav)
                 is Screen.Genre -> GenreScreen(top.name, nav)
                 Screen.Settings -> SettingsScreen(nav)
+                Screen.Year -> YearScreen(nav)
                 Screen.NowPlaying -> NowPlayingScreen(nav)
                 else -> when (nav.tab) {
                     Tab.Home -> HomeScreen(nav)
