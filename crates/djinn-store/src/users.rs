@@ -157,7 +157,7 @@ impl Store {
         role_id: i64,
         status: AccountStatus,
     ) -> Result<User, CreateUserError> {
-        let mut tx = self.pool.begin().await.map_err(StoreError::from)?;
+        let mut tx = self.write().await?;
         match insert_account(&mut tx, username, password_hash, role, role_id, status).await {
             Ok(user) => {
                 tx.commit().await.map_err(StoreError::from)?;
@@ -257,7 +257,7 @@ impl Store {
     /// Approves, turns off or turns back on an account. Anything but active
     /// signs it out everywhere, app password included.
     pub async fn set_status(&self, id: i64, status: AccountStatus) -> Result<bool> {
-        let mut tx = self.pool.begin().await?;
+        let mut tx = self.write().await?;
         let result = sqlx::query("UPDATE users SET status = ? WHERE id = ? AND role != 'guest'")
             .bind(status)
             .bind(id)
@@ -282,7 +282,7 @@ impl Store {
     /// Sets a new password and signs the user out everywhere, app password
     /// included: whoever the password was changed to keep out may have it.
     pub async fn set_password(&self, id: i64, password_hash: &str) -> Result<bool> {
-        let mut tx = self.pool.begin().await?;
+        let mut tx = self.write().await?;
         let result =
             sqlx::query("UPDATE users SET password_hash = ? WHERE id = ? AND role != 'guest'")
                 .bind(password_hash)
@@ -321,7 +321,7 @@ impl Store {
         mac: Option<&str>,
         ip: Option<&str>,
     ) -> Result<User> {
-        let mut tx = self.pool.begin().await?;
+        let mut tx = self.write().await?;
         let now = now_ms();
         let existing: Option<i64> = match mac {
             Some(mac) => {

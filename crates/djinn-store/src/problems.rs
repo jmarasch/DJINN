@@ -258,7 +258,7 @@ impl Store {
     /// problem seen before keeps the time it was first noticed. Also drops
     /// unreadable-tag notes of songs no longer in the library.
     pub async fn replace_walk_problems(&self, problems: &[ScanProblem]) -> Result<()> {
-        let mut tx = self.pool.begin().await?;
+        let mut tx = self.write().await?;
         let seen: Vec<(String, i64)> = sqlx::query_as(
             "SELECT path, noticed_at FROM scan_problems
              WHERE kind IN ('missing_folder', 'unreadable', 'bad_name', 'unsupported')",

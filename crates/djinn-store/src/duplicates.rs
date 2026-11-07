@@ -81,7 +81,7 @@ impl Store {
 
     /// Records that none of these songs are copies of each other.
     pub async fn dismiss_duplicates(&self, ids: &[i64]) -> Result<()> {
-        let mut tx = self.pool.begin().await?;
+        let mut tx = self.write().await?;
         for (i, &a) in ids.iter().enumerate() {
             for &b in &ids[i + 1..] {
                 if a == b {

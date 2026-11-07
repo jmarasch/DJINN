@@ -25,6 +25,7 @@
 - **The auto mix won't play another copy of a song that just played.** A copy counts as played, the same as the song itself. Turn this off in Admin > Rules.
 - **Report a problem with a song.** Everyone, guests included, can flag a song from its menu (in the party app, DJINN GO and the Android app): wrong title or artist, wrong cover, sounds bad, plays a different song, or something else, with an optional note. Reports show under Problems until you mark them **Done**.
 - **Nightly check.** Admin > Library can check the library every night at an hour you pick (or when DJINN starts, if it was off then) and sums up what changed: songs added and gone, problems, songs with copies, and listener reports. Useful for network folders that don't say when they change.
+- A library check could fail with "database is locked" when sound analysis was saving at the same moment. Writes now wait their turn, and analysis and AI listening wait while a library check runs.
 - A file that crashed the tag reader used to take the files read alongside it out of the library. Now only that file is affected, and it's listed under its name.
 
 ### Updates

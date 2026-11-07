@@ -135,7 +135,8 @@ pub fn waiting(state: &AppState) -> Option<Held> {
     state.scan.held.lock().ok().and_then(|h| *h)
 }
 
-/// Waits until background work may run. `wanted` is asked again while
+/// Waits until background work may run (and no library check is going).
+/// `wanted` is asked again while
 /// waiting; false (switched off or stopped meanwhile) gives up and returns
 /// false. `changed` is called when the reason to wait changes, to update
 /// what the Library page shows.
@@ -147,6 +148,18 @@ where
     CF: Future<Output = ()>,
 {
     loop {
+        // A library check writes a lot; work that writes too waits for it,
+        // so neither holds the other up.
+        while state
+            .scan
+            .running
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            if !wanted().await {
+                return false;
+            }
+            tokio::time::sleep(CHECK).await;
+        }
         let now = held(state).await;
         let before = state
             .scan

@@ -480,7 +480,7 @@ impl Store {
     /// Adds songs to the end, leaving out any already named on their own.
     pub async fn add_playlist_songs(&self, id: i64, track_ids: &[i64]) -> Result<()> {
         let now = now_ms();
-        let mut tx = self.pool.begin().await?;
+        let mut tx = self.write().await?;
         for track in track_ids {
             sqlx::query(
                 "INSERT OR IGNORE INTO playlist_entries (playlist_id, kind, ref_id, position, added_at)
@@ -513,7 +513,7 @@ impl Store {
     /// or artist already covers them.
     pub async fn set_playlist_songs(&self, id: i64, track_ids: &[i64]) -> Result<()> {
         let now = now_ms();
-        let mut tx = self.pool.begin().await?;
+        let mut tx = self.write().await?;
         let entries: Vec<(i64, EntryKind, i64)> = sqlx::query_as(
             "SELECT id, kind, ref_id FROM playlist_entries WHERE playlist_id = ? ORDER BY position",
         )
@@ -737,7 +737,7 @@ impl Store {
         rows: &[ImportRow],
     ) -> Result<PlaylistSummary> {
         let now = now_ms();
-        let mut tx = self.pool.begin().await?;
+        let mut tx = self.write().await?;
         let id: i64 = sqlx::query_scalar(
             "INSERT INTO playlists (owner_id, name, created_at, updated_at) VALUES (?, ?, ?, ?)
              RETURNING id",
@@ -809,7 +809,7 @@ impl Store {
     /// Points an entry at a song in the library. If the playlist already
     /// has that song, the entry goes instead.
     pub async fn fill_playlist_entry(&self, entry_id: i64, track_id: i64) -> Result<()> {
-        let mut tx = self.pool.begin().await?;
+        let mut tx = self.write().await?;
         sqlx::query(
             "DELETE FROM playlist_wanted WHERE id =
                (SELECT ref_id FROM playlist_entries WHERE id = ? AND kind = 'wanted')",
@@ -1006,7 +1006,7 @@ impl Store {
         entry_id: i64,
         index: usize,
     ) -> Result<bool> {
-        let mut tx = self.pool.begin().await?;
+        let mut tx = self.write().await?;
         let mut ids: Vec<i64> = sqlx::query_scalar(
             "SELECT id FROM playlist_entries WHERE playlist_id = ? ORDER BY position",
         )

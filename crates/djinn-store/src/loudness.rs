@@ -114,7 +114,7 @@ impl Store {
                 .flat_map(|v| v.to_le_bytes())
                 .collect::<Vec<u8>>()
         });
-        let mut tx = self.pool().begin().await?;
+        let mut tx = self.write().await?;
         sqlx::query(
             "UPDATE tracks SET loudness_lufs = ?, loudness_peak = ?, loudness_checked_at = ? \
              WHERE id = ?",

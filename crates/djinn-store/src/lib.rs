@@ -212,10 +212,20 @@ impl Store {
     }
 }
 
+impl Store {
+    /// A transaction that takes the write lock at once (BEGIN IMMEDIATE).
+    /// A plain transaction that reads first and writes later can't wait for
+    /// another writer: SQLite fails it straight away with "database is
+    /// locked". Taking the lock up front waits its turn instead.
+    pub(crate) async fn write(&self) -> Result<sqlx::Transaction<'static, sqlx::Sqlite>> {
+        Ok(self.pool.begin_with("BEGIN IMMEDIATE").await?)
+    }
+}
+
 fn common(options: SqliteConnectOptions) -> SqliteConnectOptions {
     options
         .foreign_keys(true)
-        .busy_timeout(Duration::from_secs(5))
+        .busy_timeout(Duration::from_secs(15))
 }
 
 /// Current time as Unix epoch milliseconds, the timestamp format in the schema.
@@ -228,6 +238,52 @@ pub fn now_ms() -> i64 {
 #[cfg(test)]
 mod playback_pool_tests {
     use super::*;
+
+    /// A library check and sound analysis writing at once: each waits for
+    /// the other instead of failing with "database is locked".
+    #[tokio::test]
+    async fn a_library_check_and_analysis_can_write_at_once() {
+        let dir = std::env::temp_dir().join(format!(
+            "djinn-write-race-{}-{}",
+            std::process::id(),
+            now_ms()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = Store::open(&dir.join("djinn.db")).await.unwrap();
+        let song = |i: usize| crate::ScannedTrack {
+            path: format!("/m/{i}.flac"),
+            title: format!("Song {i}"),
+            artist: Some("Band".into()),
+            album: Some("Album".into()),
+            ..Default::default()
+        };
+        store
+            .save_scanned(&(0..200).map(song).collect::<Vec<_>>())
+            .await
+            .unwrap();
+        let ids = store.library_track_ids().await.unwrap();
+        let analysis = {
+            let store = store.clone();
+            tokio::spawn(async move {
+                for round in 0..4 {
+                    for &id in &ids {
+                        store
+                            .save_analysis(id, 1, round, Some((-10.0, 0.9)), None, Some(&[1, 2]))
+                            .await
+                            .unwrap();
+                    }
+                }
+            })
+        };
+        for _ in 0..10 {
+            store
+                .save_scanned(&(0..200).map(song).collect::<Vec<_>>())
+                .await
+                .unwrap();
+        }
+        analysis.await.unwrap();
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[tokio::test]
     async fn playback_pool_works_when_browse_pool_is_full() {

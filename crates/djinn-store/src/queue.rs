@@ -150,7 +150,7 @@ impl Store {
         limits: RequestLimits,
         origin: &RequestOrigin,
     ) -> Result<(QueueItem, RequestOutcome), AddRequestError> {
-        let mut tx = self.pool.begin().await.map_err(StoreError::from)?;
+        let mut tx = self.write().await?;
         let available: bool = sqlx::query_scalar(
             "SELECT EXISTS (SELECT 1 FROM tracks WHERE id = ? AND removed_at IS NULL)",
         )
@@ -263,7 +263,7 @@ impl Store {
     /// requester hands it to the first backer, or removes it if there's
     /// none.
     pub async fn withdraw_request(&self, id: i64, user_id: i64) -> Result<Withdrawal> {
-        let mut tx = self.pool.begin().await?;
+        let mut tx = self.write().await?;
         let unbacked =
             sqlx::query("DELETE FROM request_backers WHERE queue_id = ? AND user_id = ?")
                 .bind(id)
@@ -366,7 +366,7 @@ impl Store {
     /// go among songs with as many backers: a song with more support stays
     /// ahead, one with less behind (see `queue_order!`).
     pub async fn move_request(&self, id: i64, index: usize) -> Result<bool> {
-        let mut tx = self.pool.begin().await?;
+        let mut tx = self.write().await?;
         let rows: Vec<(i64, i64, i64)> = sqlx::query_as(concat!(
             "SELECT q.id, q.position, ",
             backer_count!(),

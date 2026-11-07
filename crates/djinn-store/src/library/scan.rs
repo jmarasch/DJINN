@@ -16,7 +16,7 @@ impl Store {
 
     /// Inserts or updates scanned files in one transaction.
     pub async fn save_scanned(&self, tracks: &[ScannedTrack]) -> Result<()> {
-        let mut tx = self.pool.begin().await?;
+        let mut tx = self.write().await?;
         let now = now_ms();
         for track in tracks {
             save_track(&mut tx, track, now).await?;
@@ -30,7 +30,7 @@ impl Store {
     /// uses them). Run after a scan.
     pub async fn refresh_artwork(&self) -> Result<()> {
         let apart = self.get_setting(ALBUM_FOLDERS_KEY).await?.as_deref() != Some("0");
-        let mut tx = self.pool.begin().await?;
+        let mut tx = self.write().await?;
         // Files without an album-artist tag are provisionally filed under
         // their first credited artist. Compare the tracks in each album
         // folder after the scan, then collect multi-artist albums together.
@@ -169,7 +169,7 @@ impl Store {
     }
 
     pub async fn mark_removed(&self, ids: &[i64]) -> Result<()> {
-        let mut tx = self.pool.begin().await?;
+        let mut tx = self.write().await?;
         let now = now_ms();
         for id in ids {
             sqlx::query("UPDATE tracks SET removed_at = ? WHERE id = ? AND removed_at IS NULL")

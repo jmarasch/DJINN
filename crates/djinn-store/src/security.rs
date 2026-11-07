@@ -40,7 +40,7 @@ impl Store {
     /// the most it keeps.
     pub async fn log_sign_in(&self, s: &NewSignIn<'_>) -> Result<()> {
         let now = now_ms();
-        let mut tx = self.pool.begin().await?;
+        let mut tx = self.write().await?;
         sqlx::query(
             "INSERT INTO sign_ins (at, user_id, username, ip, user_agent, via, outcome)
              VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -108,7 +108,7 @@ impl Store {
         recovery_hashes: &[Vec<u8>],
         keep: Option<i64>,
     ) -> Result<bool> {
-        let mut tx = self.pool.begin().await?;
+        let mut tx = self.write().await?;
         let done = sqlx::query(
             "UPDATE users SET totp_secret = totp_pending, totp_pending = NULL, totp_last_step = ?
              WHERE id = ? AND totp_pending IS NOT NULL",
@@ -192,7 +192,7 @@ impl Store {
 
     /// Turns two-step sign-in off and forgets its recovery codes.
     pub async fn clear_two_step(&self, user_id: i64) -> Result<bool> {
-        let mut tx = self.pool.begin().await?;
+        let mut tx = self.write().await?;
         let done = sqlx::query(
             "UPDATE users SET totp_secret = NULL, totp_pending = NULL, totp_last_step = NULL
              WHERE id = ?",

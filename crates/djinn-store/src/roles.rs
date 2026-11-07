@@ -271,7 +271,7 @@ impl Store {
         if id == LISTENER_ROLE {
             return Err(RoleError::Builtin);
         }
-        let mut tx = self.pool.begin().await?;
+        let mut tx = self.write().await?;
         sqlx::query("UPDATE users SET role_id = ? WHERE role_id = ?")
             .bind(LISTENER_ROLE)
             .bind(id)
@@ -376,7 +376,7 @@ impl Store {
         password_hash: &str,
         token_hash: &[u8],
     ) -> Result<User, SignupError> {
-        let mut tx = self.pool.begin().await?;
+        let mut tx = self.write().await?;
         let role_id: Option<i64> = sqlx::query_scalar(concat!(
             "UPDATE invites AS i SET used = used + 1, uses_left = uses_left - 1
              WHERE i.token_hash = ? AND ",

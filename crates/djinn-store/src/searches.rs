@@ -149,7 +149,7 @@ impl Store {
     pub async fn add_wish(&self, user_id: i64, artist: &str, title: &str) -> Result<i64> {
         let wanted = format!("{}\u{1f}{}", fold_wish(artist), fold_wish(title));
         let now = now_ms();
-        let mut tx = self.pool.begin().await?;
+        let mut tx = self.write().await?;
         let id: i64 = sqlx::query_scalar(
             "INSERT INTO wishes (artist, title, wanted, created_at, updated_at)
              VALUES (?, ?, ?, ?, ?)

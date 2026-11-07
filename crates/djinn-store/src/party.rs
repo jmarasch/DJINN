@@ -135,7 +135,7 @@ impl Store {
     /// played songs keep their history. Returns false if there's no such
     /// style.
     pub async fn clear_party_style(&self, id: i64) -> Result<bool> {
-        let mut tx = self.pool.begin().await?;
+        let mut tx = self.write().await?;
         let found = sqlx::query("SELECT 1 FROM party_styles WHERE id = ?")
             .bind(id)
             .fetch_optional(&mut *tx)

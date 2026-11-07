@@ -134,7 +134,7 @@ impl Store {
     /// Applies `change` to each song's corrections. Returns the songs' file
     /// paths, to read again so the change shows.
     pub async fn edit_tags(&self, track_ids: &[i64], change: &TagChange) -> Result<Vec<String>> {
-        let mut tx = self.pool.begin().await?;
+        let mut tx = self.write().await?;
         let now = now_ms();
         let mut paths = Vec::with_capacity(track_ids.len());
         for &id in track_ids {

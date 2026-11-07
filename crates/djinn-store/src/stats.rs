@@ -350,7 +350,7 @@ impl Store {
     /// Forgets the plays and requests the filter covers. What the auto mix
     /// learned from them goes too, since it's worked out from them.
     pub async fn clear_history_matching(&self, filter: &StatsFilter) -> Result<HistoryCounts> {
-        let mut tx = self.pool.begin().await?;
+        let mut tx = self.write().await?;
         let party = sqlx::query(
             "DELETE FROM play_events WHERE ? AND started_at >= ? AND started_at < ?
              AND (?4 IS NULL OR requested_by = ?4)",
