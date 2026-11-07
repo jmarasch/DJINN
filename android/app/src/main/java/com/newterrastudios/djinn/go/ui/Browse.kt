@@ -1,5 +1,6 @@
 package com.newterrastudios.djinn.go.ui
 
+import com.newterrastudios.djinn.go.i18n.t
 import kotlinx.coroutines.withContext
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
@@ -1489,7 +1490,7 @@ fun SearchScreen(nav: Nav) {
             value = query,
             onValueChange = { query = it },
             singleLine = true,
-            placeholder = { Text("Songs, artists, or \"chill house\"") },
+            placeholder = { Text(t("search.placeholder")) },
             leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
             modifier = Modifier
                 .fillMaxWidth()
@@ -1506,12 +1507,12 @@ fun SearchScreen(nav: Nav) {
             if (thinking) {
                 item {
                     LinearProgressIndicator(Modifier.fillMaxWidth())
-                    Note("Asking the server's AI...")
+                    Note(t("go.thinking"))
                 }
             }
-            if (empty && !thinking) item { Note("Nothing found.") }
+            if (empty && !thinking) item { Note(t("go.no_songs")) }
             if (found.artists.isNotEmpty()) {
-                item { Heading("Artists") }
+                item { Heading(t("library.artists")) }
                 items(found.artists) { artist ->
                     Row2(
                         title = artist.name,
@@ -1523,12 +1524,12 @@ fun SearchScreen(nav: Nav) {
                 }
             }
             if (found.albums.isNotEmpty()) {
-                item { Heading("Albums") }
+                item { Heading(t("library.albums")) }
                 items(found.albums) { AlbumRow(it, nav) }
             }
-            songSection("Songs", found.tracks, nav)
+            songSection(t("library.songs"), found.tracks, nav)
             if (found.lyrics.isNotEmpty()) {
-                item { Heading("Songs with these words") }
+                item { Heading(t("search.lyric_matches")) }
                 val songs = found.lyrics.map { it.track }
                 itemsIndexed(found.lyrics) { index, hit ->
                     SongRow(hit.track, nav, note = "\u201c${hit.line}\u201d") { nav.player.play(songs, index) }

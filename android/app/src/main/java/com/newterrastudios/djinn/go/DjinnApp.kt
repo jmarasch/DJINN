@@ -21,6 +21,11 @@ private const val RECENT_CACHE_BYTES = 2L * 1024 * 1024 * 1024
 
 @UnstableApi
 class DjinnApp : Application(), SingletonImageLoader.Factory {
+    override fun onCreate() {
+        super.onCreate()
+        com.newterrastudios.djinn.go.i18n.Strings.load(this)
+    }
+
     val account by lazy { Account(this) }
     val api by lazy { GoApi(account) }
     val prefs by lazy { Prefs(this) { account.scope.orEmpty() } }

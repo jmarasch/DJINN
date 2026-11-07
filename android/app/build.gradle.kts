@@ -14,7 +14,16 @@ val djinnVersion: String = providers.gradleProperty("djinnVersion").orNull
 val nightly = djinnVersion.endsWith("-nightly")
 val release: List<Int> = djinnVersion.removeSuffix("-nightly").split('.').map(String::toInt)
 
+// The translations are the web app's (web/src/i18n), shared, copied into the
+// app's assets as i18n/<lang>.json.
+val copyTranslations by tasks.registering(Sync::class) {
+    from("../../web/src/i18n") { include("*.json") }
+    into(layout.buildDirectory.dir("generated/translations/i18n"))
+}
+tasks.named("preBuild") { dependsOn(copyTranslations) }
+
 android {
+    sourceSets.getByName("main").assets.srcDir(file("build/generated/translations"))
     namespace = "com.newterrastudios.djinn.go"
     compileSdk = 37
 

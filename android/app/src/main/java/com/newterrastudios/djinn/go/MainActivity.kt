@@ -81,6 +81,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // The phone's language may have changed since the app started.
+        com.newterrastudios.djinn.go.i18n.Strings.load(this)
         enableEdgeToEdge()
         Spectrum.leadMs = app.prefs.visualsLeadMs
         Spectrum.intensity = app.prefs.visualsIntensity

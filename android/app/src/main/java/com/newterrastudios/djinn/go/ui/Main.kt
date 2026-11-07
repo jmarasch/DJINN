@@ -65,7 +65,8 @@ sealed interface Screen {
     data object Year : Screen
 }
 
-enum class Tab(val label: String) { Home("Home"), Library("Library"), Mine("Your music"), Account("Account") }
+/** The tabs, with their names' translation keys. */
+enum class Tab(val key: String) { Home("go.home"), Library("nav.library"), Mine("go.your_music"), Account("go.account") }
 
 /** Where you are in the app, and what every screen needs. */
 @UnstableApi
@@ -209,7 +210,7 @@ fun MainScreen(nav: Nav) {
                                     contentDescription = null,
                                 )
                             },
-                            label = { Text(tab.label) },
+                            label = { Text(com.newterrastudios.djinn.go.i18n.t(tab.key)) },
                         )
                     }
                     NavigationBarItem(
