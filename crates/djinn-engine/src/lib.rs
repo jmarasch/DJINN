@@ -34,8 +34,8 @@ pub use equalizer::{
 };
 pub use error::EngineError;
 pub use features::{
-    analyze, decode_mono, decode_stereo, describe, Analysis, Features, FEATURES_VERSION,
-    FEATURE_COUNT,
+    analyze, decode_mono, decode_stereo, describe, print_similarity, Analysis, Features,
+    FEATURES_VERSION, FEATURE_COUNT, PRINT_LEN, PRINT_VERSION,
 };
 pub use fingerprint::fingerprint;
 pub use loudness::{measure_loudness, Loudness, REFERENCE_LUFS};

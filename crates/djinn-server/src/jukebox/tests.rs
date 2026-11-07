@@ -226,7 +226,7 @@ async fn requester_can_skip_their_own_song_alone() {
 async fn replay_gain_reaches_the_engine() {
     let mut h = Harness::new(1).await;
     h.store
-        .save_analysis(h.tracks[0], 1, Some((-8.0, 0.5)), None)
+        .save_analysis(h.tracks[0], 1, 1, Some((-8.0, 0.5)), None, None)
         .await
         .unwrap();
     let gain_sent = |h: &Harness| {

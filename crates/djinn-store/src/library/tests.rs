@@ -1176,11 +1176,18 @@ async fn a_changed_file_is_analyzed_and_heard_again() {
         .items[0]
         .id;
     store
-        .save_analysis(id, 1, Some((-14.0, 0.9)), Some((&[1.0, 2.0], 120.0)))
+        .save_analysis(
+            id,
+            1,
+            1,
+            Some((-14.0, 0.9)),
+            Some((&[1.0, 2.0], 120.0)),
+            None,
+        )
         .await
         .unwrap();
     store.save_heard(id, 1, Some(&[3.0])).await.unwrap();
-    assert!(store.tracks_to_analyze(1, 10).await.unwrap().is_empty());
+    assert!(store.tracks_to_analyze(1, 1, 10).await.unwrap().is_empty());
     assert!(store.tracks_to_hear(1, 10).await.unwrap().is_empty());
     assert_eq!(store.heard_progress(1).await.unwrap(), (1, 0));
     assert_eq!(store.sound_rows(1).await.unwrap().len(), 1);
@@ -1191,12 +1198,12 @@ async fn a_changed_file_is_analyzed_and_heard_again() {
         .save_scanned(std::slice::from_ref(&song))
         .await
         .unwrap();
-    assert!(store.tracks_to_analyze(1, 10).await.unwrap().is_empty());
+    assert!(store.tracks_to_analyze(1, 1, 10).await.unwrap().is_empty());
 
     let mut changed = song;
     changed.mtime = 2;
     store.save_scanned(&[changed]).await.unwrap();
-    assert_eq!(store.tracks_to_analyze(1, 10).await.unwrap().len(), 1);
+    assert_eq!(store.tracks_to_analyze(1, 1, 10).await.unwrap().len(), 1);
     assert_eq!(store.tracks_to_hear(1, 10).await.unwrap().len(), 1);
     assert_eq!(store.heard_progress(1).await.unwrap(), (0, 1));
 

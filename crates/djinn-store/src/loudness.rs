@@ -68,15 +68,23 @@ pub struct LoudnessProgress {
 
 impl Store {
     /// Up to `limit` tracks to analyze: never analyzed with the current
-    /// `version` of the features. As (id, path).
-    pub async fn tracks_to_analyze(&self, version: i64, limit: i64) -> Result<Vec<(i64, String)>> {
+    /// `version` of the features or `print_version` of the fingerprint.
+    /// As (id, path).
+    pub async fn tracks_to_analyze(
+        &self,
+        version: i64,
+        print_version: i64,
+        limit: i64,
+    ) -> Result<Vec<(i64, String)>> {
         let rows = sqlx::query_as(
             "SELECT t.id, t.path FROM tracks t \
              LEFT JOIN track_sound s ON s.track_id = t.id \
-             WHERE t.removed_at IS NULL AND (s.features_version IS NULL OR s.features_version < ?) \
+             WHERE t.removed_at IS NULL AND (s.features_version IS NULL OR s.features_version < ? \
+                OR s.print_version IS NULL OR s.print_version < ?) \
              ORDER BY t.id LIMIT ?",
         )
         .bind(version)
+        .bind(print_version)
         .bind(limit)
         .fetch_all(self.pool())
         .await?;
@@ -89,10 +97,18 @@ impl Store {
         &self,
         id: i64,
         version: i64,
+        print_version: i64,
         loudness: Option<(f64, f64)>,
         features: Option<(&[f32], f32)>,
+        print: Option<&[u32]>,
     ) -> Result<()> {
         let blob = features.map(|(values, _)| {
+            values
+                .iter()
+                .flat_map(|v| v.to_le_bytes())
+                .collect::<Vec<u8>>()
+        });
+        let print = print.map(|values| {
             values
                 .iter()
                 .flat_map(|v| v.to_le_bytes())
@@ -110,14 +126,17 @@ impl Store {
         .execute(&mut *tx)
         .await?;
         sqlx::query(
-            "INSERT INTO track_sound (track_id, features, bpm, features_version) \
-             SELECT id, ?, ?, ? FROM tracks WHERE id = ? \
+            "INSERT INTO track_sound (track_id, features, bpm, features_version, print, print_version) \
+             SELECT id, ?, ?, ?, ?, ? FROM tracks WHERE id = ? \
              ON CONFLICT (track_id) DO UPDATE SET features = excluded.features, \
-                bpm = excluded.bpm, features_version = excluded.features_version",
+                bpm = excluded.bpm, features_version = excluded.features_version, \
+                print = excluded.print, print_version = excluded.print_version",
         )
         .bind(blob)
         .bind(features.map(|(_, bpm)| bpm))
         .bind(version)
+        .bind(print)
+        .bind(print_version)
         .bind(id)
         .execute(&mut *tx)
         .await?;
@@ -307,16 +326,22 @@ impl Store {
 
     /// How far measuring has got, `version` being the current features
     /// version.
-    pub async fn loudness_progress(&self, version: i64) -> Result<LoudnessProgress> {
+    pub async fn loudness_progress(
+        &self,
+        version: i64,
+        print_version: i64,
+    ) -> Result<LoudnessProgress> {
         let (known, waiting, analyzed): (i64, i64, i64) = sqlx::query_as(
             "SELECT \
                 count(*) FILTER (WHERE rg_track_gain IS NOT NULL OR loudness_lufs IS NOT NULL), \
-                count(*) FILTER (WHERE s.features_version IS NULL OR s.features_version < ?1), \
-                count(*) FILTER (WHERE s.features_version >= ?1) \
+                count(*) FILTER (WHERE s.features_version IS NULL OR s.features_version < ?1 \
+                    OR s.print_version IS NULL OR s.print_version < ?2), \
+                count(*) FILTER (WHERE s.features_version >= ?1 AND s.print_version >= ?2) \
              FROM tracks t LEFT JOIN track_sound s ON s.track_id = t.id \
              WHERE t.removed_at IS NULL",
         )
         .bind(version)
+        .bind(print_version)
         .fetch_one(self.pool())
         .await?;
         Ok(LoudnessProgress {
@@ -390,10 +415,10 @@ mod tests {
             ])
             .await
             .unwrap();
-        let todo = store.tracks_to_analyze(1, 10).await.unwrap();
+        let todo = store.tracks_to_analyze(1, 1, 10).await.unwrap();
         assert_eq!(todo.len(), 3, "every song gets analyzed");
         assert_eq!(
-            store.loudness_progress(1).await.unwrap(),
+            store.loudness_progress(1, 1).await.unwrap(),
             LoudnessProgress {
                 known: 1,
                 waiting: 3,
@@ -403,17 +428,27 @@ mod tests {
 
         let features = [0.5f32, -1.25, 3.0];
         store
-            .save_analysis(todo[0].0, 1, Some((-10.0, 0.9)), Some((&features, 128.0)))
+            .save_analysis(
+                todo[0].0,
+                1,
+                1,
+                Some((-10.0, 0.9)),
+                Some((&features, 128.0)),
+                None,
+            )
             .await
             .unwrap();
         store
-            .save_analysis(todo[1].0, 1, Some((-10.0, 0.7)), None)
+            .save_analysis(todo[1].0, 1, 1, Some((-10.0, 0.7)), None, None)
             .await
             .unwrap();
-        store.save_analysis(todo[2].0, 1, None, None).await.unwrap();
-        assert!(store.tracks_to_analyze(1, 10).await.unwrap().is_empty());
+        store
+            .save_analysis(todo[2].0, 1, 1, None, None, None)
+            .await
+            .unwrap();
+        assert!(store.tracks_to_analyze(1, 1, 10).await.unwrap().is_empty());
         assert_eq!(
-            store.tracks_to_analyze(2, 10).await.unwrap().len(),
+            store.tracks_to_analyze(2, 1, 10).await.unwrap().len(),
             3,
             "a new version redoes all"
         );
@@ -444,7 +479,7 @@ mod tests {
         let mut changed = track("/m/a.flac", 60_000);
         changed.mtime = 2;
         store.save_scanned(&[changed]).await.unwrap();
-        assert_eq!(store.tracks_to_analyze(1, 10).await.unwrap().len(), 1);
+        assert_eq!(store.tracks_to_analyze(1, 1, 10).await.unwrap().len(), 1);
         assert_eq!(store.tracks_to_hear(1, 10).await.unwrap().len(), 3);
     }
 }

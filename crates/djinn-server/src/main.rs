@@ -19,6 +19,7 @@ mod convert;
 mod cpu;
 mod desktop;
 mod download;
+mod duplicates;
 mod error;
 mod events;
 mod folders;

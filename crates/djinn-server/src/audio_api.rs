@@ -258,7 +258,7 @@ pub async fn loudness_status(state: &AppState) -> ApiResult<LoudnessStatus> {
     Ok(LoudnessStatus {
         progress: state
             .store
-            .loudness_progress(djinn_engine::FEATURES_VERSION)
+            .loudness_progress(djinn_engine::FEATURES_VERSION, djinn_engine::PRINT_VERSION)
             .await?,
         running: state.scan.loudness_running.load(Ordering::Acquire),
         on: analysis_on(state).await,
@@ -308,7 +308,11 @@ pub async fn start_analysis(state: &AppState) {
         // done too, so they aren't tried again.
         let mut unreadable = 0usize;
         loop {
-            let batch = match state.store.tracks_to_analyze(version, ANALYSIS_BATCH).await {
+            let batch = match state
+                .store
+                .tracks_to_analyze(version, djinn_engine::PRINT_VERSION, ANALYSIS_BATCH)
+                .await
+            {
                 Ok(batch) if !batch.is_empty() => batch,
                 Ok(_) => break,
                 Err(e) => {
@@ -340,15 +344,16 @@ pub async fn start_analysis(state: &AppState) {
                     let Ok((id, result, path)) = job.await else {
                         continue;
                     };
-                    let (loudness, features) = match result {
+                    let (loudness, features, print) = match result {
                         Ok(analysis) => (
                             analysis.loudness.map(|l| (l.lufs, l.peak)),
                             analysis.features,
+                            analysis.print,
                         ),
                         Err(e) => {
                             tracing::debug!(path = %path.display(), error = %e, "cannot analyze song");
                             unreadable += 1;
-                            (None, None)
+                            (None, None, None)
                         }
                     };
                     let saved = state
@@ -356,8 +361,10 @@ pub async fn start_analysis(state: &AppState) {
                         .save_analysis(
                             id,
                             version,
+                            djinn_engine::PRINT_VERSION,
                             loudness,
                             features.as_ref().map(|f| (f.values.as_slice(), f.bpm)),
+                            print.as_deref(),
                         )
                         .await;
                     if let Err(e) = saved {

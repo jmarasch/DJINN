@@ -7,6 +7,7 @@
   import LibraryExtras from '../lib/LibraryExtras.svelte'
   import LibraryProgress from '../lib/LibraryProgress.svelte'
   import LibraryProblems from '../lib/LibraryProblems.svelte'
+  import LibraryDuplicates from '../lib/LibraryDuplicates.svelte'
   import { clearListCache } from '../lib/listCache'
   import LogViewer from '../lib/LogViewer.svelte'
   import ResetPanel from '../lib/ResetPanel.svelte'
@@ -153,6 +154,7 @@
   </section>
 
   <LibraryProblems />
+  <LibraryDuplicates />
 
   {#if settings}
     <section class="card">

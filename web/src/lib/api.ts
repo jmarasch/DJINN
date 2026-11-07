@@ -58,6 +58,7 @@ import type {
   OutputList,
   OutputStatus,
   Page,
+  DuplicateListing,
   ProblemItem,
   ProblemKind,
   ProblemSummary,
@@ -434,5 +435,7 @@ export const api = {
   libraryProblems: () => get<ProblemSummary>('/library/problems'),
   libraryProblemList: (kind: ProblemKind, offset = 0) =>
     get<ProblemItem[]>(`/library/problems/${kind}?offset=${offset}&limit=100`),
+  duplicates: (offset = 0) => get<DuplicateListing>(`/library/duplicates?offset=${offset}`),
+  notDuplicates: (ids: number[]) => post<void>('/library/duplicates/dismiss', { ids }),
   hideLibraryProblems: (kinds: ProblemKind[]) => put<{ kinds: ProblemKind[] }>('/library/problems/hidden', { kinds }),
 }

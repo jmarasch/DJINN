@@ -788,6 +788,35 @@ export interface ProblemItem {
   noticed_at: number | null
 }
 
+export type DuplicateReason = 'name' | 'recording' | 'sound'
+
+export interface DuplicateCopy {
+  id: number
+  title: string
+  artist: string | null
+  album: string | null
+  album_id: number | null
+  path: string
+  format: string | null
+  sample_rate: number | null
+  kbps: number | null
+  duration_ms: number | null
+  /** The copy DJINN suggests keeping. */
+  keep: boolean
+}
+
+export interface DuplicateGroup {
+  reasons: DuplicateReason[]
+  songs: DuplicateCopy[]
+}
+
+export interface DuplicateListing {
+  total: number
+  songs: number
+  groups: DuplicateGroup[]
+  sound_analysis: boolean
+}
+
 export interface LibraryStatus {
   scanning: boolean
   last_scan: ScanProgress | null

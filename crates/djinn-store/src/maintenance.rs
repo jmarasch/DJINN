@@ -22,9 +22,12 @@ impl Store {
         )
         .execute(&mut *tx)
         .await?;
-        sqlx::query("UPDATE track_sound SET features = NULL, features_version = NULL, bpm = NULL")
-            .execute(&mut *tx)
-            .await?;
+        sqlx::query(
+            "UPDATE track_sound SET features = NULL, features_version = NULL, bpm = NULL, \
+                    print = NULL, print_version = NULL",
+        )
+        .execute(&mut *tx)
+        .await?;
         tx.commit().await?;
         Ok(())
     }

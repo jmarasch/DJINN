@@ -64,6 +64,9 @@ pub struct AppState {
     pub tickets: Arc<crate::two_step::Tickets>,
     /// DJINN GO's optional converting.
     pub converter: Arc<crate::convert::Converter>,
+    /// Copies of songs, worked out when asked and kept until the library
+    /// changes.
+    pub duplicates: Arc<tokio::sync::Mutex<Option<Arc<crate::duplicates::Duplicates>>>>,
 }
 
 #[derive(Default)]
@@ -126,6 +129,7 @@ impl AppState {
             limiter: Arc::default(),
             tickets: Arc::default(),
             converter: Arc::default(),
+            duplicates: Arc::default(),
         }
     }
 

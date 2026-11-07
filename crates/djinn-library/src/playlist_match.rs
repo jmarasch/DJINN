@@ -80,7 +80,7 @@ fn is_noise(text: &str) -> bool {
 }
 
 /// The title without what only says which release it's from.
-fn core_title(title: &str) -> String {
+pub(crate) fn core_title(title: &str) -> String {
     let mut text = title.trim().to_owned();
     // Bracketed notes, from the end.
     loop {
@@ -127,7 +127,7 @@ fn core_title(title: &str) -> String {
 
 /// The names in an artist credit, comparable: "The Beatles & Billy Preston"
 /// holds "beatles" and "billy preston".
-fn artist_names(credit: &str) -> HashSet<String> {
+pub(crate) fn artist_names(credit: &str) -> HashSet<String> {
     let mut lower = credit.replace('\u{a0}', " ").to_lowercase();
     for word in [
         " feat. ",
