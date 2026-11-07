@@ -156,7 +156,8 @@
 
 {#snippet kindRow(k: ProblemCount)}
   <div class="kind">
-    <button class="row" aria-expanded={open === k.kind} onclick={() => show(k.kind)}>
+    <button class="row" class:open={open === k.kind} aria-expanded={open === k.kind} onclick={() => show(k.kind)}>
+      <span class="chevron" aria-hidden="true"></span>
       <span class="grow">{about[k.kind].label}</span>
       <span class="count">{n(k.count)}</span>
     </button>
@@ -214,8 +215,9 @@
     {#if summary && summary.trouble > 0}<span class="badge">{n(summary.trouble)}</span>{/if}
   </h2>
   <p class="small muted">
-    What the last library check couldn't add or found broken, and gaps in your tags. Your music folders are never
-    changed.
+    What the last library check couldn't add or found broken, and gaps in your tags. Only music files are checked;
+    pictures, playlists and other files in your folders are left alone. Select a line to see its files. Your music
+    folders are never changed.
   </p>
   {#if !summary}
     <p class="small muted">Loading...</p>
@@ -281,6 +283,30 @@
     background: none;
     color: inherit;
     text-align: left;
+  }
+
+  .row:hover {
+    background: var(--surface-2);
+  }
+
+  .row.open {
+    font-weight: 600;
+  }
+
+  /* A small arrow that turns down when the list is open. */
+  .chevron {
+    flex: none;
+    width: 8px;
+    height: 8px;
+    margin: 0 4px 0 2px;
+    border-right: 2px solid var(--muted);
+    border-bottom: 2px solid var(--muted);
+    transform: rotate(-45deg);
+    transition: transform 0.15s;
+  }
+
+  .row.open .chevron {
+    transform: rotate(45deg);
   }
 
   .grow {

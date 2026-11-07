@@ -75,6 +75,9 @@ pub const DEFAULT_PER_USER_LIMIT: i64 = 3;
 const DEFAULT_VOLUME: i64 = 80;
 /// Tracks replaced in the engine's slot that it may already have taken.
 const MAX_REPLACED: usize = 8;
+/// Auto mix songs planned beyond the next one, so screens can show what's
+/// coming and it plays in that order.
+const PLAN_AHEAD: usize = 4;
 
 pub type EngineSink = Box<dyn Fn(Command) + Send + Sync>;
 
@@ -209,6 +212,8 @@ pub struct Jukebox {
     queued: Option<Pending>,
     replaced: VecDeque<Pending>,
     in_flight: VecDeque<Pending>,
+    /// Auto mix songs to play after `queued`, drawn ahead (see PLAN_AHEAD).
+    planned: VecDeque<Pending>,
     playing: Option<Playing>,
     /// Songs fading out under the playing one during a crossfade.
     ending: Vec<Playing>,
@@ -310,6 +315,7 @@ impl Jukebox {
             queued: None,
             replaced: VecDeque::new(),
             in_flight: VecDeque::new(),
+            planned: VecDeque::new(),
             playing: None,
             ending: Vec::new(),
             state: PlayState::Idle,
@@ -410,6 +416,7 @@ impl Jukebox {
                 .front()
                 .or(self.queued.as_ref())
                 .map(Pending::entry),
+            later: self.planned.iter().map(Pending::entry).collect(),
         }
     }
 
@@ -641,10 +648,16 @@ impl Jukebox {
                         self.queued.take()
                     } else {
                         // Replaced after the engine had already taken it.
-                        self.replaced
+                        let late = self
+                            .replaced
                             .iter()
                             .position(|p| p.track.id == id)
-                            .and_then(|i| self.replaced.remove(i))
+                            .and_then(|i| self.replaced.remove(i));
+                        // It went back into the plan when it was replaced.
+                        if let Some(i) = self.planned.iter().position(|p| p.track.id == id) {
+                            self.planned.remove(i);
+                        }
+                        late
                     };
                     if let Some(pending) = taken {
                         self.in_flight.push_back(pending);
@@ -826,8 +839,13 @@ impl Jukebox {
 
     /// Makes sure the engine's next slot holds the right track: the first
     /// request not already on its way, otherwise the active playlist's next
-    /// song.
+    /// song. Then plans the auto mix's next few songs.
     async fn refresh_next(&mut self) -> anyhow::Result<()> {
+        self.refresh_slot().await?;
+        self.top_up_plan().await
+    }
+
+    async fn refresh_slot(&mut self) -> anyhow::Result<()> {
         // The song a restart cut off goes first, whatever else is waiting.
         if self.queued.as_ref().is_some_and(|q| q.resume.is_some()) {
             return Ok(());
@@ -867,6 +885,8 @@ impl Jukebox {
                     if pool.iter().any(|(id, _)| *id == q.track.id) && self.start_at.is_none() {
                         return Ok(());
                     }
+                    // The playlist changed under it: so did the plan.
+                    self.clear_plan();
                     match self.draw(&pool).await? {
                         Some(track) => track,
                         None => return self.clear_next(),
@@ -874,9 +894,12 @@ impl Jukebox {
                 }
                 (None, _) => {
                     let pool = self.auto_mix().await?;
-                    match self.draw(&pool).await? {
+                    match self.take_planned(&pool) {
                         Some(track) => track,
-                        None => return self.clear_next(),
+                        None => match self.draw(&pool).await? {
+                            Some(track) => track,
+                            None => return self.clear_next(),
+                        },
                     }
                 }
             };
@@ -899,8 +922,10 @@ impl Jukebox {
             return Ok(false);
         };
         if let Some(old) = self.queued.take() {
+            // A request pushed an auto mix song back: it plays after the
+            // requests, still in its place in the plan.
             if old.source == PlaySource::Pool && candidate.source == PlaySource::Request {
-                self.bag.put_back(old.track.id);
+                self.planned.push_front(old.clone());
             }
             self.replaced.push_back(old);
             if self.replaced.len() > MAX_REPLACED {

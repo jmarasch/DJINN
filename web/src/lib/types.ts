@@ -435,6 +435,8 @@ export interface NowPlaying {
   current: Entry | null
   position_ms: number
   up_next: Entry | null
+  /** The auto mix's songs planned after that, in order. */
+  later?: Entry[]
 }
 
 export type PlayState = 'idle' | 'playing' | 'paused'

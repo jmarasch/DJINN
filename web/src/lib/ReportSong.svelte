@@ -32,7 +32,7 @@
   <form onsubmit={send}>
     <p class="small muted">What's wrong with "{song.title}"?</p>
     {#each reportReasons as r (r.id)}
-      <label class="choice">
+      <label class="switch choice">
         <input type="radio" name="reason" value={r.id} bind:group={reason} />
         {r.label}
       </label>
@@ -53,8 +53,7 @@
   }
 
   .choice {
-    display: flex;
-    align-items: center;
-    gap: 10px;
+    justify-content: flex-start;
+    text-align: left;
   }
 </style>

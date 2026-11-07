@@ -266,7 +266,7 @@ struct Settings {
     #[serde(default = "default_true")]
     avoid_copies: bool,
     /// Tonight's numbers on the TV page.
-    #[serde(default = "default_true")]
+    #[serde(default)]
     tv_stats: bool,
     /// Keep a history of searches for Admin > Stats.
     #[serde(default = "default_true")]
@@ -358,7 +358,7 @@ async fn settings(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json
         .await?,
         avoid_copies: settings::flag(store, jukebox::AVOID_COPIES, true).await?,
         search_history: settings::flag(store, crate::wishes_api::SEARCH_HISTORY, true).await?,
-        tv_stats: settings::flag(store, crate::tv_api::TV_STATS, true).await?,
+        tv_stats: settings::flag(store, crate::tv_api::TV_STATS, false).await?,
         wishlist_everyone: settings::flag(store, crate::wishes_api::WISHLIST_EVERYONE, false)
             .await?,
         per_user_limit: settings::number(

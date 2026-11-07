@@ -106,10 +106,28 @@
     el?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
-  // A link to a section (#/admin/rules) scrolls to it on one page.
+  // A link to a section (#/admin/rules) scrolls to it on one page. The
+  // sections above it are still loading and grow, so it follows the section
+  // until the page settles, unless you scroll yourself.
   $effect(() => {
     const target = tab
-    if (layout === 'page' && target !== 'home') void tick().then(() => jump(document.getElementById(`admin-${target}`)))
+    if (layout !== 'page' || target === 'home') return
+    let stopped = false
+    const stop = () => (stopped = true)
+    window.addEventListener('wheel', stop, { once: true, passive: true })
+    window.addEventListener('touchmove', stop, { once: true, passive: true })
+    const timers = [0, 400, 1000, 2000, 3500].map((ms) =>
+      setTimeout(() => {
+        if (stopped) return
+        const el = document.getElementById(`admin-${target}`)
+        el?.scrollIntoView({ block: 'start' })
+      }, ms),
+    )
+    return () => {
+      timers.forEach(clearTimeout)
+      window.removeEventListener('wheel', stop)
+      window.removeEventListener('touchmove', stop)
+    }
   })
 
   async function loadAll() {

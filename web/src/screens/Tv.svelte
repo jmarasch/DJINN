@@ -206,6 +206,13 @@
   const shown = $derived(Math.min(position, total || position))
   const upNext = $derived(queue.slice(0, UP_NEXT))
   const more = $derived(Math.max(0, queue.length - UP_NEXT))
+  /** Auto mix songs coming after the requests, in the room the requests leave. */
+  const autoNext = $derived(
+    [
+      ...(nowPlaying.up_next && nowPlaying.up_next.source !== 'request' ? [nowPlaying.up_next] : []),
+      ...(nowPlaying.later ?? []),
+    ].slice(0, Math.max(0, UP_NEXT - upNext.length)),
+  )
 </script>
 
 <svelte:head><title>DJINN TV</title></svelte:head>
@@ -272,8 +279,8 @@
     </main>
 
     <aside class="side">
-      <h2>Up next</h2>
       {#if upNext.length}
+        <h2>Requests</h2>
         <ol class="queue">
           {#each upNext as item (item.id)}
             <li>
@@ -293,23 +300,28 @@
           {/each}
         </ol>
         {#if more}<p class="more">and {more} more</p>{/if}
-      {:else if nowPlaying.up_next}
-        <ol class="queue">
-          <li>
-            {#if nowPlaying.up_next.track.art_hash}
-              <img src={art(nowPlaying.up_next.track.art_hash, 128)} alt="" />
-            {:else}
-              <div class="no-art small">♪</div>
-            {/if}
-            <div class="text">
-              <div class="title">{nowPlaying.up_next.track.title}</div>
-              <div class="sub">{artist(nowPlaying.up_next.track)}</div>
-            </div>
-          </li>
-        </ol>
-        <p class="more">No requests yet. Yours could be next.</p>
       {:else}
+        <h2>Requests</h2>
         <p class="more">No requests yet. Yours could be next.</p>
+      {/if}
+
+      {#if autoNext.length}
+        <h2 class="coming">Coming up</h2>
+        <ol class="queue">
+          {#each autoNext as entry, i (`${entry.track.id}-${i}`)}
+            <li>
+              {#if entry.track.art_hash}
+                <img src={art(entry.track.art_hash, 128)} alt="" />
+              {:else}
+                <div class="no-art small">♪</div>
+              {/if}
+              <div class="text">
+                <div class="title">{entry.track.title}</div>
+                <div class="sub">{artist(entry.track)}</div>
+              </div>
+            </li>
+          {/each}
+        </ol>
       {/if}
 
       {#if tonight && tonight.songs > 0}
@@ -587,6 +599,10 @@
     margin: 0.8em 0 0;
     font-size: 0.85em;
     color: rgb(255 255 255 / 0.6);
+  }
+
+  .coming {
+    margin-top: 1.2em;
   }
 
   .tonight {

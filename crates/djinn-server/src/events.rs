@@ -61,6 +61,9 @@ pub struct NowPlaying {
     pub current: Option<Entry>,
     pub position_ms: u64,
     pub up_next: Option<Entry>,
+    /// The auto mix's songs planned after that, in order (requests still
+    /// go first).
+    pub later: Vec<Entry>,
 }
 
 #[derive(Clone, Debug, Serialize)]

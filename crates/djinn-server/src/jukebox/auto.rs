@@ -52,6 +52,7 @@ impl Jukebox {
             .set_setting(ACTIVE_PLAYLIST, &id.to_string())
             .await?;
         self.store.set_setting(PLAYLIST_CURSOR, "0").await?;
+        self.planned.clear();
         self.bag = ShuffleBag::default();
         self.cursor = None;
         self.start_at = from_track;
@@ -108,6 +109,7 @@ impl Jukebox {
     }
 
     pub(super) async fn load_active(&mut self) -> anyhow::Result<()> {
+        self.clear_plan();
         let id = settings::number(&self.store, ACTIVE_PLAYLIST, 0).await?;
         self.radio = None;
         self.active = match id {
@@ -223,17 +225,35 @@ impl Jukebox {
     /// The active playlist's next song: shuffled through the bag, or the
     /// one after the last it played.
     pub(super) async fn draw(&mut self, pool: &[(i64, f32)]) -> anyhow::Result<Option<Pending>> {
+        self.draw_after(pool, &[]).await
+    }
+
+    /// The song after `ahead` (songs already lined up, oldest first): they
+    /// count as played, and an in-order playlist carries on from the last.
+    async fn draw_after(
+        &mut self,
+        pool: &[(i64, f32)],
+        ahead: &[i64],
+    ) -> anyhow::Result<Option<Pending>> {
         let ids: Vec<i64> = pool.iter().map(|(id, _)| *id).collect();
         // A radio's first song needn't be in its pool.
         let radio = self.active.as_ref().is_some_and(|p| p.id == RADIO);
-        let id = match self.start_at.take().filter(|id| radio || ids.contains(id)) {
+        let start = if ahead.is_empty() {
+            self.start_at.take()
+        } else {
+            None
+        };
+        let id = match start.filter(|id| radio || ids.contains(id)) {
             Some(id) => Some(id),
-            None if self.weighted() => self.weighted_draw(pool).await?,
+            None if self.weighted() => self.weighted_draw(pool, ahead).await?,
             None if self.active.as_ref().is_some_and(|p| !p.shuffle) => {
-                let anchor = self.playable_anchor(&ids).await?;
+                let anchor = match ahead.last() {
+                    Some(&last) => Some(last),
+                    None => self.playable_anchor(&ids).await?,
+                };
                 next_in_order(&ids, anchor)
             }
-            None => self.shuffle_draw(&ids).await?,
+            None => self.shuffle_draw(&ids, ahead).await?,
         };
         let Some(id) = id else { return Ok(None) };
         Ok(self.store.track(id).await?.map(|track| Pending {
@@ -275,8 +295,62 @@ impl Jukebox {
         Ok(previous_playable(&order, playable, anchor_id))
     }
 
-    async fn shuffle_draw(&mut self, pool: &[i64]) -> anyhow::Result<Option<i64>> {
-        let (recent, window) = self.recent().await?;
+    /// The planned song to play next, if it still belongs to the auto mix.
+    /// Ones that don't any more are dropped.
+    pub(super) fn take_planned(&mut self, pool: &[(i64, f32)]) -> Option<Pending> {
+        let radio = self.active.as_ref().is_some_and(|p| p.id == RADIO);
+        while let Some(next) = self.planned.pop_front() {
+            if radio || pool.iter().any(|(id, _)| *id == next.track.id) {
+                return Some(next);
+            }
+            self.bag.put_back(next.track.id);
+        }
+        None
+    }
+
+    /// Forgets the plan; its songs go back in the shuffle bag.
+    pub(super) fn clear_plan(&mut self) {
+        while let Some(old) = self.planned.pop_front() {
+            self.bag.put_back(old.track.id);
+        }
+    }
+
+    /// Plans the auto mix's next few songs after the one lined up.
+    pub(super) async fn top_up_plan(&mut self) -> anyhow::Result<()> {
+        if self.active.is_none() || self.start_at.is_some() {
+            return Ok(());
+        }
+        if self.planned.len() >= super::PLAN_AHEAD {
+            return Ok(());
+        }
+        let pool = self.auto_mix().await?;
+        if pool.is_empty() {
+            return Ok(());
+        }
+        let mut ahead: Vec<i64> = self
+            .queued
+            .iter()
+            .filter(|q| q.source == PlaySource::Pool)
+            .chain(self.planned.iter())
+            .map(|p| p.track.id)
+            .collect();
+        while self.planned.len() < super::PLAN_AHEAD {
+            let Some(next) = self.draw_after(&pool, &ahead).await? else {
+                break;
+            };
+            // A playlist shorter than the plan comes round again: stop there.
+            if ahead.contains(&next.track.id) {
+                self.bag.put_back(next.track.id);
+                break;
+            }
+            ahead.push(next.track.id);
+            self.planned.push_back(next);
+        }
+        Ok(())
+    }
+
+    async fn shuffle_draw(&mut self, pool: &[i64], ahead: &[i64]) -> anyhow::Result<Option<i64>> {
+        let (recent, window) = self.recent(ahead).await?;
         let weights = if settings::flag(&self.store, SMART_PLAYLISTS, false).await? {
             self.party_weights().await?
         } else {
@@ -288,24 +362,31 @@ impl Jukebox {
 
     /// Wild play and radio: by weight, after the party's history, never a
     /// song that played recently.
-    async fn weighted_draw(&mut self, pool: &[(i64, f32)]) -> anyhow::Result<Option<i64>> {
-        let (recent, window) = self.recent().await?;
+    async fn weighted_draw(
+        &mut self,
+        pool: &[(i64, f32)],
+        ahead: &[i64],
+    ) -> anyhow::Result<Option<i64>> {
+        let (recent, window) = self.recent(ahead).await?;
         let recent: HashSet<i64> = recent.into_iter().take(window).collect();
         let party = self.party_weights().await?;
         Ok(mix::weighted_draw(pool, &recent, &party, &mut self.rng))
     }
 
     /// Songs played recently, newest first, and how many of them count:
-    /// those on their way, on top of the configured window of history.
-    async fn recent(&self) -> anyhow::Result<(Vec<i64>, usize)> {
+    /// those lined up (`ahead`) and on their way, on top of the configured
+    /// window of history.
+    async fn recent(&self, ahead: &[i64]) -> anyhow::Result<(Vec<i64>, usize)> {
         let window = settings::number(&self.store, HISTORY_WINDOW, DEFAULT_HISTORY_WINDOW)
             .await?
             .max(0);
-        let mut recent: Vec<i64> = self
-            .in_flight
+        // Newest first: what's lined up (latest first), then on its way,
+        // then playing.
+        let mut recent: Vec<i64> = ahead
             .iter()
             .rev()
-            .map(|p| p.track.id)
+            .copied()
+            .chain(self.in_flight.iter().rev().map(|p| p.track.id))
             .chain(self.playing.iter().map(|p| p.pending.track.id))
             .collect();
         let upcoming = recent.len();

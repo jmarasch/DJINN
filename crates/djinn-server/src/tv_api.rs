@@ -70,13 +70,13 @@ struct Tonight {
     top_requester: Option<String>,
 }
 
-/// Setting key: show tonight's numbers on the TV page (on unless turned off).
+/// Setting key: show tonight's numbers on the TV page (off unless turned on).
 pub const TV_STATS: &str = "tv_stats";
 /// A break this long with nothing playing ends a party.
 const PARTY_GAP_MS: i64 = 6 * 60 * 60 * 1000;
 
 async fn tonight(state: &AppState) -> anyhow::Result<Option<Tonight>> {
-    if !settings::flag(&state.store, TV_STATS, true).await? {
+    if !settings::flag(&state.store, TV_STATS, false).await? {
         return Ok(None);
     }
     let Some(from) = state.store.last_party_start(PARTY_GAP_MS).await? else {

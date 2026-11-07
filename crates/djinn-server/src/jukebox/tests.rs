@@ -874,3 +874,74 @@ fn copies_count_right_after_their_song() {
     let (recent, counted) = auto::with_copies(&[0], 5, &PairCopies(0, 1));
     assert_eq!((recent, counted), (vec![0, 1], 2));
 }
+
+/// What screens show as coming: the next song, then the plan.
+fn coming(h: &Harness) -> Vec<i64> {
+    let now = h.jukebox.now_playing();
+    now.up_next
+        .iter()
+        .chain(now.later.iter())
+        .map(|e| e.track.id)
+        .collect()
+}
+
+#[tokio::test]
+async fn planned_songs_play_in_the_order_shown() {
+    let mut h = Harness::new(8).await;
+    h.event(EngineEvent::NextNeeded { after: None }).await;
+    let shown = coming(&h);
+    assert_eq!(shown.len(), 1 + PLAN_AHEAD, "the next song and the plan");
+    let unique: std::collections::HashSet<_> = shown.iter().collect();
+    assert_eq!(unique.len(), shown.len(), "no repeats in the plan");
+    let mut played = Vec::new();
+    for _ in 0..shown.len() {
+        let id = h.play_next().await;
+        played.push(id);
+        h.finish(id).await;
+    }
+    assert_eq!(played, shown);
+}
+
+#[tokio::test]
+async fn a_request_pushes_the_auto_mix_back_without_skipping_any() {
+    let mut h = Harness::new(6).await;
+    let list = h.jukebox.active_playlist().unwrap();
+    h.store
+        .update_playlist(list, None, Some(false))
+        .await
+        .unwrap();
+    h.jukebox.auto_mix_changed().await.unwrap();
+    h.event(EngineEvent::NextNeeded { after: None }).await;
+    let first = h.play_next().await;
+    assert_eq!(first, h.tracks[0]);
+    assert_eq!(coming(&h)[0], h.tracks[1]);
+
+    // A song outside the playlist, asked for.
+    let requested = h.tracks[7];
+    let user = h.user.clone();
+    h.jukebox
+        .add_request(&user, requested, &origin())
+        .await
+        .unwrap();
+    let shown = coming(&h);
+    assert_eq!(shown[0], requested);
+    assert_eq!(shown[1], h.tracks[1], "the bumped song comes right after");
+
+    h.finish(first).await;
+    let mut played = Vec::new();
+    for _ in 0..4 {
+        let id = h.play_next().await;
+        played.push(id);
+        h.finish(id).await;
+    }
+    assert_eq!(played, [requested, h.tracks[1], h.tracks[2], h.tracks[3]]);
+}
+
+#[tokio::test]
+async fn a_short_playlist_plans_no_repeats() {
+    let mut h = Harness::new(2).await;
+    h.event(EngineEvent::NextNeeded { after: None }).await;
+    let shown = coming(&h);
+    let unique: std::collections::HashSet<_> = shown.iter().collect();
+    assert_eq!(unique.len(), shown.len(), "{shown:?}");
+}

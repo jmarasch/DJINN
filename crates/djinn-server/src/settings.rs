@@ -64,7 +64,7 @@ pub const DEFAULTS: &[(&str, Default)] = &[
     (GUEST_MODE, Default::Flag(false)),
     (crate::tv_api::TV_PAGE, Default::Flag(true)),
     (crate::tv_api::TV_SOUND, Default::Flag(false)),
-    (crate::tv_api::TV_STATS, Default::Flag(true)),
+    (crate::tv_api::TV_STATS, Default::Flag(false)),
     (crate::cast_api::PLAY_HERE, Default::Flag(false)),
     (crate::jukebox::MAX_QUEUE, Default::Number(0)),
     (
