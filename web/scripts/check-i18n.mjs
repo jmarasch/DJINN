@@ -12,7 +12,8 @@ const catalogs = Object.fromEntries(
 )
 const en = catalogs.en
 const problems = []
-const places = (v) => [...JSON.stringify(v).matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort().join(',')
+// Which placeholders a key uses (a plural form may leave {n} out).
+const places = (v) => [...new Set([...JSON.stringify(v).matchAll(/\{(\w+)\}/g)].map((m) => m[1]))].sort().join(',')
 
 for (const [code, catalog] of Object.entries(catalogs)) {
   for (const key of Object.keys(en)) {
@@ -22,15 +23,21 @@ for (const [code, catalog] of Object.entries(catalogs)) {
   for (const key of Object.keys(catalog)) if (!(key in en)) problems.push(`${code}: ${key} isn't in en.json`)
 }
 
-function files(path) {
+function files(path, kinds) {
   return statSync(path).isDirectory()
-    ? readdirSync(path).flatMap((f) => files(join(path, f)))
-    : /\.(svelte|ts)$/.test(path)
+    ? readdirSync(path).flatMap((f) => files(join(path, f), kinds))
+    : kinds.test(path)
       ? [path]
       : []
 }
-for (const file of files('src')) {
-  for (const m of readFileSync(file, 'utf8').matchAll(/\bt\(['`]([a-z_]+\.[a-z_.]+)['`]/g)) {
+// The web app, and the Android app, which reads the same files.
+const android = '../android/app/src/main/java'
+const sources = [
+  ...files('src', /\.(svelte|ts)$/),
+  ...(statSync(android, { throwIfNoEntry: false }) ? files(android, /\.kt$/) : []),
+]
+for (const file of sources) {
+  for (const m of readFileSync(file, 'utf8').matchAll(/\bt\(['`"]([a-z_]+\.[a-z_.]+)['`"]/g)) {
     if (!(m[1] in en) && file.indexOf('i18n.svelte.ts') < 0) problems.push(`${file}: ${m[1]} isn't in en.json`)
   }
 }

@@ -58,14 +58,15 @@ import com.newterrastudios.djinn.go.data.ApiException
 import com.newterrastudios.djinn.go.data.GoApi
 import com.newterrastudios.djinn.go.data.safeToSignIn
 import com.newterrastudios.djinn.go.data.serverAddress
+import com.newterrastudios.djinn.go.i18n.t
 import kotlinx.coroutines.launch
 import java.io.IOException
 
 private fun explain(e: IOException): String = when (e) {
-    is ApiException -> e.message ?: "The server said no."
+    is ApiException -> e.message ?: t("signin.server_said_no")
     else -> {
         Log.w("DjinnGo", "Couldn't reach the server", e)
-        "Couldn't reach the server. Check the address and that this phone is on the right network."
+        t("signin.unreachable")
     }
 }
 
@@ -153,8 +154,7 @@ fun ConnectScreen(
                 val before = account.saved(probed.hello?.id, server)
                 when {
                     expected != null && probed.pin != expected -> problem =
-                        (if (fromQr) "That isn't the server the QR code is for" else "That server isn't what it announced") +
-                            ": its certificate is different. Someone on this network may be in the way."
+                        if (fromQr) t("signin.not_qr_server") else t("signin.not_announced_server")
                     before?.pin != null && probed.pin != before.pin -> changed = before to probed
                     !probed.encrypted -> unencrypted = probed
                     else -> accept(probed, before)
@@ -173,7 +173,7 @@ fun ConnectScreen(
 
     fun use(server: String?, expected: String? = null, fromQr: Boolean = false) {
         if (server == null) {
-            problem = "That doesn't look like a server address."
+            problem = t("signin.bad_address")
         } else {
             connect(server, expected, fromQr)
         }
@@ -193,10 +193,10 @@ fun ConnectScreen(
 
     Form(
         "DJINN GO",
-        "Android may ask about nearby devices: that's how it lets an app find and reach a computer on your network.",
+        t("signin.nearby_note"),
     ) {
         if (saved.isNotEmpty()) {
-            Text("Your servers", style = MaterialTheme.typography.titleMedium)
+            Text(t("signin.your_servers"), style = MaterialTheme.typography.titleMedium)
             saved.forEach { server ->
                 Card(
                     Modifier
@@ -217,13 +217,13 @@ fun ConnectScreen(
                             )
                         }
                         IconButton(onClick = { removing = server }) {
-                            Icon(Icons.Default.Close, "Remove ${server.name ?: server.address}")
+                            Icon(Icons.Default.Close, t("signin.remove_named", "name" to (server.name ?: server.address)))
                         }
                     }
                 }
             }
         }
-        Text("On this network", style = MaterialTheme.typography.titleMedium)
+        Text(t("signin.on_this_network"), style = MaterialTheme.typography.titleMedium)
         found.forEach { server: FoundServer ->
             Card(
                 Modifier
@@ -242,13 +242,12 @@ fun ConnectScreen(
         }
         when {
             found.isNotEmpty() -> Text(
-                "Anyone on a network can give a computer any name, so only sign in to a server you recognize.",
+                t("signin.recognize_note"),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             lookedLong -> Text(
-                "No servers heard yet. GO has to be on, on a computer on this network, and some networks block this. " +
-                    "You can still scan or enter the address below.",
+                t("signin.none_heard"),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             else -> Row(
@@ -256,19 +255,18 @@ fun ConnectScreen(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                Text("Looking for servers...", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(t("signin.looking"), color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-        Text("Or connect yourself", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 8.dp))
+        Text(t("signin.connect_yourself"), style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 8.dp))
         Text(
-            "Scan the QR code from GO on a computer (Account > Open on your phone), or enter the address " +
-                "Admin > GO shows, like 192.168.1.20:8067.",
+            t("signin.connect_help"),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         OutlinedTextField(
             value = address,
             onValueChange = { address = it },
-            label = { Text("Server address") },
+            label = { Text(t("signin.server_address")) },
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Go),
             keyboardActions = KeyboardActions(onGo = { if (!busy && address.isNotBlank()) use(serverAddress(address)) }),
@@ -279,7 +277,7 @@ fun ConnectScreen(
             enabled = !busy && address.isNotBlank(),
             modifier = Modifier.fillMaxWidth(),
             onClick = { use(serverAddress(address)) },
-        ) { Text(if (busy) "Connecting..." else "Continue") }
+        ) { Text(if (busy) t("signin.connecting") else t("signin.continue")) }
         OutlinedButton(
             enabled = !busy,
             modifier = Modifier.fillMaxWidth(),
@@ -288,25 +286,23 @@ fun ConnectScreen(
                     if (askCamera()) {
                         scanning = true
                     } else {
-                        problem = "Scanning needs the camera. You can type the address instead."
+                        problem = t("signin.camera_needed")
                     }
                 }
             },
-        ) { Text("Scan the QR code") }
+        ) { Text(t("signin.scan_qr")) }
     }
 
     unencrypted?.let { probed ->
         AlertDialog(
             onDismissRequest = { unencrypted = null },
-            title = { Text("Not encrypted") },
+            title = { Text(t("signin.not_encrypted")) },
             text = {
                 Text(
                     if (safeToSignIn(probed.address)) {
-                        "This server isn't offering encryption, so others on this network could see your password " +
-                            "and what you play. Its admin can turn it on under Admin > GO."
+                        t("signin.unencrypted_home")
                     } else {
-                        "${probed.address} is outside your home network and isn't offering encryption. " +
-                            "Your password and music would cross the internet where others could read them."
+                        t("signin.unencrypted_away", "address" to probed.address)
                     },
                 )
             },
@@ -314,21 +310,23 @@ fun ConnectScreen(
                 TextButton(onClick = {
                     unencrypted = null
                     accept(probed, account.saved(probed.hello?.id, probed.address))
-                }) { Text("Connect anyway") }
+                }) { Text(t("signin.connect_anyway")) }
             },
-            dismissButton = { TextButton(onClick = { unencrypted = null }) { Text("Go back") } },
+            dismissButton = { TextButton(onClick = { unencrypted = null }) { Text(t("signin.go_back")) } },
         )
     }
 
     changed?.let { (before, probed) ->
         AlertDialog(
             onDismissRequest = { changed = null },
-            title = { Text("This server's certificate changed") },
+            title = { Text(t("signin.cert_changed")) },
             text = {
                 Text(
-                    "${before.name ?: before.address} is presenting a different certificate from last time. " +
-                        "That happens if it was set up again, but it's also what someone in the middle would look like. " +
-                        "Check that Admin > GO shows this code: " + (probed.pin?.let(::securityCode) ?: "none, it's not encrypted"),
+                    t(
+                        "signin.cert_changed_body",
+                        "name" to (before.name ?: before.address),
+                        "code" to (probed.pin?.let(::securityCode) ?: t("signin.no_code")),
+                    ),
                 )
             },
             confirmButton = {
@@ -336,17 +334,17 @@ fun ConnectScreen(
                     changed = null
                     // A password is needed again, so it only goes to the server just checked.
                     accept(probed, before.copy(token = null, accountId = null))
-                }) { Text("It matches: trust it") }
+                }) { Text(t("signin.trust_it")) }
             },
-            dismissButton = { TextButton(onClick = { changed = null }) { Text("Go back") } },
+            dismissButton = { TextButton(onClick = { changed = null }) { Text(t("signin.go_back")) } },
         )
     }
 
     removing?.let { server ->
         AlertDialog(
             onDismissRequest = { removing = null },
-            title = { Text("Remove ${server.name ?: "this server"}?") },
-            text = { Text("This forgets the server and deletes the songs and system sounds kept on this phone for it.") },
+            title = { Text(t("signin.remove_question", "name" to (server.name ?: t("signin.this_server")))) },
+            text = { Text(t("signin.remove_body")) },
             confirmButton = {
                 TextButton(onClick = {
                     removing = null
@@ -354,9 +352,9 @@ fun ConnectScreen(
                         offline.deleteForServer(server)
                         account.forget(server)
                     }
-                }) { Text("Remove and delete") }
+                }) { Text(t("signin.remove_and_delete")) }
             },
-            dismissButton = { TextButton(onClick = { removing = null }) { Text("Keep it") } },
+            dismissButton = { TextButton(onClick = { removing = null }) { Text(t("signin.keep_it")) } },
         )
     }
 }
@@ -398,7 +396,7 @@ fun SignInScreen(account: Account, api: GoApi, onChangeServer: () -> Unit) {
                         ticket = reply.ticket
                         password = ""
                     }
-                    else -> problem = "The server's answer made no sense. Is it up to date?"
+                    else -> problem = t("signin.nonsense")
                 }
             } catch (e: IOException) {
                 problem = explain(e)
@@ -411,11 +409,11 @@ fun SignInScreen(account: Account, api: GoApi, onChangeServer: () -> Unit) {
     }
 
     if (ticket != null) {
-        Form("Two-step sign-in", "Enter the code from your authenticator app, or a recovery code.") {
+        Form(t("signin.two_step"), t("signin.two_step_help")) {
             OutlinedTextField(
                 value = code,
                 onValueChange = { code = it },
-                label = { Text("Code") },
+                label = { Text(t("signin.code")) },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -424,30 +422,30 @@ fun SignInScreen(account: Account, api: GoApi, onChangeServer: () -> Unit) {
                 enabled = !busy && code.isNotBlank(),
                 modifier = Modifier.fillMaxWidth(),
                 onClick = ::submit,
-            ) { Text(if (busy) "Checking..." else "Sign in") }
+            ) { Text(if (busy) t("signin.checking") else t("signin.sign_in")) }
         }
         return
     }
 
     Form(
-        account.serverName?.let { "Sign in to $it" } ?: "Sign in",
+        account.serverName?.let { t("signin.sign_in_to", "name" to it) } ?: t("signin.sign_in"),
         account.server + "\n" + when {
-            account.pin != null -> "Encrypted. Security code ${account.pin?.let(::securityCode)}, which Admin > GO shows too."
-            account.server?.startsWith("https://") == true -> "Encrypted."
-            else -> "Not encrypted: others on this network could see your password."
+            account.pin != null -> t("signin.encrypted_code", "code" to (account.pin?.let(::securityCode) ?: ""))
+            account.server?.startsWith("https://") == true -> t("signin.encrypted")
+            else -> t("signin.not_encrypted_note")
         },
     ) {
         OutlinedTextField(
             value = username,
             onValueChange = { username = it },
-            label = { Text("Username") },
+            label = { Text(t("signin.username")) },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
         OutlinedTextField(
             value = password,
             onValueChange = { password = it },
-            label = { Text("Password") },
+            label = { Text(t("signin.password")) },
             singleLine = true,
             visualTransformation = PasswordVisualTransformation(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
@@ -458,9 +456,9 @@ fun SignInScreen(account: Account, api: GoApi, onChangeServer: () -> Unit) {
             enabled = !busy && username.isNotBlank() && password.isNotEmpty(),
             modifier = Modifier.fillMaxWidth(),
             onClick = ::submit,
-        ) { Text(if (busy) "Signing in..." else "Sign in") }
+        ) { Text(if (busy) t("signin.signing_in") else t("signin.sign_in")) }
         TextButton(onClick = onChangeServer, modifier = Modifier.fillMaxWidth()) {
-            Text("Use a different server")
+            Text(t("signin.different_server"))
         }
     }
 }

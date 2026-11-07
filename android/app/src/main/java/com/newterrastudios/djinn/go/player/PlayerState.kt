@@ -22,6 +22,7 @@ import androidx.media3.session.SessionToken
 import com.newterrastudios.djinn.go.data.GoApi
 import com.newterrastudios.djinn.go.data.GoResume
 import com.newterrastudios.djinn.go.data.Track
+import com.newterrastudios.djinn.go.i18n.t
 import java.io.IOException
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.delay
@@ -131,8 +132,8 @@ class PlayerState(private val api: GoApi) {
 
         override fun onPlayerError(e: PlaybackException) {
             error = e.cause?.message?.takeIf { "429" in it }
-                ?.let { "You're already listening on as many devices as your role allows." }
-                ?: "Couldn't play this song (${e.errorCodeName})."
+                ?.let { t("player.too_many_streams") }
+                ?: t("player.play_failed", "error" to e.errorCodeName)
         }
     }
 

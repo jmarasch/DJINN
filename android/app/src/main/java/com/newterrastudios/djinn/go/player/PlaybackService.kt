@@ -39,6 +39,7 @@ import com.newterrastudios.djinn.go.data.ResumeSave
 import com.newterrastudios.djinn.go.data.PendingPlay
 import com.newterrastudios.djinn.go.data.Track
 import com.newterrastudios.djinn.go.work.SyncWorker
+import com.newterrastudios.djinn.go.i18n.t
 import java.io.File
 import java.io.IOException
 import kotlinx.coroutines.CoroutineScope
@@ -493,10 +494,10 @@ class PlaybackService : MediaLibraryService() {
         return try {
             when {
                 parent == ROOT -> listOf(
-                    folder(RECENT, "Lately played"),
-                    folder(KEPT, "On this phone"),
-                    folder(PLAYLISTS, "Playlists"),
-                    folder(ALBUMS, "Albums"),
+                    folder(RECENT, t("go.played_lately")),
+                    folder(KEPT, t("kept.on_this_phone")),
+                    folder(PLAYLISTS, t("nav.playlists")),
+                    folder(ALBUMS, t("library.albums")),
                 )
                 parent == RECENT -> api.home().recent.map { it.toMediaItem(api) }
                 parent == KEPT -> keptForCar(server)
@@ -511,7 +512,7 @@ class PlaybackService : MediaLibraryService() {
         } catch (_: IOException) {
             // Away from the server, the car still has what's kept here.
             when (parent) {
-                ROOT -> listOf(folder(KEPT, "On this phone"))
+                ROOT -> listOf(folder(KEPT, t("kept.on_this_phone")))
                 KEPT -> keptForCar(server)
                 else -> emptyList()
             }

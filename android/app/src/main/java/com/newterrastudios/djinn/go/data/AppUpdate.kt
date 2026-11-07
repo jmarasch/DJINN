@@ -1,6 +1,7 @@
 package com.newterrastudios.djinn.go.data
 
 import android.content.Context
+import com.newterrastudios.djinn.go.i18n.t
 import android.content.Intent
 import androidx.core.content.FileProvider
 import kotlinx.coroutines.Dispatchers
@@ -60,7 +61,7 @@ class AppUpdater(private val context: Context, private val api: GoApi, private v
         }
         if (sha256Of(file) != release.sha256) {
             file.delete()
-            throw IOException("The download didn't match what the server said it was sending.")
+            throw IOException(t("update.mismatch"))
         }
         file
     }

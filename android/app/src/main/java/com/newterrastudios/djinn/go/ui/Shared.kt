@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.newterrastudios.djinn.go.data.Track
+import com.newterrastudios.djinn.go.i18n.t
 
 fun duration(ms: Long?): String {
     if (ms == null || ms <= 0) return ""
@@ -134,7 +135,7 @@ fun SongRow(track: Track, nav: Nav, note: String? = null, onClick: () -> Unit) {
             if (track.id in nav.keptIds) {
                 Icon(
                     Icons.Default.OfflinePin,
-                    contentDescription = "On this phone",
+                    contentDescription = t("kept.on_this_phone"),
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(18.dp),
                 )
@@ -143,12 +144,12 @@ fun SongRow(track: Track, nav: Nav, note: String? = null, onClick: () -> Unit) {
             IconButton(onClick = { nav.scope.launch { nav.setLiked(track.id, !liked) } }) {
                 Icon(
                     if (liked) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                    contentDescription = if (liked) "Unlike ${track.title}" else "Like ${track.title}",
+                    contentDescription = if (liked) t("go.unlike_named", "name" to track.title) else t("go.like_named", "name" to track.title),
                     tint = if (liked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             IconButton(onClick = { nav.menuFor = track }) {
-                Icon(Icons.Default.MoreVert, contentDescription = "More for ${track.title}")
+                Icon(Icons.Default.MoreVert, contentDescription = t("go.more_for", "title" to track.title))
             }
         },
     )

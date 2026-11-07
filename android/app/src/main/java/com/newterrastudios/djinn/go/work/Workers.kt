@@ -25,6 +25,7 @@ import com.newterrastudios.djinn.go.data.KIND_DOWNLOAD
 import com.newterrastudios.djinn.go.data.scopeOf
 import com.newterrastudios.djinn.go.data.KIND_SMART
 import com.newterrastudios.djinn.go.data.Track
+import com.newterrastudios.djinn.go.i18n.t
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
@@ -39,7 +40,7 @@ private fun Context.downloadNotice(text: String): ForegroundInfo {
     val manager = getSystemService(NotificationManager::class.java)
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
         manager.createNotificationChannel(
-            NotificationChannel(CHANNEL, "Downloads", NotificationManager.IMPORTANCE_LOW),
+            NotificationChannel(CHANNEL, t("download.channel"), NotificationManager.IMPORTANCE_LOW),
         )
     }
     val notice = NotificationCompat.Builder(this, CHANNEL)
@@ -62,7 +63,7 @@ class DownloadWorker(context: Context, params: WorkerParameters) : CoroutineWork
     private val app get() = applicationContext as DjinnApp
 
     override suspend fun getForegroundInfo() =
-        applicationContext.downloadNotice("Downloading ${inputData.getString(TITLE) ?: "songs"}")
+        applicationContext.downloadNotice(inputData.getString(TITLE)?.let { t("download.one", "title" to it) } ?: t("download.songs"))
 
     override suspend fun doWork(): Result {
         val track = Json.decodeFromString<Track>(inputData.getString(TRACK) ?: return Result.failure())
@@ -118,7 +119,7 @@ class SmartCacheWorker(context: Context, params: WorkerParameters) : CoroutineWo
     private val app get() = applicationContext as DjinnApp
 
     override suspend fun getForegroundInfo() =
-        applicationContext.downloadNotice("Keeping your favorites on this phone")
+        applicationContext.downloadNotice(t("download.smart"))
 
     override suspend fun doWork(): Result {
         val server = app.account.scope ?: return Result.success()

@@ -50,6 +50,7 @@ import com.newterrastudios.djinn.go.data.Prefs
 import com.newterrastudios.djinn.go.player.CastState
 import com.newterrastudios.djinn.go.data.Track
 import com.newterrastudios.djinn.go.player.PlayerState
+import com.newterrastudios.djinn.go.i18n.t
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 
@@ -218,7 +219,7 @@ fun MainScreen(nav: Nav) {
                         enabled = nav.player.current != null,
                         onClick = nav::showPlayer,
                         icon = { Icon(Icons.Default.PlayCircle, contentDescription = null) },
-                        label = { Text("Playing") },
+                        label = { Text(t("nav.playing")) },
                     )
                 }
             }
@@ -269,7 +270,7 @@ fun MainScreen(nav: Nav) {
                                 undo()
                                 nav.message = null
                                 nav.undo = null
-                            }) { Text("Undo") }
+                            }) { Text(t("common.undo")) }
                         }
                     },
                 ) { Text(message) }
@@ -315,11 +316,11 @@ private fun MiniPlayer(nav: Nav) {
             IconButton(onClick = player::toggle) {
                 Icon(
                     if (player.playing) Icons.Default.Pause else Icons.Default.PlayArrow,
-                    contentDescription = if (player.playing) "Pause" else "Play",
+                    contentDescription = if (player.playing) t("player.pause") else t("player.play"),
                 )
             }
             IconButton(onClick = player::next, enabled = player.upNext.isNotEmpty()) {
-                Icon(Icons.Default.SkipNext, contentDescription = "Next")
+                Icon(Icons.Default.SkipNext, contentDescription = t("player.next"))
             }
         }
     }

@@ -22,6 +22,7 @@ import com.google.android.gms.cast.framework.OptionsProvider
 import com.google.android.gms.cast.framework.SessionManagerListener
 import com.google.android.gms.common.images.WebImage
 import com.newterrastudios.djinn.go.DjinnApp
+import com.newterrastudios.djinn.go.i18n.t
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -75,7 +76,7 @@ class CastState(private val context: Context, private val player: PlayerState) {
         override fun onSessionEnded(session: CastSession, error: Int) = finished()
         override fun onSessionStarting(session: CastSession) = Unit
         override fun onSessionStartFailed(session: CastSession, error: Int) {
-            player.error = "Couldn't start casting."
+            player.error = t("cast.failed")
         }
         override fun onSessionEnding(session: CastSession) = Unit
         override fun onSessionResuming(session: CastSession, sessionId: String) = Unit
@@ -128,7 +129,7 @@ class CastState(private val context: Context, private val player: PlayerState) {
                 // Another server's kept songs only exist here, so there's nothing to send a TV.
                 val castable = items.filter { it.mediaId.toLongOrNull() != null }
                 if (castable.isEmpty()) {
-                    player.error = "That song is kept from another server, so it can't be cast from here."
+                    player.error = t("cast.other_server")
                     stop()
                     return@launch
                 }
@@ -142,7 +143,7 @@ class CastState(private val context: Context, private val player: PlayerState) {
                 session.remoteMediaClient?.load(load)
                 remotePlaying = true
             } catch (_: IOException) {
-                player.error = "Couldn't reach the server to start casting."
+                player.error = t("cast.unreachable")
                 stop()
             }
         }

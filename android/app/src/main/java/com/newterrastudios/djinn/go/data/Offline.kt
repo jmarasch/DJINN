@@ -32,6 +32,7 @@ import java.io.IOException
 import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 import com.newterrastudios.djinn.go.player.TalkOver
+import com.newterrastudios.djinn.go.i18n.t
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -328,10 +329,10 @@ fun largeDownloadWarning(bytes: Long, kbps: Int, canConvert: Boolean): String? {
     val size = if (bytes >= 1_000_000_000) "%.1f GB".format(bytes / 1e9) else "${bytes / 1_000_000} MB"
     return when {
         kbps > 0 && !canConvert && bytes >= LARGE_UNCONVERTED_BYTES ->
-            "Your server isn't converting songs for this account, so these stay at full size: $size."
+            t("download.not_converting", "size" to size)
         kbps > 0 && canConvert && bytes >= LARGE_DOWNLOAD_BYTES ->
-            "Up to $size. FLAC and WAV songs will take less once converted, but converting takes the server a while."
-        kbps == 0 && bytes >= LARGE_DOWNLOAD_BYTES -> "Full quality: $size."
+            t("download.up_to", "size" to size)
+        kbps == 0 && bytes >= LARGE_DOWNLOAD_BYTES -> t("download.full_quality", "size" to size)
         else -> null
     }
 }

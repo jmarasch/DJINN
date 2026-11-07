@@ -1,13 +1,22 @@
 package com.newterrastudios.djinn.go.data
 
+import com.newterrastudios.djinn.go.i18n.Strings
+import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 
 class OfflineRulesTest {
+    /** The warnings are worded in the shared translations; tests read English. */
+    @Before
+    fun english() {
+        Strings.useEnglish(File("../../web/src/i18n/en.json").readText())
+    }
+
     private val day = 24L * 60 * 60 * 1000
 
     @Test

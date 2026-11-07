@@ -15,6 +15,7 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.newterrastudios.djinn.go.MainActivity
 import com.newterrastudios.djinn.go.R
+import com.newterrastudios.djinn.go.i18n.t
 
 /** The song playing, on the home screen, with play and next. */
 @UnstableApi
@@ -62,7 +63,7 @@ class NowPlayingWidget : AppWidgetProvider() {
         internal fun views(context: Context, title: String?, artist: String?, playing: Boolean): RemoteViews {
             val views = RemoteViews(context.packageName, R.layout.widget)
             views.setTextViewText(R.id.widget_title, title ?: "DJINN GO")
-            views.setTextViewText(R.id.widget_artist, artist ?: "Tap to open")
+            views.setTextViewText(R.id.widget_artist, artist ?: t("widget.tap_to_open"))
             views.setImageViewResource(
                 R.id.widget_play,
                 if (playing) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play,

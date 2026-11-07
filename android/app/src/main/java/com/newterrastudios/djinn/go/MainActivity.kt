@@ -43,6 +43,7 @@ import com.newterrastudios.djinn.go.ui.DjinnTheme
 import com.newterrastudios.djinn.go.ui.MainScreen
 import com.newterrastudios.djinn.go.ui.Nav
 import com.newterrastudios.djinn.go.ui.SignInScreen
+import com.newterrastudios.djinn.go.i18n.t
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filter
@@ -238,7 +239,7 @@ class MainActivity : ComponentActivity() {
                 } catch (_: IOException) {
                     app.offline.searchPlayable(nav.server, query).map { it.toTrack() }
                 }
-                if (found.isEmpty()) nav.message = "Nothing found for \"$query\"." else player.play(found)
+                if (found.isEmpty()) nav.message = t("search.no_matches", "query" to query) else player.play(found)
             }
         }
         LaunchedEffect(Unit) {
@@ -248,7 +249,7 @@ class MainActivity : ComponentActivity() {
                 try {
                     player.queueRadio(seed.id, api.radio(seed.id))
                 } catch (_: IOException) {
-                    player.error = "Couldn't start radio."
+                    player.error = t("player.radio_failed")
                 }
             }
         }

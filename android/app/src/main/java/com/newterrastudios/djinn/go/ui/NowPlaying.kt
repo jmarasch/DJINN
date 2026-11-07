@@ -98,6 +98,7 @@ import com.newterrastudios.djinn.go.data.REPORT_REASONS
 import com.newterrastudios.djinn.go.data.SoundKind
 import com.newterrastudios.djinn.go.data.Track
 import com.newterrastudios.djinn.go.work.DownloadWorker
+import com.newterrastudios.djinn.go.i18n.t
 import kotlinx.serialization.encodeToString
 import kotlinx.coroutines.launch
 import java.io.IOException
@@ -164,7 +165,7 @@ fun NowPlayingScreen(nav: Nav) {
         item {
             Row(Modifier.fillMaxWidth().padding(4.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                 IconButton(onClick = nav::pop) {
-                    Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Close")
+                    Icon(Icons.Default.KeyboardArrowDown, contentDescription = t("common.close"))
                 }
                 Row {
                     if (canShow) {
@@ -174,19 +175,19 @@ fun NowPlayingScreen(nav: Nav) {
                         }) {
                             Icon(
                                 Icons.Default.AutoAwesome,
-                                contentDescription = if (visuals) "Show the cover" else "Show visuals",
+                                contentDescription = if (visuals) t("player.show_cover") else t("player.show_visuals"),
                                 tint = if (visuals) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                     }
                     IconButton(onClick = { nav.push(if (visuals) Screen.Visuals else Screen.Cover) }) {
-                        Icon(Icons.Default.Fullscreen, contentDescription = "Full screen")
+                        Icon(Icons.Default.Fullscreen, contentDescription = t("player.full_screen"))
                     }
                     if (casting != null || nav.cast.devices.isNotEmpty()) {
                         IconButton(onClick = { pickDevice = true }) {
                             Icon(
                                 if (casting != null) Icons.Default.CastConnected else Icons.Default.Cast,
-                                contentDescription = "Cast",
+                                contentDescription = t("player.cast"),
                             )
                         }
                     }
@@ -216,7 +217,7 @@ fun NowPlayingScreen(nav: Nav) {
                 }
                 if (casting != null) {
                     Text(
-                        "Playing on $casting",
+                        t("player.playing_on", "device" to casting),
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.padding(top = 12.dp),
                     )
@@ -229,10 +230,10 @@ fun NowPlayingScreen(nav: Nav) {
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(top = 20.dp),
                 )
-                SongLink(item.mediaMetadata.artist, item.artistId, "Open artist") {
+                SongLink(item.mediaMetadata.artist, item.artistId, t("player.open_artist")) {
                     nav.goTo(Screen.Artist(it))
                 }
-                SongLink(item.mediaMetadata.albumTitle, item.albumId, "Open album") {
+                SongLink(item.mediaMetadata.albumTitle, item.albumId, t("player.open_album")) {
                     nav.goTo(Screen.Album(it))
                 }
                 Slider(
@@ -259,10 +260,10 @@ fun NowPlayingScreen(nav: Nav) {
                     val on = MaterialTheme.colorScheme.primary
                     val off = MaterialTheme.colorScheme.onSurfaceVariant
                     IconButton(onClick = player::toggleShuffle) {
-                        Icon(Icons.Default.Shuffle, "Shuffle", tint = if (player.shuffle) on else off)
+                        Icon(Icons.Default.Shuffle, t("player.shuffle"), tint = if (player.shuffle) on else off)
                     }
                     IconButton(onClick = player::previous) {
-                        Icon(Icons.Default.SkipPrevious, "Previous", Modifier.size(32.dp))
+                        Icon(Icons.Default.SkipPrevious, t("player.previous"), Modifier.size(32.dp))
                     }
                     val playing = if (casting != null) nav.cast.remotePlaying else player.playing
                     FilledIconButton(
@@ -271,7 +272,7 @@ fun NowPlayingScreen(nav: Nav) {
                     ) {
                         Icon(
                             if (playing) Icons.Default.Pause else Icons.Default.PlayArrow,
-                            if (playing) "Pause" else "Play",
+                            if (playing) t("player.pause") else t("player.play"),
                             Modifier.size(36.dp),
                         )
                     }
@@ -279,12 +280,12 @@ fun NowPlayingScreen(nav: Nav) {
                         onClick = { if (casting != null) nav.cast.nextRemote() else player.next() },
                         enabled = casting != null || player.upNext.isNotEmpty(),
                     ) {
-                        Icon(Icons.Default.SkipNext, "Next", Modifier.size(32.dp))
+                        Icon(Icons.Default.SkipNext, t("player.next"), Modifier.size(32.dp))
                     }
                     IconButton(onClick = player::cycleRepeat) {
                         Icon(
                             if (player.repeat == Player.REPEAT_MODE_ONE) Icons.Default.RepeatOne else Icons.Default.Repeat,
-                            "Repeat",
+                            t("player.repeat"),
                             tint = if (player.repeat == Player.REPEAT_MODE_OFF) off else on,
                         )
                     }
@@ -297,7 +298,7 @@ fun NowPlayingScreen(nav: Nav) {
                         }) {
                             Icon(
                                 if (liked) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                                if (liked) "Unlike" else "Like",
+                                if (liked) t("player.unlike") else t("player.like"),
                                 tint = if (liked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
@@ -307,7 +308,7 @@ fun NowPlayingScreen(nav: Nav) {
                         }) {
                             Icon(
                                 Icons.Default.Lyrics,
-                                if (showLyrics) "Hide lyrics" else "Show lyrics",
+                                if (showLyrics) t("player.hide_lyrics") else t("player.show_lyrics"),
                                 tint = if (showLyrics) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
@@ -320,12 +321,12 @@ fun NowPlayingScreen(nav: Nav) {
         if (player.upNext.isNotEmpty()) {
             item {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.weight(1f)) { Heading("Up next") }
-                    TextButton(onClick = { nav.undo = player.clearUpcoming(); nav.message = "Queue cleared" }) {
-                        Text("Clear upcoming")
+                    Box(Modifier.weight(1f)) { Heading(t("player.up_next")) }
+                    TextButton(onClick = { nav.undo = player.clearUpcoming(); nav.message = t("player.queue_cleared") }) {
+                        Text(t("player.clear_upcoming"))
                     }
-                    TextButton(onClick = { nav.undo = player.clearAll(); nav.message = "Queue cleared" }) {
-                        Text("Clear all")
+                    TextButton(onClick = { nav.undo = player.clearAll(); nav.message = t("player.queue_cleared") }) {
+                        Text(t("player.clear_all"))
                     }
                 }
             }
@@ -347,12 +348,12 @@ fun NowPlayingScreen(nav: Nav) {
                         onClick = { player.jumpTo(entry.index) },
                         end = {
                             IconButton(onClick = { player.remove(entry.index) }) {
-                                Icon(Icons.Default.Close, "Take out of the queue")
+                                Icon(Icons.Default.Close, t("player.take_out"))
                             }
                             // The row follows the finger; the queue changes when it's let go.
                             Icon(
                                 Icons.Default.DragHandle,
-                                contentDescription = "Move $title",
+                                contentDescription = t("player.move", "title" to title),
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier
                                     .size(40.dp)
@@ -373,11 +374,11 @@ fun NowPlayingScreen(nav: Nav) {
                                     }
                                     .semantics {
                                         customActions = listOf(
-                                            CustomAccessibilityAction("Move up") {
+                                            CustomAccessibilityAction(t("player.move_up")) {
                                                 player.move(entry.index, entry.index - 1)
                                                 true
                                             },
-                                            CustomAccessibilityAction("Move down") {
+                                            CustomAccessibilityAction(t("player.move_down")) {
                                                 player.move(entry.index, entry.index + 1)
                                                 true
                                             },
@@ -425,16 +426,16 @@ fun SongMenu(track: Track, nav: Nav) {
     fun saveAs(kind: SoundKind) = then {
         scope.launch {
             if (!nav.askStorage()) {
-                nav.message = "Saving a sound needs permission to write to storage."
+                nav.message = t("menu.sound_permission")
                 return@launch
             }
-            nav.message = "Saving..."
+            nav.message = t("menu.saving")
             try {
                 val song = nav.offline.local(track.id) ?: nav.offline.fetch(track, KIND_DOWNLOAD)
                 nav.offline.saveSound(song, kind)
-                nav.message = "Saved as a ${kind.label}. Choose it in Clock or your phone's sound settings."
+                nav.message = t("menu.saved_${kind.label}")
             } catch (e: IOException) {
-                nav.message = "Couldn't save it: ${e.message}"
+                nav.message = t("menu.save_failed", "error" to (e.message ?: ""))
             }
         }
     }
@@ -446,10 +447,10 @@ fun SongMenu(track: Track, nav: Nav) {
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
         )
-        MenuRow("Play next", Icons.Default.SkipNext) { then { nav.player.playNext(track) } }
-        MenuRow("Add to end of queue", Icons.AutoMirrored.Filled.QueueMusic) { then { nav.player.addToEnd(track) } }
-        MenuRow("Start radio", Icons.Default.Radio) { then { nav.radioFor = track } }
-        MenuRow("Add to playlist", Icons.AutoMirrored.Filled.PlaylistAdd) {
+        MenuRow(t("menu.play_next"), Icons.Default.SkipNext) { then { nav.player.playNext(track) } }
+        MenuRow(t("menu.add_to_end"), Icons.AutoMirrored.Filled.QueueMusic) { then { nav.player.addToEnd(track) } }
+        MenuRow(t("menu.start_radio"), Icons.Default.Radio) { then { nav.radioFor = track } }
+        MenuRow(t("menu.add_to_playlist"), Icons.AutoMirrored.Filled.PlaylistAdd) {
             scope.launch {
                 choosingPlaylist = try {
                     nav.api.playlists().also { nav.prefs.playlists = nav.api.json.encodeToString(it) }
@@ -459,46 +460,46 @@ fun SongMenu(track: Track, nav: Nav) {
                 }
             }
         }
-        MenuRow("Send to the party", Icons.Default.Celebration) {
+        MenuRow(t("menu.send_to_party"), Icons.Default.Celebration) {
             then {
                 scope.launch {
                     nav.message = try {
                         nav.api.sendToParty(track.id)
-                        "Sent to the party."
+                        t("menu.sent_to_party")
                     } catch (e: IOException) {
-                        if (e is ApiException) e.message else "Couldn't reach the server."
+                        if (e is ApiException) e.message else t("common.no_server")
                     }
                 }
             }
         }
         if (nav.canKeepSongs) {
             if (kept != null) {
-                MenuRow("Remove from this phone", Icons.Default.Delete) {
+                MenuRow(t("menu.remove_from_phone"), Icons.Default.Delete) {
                     then { scope.launch { nav.offline.remove(track.id) } }
                 }
             } else {
-                MenuRow("Download", Icons.Default.Download) {
+                MenuRow(t("menu.download"), Icons.Default.Download) {
                     then {
                         DownloadWorker.enqueue(context, listOf(track), nav.prefs.wifiOnly)
-                        nav.message = "Downloading" + if (nav.prefs.wifiOnly) " when on Wi-Fi" else ""
+                        nav.message = if (nav.prefs.wifiOnly) t("menu.downloading_wifi") else t("menu.downloading")
                     }
                 }
             }
-            MenuRow("Save as alarm sound", Icons.Default.Alarm) { saveAs(SoundKind.Alarm) }
-            MenuRow("Save as ringtone", Icons.Default.PhoneInTalk) { saveAs(SoundKind.Ringtone) }
-            MenuRow("Save as notification sound", Icons.Default.Notifications) { saveAs(SoundKind.Notification) }
+            MenuRow(t("menu.save_alarm"), Icons.Default.Alarm) { saveAs(SoundKind.Alarm) }
+            MenuRow(t("menu.save_ringtone"), Icons.Default.PhoneInTalk) { saveAs(SoundKind.Ringtone) }
+            MenuRow(t("menu.save_notification"), Icons.Default.Notifications) { saveAs(SoundKind.Notification) }
         }
         val liked = track.id in nav.liked
-        MenuRow(if (liked) "Unlike" else "Like", if (liked) Icons.Default.Favorite else Icons.Default.FavoriteBorder) {
+        MenuRow(if (liked) t("player.unlike") else t("player.like"), if (liked) Icons.Default.Favorite else Icons.Default.FavoriteBorder) {
             then { scope.launch { nav.setLiked(track.id, !liked) } }
         }
         track.albumId?.let { album ->
-            MenuRow("Go to album", Icons.Default.Album) { then { nav.goTo(Screen.Album(album)) } }
+            MenuRow(t("menu.go_to_album"), Icons.Default.Album) { then { nav.goTo(Screen.Album(album)) } }
         }
         track.artistId?.let { artist ->
-            MenuRow("Go to artist", Icons.Default.Person) { then { nav.goTo(Screen.Artist(artist)) } }
+            MenuRow(t("menu.go_to_artist"), Icons.Default.Person) { then { nav.goTo(Screen.Artist(artist)) } }
         }
-        MenuRow("Report a problem", Icons.Default.Flag) { reporting = true }
+        MenuRow(t("menu.report"), Icons.Default.Flag) { reporting = true }
     }
     if (reporting) {
         ReportDialog(
@@ -510,9 +511,9 @@ fun SongMenu(track: Track, nav: Nav) {
                     scope.launch {
                         nav.message = try {
                             nav.api.reportSong(track.id, reason, note)
-                            "Thanks, the admin will take a look."
+                            t("menu.report_thanks")
                         } catch (e: IOException) {
-                            if (e is ApiException) e.message else "Couldn't reach the server."
+                            if (e is ApiException) e.message else t("common.no_server")
                         }
                     }
                 }
@@ -522,10 +523,10 @@ fun SongMenu(track: Track, nav: Nav) {
     choosingPlaylist?.let { lists ->
         AlertDialog(
             onDismissRequest = { choosingPlaylist = null },
-            title = { Text("Add to playlist") },
+            title = { Text(t("menu.add_to_playlist")) },
             text = {
                 Column {
-                    if (lists.isEmpty()) Text("No playlists here yet. Make one under Library > Lists.")
+                    if (lists.isEmpty()) Text(t("menu.no_playlists"))
                     lists.forEach { list ->
                         TextButton(onClick = {
                             choosingPlaylist = null
@@ -533,7 +534,7 @@ fun SongMenu(track: Track, nav: Nav) {
                                 scope.launch {
                                     nav.message = try {
                                         nav.api.addToPlaylist(list.id, track.id)
-                                        "Added to ${list.name}."
+                                        t("menu.added_to", "name" to list.name)
                                     } catch (e: ApiException) {
                                         e.message
                                     } catch (_: IOException) {
@@ -545,7 +546,7 @@ fun SongMenu(track: Track, nav: Nav) {
                                             ),
                                         )
                                         nav.syncLater()
-                                        "Added to ${list.name}. It reaches the server when you're back online."
+                                        t("menu.added_offline", "name" to list.name)
                                     }
                                 }
                             }
@@ -553,7 +554,7 @@ fun SongMenu(track: Track, nav: Nav) {
                     }
                 }
             },
-            confirmButton = { TextButton(onClick = { choosingPlaylist = null }) { Text("Cancel") } },
+            confirmButton = { TextButton(onClick = { choosingPlaylist = null }) { Text(t("common.cancel")) } },
         )
     }
 }
@@ -565,11 +566,11 @@ private fun ReportDialog(title: String, onDismiss: () -> Unit, onSend: (String, 
     var note by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Report a problem") },
+        title = { Text(t("menu.report")) },
         text = {
             Column {
-                Text("What's wrong with \"$title\"?", style = MaterialTheme.typography.bodyMedium)
-                REPORT_REASONS.forEach { (id, label) ->
+                Text(t("menu.whats_wrong", "title" to title), style = MaterialTheme.typography.bodyMedium)
+                REPORT_REASONS.forEach { (id, _) ->
                     Row(
                         verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
                         modifier = Modifier
@@ -577,13 +578,13 @@ private fun ReportDialog(title: String, onDismiss: () -> Unit, onSend: (String, 
                             .selectable(selected = id == reason, onClick = { reason = id }),
                     ) {
                         androidx.compose.material3.RadioButton(selected = id == reason, onClick = { reason = id })
-                        Text(label)
+                        Text(t("report.$id"))
                     }
                 }
                 androidx.compose.material3.OutlinedTextField(
                     value = note,
                     onValueChange = { note = it.take(300) },
-                    label = { Text("Anything else (optional)") },
+                    label = { Text(t("menu.anything_else")) },
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
@@ -591,9 +592,9 @@ private fun ReportDialog(title: String, onDismiss: () -> Unit, onSend: (String, 
         confirmButton = {
             TextButton(enabled = reason != null, onClick = {
                 reason?.let { onSend(it, note.trim().ifEmpty { null }) }
-            }) { Text("Send") }
+            }) { Text(t("common.send")) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(t("common.cancel")) } },
     )
 }
 

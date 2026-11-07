@@ -30,6 +30,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.util.UnstableApi
 import com.newterrastudios.djinn.go.data.GoYear
+import com.newterrastudios.djinn.go.i18n.t
 import java.io.IOException
 import java.text.DateFormatSymbols
 
@@ -52,12 +53,12 @@ fun YearScreen(nav: Nav) {
     val r = review
     LazyColumn(Modifier.fillMaxSize()) {
         if (r == null) {
-            item { Note(if (failed) "Couldn't reach the server." else "Loading...") }
+            item { Note(if (failed) t("common.no_server") else t("common.loading")) }
             return@LazyColumn
         }
         item {
             Column(Modifier.padding(16.dp)) {
-                Text("Your ${r.year}", style = MaterialTheme.typography.headlineSmall)
+                Text(t("year.title", "year" to r.year), style = MaterialTheme.typography.headlineSmall)
                 if (r.years.size > 1) {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
                         r.years.forEach { y ->
@@ -68,39 +69,39 @@ fun YearScreen(nav: Nav) {
             }
         }
         if (r.plays == 0L) {
-            item { Note("Nothing played on DJINN GO in ${r.year} yet.") }
+            item { Note(t("year.nothing", "year" to r.year)) }
             return@LazyColumn
         }
         item {
-            val listened = if (r.minutes >= 120) "${r.minutes / 60} hours" else "${r.minutes} minutes"
+            val listened = if (r.minutes >= 120) t("year.hours", "n" to r.minutes / 60) else t("year.minutes", "n" to r.minutes)
             Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Tile(listened, "listened", Modifier.weight(1f))
-                    Tile("${r.plays}", "plays", Modifier.weight(1f))
+                    Tile(listened, t("year.listened"), Modifier.weight(1f))
+                    Tile("${r.plays}", t("year.plays"), Modifier.weight(1f))
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Tile("${r.songs}", "different songs", Modifier.weight(1f))
-                    Tile("${r.requests}", "asked for at the party", Modifier.weight(1f))
+                    Tile("${r.songs}", t("year.songs"), Modifier.weight(1f))
+                    Tile("${r.requests}", t("year.requests"), Modifier.weight(1f))
                 }
             }
         }
         if (r.topSongs.isNotEmpty()) {
-            item { Heading("Your top songs") }
+            item { Heading(t("year.top_songs")) }
             itemsIndexed(r.topSongs) { i, song ->
                 Row2(
                     title = "${i + 1}. ${song.title}",
-                    subtitle = listOfNotNull(song.artist, "${song.plays} plays").joinToString(" · "),
+                    subtitle = listOfNotNull(song.artist, t("count.plays", "n" to song.plays)).joinToString(" · "),
                     art = {},
                     onClick = { song.albumId?.let { nav.push(Screen.Album(it)) } },
                 )
             }
         }
         if (r.topArtists.isNotEmpty()) {
-            item { Heading("Your top artists") }
+            item { Heading(t("year.top_artists")) }
             itemsIndexed(r.topArtists) { i, artist ->
                 Row2(
                     title = "${i + 1}. ${artist.name}",
-                    subtitle = "${artist.plays} plays",
+                    subtitle = t("count.plays", "n" to artist.plays),
                     art = {},
                     onClick = { nav.push(Screen.Artist(artist.artistId)) },
                 )
@@ -109,12 +110,12 @@ fun YearScreen(nav: Nav) {
         r.busiestMonth?.let { busiest ->
             item {
                 val names = DateFormatSymbols.getInstance().months
-                Heading("Busiest in ${names.getOrElse(busiest - 1) { "" }}")
+                Heading(t("year.busiest", "month" to names.getOrElse(busiest - 1) { "" }))
                 MonthBars(r.months, Modifier.padding(horizontal = 16.dp))
             }
         }
         r.first?.let { song ->
-            item { Heading("Your first song of ${r.year}") }
+            item { Heading(t("year.first_song", "year" to r.year)) }
             item {
                 Row2(
                     title = song.title,
@@ -164,7 +165,7 @@ private fun MonthBars(months: List<Long>, modifier: Modifier = Modifier) {
                             .fillMaxWidth()
                             .fillMaxHeight((plays.toFloat() / max).coerceAtLeast(0.01f))
                             .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp))
-                            .semantics { contentDescription = "${names.getOrElse(i) { "" }}: $plays plays" },
+                            .semantics { contentDescription = "${names.getOrElse(i) { "" }}: ${t("count.plays", "n" to plays)}" },
                     )
                 }
             }

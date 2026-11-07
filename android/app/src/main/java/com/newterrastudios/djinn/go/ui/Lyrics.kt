@@ -23,6 +23,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.newterrastudios.djinn.go.data.LyricLine
 import com.newterrastudios.djinn.go.data.Lyrics
+import com.newterrastudios.djinn.go.i18n.t
 import kotlinx.coroutines.delay
 
 /** The line being sung: the last one started by [ms], or -1 before the first. */
@@ -50,9 +51,9 @@ fun lineAt(lines: List<LyricLine>, ms: Long): Int {
 fun LyricsBlock(lyrics: Lyrics?, loading: Boolean, position: () -> Long) {
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
     when {
-        loading -> Note("Loading lyrics...")
-        lyrics == null -> Note("No lyrics for this song.")
-        lyrics.instrumental -> Note("Instrumental")
+        loading -> Note(t("lyrics.loading"))
+        lyrics == null -> Note(t("lyrics.none"))
+        lyrics.instrumental -> Note(t("lyrics.instrumental"))
         !lyrics.lines.isNullOrEmpty() -> {
             val lines = lyrics.lines
             var at by remember(lines) { mutableIntStateOf(-1) }
@@ -103,6 +104,6 @@ fun LyricsBlock(lyrics: Lyrics?, loading: Boolean, position: () -> Long) {
             textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth().padding(16.dp),
         )
-        else -> Note("No lyrics for this song.")
+        else -> Note(t("lyrics.none"))
     }
 }

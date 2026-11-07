@@ -127,7 +127,7 @@ private fun <T : Any> Loaded(
         try {
             value = load()
         } catch (e: IOException) {
-            failed = if (e is ApiException || e is CertificateChanged) e.message else "Couldn't reach the server."
+            failed = if (e is ApiException || e is CertificateChanged) e.message else t("common.no_server")
         }
     }
     val shown = value
@@ -136,9 +136,9 @@ private fun <T : Any> Loaded(
         failed != null && away != null -> away(failed)
         failed != null -> Column(Modifier.padding(16.dp)) {
             Text(failed ?: "", color = MaterialTheme.colorScheme.error)
-            FilledTonalButton(onClick = { attempt++ }) { Text("Try again") }
+            FilledTonalButton(onClick = { attempt++ }) { Text(t("common.try_again")) }
         }
-        else -> Note("Loading...")
+        else -> Note(t("common.loading"))
     }
 }
 
@@ -216,8 +216,8 @@ private fun <T : Any> PagedList(
             AnimatedVisibility(visible = !state.canScrollBackward || goingBack) { options() }
             if (failed) {
                 Column(Modifier.padding(16.dp)) {
-                    Text("Couldn't load more.", color = MaterialTheme.colorScheme.error)
-                    FilledTonalButton(onClick = { failed = false }) { Text("Try again") }
+                    Text(t("common.load_more_failed"), color = MaterialTheme.colorScheme.error)
+                    FilledTonalButton(onClick = { failed = false }) { Text(t("common.try_again")) }
                 }
             }
             Row(
@@ -236,9 +236,9 @@ private fun <T : Any> PagedList(
                         if (item != null) row(item) else Spacer(Modifier.height(UNLOADED_ROW))
                     }
                     if (total == null && !failed) {
-                        item { Note("Loading...") }
+                        item { Note(t("common.loading")) }
                     } else if (total == 0) {
-                        item { Note("Nothing here yet.") }
+                        item { Note(t("common.nothing_yet")) }
                     }
                 }
                 if (showStrip) {
@@ -257,7 +257,7 @@ private fun <T : Any> PagedList(
                 .padding(end = if (showStrip) 44.dp else 16.dp, bottom = 16.dp),
         ) {
             SmallFloatingActionButton(onClick = { scope.launch { state.scrollToItem(0) } }) {
-                Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Back to top")
+                Icon(Icons.Default.KeyboardArrowUp, contentDescription = t("common.back_to_top"))
             }
         }
         pressedLabel?.let { JumpBubble(it, Modifier.align(Alignment.Center)) }
@@ -284,19 +284,19 @@ fun HomeScreen(nav: Nav) {
             home.resume?.let { resume ->
                 resume.songs.getOrNull(resume.position)?.let { song ->
                     item {
-                        Heading("Carry on")
+                        Heading(t("go.carry_on"))
                         Row2(
                             title = song.title,
                             subtitle = song.artist,
                             art = { Art(nav.api.artUrl(song.artHash), 56.dp) },
                             onClick = { nav.player.resume(resume) },
-                            end = { Icon(Icons.Default.PlayArrow, contentDescription = "Carry on") },
+                            end = { Icon(Icons.Default.PlayArrow, contentDescription = t("go.carry_on")) },
                         )
                     }
                 }
             }
             if (home.playlists.isNotEmpty()) {
-                item { Heading("Your playlists") }
+                item { Heading(t("go.your_playlists")) }
                 items(home.playlists) { list ->
                     Row2(
                         title = list.name,
@@ -306,8 +306,8 @@ fun HomeScreen(nav: Nav) {
                     )
                 }
             }
-            songSection("Lately played", home.recent, nav)
-            songSection("New in the library", home.newest, nav)
+            songSection(t("go.played_lately"), home.recent, nav)
+            songSection(t("go.new_in_library"), home.newest, nav)
         }
     }
 }
@@ -336,11 +336,10 @@ private fun KeptSongs(nav: Nav) {
     LazyColumn(Modifier.fillMaxSize()) {
         if (locked && kept.isNotEmpty()) {
             item {
-                val songs = if (kept.size == 1) "1 kept song is" else "${kept.size} kept songs are"
-                Note("Your $songs locked because this phone hasn't reached the server for a while. They'll unlock when it does.")
+                Note(t("kept.locked_away", "n" to kept.size))
             }
         } else if (songs.isEmpty()) {
-            item { Note("Nothing here yet. A song's menu can download it, and albums have a download button.") }
+            item { Note(t("kept.nothing")) }
         }
         itemsIndexed(songs) { index, song ->
             SongRow(song, nav) { nav.player.play(songs, index) }
@@ -363,11 +362,10 @@ private fun AllKeptSongs(nav: Nav) {
     val songs = shown.map { it.song }
     LazyColumn(Modifier.fillMaxSize()) {
         if (shown.isEmpty() && locked == 0) {
-            item { Note("Nothing here yet. A song's menu can download it, and albums have a download button.") }
+            item { Note(t("kept.nothing")) }
         }
         if (locked > 0) {
-            val count = if (locked == 1) "1 song is" else "$locked songs are"
-            item { Note("$count locked until you sign in to its server, or that server is reached again.") }
+            item { Note(t("kept.locked_elsewhere", "n" to locked)) }
         }
         itemsIndexed(shown) { index, (song, serverName) ->
             val here = song.server == nav.server
@@ -391,8 +389,7 @@ private fun DownloadAll(songs: List<Track>, nav: Nav) {
     var warning by remember { mutableStateOf<String?>(null) }
     fun start() {
         DownloadWorker.enqueue(context, songs, nav.prefs.wifiOnly)
-        nav.message = "Downloading ${songs.size} songs" +
-            if (nav.prefs.wifiOnly) " when on Wi-Fi" else ""
+        nav.message = t(if (nav.prefs.wifiOnly) "download.many_wifi" else "download.many", "n" to songs.size)
     }
     FilledTonalButton(
         onClick = {
@@ -410,20 +407,20 @@ private fun DownloadAll(songs: List<Track>, nav: Nav) {
         modifier = Modifier.padding(top = 8.dp),
     ) {
         Icon(Icons.Default.Download, contentDescription = null)
-        Text("Download", modifier = Modifier.padding(start = 8.dp))
+        Text(t("menu.download"), modifier = Modifier.padding(start = 8.dp))
     }
     warning?.let { text ->
         AlertDialog(
             onDismissRequest = { warning = null },
-            title = { Text("Download ${songs.size} songs?") },
+            title = { Text(t("download.question", "n" to songs.size)) },
             text = { Text(text) },
             confirmButton = {
                 TextButton(onClick = {
                     warning = null
                     start()
-                }) { Text("Download") }
+                }) { Text(t("menu.download")) }
             },
-            dismissButton = { TextButton(onClick = { warning = null }) { Text("Not now") } },
+            dismissButton = { TextButton(onClick = { warning = null }) { Text(t("settings.not_now")) } },
         )
     }
 }
@@ -442,8 +439,8 @@ fun DownloadStatus() {
             .padding(horizontal = 16.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(if (waiting == 1) "1 download waiting or running" else "$waiting downloads waiting or running", modifier = Modifier.weight(1f))
-        TextButton(onClick = { manager.cancelAllWorkByTag(DOWNLOAD_TAG) }) { Text("Stop") }
+        Text(t("download.waiting", "n" to waiting), modifier = Modifier.weight(1f))
+        TextButton(onClick = { manager.cancelAllWorkByTag(DOWNLOAD_TAG) }) { Text(t("download.stop")) }
     }
 }
 
@@ -459,7 +456,7 @@ private fun PlaylistsTab(nav: Nav) {
     fun import(text: String, filename: String?) {
         // Started from the app's scope: leaving this tab shouldn't lose it.
         nav.scope.launch {
-            nav.message = "Importing..."
+            nav.message = t("playlist.importing")
             try {
                 val result = nav.api.importPlaylist(text, filename)
                 nav.message = result.playlists.joinToString(". ") {
@@ -467,7 +464,7 @@ private fun PlaylistsTab(nav: Nav) {
                 }
                 version++
             } catch (e: IOException) {
-                nav.message = if (e is ApiException) e.message else "Couldn't reach the server."
+                nav.message = if (e is ApiException) e.message else t("common.no_server")
             }
         }
     }
@@ -484,7 +481,7 @@ private fun PlaylistsTab(nav: Nav) {
                         bytes?.let { importText(it) to name }
                     }.getOrNull()
                 }
-                if (file != null) import(file.first, file.second) else nav.message = "Couldn't read that file."
+                if (file != null) import(file.first, file.second) else nav.message = t("playlist.unreadable")
             }
         }
     }
@@ -495,17 +492,17 @@ private fun PlaylistsTab(nav: Nav) {
                     Modifier.padding(16.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    FilledTonalButton(onClick = { naming = true }) { Text("New playlist") }
-                    FilledTonalButton(onClick = { pasting = true }) { Text("Import") }
+                    FilledTonalButton(onClick = { naming = true }) { Text(t("playlist.new")) }
+                    FilledTonalButton(onClick = { pasting = true }) { Text(t("playlist.import")) }
                 }
             }
-            if (lists.isEmpty()) item { Note("No playlists yet.") }
+            if (lists.isEmpty()) item { Note(t("playlist.none")) }
             items(lists) { list ->
                 Row2(
                     title = list.name,
                     subtitle = listOfNotNull(
-                        if (list.tracks == 1L) "1 song" else "${list.tracks} songs",
-                        if (list.mine) null else "from ${list.owner}",
+                        t("count.songs", "n" to list.tracks),
+                        if (list.mine) null else t("playlist.from", "name" to (list.owner ?: "")),
                     ).joinToString(" · "),
                     art = { Art(null, 44.dp) },
                     onClick = { nav.push(Screen.Playlist(list.id)) },
@@ -528,7 +525,7 @@ private fun PlaylistsTab(nav: Nav) {
         )
     }
     if (naming) {
-        NameDialog("New playlist", "", onDone = { name ->
+        NameDialog(t("playlist.new"), "", onDone = { name ->
             naming = false
             if (name != null) {
                 scope.launch {
@@ -536,7 +533,7 @@ private fun PlaylistsTab(nav: Nav) {
                         nav.api.createPlaylist(name)
                         version++
                     } catch (e: IOException) {
-                        nav.message = if (e is ApiException) e.message else "Couldn't reach the server."
+                        nav.message = if (e is ApiException) e.message else t("common.no_server")
                     }
                 }
             }
@@ -558,37 +555,36 @@ private fun ImportDialog(nav: Nav, onFile: () -> Unit, onPaste: (String) -> Unit
     }
     AlertDialog(
         onDismissRequest = onCancel,
-        title = { Text("Import a playlist") },
+        title = { Text(t("playlist.import_title")) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    "This brings in the list, not the music. Songs you don't have stay in the list, flagged, " +
-                        "and are skipped. For other services, get a file from Tune My Music or Soundiiz.",
+                    t("playlist.import_note"),
                     style = MaterialTheme.typography.bodySmall,
                 )
                 when (youtubeOn) {
-                    true -> Text("You can paste a YouTube playlist link too.", style = MaterialTheme.typography.bodySmall)
+                    true -> Text(t("playlist.youtube_on"), style = MaterialTheme.typography.bodySmall)
                     false -> Text(
-                        "YouTube links are off on this server. An admin can turn them on under Admin > Library.",
+                        t("playlist.youtube_off"),
                         style = MaterialTheme.typography.bodySmall,
                     )
                     null -> Unit
                 }
-                FilledTonalButton(onClick = onFile) { Text("Choose a file") }
+                FilledTonalButton(onClick = onFile) { Text(t("playlist.choose_file")) }
                 OutlinedTextField(
                     value = text,
                     onValueChange = { text = it },
                     minLines = 3,
                     maxLines = 6,
-                    label = { Text(if (youtubeOn == false) "Or paste songs" else "Or paste songs, or a YouTube link") },
-                    placeholder = { Text("Artist - Title") },
+                    label = { Text(if (youtubeOn == false) t("playlist.paste") else t("playlist.paste_or_link")) },
+                    placeholder = { Text(t("playlist.paste_hint")) },
                 )
             }
         },
         confirmButton = {
-            TextButton(enabled = text.isNotBlank(), onClick = { onPaste(text) }) { Text("Import") }
+            TextButton(enabled = text.isNotBlank(), onClick = { onPaste(text) }) { Text(t("playlist.import")) }
         },
-        dismissButton = { TextButton(onClick = onCancel) { Text("Cancel") } },
+        dismissButton = { TextButton(onClick = onCancel) { Text(t("common.cancel")) } },
     )
 }
 
@@ -606,7 +602,7 @@ private fun SharingDialog(list: GoPlaylistDetail, nav: Nav, onClose: () -> Unit)
                 action()
                 after()
             } catch (e: IOException) {
-                nav.message = if (e is ApiException) e.message else "Couldn't reach the server."
+                nav.message = if (e is ApiException) e.message else t("common.no_server")
             }
         }
     }
@@ -616,13 +612,13 @@ private fun SharingDialog(list: GoPlaylistDetail, nav: Nav, onClose: () -> Unit)
             chosen.addAll(shares.map { it.id })
             people = runCatching { nav.api.shareTargets() }.getOrDefault(shares)
         } catch (e: IOException) {
-            nav.message = if (e is ApiException) e.message else "Couldn't reach the server."
+            nav.message = if (e is ApiException) e.message else t("common.no_server")
             onClose()
         }
     }
     AlertDialog(
         onDismissRequest = onClose,
-        title = { Text("Share ${list.name}") },
+        title = { Text(t("playlist.share_title", "name" to list.name)) },
         text = {
             LazyColumn {
                 item {
@@ -633,7 +629,7 @@ private fun SharingDialog(list: GoPlaylistDetail, nav: Nav, onClose: () -> Unit)
                                 change({ nav.api.setPlaylistShared(list.id, on) }) { everyone = on }
                             },
                         )
-                        Text("Everyone on this server")
+                        Text(t("playlist.everyone"))
                     }
                 }
                 items(people.orEmpty()) { person ->
@@ -654,14 +650,14 @@ private fun SharingDialog(list: GoPlaylistDetail, nav: Nav, onClose: () -> Unit)
                 }
                 item {
                     Text(
-                        "They can see and play it. Only you can change it.",
+                        t("playlist.share_note"),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onClose) { Text("Done") } },
+        confirmButton = { TextButton(onClick = onClose) { Text(t("common.done")) } },
     )
 }
 
@@ -672,12 +668,12 @@ fun NameDialog(title: String, start: String, onDone: (String?) -> Unit) {
         onDismissRequest = { onDone(null) },
         title = { Text(title) },
         text = {
-            OutlinedTextField(value = name, onValueChange = { name = it }, singleLine = true, label = { Text("Name") })
+            OutlinedTextField(value = name, onValueChange = { name = it }, singleLine = true, label = { Text(t("playlist.name")) })
         },
         confirmButton = {
-            TextButton(enabled = name.isNotBlank(), onClick = { onDone(name.trim()) }) { Text("Save") }
+            TextButton(enabled = name.isNotBlank(), onClick = { onDone(name.trim()) }) { Text(t("common.save")) }
         },
-        dismissButton = { TextButton(onClick = { onDone(null) }) { Text("Cancel") } },
+        dismissButton = { TextButton(onClick = { onDone(null) }) { Text(t("common.cancel")) } },
     )
 }
 
@@ -700,7 +696,7 @@ fun LibraryScreen(nav: Nav) {
                 Tab(
                     selected = tab == index,
                     onClick = { tab = index },
-                    text = { Text(label, maxLines = 1, softWrap = false) },
+                    text = { Text(t(label), maxLines = 1, softWrap = false) },
                 )
             }
         }
@@ -776,7 +772,7 @@ fun YourMusicScreen(nav: Nav) {
                 Tab(
                     selected = tab == index,
                     onClick = { tab = index },
-                    text = { Text(label, maxLines = 1, softWrap = false) },
+                    text = { Text(t(label), maxLines = 1, softWrap = false) },
                 )
             }
         }
@@ -794,7 +790,7 @@ fun YourMusicScreen(nav: Nav) {
     }
 }
 
-private val MINE_TABS = listOf("Liked", "Playlists", "History", "Your year", "On phone")
+private val MINE_TABS = listOf("go.liked", "nav.playlists", "go.history", "go.your_year", "go.on_phone")
 
 /** The artists, albums and songs you like. Taking a heart off leaves the list at once. */
 @UnstableApi
@@ -806,10 +802,10 @@ private fun LikedTab(nav: Nav) {
         val songs = liked.tracks.filter { it.id in nav.liked }
         LazyColumn(Modifier.fillMaxSize()) {
             if (artists.isEmpty() && albums.isEmpty() && songs.isEmpty()) {
-                item { Note("Tap the heart on a song, album or artist to keep it here.") }
+                item { Note(t("go.liked_empty")) }
             }
             if (artists.isNotEmpty()) {
-                item { Heading("Artists") }
+                item { Heading(t("library.artists")) }
                 items(artists, key = { "artist-${it.id}" }) { artist ->
                     Row2(
                         title = artist.name,
@@ -821,7 +817,7 @@ private fun LikedTab(nav: Nav) {
                 }
             }
             if (albums.isNotEmpty()) {
-                item { Heading("Albums") }
+                item { Heading(t("library.albums")) }
                 items(albums, key = { "album-${it.id}" }) { AlbumRow(it, nav) }
             }
             if (songs.isNotEmpty()) {
@@ -830,8 +826,8 @@ private fun LikedTab(nav: Nav) {
                         Modifier.fillMaxWidth().padding(end = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Box(Modifier.weight(1f)) { Heading("Songs") }
-                        TextButton(onClick = { nav.player.play(songs, 0) }) { Text("Play all") }
+                        Box(Modifier.weight(1f)) { Heading(t("library.songs")) }
+                        TextButton(onClick = { nav.player.play(songs, 0) }) { Text(t("go.play_all")) }
                     }
                 }
                 itemsIndexed(songs, key = { _, song -> "song-${song.id}" }) { index, song ->
@@ -861,40 +857,42 @@ private fun HistoryTab(nav: Nav) {
     LaunchedEffect(Unit) { if (songs.isEmpty()) load() }
     val scope = rememberCoroutineScope()
     LazyColumn(Modifier.fillMaxSize()) {
-        if (failed && songs.isEmpty()) item { Note("Couldn't reach the server.") }
-        if (!failed && songs.isEmpty() && !more) item { Note("Songs you play show up here.") }
+        if (failed && songs.isEmpty()) item { Note(t("common.no_server")) }
+        if (!failed && songs.isEmpty() && !more) item { Note(t("go.history_empty")) }
         itemsIndexed(songs) { index, song ->
             SongRow(song, nav) { nav.player.play(songs.toList(), index) }
         }
         if (more && songs.isNotEmpty()) {
             item {
                 TextButton(onClick = { scope.launch { load() } }, modifier = Modifier.fillMaxWidth()) {
-                    Text("Show more")
+                    Text(t("common.show_more"))
                 }
             }
         }
     }
 }
 
-private val LIBRARY_TABS = listOf("Artists", "Albums", "Songs", "Genres")
+/** Translation keys of the library tabs. */
+private val LIBRARY_TABS = listOf("library.artists", "library.albums", "library.songs", "library.genres")
 private const val ROOM_FOR_EVEN_TABS_DP = 576
 
-val KEPT_VIEWS = listOf("here" to "This server", "all" to "All servers")
-val ARTIST_SORTS = listOf("name" to "Name", "added" to "Recently added")
+// Choices as (value the server knows, translation key of the label).
+val KEPT_VIEWS = listOf("here" to "kept.this_server", "all" to "kept.all_servers")
+val ARTIST_SORTS = listOf("name" to "library.sort_name", "added" to "library.sort_added")
 val ALBUM_SORTS = listOf(
-    "name" to "Name",
-    "added" to "Recently added",
-    "year" to "Newest",
-    "oldest" to "Oldest",
+    "name" to "library.sort_name",
+    "added" to "library.sort_added",
+    "year" to "library.newest",
+    "oldest" to "library.oldest",
 )
-val ALBUM_FILTERS = listOf("all" to "All albums", "various" to "Various artists", "soundtracks" to "Soundtracks")
+val ALBUM_FILTERS = listOf("all" to "library.all_albums", "various" to "library.various", "soundtracks" to "library.soundtracks")
 val SONG_SORTS = listOf(
-    "title" to "Title",
-    "artist" to "Artist",
-    "added" to "Recently added",
-    "popular" to "Most popular",
-    "year" to "Newest",
-    "oldest" to "Oldest",
+    "title" to "library.sort_title",
+    "artist" to "library.sort_artist",
+    "added" to "library.sort_added",
+    "popular" to "library.sort_popular",
+    "year" to "library.newest",
+    "oldest" to "library.oldest",
 )
 
 /** A heart for an album or artist. Shows at once, and goes back if the server can't be told. */
@@ -910,13 +908,13 @@ internal fun LikeHeart(id: Long, likes: MutableList<Long>, name: String, set: su
                 set(id, on)
             } catch (_: IOException) {
                 if (on) likes.remove(id) else likes.add(id)
-                nav.message = "Couldn't reach the server, so that wasn't changed."
+                nav.message = t("settings.not_changed")
             }
         }
     }) {
         Icon(
             if (liked) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-            if (liked) "Unlike $name" else "Like $name",
+            if (liked) t("go.unlike_named", "name" to name) else t("go.like_named", "name" to name),
             tint = if (liked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
@@ -933,7 +931,7 @@ private fun Choices(choices: List<Pair<String, String>>, chosen: String, choose:
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         choices.forEach { (value, label) ->
-            FilterChip(selected = value == chosen, onClick = { choose(value) }, label = { Text(label) })
+            FilterChip(selected = value == chosen, onClick = { choose(value) }, label = { Text(t(label)) })
         }
     }
 }
@@ -975,11 +973,11 @@ fun AlbumScreen(id: Long, nav: Nav) {
                         FilledTonalButton(
                             onClick = { nav.player.play(album.tracks) },
                             enabled = album.tracks.isNotEmpty(),
-                        ) { Text("Play album") }
+                        ) { Text(t("go.play_album")) }
                         album.tracks.firstOrNull()?.let { first ->
                             TextButton(onClick = { nav.startRadio(first) }) {
                                 Icon(Icons.Default.Radio, contentDescription = null, Modifier.size(18.dp))
-                                Text("Radio", Modifier.padding(start = 6.dp))
+                                Text(t("go.radio"), Modifier.padding(start = 6.dp))
                             }
                         }
                         LikeHeart(album.id, nav.likedAlbums, album.title, nav.api::setAlbumLike, nav)
@@ -1024,15 +1022,15 @@ fun ArtistScreen(id: Long, nav: Nav) {
                                         val songs = nav.api.artistSongs(id, 0, 5000).tracks
                                         if (songs.isNotEmpty()) nav.player.play(songs, 0)
                                     } catch (_: IOException) {
-                                        nav.message = "Couldn't reach the server."
+                                        nav.message = t("common.no_server")
                                     }
                                 }
                             },
-                        ) { Text("Play all") }
+                        ) { Text(t("go.play_all")) }
                         artist.topTracks.firstOrNull()?.let { first ->
                             TextButton(onClick = { nav.startRadio(first) }) {
                                 Icon(Icons.Default.Radio, contentDescription = null, Modifier.size(18.dp))
-                                Text("Radio", Modifier.padding(start = 6.dp))
+                                Text(t("go.radio"), Modifier.padding(start = 6.dp))
                             }
                         }
                         LikeHeart(artist.id, nav.likedArtists, artist.name, nav.api::setArtistLike, nav)
@@ -1049,7 +1047,7 @@ fun ArtistScreen(id: Long, nav: Nav) {
                 }
             }
             if (shown.isNotEmpty()) {
-                item { Heading(if (total > 0) "Songs ($total)" else "Songs") }
+                item { Heading(if (total > 0) t("go.songs_total", "n" to total) else t("library.songs")) }
                 itemsIndexed(shown, key = { _, song -> song.id }) { index, song ->
                     SongRow(song, nav) { nav.player.play(shown, index) }
                 }
@@ -1063,21 +1061,21 @@ fun ArtistScreen(id: Long, nav: Nav) {
                                         all = (all ?: emptyList()) + page.tracks
                                         total = page.total
                                     } catch (_: IOException) {
-                                        nav.message = "Couldn't reach the server."
+                                        nav.message = t("common.no_server")
                                     }
                                 }
                             },
                             modifier = Modifier.fillMaxWidth(),
-                        ) { Text(if (all == null) "Show all $total songs" else "Show more") }
+                        ) { Text(if (all == null) t("go.show_all_songs", "n" to total) else t("common.show_more")) }
                     }
                 }
             }
             if (artist.albums.isNotEmpty()) {
-                item { Heading("Albums") }
+                item { Heading(t("library.albums")) }
                 items(artist.albums) { AlbumRow(it, nav) }
             }
             if (artist.appearsOn.isNotEmpty()) {
-                item { Heading("Appears on") }
+                item { Heading(t("go.appears_on")) }
                 items(artist.appearsOn) { AlbumRow(it, nav) }
             }
         }
@@ -1106,9 +1104,9 @@ private fun GenresTab(nav: Nav) {
                 nav.prefs.genreCloud = cloud
             }) {
                 if (cloud) {
-                    Icon(Icons.AutoMirrored.Filled.List, "Show as a list")
+                    Icon(Icons.AutoMirrored.Filled.List, t("genres.as_list"))
                 } else {
-                    Icon(Icons.Default.BubbleChart, "Show as a cloud")
+                    Icon(Icons.Default.BubbleChart, t("genres.as_cloud"))
                 }
             }
         }
@@ -1142,11 +1140,11 @@ private fun GenresTab(nav: Nav) {
                         .fillMaxHeight(),
                     state = state,
                 ) {
-                    if (list.genres.isEmpty()) item { Note("No genres yet.") }
+                    if (list.genres.isEmpty()) item { Note(t("genres.none")) }
                     items(list.genres) { genre ->
                         Row2(
                             title = genreTitle(genre.name),
-                            subtitle = if (genre.songs == 1L) "1 song" else "${genre.songs} songs",
+                            subtitle = t("count.songs", "n" to genre.songs),
                             art = {},
                             onClick = { nav.push(Screen.Genre(genre.name)) },
                         )
@@ -1244,8 +1242,7 @@ fun GenreScreen(name: String, nav: Nav) {
                 Column(Modifier.padding(16.dp)) {
                     Text(genreTitle(name), style = MaterialTheme.typography.headlineSmall)
                     Text(
-                        (if (page.total == 1L) "1 song" else "${page.total} songs") +
-                            ", shuffled with the most played nearer the top.",
+                        t("genres.shuffled", "n" to page.total),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Row(
@@ -1257,37 +1254,37 @@ fun GenreScreen(name: String, nav: Nav) {
                             enabled = songs.isNotEmpty(),
                         ) {
                             Icon(Icons.Default.PlayArrow, contentDescription = null)
-                            Text("Play", modifier = Modifier.padding(start = 8.dp))
+                            Text(t("player.play"), modifier = Modifier.padding(start = 8.dp))
                         }
                         FilledTonalButton(
                             onClick = { nav.player.playShuffled(songs.toList()) },
                             enabled = songs.isNotEmpty(),
                         ) {
                             Icon(Icons.Default.Shuffle, contentDescription = null)
-                            Text("Shuffle", modifier = Modifier.padding(start = 8.dp))
+                            Text(t("player.shuffle"), modifier = Modifier.padding(start = 8.dp))
                         }
                     }
                 }
             }
             if (page.related.isNotEmpty()) {
-                item { Heading("Related genres") }
+                item { Heading(t("genres.related")) }
                 item {
                     Chips(page.related.map { genreTitle(it.name) to { nav.push(Screen.Genre(it.name)) } })
                 }
             }
             if (page.artists.isNotEmpty()) {
-                item { Heading("Artists (${page.artistTotal})") }
+                item { Heading(t("genres.artists_total", "n" to page.artistTotal)) }
                 item { GenreArtists(name, page, nav) }
             }
-            if (songs.isNotEmpty()) item { Heading("Songs") }
+            if (songs.isNotEmpty()) item { Heading(t("library.songs")) }
             itemsIndexed(songs, key = { _, song -> song.id }) { index, song ->
                 SongRow(song, nav) { nav.player.play(songs.toList(), index) }
             }
             if (failed && songs.size < page.total) {
                 item {
                     Column(Modifier.padding(16.dp)) {
-                        Text("Couldn't load more.", color = MaterialTheme.colorScheme.error)
-                        FilledTonalButton(onClick = { failed = false }) { Text("Try again") }
+                        Text(t("common.load_more_failed"), color = MaterialTheme.colorScheme.error)
+                        FilledTonalButton(onClick = { failed = false }) { Text(t("common.try_again")) }
                     }
                 }
             }
@@ -1322,7 +1319,7 @@ fun PlaylistScreen(id: Long, nav: Nav) {
                 action()
                 version++
             } catch (e: IOException) {
-                nav.message = if (e is ApiException) e.message else "Couldn't reach the server."
+                nav.message = if (e is ApiException) e.message else t("common.no_server")
             }
         }
     }
@@ -1333,7 +1330,7 @@ fun PlaylistScreen(id: Long, nav: Nav) {
                     Text(list.name, style = MaterialTheme.typography.headlineSmall)
                     if (!list.mine) {
                         Text(
-                            "From ${list.owner}",
+                            t("playlist.from_owner", "name" to (list.owner ?: "")),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -1350,15 +1347,15 @@ fun PlaylistScreen(id: Long, nav: Nav) {
                         onClick = { nav.player.play(list.songs) },
                         enabled = list.songs.isNotEmpty(),
                         modifier = Modifier.padding(top = 8.dp),
-                    ) { Text("Play") }
+                    ) { Text(t("player.play")) }
                     DownloadAll(list.songs, nav)
                     if (list.mine) {
                         Row {
-                            TextButton(onClick = { renaming = true }) { Text("Rename") }
+                            TextButton(onClick = { renaming = true }) { Text(t("playlist.rename")) }
                             if (nav.canShare || list.shared) {
-                                TextButton(onClick = { sharing = true }) { Text("Share") }
+                                TextButton(onClick = { sharing = true }) { Text(t("playlist.share")) }
                             }
-                            TextButton(onClick = { deleting = true }) { Text("Delete") }
+                            TextButton(onClick = { deleting = true }) { Text(t("playlist.delete")) }
                         }
                     }
                 }
@@ -1398,7 +1395,7 @@ fun PlaylistScreen(id: Long, nav: Nav) {
                     }
                     if (list.mine && row.removable) {
                         IconButton(onClick = { change { nav.api.removePlaylistEntry(id, row.entryId) } }) {
-                            Icon(Icons.Default.Close, "Take ${row.title} out of the playlist")
+                            Icon(Icons.Default.Close, t("playlist.take_out", "title" to row.title))
                         }
                     }
                 }
@@ -1406,7 +1403,7 @@ fun PlaylistScreen(id: Long, nav: Nav) {
         }
         if (sharing) SharingDialog(list, nav) { sharing = false; version++ }
         if (renaming) {
-            NameDialog("Rename playlist", list.name, onDone = { name ->
+            NameDialog(t("playlist.rename_title"), list.name, onDone = { name ->
                 renaming = false
                 if (name != null) change { nav.api.renamePlaylist(id, name) }
             })
@@ -1414,8 +1411,8 @@ fun PlaylistScreen(id: Long, nav: Nav) {
         if (deleting) {
             AlertDialog(
                 onDismissRequest = { deleting = false },
-                title = { Text("Delete ${list.name}?") },
-                text = { Text("Songs stay in the library and on this phone.") },
+                title = { Text(t("playlist.delete_question", "name" to list.name)) },
+                text = { Text(t("playlist.delete_note")) },
                 confirmButton = {
                     TextButton(onClick = {
                         deleting = false
@@ -1424,12 +1421,12 @@ fun PlaylistScreen(id: Long, nav: Nav) {
                                 nav.api.deletePlaylist(id)
                                 nav.pop()
                             } catch (e: IOException) {
-                                nav.message = if (e is ApiException) e.message else "Couldn't reach the server."
+                                nav.message = if (e is ApiException) e.message else t("common.no_server")
                             }
                         }
-                    }) { Text("Delete") }
+                    }) { Text(t("playlist.delete")) }
                 },
-                dismissButton = { TextButton(onClick = { deleting = false }) { Text("Keep it") } },
+                dismissButton = { TextButton(onClick = { deleting = false }) { Text(t("signin.keep_it")) } },
             )
         }
     }
@@ -1496,7 +1493,7 @@ fun SearchScreen(nav: Nav) {
                 .fillMaxWidth()
                 .padding(12.dp),
         )
-        if (failed) Note("Couldn't reach the server.")
+        if (failed) Note(t("common.no_server"))
         val found = results ?: run {
             LibraryScreen(nav)
             return@Column
@@ -1558,23 +1555,23 @@ private fun AskForSong(query: String, nav: Nav) {
         modifier = Modifier
             .fillMaxWidth()
             .padding(8.dp),
-    ) { Text("Not in the library? Ask for it") }
+    ) { Text(t("wish.not_here") + " " + t("wish.ask_for_it")) }
     if (asking) {
         AlertDialog(
             onDismissRequest = { asking = false },
-            title = { Text("Ask for a song") },
+            title = { Text(t("wish.title")) },
             text = {
                 Column {
                     OutlinedTextField(
                         value = artist,
                         onValueChange = { artist = it.take(200) },
-                        label = { Text("Artist") },
+                        label = { Text(t("wish.artist")) },
                         singleLine = true,
                     )
                     OutlinedTextField(
                         value = title,
                         onValueChange = { title = it.take(200) },
-                        label = { Text("Song") },
+                        label = { Text(t("wish.song")) },
                         singleLine = true,
                     )
                 }
@@ -1585,14 +1582,14 @@ private fun AskForSong(query: String, nav: Nav) {
                     scope.launch {
                         nav.message = try {
                             nav.api.addWish(artist.trim(), title.trim())
-                            "Asked. The admin will see it."
+                            t("wish.asked")
                         } catch (e: IOException) {
-                            if (e is ApiException) e.message else "Couldn't reach the server."
+                            if (e is ApiException) e.message else t("common.no_server")
                         }
                     }
-                }) { Text("Ask") }
+                }) { Text(t("wish.ask")) }
             },
-            dismissButton = { TextButton(onClick = { asking = false }) { Text("Cancel") } },
+            dismissButton = { TextButton(onClick = { asking = false }) { Text(t("common.cancel")) } },
         )
     }
 }

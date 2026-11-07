@@ -1,6 +1,7 @@
 package com.newterrastudios.djinn.go.data
 
 import kotlinx.serialization.SerialName
+import com.newterrastudios.djinn.go.i18n.t
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -188,9 +189,9 @@ data class PlaylistRow(
     val problemText: String?
         get() = when (problem) {
             null -> null
-            "not_in_library" -> "Not in the library"
-            "file_missing" -> "File is missing"
-            else -> "File won't play"
+            "not_in_library" -> t("problem.not_in_library")
+            "file_missing" -> t("problem.file_missing")
+            else -> t("problem.wont_play")
         }
 }
 

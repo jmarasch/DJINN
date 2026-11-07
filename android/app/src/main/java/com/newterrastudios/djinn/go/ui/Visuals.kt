@@ -75,6 +75,7 @@ import com.newterrastudios.djinn.go.player.rotatedHue
 import com.newterrastudios.djinn.go.player.SoundReader
 import com.newterrastudios.djinn.go.player.Spectrum
 import com.newterrastudios.djinn.go.player.WAVE_POINTS
+import com.newterrastudios.djinn.go.i18n.t
 import kotlinx.coroutines.delay
 import kotlin.math.PI
 import kotlin.math.cos
@@ -82,19 +83,22 @@ import kotlin.math.min
 import kotlin.math.sin
 
 /** Stored by position in Settings, so new ones go on the end. */
-enum class VisualStyle(val label: String) {
-    Art("Cover"),
-    Bars("Bars"),
-    Ring("Ring"),
-    Wave("Wave"),
-    Mirror("Mirror"),
-    Warp("Warp"),
-    Tunnel("Tunnel"),
-    Plasma("Plasma"),
-    Kaleidoscope("Kaleidoscope"),
-    Nebula("Nebula"),
-    Stars("Stars"),
+enum class VisualStyle {
+    Art,
+    Bars,
+    Ring,
+    Wave,
+    Mirror,
+    Warp,
+    Tunnel,
+    Plasma,
+    Kaleidoscope,
+    Nebula,
+    Stars,
     ;
+
+    /** The style's name in the phone's language. */
+    val label: String get() = t("visual.${name.lowercase()}")
 
     /** Drawn on the graphics chip, rather than as shapes. */
     val onGraphicsChip get() = fragmentFor(this) != null
@@ -424,7 +428,7 @@ fun FullScreen(nav: Nav, cover: Boolean) {
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 if (!cover) {
-                    Text(if (auto) "${style.label} (changes by itself)" else style.label, color = Color.White)
+                    Text(if (auto) t("visual.auto_named", "name" to style.label) else style.label, color = Color.White)
                 }
                 if (player.durationMs > 0) {
                     Slider(
@@ -447,24 +451,24 @@ fun FullScreen(nav: Nav, cover: Boolean) {
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     val tint = Color.White
-                    IconButton(onClick = nav::pop) { Icon(Icons.Default.Close, "Leave full screen", tint = tint) }
+                    IconButton(onClick = nav::pop) { Icon(Icons.Default.Close, t("visual.leave"), tint = tint) }
                     if (!cover) {
                         IconButton(onClick = {
                             change(-1)
                             touched++
-                        }) { Icon(Icons.Default.ChevronLeft, "Previous style", tint = tint) }
+                        }) { Icon(Icons.Default.ChevronLeft, t("visual.previous_style"), tint = tint) }
                     }
                     IconButton(onClick = {
                         player.previous()
                         touched++
-                    }) { Icon(Icons.Default.SkipPrevious, "Previous song", tint = tint) }
+                    }) { Icon(Icons.Default.SkipPrevious, t("visual.previous_song"), tint = tint) }
                     IconButton(onClick = {
                         player.toggle()
                         touched++
                     }) {
                         Icon(
                             if (player.playing) Icons.Default.Pause else Icons.Default.PlayArrow,
-                            if (player.playing) "Pause" else "Play",
+                            if (player.playing) t("player.pause") else t("player.play"),
                             tint = tint,
                         )
                     }
@@ -472,13 +476,13 @@ fun FullScreen(nav: Nav, cover: Boolean) {
                         player.next()
                         touched++
                     }, enabled = player.upNext.isNotEmpty()) {
-                        Icon(Icons.Default.SkipNext, "Next song", tint = tint.copy(alpha = if (player.upNext.isNotEmpty()) 1f else 0.4f))
+                        Icon(Icons.Default.SkipNext, t("visual.next_song"), tint = tint.copy(alpha = if (player.upNext.isNotEmpty()) 1f else 0.4f))
                     }
                     if (!cover) {
                         IconButton(onClick = {
                             change(1)
                             touched++
-                        }) { Icon(Icons.Default.ChevronRight, "Next style", tint = tint) }
+                        }) { Icon(Icons.Default.ChevronRight, t("visual.next_style"), tint = tint) }
                         IconButton(onClick = {
                             auto = !auto
                             nav.prefs.visualsAuto = auto
@@ -486,7 +490,7 @@ fun FullScreen(nav: Nav, cover: Boolean) {
                         }) {
                             Icon(
                                 Icons.Default.AutoAwesome,
-                                if (auto) "Stop changing styles" else "Change styles by itself",
+                                if (auto) t("visual.stop_auto") else t("visual.start_auto"),
                                 tint = if (auto) MaterialTheme.colorScheme.primary else tint,
                             )
                         }
