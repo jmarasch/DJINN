@@ -65,8 +65,10 @@
       ? 'search'
       : route.path.startsWith('/queue')
         ? 'queue'
-        : route.path.startsWith('/playlist') || route.path === '/favorites'
-          ? 'playlists'
+        : route.path === '/favorites'
+          ? 'favorites'
+          : route.path.startsWith('/playlist')
+            ? 'playlists'
           : route.path.startsWith('/admin')
             ? 'admin'
             : 'now',
@@ -106,6 +108,9 @@
     </button>
     <a href="#/" class:active={tab === 'now'}><Icon name="disc" /><span>Playing</span></a>
     <a href="#/search" class:active={tab === 'search'}><Icon name="search" /><span>Library</span></a>
+    {#if hasPlaylists()}
+      <a href="#/favorites" class:active={tab === 'favorites'}><Icon name="heart" /><span>Favorites</span></a>
+    {/if}
     <a href="#/queue" class:active={tab === 'queue'}>
       <Icon name="queue" />
       <span>Queue{app.queue.length ? ` (${app.queue.length})` : ''}</span>

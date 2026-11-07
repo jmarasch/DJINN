@@ -20,7 +20,6 @@
   const empty = $derived(liked && !liked.artists.length && !liked.albums.length && !liked.tracks.length)
 </script>
 
-<a class="back" href="#/playlists">Playlists</a>
 <h1>Favorites</h1>
 {#if !liked}
   <p class="muted small">Loading...</p>
@@ -65,12 +64,6 @@
 {/if}
 
 <style>
-  .back {
-    display: inline-block;
-    margin-bottom: 8px;
-    color: var(--muted);
-  }
-
   h2 {
     margin: 18px 0 8px;
     font-size: 1.05rem;
