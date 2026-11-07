@@ -820,6 +820,25 @@ export interface DuplicateListing {
   sound_analysis: boolean
 }
 
+export interface CheckSummary {
+  at: number
+  added: number
+  removed: number
+  trouble: number
+  trouble_change: number
+  duplicates: number
+  duplicates_change: number
+  reports: number
+  reports_change: number
+}
+
+export interface ScheduledCheck {
+  on: boolean
+  /** 0 to 23, the DJINN computer's time. */
+  hour: number
+  last: CheckSummary | null
+}
+
 export interface LibraryStatus {
   scanning: boolean
   last_scan: ScanProgress | null

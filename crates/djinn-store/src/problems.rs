@@ -232,6 +232,19 @@ impl Store {
         Ok(done.rows_affected() > 0)
     }
 
+    /// Songs added to the library and songs gone from it since `since`
+    /// (Unix ms).
+    pub async fn library_changes_since(&self, since: i64) -> Result<(i64, i64)> {
+        Ok(sqlx::query_as(
+            "SELECT count(*) FILTER (WHERE added_at >= ?1 AND removed_at IS NULL),
+                    count(*) FILTER (WHERE removed_at >= ?1)
+             FROM tracks",
+        )
+        .bind(since)
+        .fetch_one(&self.pool)
+        .await?)
+    }
+
     /// Clears every report on a song (it's been fixed). How many there were.
     pub async fn clear_song_reports(&self, track_id: i64) -> Result<u64> {
         let done = sqlx::query("DELETE FROM song_reports WHERE track_id = ?")

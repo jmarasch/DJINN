@@ -8,6 +8,7 @@
 - **Possible duplicates.** Admin > Library lists songs you have more than one copy of: the same title and artist at about the same length (notes like "Remastered" are ignored, "Live" is not), songs identified as the same recording, and, with sound analysis on, copies that sound the same even when named differently. The best copy (lossless, then the higher bit rate) is marked to keep. DJINN never deletes files; mark a group **Not duplicates** if it's wrong. With sound analysis on, each song is analyzed once more after updating to take its fingerprint.
 - **The auto mix won't play another copy of a song that just played.** A copy counts as played, the same as the song itself. Turn this off in Admin > Rules.
 - **Report a problem with a song.** Everyone, guests included, can flag a song from its menu (in the party app, DJINN GO and the Android app): wrong title or artist, wrong cover, sounds bad, plays a different song, or something else, with an optional note. Reports show under Problems until you mark them **Done**.
+- **Nightly check.** Admin > Library can check the library every night at an hour you pick (or when DJINN starts, if it was off then) and sums up what changed: songs added and gone, problems, songs with copies, and listener reports. Useful for network folders that don't say when they change.
 - A file that crashed the tag reader used to take the files read alongside it out of the library. Now only that file is affected, and it's listed under its name.
 
 ### Updates

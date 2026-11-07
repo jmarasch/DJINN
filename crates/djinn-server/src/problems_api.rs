@@ -93,7 +93,7 @@ struct Summary {
     trouble: i64,
 }
 
-async fn hidden(store: &Store) -> anyhow::Result<Vec<ProblemKind>> {
+pub async fn hidden(store: &Store) -> anyhow::Result<Vec<ProblemKind>> {
     Ok(store
         .get_setting(HIDDEN_KEY)
         .await?

@@ -58,6 +58,7 @@ import type {
   OutputList,
   OutputStatus,
   Page,
+  ScheduledCheck,
   DuplicateListing,
   ProblemItem,
   ProblemKind,
@@ -439,5 +440,7 @@ export const api = {
   notDuplicates: (ids: number[]) => post<void>('/library/duplicates/dismiss', { ids }),
   reportSong: (id: number, reason: string, note?: string) => post<void>(`/tracks/${id}/report`, { reason, note }),
   clearSongReports: (trackId: number) => del<void>(`/library/reports/${trackId}`),
+  scheduledCheck: () => get<ScheduledCheck>('/library/scheduled'),
+  saveScheduledCheck: (on: boolean, hour: number) => put<ScheduledCheck>('/library/scheduled', { on, hour }),
   hideLibraryProblems: (kinds: ProblemKind[]) => put<{ kinds: ProblemKind[] }>('/library/problems/hidden', { kinds }),
 }

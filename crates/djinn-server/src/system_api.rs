@@ -63,6 +63,8 @@ const RESET_SETTINGS: &[&str] = &[
     "radio",
     "replaygain_mode",
     "replaygain_preamp_db",
+    "scheduled_check",
+    "scheduled_check_hour",
     "skip_votes",
     "smart_play",
     "smart_playlists",

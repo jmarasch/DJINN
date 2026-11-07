@@ -40,6 +40,7 @@ mod playlist_api;
 mod playlist_import;
 mod problems_api;
 mod reader;
+mod scheduled_check;
 mod security;
 mod settings;
 mod smart;
@@ -351,6 +352,7 @@ async fn run() -> anyhow::Result<()> {
         });
     }
     watcher::start(state.clone());
+    scheduled_check::start(state.clone());
     update::start(&state);
     if let Err(e) = convert::apply(&state).await {
         tracing::error!(error = %format!("{e:#}"), "couldn't read the converting settings");
