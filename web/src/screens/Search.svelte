@@ -85,6 +85,7 @@
       !results.tracks.length &&
       !results.albums.length &&
       !results.artists.length &&
+      !results.lyrics?.length &&
       !described?.tracks.length,
   )
 
@@ -214,6 +215,13 @@
       <TrackRow {track} />
     {/each}
   {/if}
+  {#if results.lyrics?.length}
+    <h2>Songs with these words</h2>
+    {#each results.lyrics as hit (hit.track.id)}
+      <TrackRow track={hit.track} />
+      <p class="quote">“{hit.line}”</p>
+    {/each}
+  {/if}
   {#if !describedFirst}{@render describedSection()}{/if}
   <NotInLibrary {query} />
 {:else if !query.trim()}
@@ -221,6 +229,14 @@
 {/if}
 
 <style>
+  /* The lyric line a search matched, under its song. */
+  .quote {
+    margin: -4px 0 10px 56px;
+    color: var(--muted);
+    font-size: 0.875rem;
+    font-style: italic;
+  }
+
   .thinking {
     margin: 12px 0;
   }

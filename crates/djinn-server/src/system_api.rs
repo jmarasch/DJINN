@@ -54,6 +54,8 @@ const RESET_SETTINGS: &[&str] = &[
     "crossfade_secs",
     "guest_mode",
     "history_window",
+    "lyrics_lookup",
+    "lyrics_page",
     "max_queue",
     "musicbrainz",
     "online_artist_info",

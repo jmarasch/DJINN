@@ -1501,7 +1501,7 @@ fun SearchScreen(nav: Nav) {
             return@Column
         }
         val empty = found.tracks.isEmpty() && found.albums.isEmpty() && found.artists.isEmpty() &&
-            found.described?.tracks.isNullOrEmpty()
+            found.described?.tracks.isNullOrEmpty() && found.lyrics.isEmpty()
         LazyColumn(Modifier.fillMaxSize()) {
             if (thinking) {
                 item {
@@ -1527,6 +1527,13 @@ fun SearchScreen(nav: Nav) {
                 items(found.albums) { AlbumRow(it, nav) }
             }
             songSection("Songs", found.tracks, nav)
+            if (found.lyrics.isNotEmpty()) {
+                item { Heading("Songs with these words") }
+                val songs = found.lyrics.map { it.track }
+                itemsIndexed(found.lyrics) { index, hit ->
+                    SongRow(hit.track, nav, note = "\u201c${hit.line}\u201d") { nav.player.play(songs, index) }
+                }
+            }
             found.described?.let { songSection(it.summary.joinToString(", "), it.tracks, nav) }
             if (canWish) item { AskForSong(query.trim(), nav) }
         }

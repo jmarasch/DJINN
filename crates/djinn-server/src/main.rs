@@ -35,6 +35,7 @@ mod jukebox;
 mod library_api;
 mod likes_api;
 mod logs;
+mod lyrics;
 mod network;
 mod party_api;
 mod player_api;
@@ -357,6 +358,7 @@ async fn run() -> anyhow::Result<()> {
     }
     watcher::start(state.clone());
     scheduled_check::start(state.clone());
+    lyrics::start(&state);
     update::start(&state);
     if let Err(e) = convert::apply(&state).await {
         tracing::error!(error = %format!("{e:#}"), "couldn't read the converting settings");

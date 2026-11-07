@@ -5,6 +5,7 @@ pub mod credits;
 pub mod duplicates;
 pub mod genres;
 pub mod identify;
+pub mod lyrics;
 pub mod online;
 pub mod playlist_file;
 pub mod playlist_match;

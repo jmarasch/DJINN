@@ -97,6 +97,10 @@ export async function toggleLike(kind: LikeKind, id: number) {
 
 export const current = () => (player.index >= 0 ? player.queue[player.index] ?? null : null)
 
+/** Milliseconds into the song playing, read straight from the audio (for
+ * lyrics, which need more than the few updates a second `position` gets). */
+export const livePosition = () => decks[active].currentTime * 1000
+
 const decks = [new Audio(), new Audio()]
 let active = 0
 /** The next song, already loading in the other deck. */

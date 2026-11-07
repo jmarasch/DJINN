@@ -286,6 +286,10 @@ class Prefs(context: Context, private val scope: () -> String = { "" }) {
     var visualsOn: Boolean
         get() = prefs.getBoolean("visuals_on", false)
         set(value) = prefs.edit { putBoolean("visuals_on", value) }
+    /** Lyrics open under the player's controls. */
+    var lyricsOn: Boolean
+        get() = prefs.getBoolean("lyrics_on", false)
+        set(value) = prefs.edit { putBoolean("lyrics_on", value) }
     /** Styles this device turned out not to keep up with. */
     var visualsTooSlow: Set<String>
         get() = prefs.getStringSet("visuals_too_slow", emptySet()).orEmpty()

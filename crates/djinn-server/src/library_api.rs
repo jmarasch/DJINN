@@ -86,7 +86,12 @@ struct SearchResponse {
     described: Option<crate::smart::Described>,
     /// The AI reader might understand it better: ask `/search/ask`.
     ask: bool,
+    /// Songs whose lyrics have the words, with the line that matched.
+    lyrics: Vec<crate::lyrics::LyricHit>,
 }
+
+/// Songs found by their words, at most.
+const LYRIC_HITS: i64 = 20;
 
 async fn search(
     CurrentUser(user): CurrentUser,
@@ -105,15 +110,18 @@ async fn search(
     let ask =
         allowed && read.is_none() && crate::smart::worth_asking(&state, &query.q, plain_found);
     let described = crate::smart::describe(&state, &query.q, plain_found, read.as_ref()).await?;
+    let lyrics = crate::lyrics::search(&state, &query.q, LYRIC_HITS).await?;
     let found = results.tracks.len()
         + results.albums.len()
         + results.artists.len()
-        + described.as_ref().map_or(0, |d| d.tracks.len());
+        + described.as_ref().map_or(0, |d| d.tracks.len())
+        + lyrics.len();
     crate::wishes_api::log_search(&state, user.id, &query.q, found);
     Ok(Json(SearchResponse {
         described,
         results,
         ask,
+        lyrics,
     }))
 }
 
@@ -1561,6 +1569,7 @@ pub fn start_scan(state: &AppState) -> bool {
                 }
                 crate::audio_api::start_analysis(&state).await;
                 crate::ai::start(&state);
+                crate::lyrics::start(&state);
                 // New tracks may have joined albums and artists in the
                 // active playlist.
                 if let Err(e) = state.jukebox.lock().await.auto_mix_changed().await {

@@ -25,6 +25,7 @@
   import Genre from './screens/Genre.svelte'
   import Similar from './screens/Similar.svelte'
   import Tv from './screens/Tv.svelte'
+  import LyricsPage from './screens/Lyrics.svelte'
   import SetupLibrary from './screens/SetupLibrary.svelte'
 
   /** So what sticks to the top of a page can stick just below this. */
@@ -37,10 +38,11 @@
   // public and read only.
   const onJoinPage = location.pathname === '/join'
   const onTvPage = location.pathname === '/tv'
+  const onLyricsPage = location.pathname === '/lyrics'
   let showJoin = $state(false)
 
   onMount(async () => {
-    if (onJoinPage || onTvPage) return
+    if (onJoinPage || onTvPage || onLyricsPage) return
     const me = await refreshMe()
     if (me) connect()
     else await refreshMode()
@@ -48,7 +50,7 @@
 
   // Signing out (or being signed out) re-checks how to get back in.
   $effect(() => {
-    if (app.ready && !app.me && !onJoinPage && !onTvPage) refreshMode()
+    if (app.ready && !app.me && !onJoinPage && !onTvPage && !onLyricsPage) refreshMode()
   })
 
   const genreName = $derived.by(() => {
@@ -77,6 +79,8 @@
 
 {#if onTvPage}
   <Tv />
+{:else if onLyricsPage}
+  <LyricsPage />
 {:else if onJoinPage}
   <Join />
 {:else if !app.ready}

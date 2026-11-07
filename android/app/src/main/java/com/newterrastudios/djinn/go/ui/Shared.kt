@@ -110,8 +110,8 @@ fun countParts(plays: Long, likes: Long): List<String> = listOfNotNull(
 /** One song: tap to play, dots for everything else. */
 @UnstableApi
 @Composable
-fun SongRow(track: Track, nav: Nav, onClick: () -> Unit) {
-    val line = (listOfNotNull(track.artist, track.album) + countParts(track.plays, track.likes)).joinToString(" · ")
+fun SongRow(track: Track, nav: Nav, note: String? = null, onClick: () -> Unit) {
+    val line = (listOfNotNull(note, track.artist, track.album) + countParts(track.plays, track.likes)).joinToString(" · ")
     Row2(
         title = track.title,
         subtitle = line,

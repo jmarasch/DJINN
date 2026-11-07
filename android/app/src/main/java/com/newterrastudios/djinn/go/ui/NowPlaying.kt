@@ -34,6 +34,8 @@ import androidx.compose.material.icons.filled.PhoneInTalk
 import androidx.compose.material.icons.filled.Alarm
 import androidx.compose.material.icons.filled.Celebration
 import androidx.compose.material.icons.filled.Flag
+import androidx.compose.material.icons.filled.Lyrics
+import com.newterrastudios.djinn.go.data.Lyrics
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -134,6 +136,19 @@ fun NowPlayingScreen(nav: Nav) {
     /** Where the thumb is while being dragged. */
     var dragging by remember { mutableStateOf<Float?>(null) }
     var showVisuals by remember { mutableStateOf(nav.prefs.visualsOn) }
+    var showLyrics by remember { mutableStateOf(nav.prefs.lyricsOn) }
+    var lyrics by remember(id) { mutableStateOf<Lyrics?>(null) }
+    var lyricsLoading by remember(id) { mutableStateOf(true) }
+    LaunchedEffect(id, showLyrics) {
+        if (!showLyrics || id == null) return@LaunchedEffect
+        lyricsLoading = true
+        lyrics = try {
+            nav.api.lyrics(id)
+        } catch (_: Exception) {
+            null
+        }
+        lyricsLoading = false
+    }
     val context = LocalContext.current
     var pickDevice by remember { mutableStateOf(false) }
     val casting = nav.cast.castingTo
@@ -276,17 +291,30 @@ fun NowPlayingScreen(nav: Nav) {
                 }
                 if (id != null) {
                     val liked = id in nav.liked
-                    IconButton(onClick = {
-                        scope.launch { nav.setLiked(id, !liked) }
-                    }) {
-                        Icon(
-                            if (liked) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                            if (liked) "Unlike" else "Like",
-                            tint = if (liked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                    Row {
+                        IconButton(onClick = {
+                            scope.launch { nav.setLiked(id, !liked) }
+                        }) {
+                            Icon(
+                                if (liked) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                if (liked) "Unlike" else "Like",
+                                tint = if (liked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        IconButton(onClick = {
+                            showLyrics = !showLyrics
+                            nav.prefs.lyricsOn = showLyrics
+                        }) {
+                            Icon(
+                                Icons.Default.Lyrics,
+                                if (showLyrics) "Hide lyrics" else "Show lyrics",
+                                tint = if (showLyrics) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
                 }
                 player.error?.let { Text(it, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center) }
+                if (showLyrics && id != null) LyricsBlock(lyrics, lyricsLoading, player::livePositionMs)
             }
         }
         if (player.upNext.isNotEmpty()) {

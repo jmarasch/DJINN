@@ -20,10 +20,50 @@
     setShuffle,
     toggle,
     toggleLike,
+    livePosition,
   } from '../player.svelte'
   import { ui } from '../ui.svelte'
+  import { api } from '../../lib/api'
+  import LyricsView from '../../lib/LyricsView.svelte'
+  import type { Lyrics } from '../../lib/types'
 
   const song = $derived(current())
+
+  // Lyrics under the controls, opened or closed on this device.
+  let lyricsOpen = $state(readLyricsOpen())
+  let lyrics = $state<Lyrics | null | undefined>(undefined)
+  function readLyricsOpen(): boolean {
+    try {
+      return localStorage.getItem('go-lyrics-open') === '1'
+    } catch {
+      return false
+    }
+  }
+  function toggleLyrics() {
+    lyricsOpen = !lyricsOpen
+    try {
+      localStorage.setItem('go-lyrics-open', lyricsOpen ? '1' : '0')
+    } catch {
+      // Not remembered.
+    }
+  }
+  $effect(() => {
+    const id = song?.id
+    if (!lyricsOpen || id == null) return
+    lyrics = undefined
+    let live = true
+    api
+      .trackLyrics(id)
+      .then((found) => {
+        if (live) lyrics = found
+      })
+      .catch(() => {
+        if (live) lyrics = null
+      })
+    return () => {
+      live = false
+    }
+  })
 
   function clear(clearing: () => () => void) {
     toast('Queue cleared', false, { label: 'Undo', run: clearing() })
@@ -123,9 +163,15 @@
           <Icon name={likes.track.has(song.id) ? 'heart' : 'heart-outline'} size={18} />
           {likes.track.has(song.id) ? 'Liked' : 'Like'}
         </button>
+        <button class="small-button" class:on={lyricsOpen} aria-pressed={lyricsOpen} onclick={toggleLyrics}>
+          <Icon name="lyrics" size={18} /> Lyrics
+        </button>
         <button class="small-button" onclick={() => (ui.menu = song)}>More</button>
         {#if player.downloadUrl}<a class="button small-button" href={player.downloadUrl} download>Download</a>{/if}
       </div>
+      {#if lyricsOpen}
+        <LyricsView {lyrics} position={livePosition} />
+      {/if}
     </section>
 
     <section class="queue">

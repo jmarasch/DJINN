@@ -12,12 +12,6 @@ pub struct Counts {
     pub likes: i64,
 }
 
-/// The ids as a JSON array, for `json_each(?)`.
-fn id_list(ids: &[i64]) -> String {
-    let inner: Vec<String> = ids.iter().map(i64::to_string).collect();
-    format!("[{}]", inner.join(","))
-}
-
 impl Store {
     pub async fn track_counts(&self, ids: &[i64]) -> Result<HashMap<i64, Counts>> {
         self.counts(
@@ -68,7 +62,7 @@ impl Store {
             return Ok(HashMap::new());
         }
         let rows: Vec<(i64, i64, i64)> = sqlx::query_as(sql)
-            .bind(id_list(ids))
+            .bind(json_ids(ids))
             .fetch_all(&self.pool)
             .await?;
         Ok(rows

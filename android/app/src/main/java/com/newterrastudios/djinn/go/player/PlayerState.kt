@@ -151,6 +151,9 @@ class PlayerState(private val api: GoApi) {
         controller = null
     }
 
+    /** Milliseconds into the song, read now (lyrics need more than [positionMs]'s two updates a second). */
+    fun livePositionMs(): Long = controller?.currentPosition?.coerceAtLeast(0) ?: positionMs
+
     /** Follows the position while something's on screen to show it. */
     suspend fun followPosition() {
         while (true) {

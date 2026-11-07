@@ -188,15 +188,33 @@
   {#if results.tracks.length}
     <h2>Songs</h2>
     <SongList tracks={results.tracks} />
-  {:else if !described?.tracks.length && !thinking}
+  {:else if !described?.tracks.length && !results.lyrics?.length && !thinking}
     <h2>Songs</h2>
     <p class="muted">No songs match.</p>
+  {/if}
+  {#if results.lyrics?.length}
+    <h2>Songs with these words</h2>
+    {#each results.lyrics as hit (hit.track.id)}
+      <SongRow
+        track={hit.track}
+        onplay={() => tapSong(hit.track, () => playList(results?.lyrics?.map((h) => h.track) ?? [hit.track], results?.lyrics?.indexOf(hit) ?? 0))}
+      />
+      <p class="quote">“{hit.line}”</p>
+    {/each}
   {/if}
   {#if !describedFirst}{@render describedSection()}{/if}
   <NotInLibrary {query} />
 {/if}
 
 <style>
+  /* The lyric line a search matched, under its song. */
+  .quote {
+    margin: -6px 0 10px 56px;
+    color: var(--muted);
+    font-size: 0.875rem;
+    font-style: italic;
+  }
+
   .search-bar {
     position: sticky;
     top: var(--nav-height, 60px);

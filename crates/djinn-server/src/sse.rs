@@ -58,6 +58,13 @@ pub async fn tv_events(
     live(state, Audience::Tv).await
 }
 
+pub async fn lyrics_events(
+    State(state): State<AppState>,
+) -> ApiResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {
+    crate::lyrics::check_page(&state).await?;
+    live(state, Audience::Tv).await
+}
+
 async fn live(
     state: AppState,
     audience: Audience,

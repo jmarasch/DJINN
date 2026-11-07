@@ -220,6 +220,9 @@ class GoApi(private val account: Account) {
     suspend fun ask(query: String): Described? =
         get("/api/search/ask?q=${URLEncoder.encode(query, "UTF-8")}")
 
+    /** A song's lyrics, null when there are none. */
+    suspend fun lyrics(id: Long): Lyrics? = get("/api/tracks/$id/lyrics")
+
     suspend fun likedIds(): LikedIds = get("/api/go/likes/ids")
     suspend fun liked(): Liked = get("/api/go/likes")
     suspend fun setAlbumLike(id: Long, on: Boolean) = withContext(Dispatchers.IO) {

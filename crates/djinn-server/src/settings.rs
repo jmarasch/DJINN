@@ -82,6 +82,8 @@ pub const DEFAULTS: &[(&str, Default)] = &[
     (crate::jukebox::CROSSFADE, Default::Number(0)),
     (crate::audio_api::SOUND_ANALYSIS, Default::Flag(false)),
     (ONLINE_INFO, Default::Flag(false)),
+    (crate::lyrics::LYRICS_LOOKUP, Default::Flag(false)),
+    (crate::lyrics::LYRICS_PAGE, Default::Flag(true)),
     (crate::library_api::ARTIST_PICTURES, Default::Flag(false)),
     ("show_collaboration_artists", Default::Flag(true)),
     (djinn_library::ORIGINAL_YEARS_KEY, Default::Flag(true)),

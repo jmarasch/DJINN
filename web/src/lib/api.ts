@@ -1,5 +1,8 @@
 import type {
   About,
+  Lyrics,
+  LyricsSettings,
+  LyricsStatus,
   ConvertSettings,
   Submission,
   UploadSettings,
@@ -235,6 +238,11 @@ export const api = {
   search: (q: string) => get<SearchResults>(`/search?q=${encodeURIComponent(q)}`),
   /** The query read by the AI reader; takes a few seconds. */
   ask: (q: string) => get<Described | null>(`/search/ask?q=${encodeURIComponent(q)}`),
+  trackLyrics: (id: number) => get<Lyrics | null>(`/tracks/${id}/lyrics`),
+  lyricsStatus: () => get<LyricsStatus>('/lyrics/status'),
+  lyricsSettings: () => get<LyricsSettings>('/lyrics/settings'),
+  setLyricsSettings: (settings: LyricsSettings) => put<void>('/lyrics/settings', settings),
+  recheckLyrics: () => post<void>('/lyrics/recheck'),
   artists: (sort: ArtistSort, offset: number) => get<Page<ArtistSummary>>(`/artists?sort=${sort}&offset=${offset}`),
   albums: (sort: AlbumSort, filter: AlbumFilter, offset: number) => get<Page<Album>>(`/albums?sort=${sort}&filter=${filter}&offset=${offset}`),
   /** Where each letter (or year) starts in a list, for the jump strip. */

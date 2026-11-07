@@ -98,7 +98,26 @@ data class SearchResults(
     val described: Described? = null,
     /** The server's AI reader might understand this better: see [GoApi.ask]. */
     val ask: Boolean = false,
+    /** Songs whose lyrics have the words typed, with the line that matched. */
+    val lyrics: List<LyricHit> = emptyList(),
 )
+
+/** A timed line of lyrics: when it starts, in milliseconds. */
+@Serializable
+data class LyricLine(val ms: Long, val text: String)
+
+/** A song's lyrics: timed lines when there are some, otherwise plain words. */
+@Serializable
+data class Lyrics(
+    val lines: List<LyricLine>? = null,
+    val plain: String? = null,
+    val instrumental: Boolean = false,
+    val source: String = "",
+)
+
+/** A song found by its words. */
+@Serializable
+data class LyricHit(val track: Track, val line: String)
 
 /** The search read as a description, like "80's hair metal". */
 @Serializable

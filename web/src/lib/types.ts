@@ -375,6 +375,8 @@ export interface SearchResults {
   described: Described | null
   /** The AI reader might understand the query better (see api.ask). */
   ask: boolean
+  /** Songs whose lyrics have the words typed (two or more words). */
+  lyrics?: LyricHit[]
 }
 
 export interface Described {
@@ -1276,4 +1278,41 @@ export interface ArtistPicture {
   credit_url: string
   source: 'commons' | 'manual' | 'fanart' | 'audiodb' | 'unsplash'
   remote_url: string | null
+}
+
+/** A timed line of lyrics. */
+export interface LyricLine {
+  ms: number
+  text: string
+}
+
+/** A song's lyrics: timed lines when there are some, otherwise plain words. */
+export interface Lyrics {
+  lines: LyricLine[] | null
+  plain: string | null
+  instrumental: boolean
+  /** lrc (a file beside the song), file (its tags) or lrclib (online). */
+  source: string
+}
+
+/** A song found by its words, with the line that matched. */
+export interface LyricHit {
+  track: Track
+  line: string
+}
+
+export interface LyricsStatus {
+  songs: number
+  synced: number
+  plain: number
+  instrumental: number
+  unread: number
+  not_looked_up: number
+  running: boolean
+  phase: '' | 'reading' | 'looking up'
+}
+
+export interface LyricsSettings {
+  lookup: boolean
+  page: boolean
 }

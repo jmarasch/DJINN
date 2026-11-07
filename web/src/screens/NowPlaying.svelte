@@ -18,6 +18,8 @@
   } from '../lib/state.svelte'
   import { checkPlayHere, playHere, startPlayHere, stopPlayHere } from '../lib/playHere.svelte'
   import { cycleTheme, theme } from '../lib/theme.svelte'
+  import LyricsView from '../lib/LyricsView.svelte'
+  import type { Lyrics } from '../lib/types'
 
   const current = $derived(app.nowPlaying.current)
   const next = $derived(app.nowPlaying.up_next)
@@ -32,6 +34,42 @@
   const total = $derived(current?.track.duration_ms ?? 0)
   let position = $state(0)
   let volume = $state(app.player.volume)
+
+  // Lyrics under the song, opened or closed per browser.
+  let lyricsOpen = $state(readLyricsOpen())
+  let lyrics = $state<Lyrics | null | undefined>(undefined)
+  function readLyricsOpen(): boolean {
+    try {
+      return localStorage.getItem('djinn-lyrics-open') === '1'
+    } catch {
+      return false
+    }
+  }
+  function toggleLyrics() {
+    lyricsOpen = !lyricsOpen
+    try {
+      localStorage.setItem('djinn-lyrics-open', lyricsOpen ? '1' : '0')
+    } catch {
+      // Not remembered.
+    }
+  }
+  $effect(() => {
+    const id = current?.track.id
+    if (!lyricsOpen || id == null) return
+    lyrics = undefined
+    let live = true
+    api
+      .trackLyrics(id)
+      .then((found) => {
+        if (live) lyrics = found
+      })
+      .catch(() => {
+        if (live) lyrics = null
+      })
+    return () => {
+      live = false
+    }
+  })
 
   onMount(() => {
     void checkPlayHere()
@@ -147,6 +185,12 @@
       <span>{duration(position)}</span>
       <span>{duration(total)}</span>
     </div>
+    <button class="lyrics-toggle" class:on={lyricsOpen} aria-pressed={lyricsOpen} onclick={toggleLyrics}>
+      <Icon name="lyrics" size={18} /> Lyrics
+    </button>
+    {#if lyricsOpen}
+      <LyricsView {lyrics} position={currentPosition} />
+    {/if}
     {#if canVote}
       <button class="skip-vote" disabled={voted || resting} onclick={voteSkip}>
         <Icon name="skip" size={18} />
@@ -288,6 +332,23 @@
 </div>
 
 <style>
+  .lyrics-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin: 4px 0 8px;
+    min-height: 36px;
+    padding: 6px 14px;
+    border-radius: 999px;
+    background: var(--surface-2);
+    color: var(--muted);
+    font-size: 0.875rem;
+  }
+
+  .lyrics-toggle.on {
+    color: var(--accent);
+  }
+
   .playing-page {
     position: relative;
     isolation: isolate;
