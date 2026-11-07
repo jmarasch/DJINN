@@ -1,6 +1,7 @@
 // App-wide state, kept current by Server-Sent Events.
 
 import { api, ApiError } from './api'
+import { locale, t } from './i18n.svelte'
 import { clearListCache } from './listCache'
 import type {
   AiStatus,
@@ -299,11 +300,13 @@ export function involvement(item: QueueItem): 'owner' | 'backer' | null {
 /** Everyone who asked for a song: "you, Sam & Jo". */
 export function askedBy(item: QueueItem): string {
   const me = app.me?.id
+  const you = t('common.you')
   const names = [
-    item.user_id === me ? 'you' : item.username,
-    ...item.backers.map((b) => (b.user_id === me ? 'you' : b.name)),
+    item.user_id === me ? you : item.username,
+    ...item.backers.map((b) => (b.user_id === me ? you : b.name)),
   ]
-  return names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} & ${names[names.length - 1]}`
+  // "you, Sam and Jo" in the reader's language.
+  return new Intl.ListFormat(locale.code, { type: 'conjunction' }).format(names)
 }
 
 /** Takes you off a request: as a backer you step back; as the requester

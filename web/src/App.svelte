@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from './lib/i18n.svelte'
   import { onMount } from 'svelte'
   import Icon from './lib/Icon.svelte'
   import JoinCard from './lib/JoinCard.svelte'
@@ -112,27 +113,27 @@
 {:else}
   <nav class:admin={isAdmin()} aria-label="Main navigation" bind:offsetHeight={navHeight}>
     <button class="back" disabled={!navigation.canGoBack} onclick={goBack} aria-label="Back" title="Back">
-      <Icon name="back" size={28} /><span>Back</span>
+      <Icon name="back" size={28} /><span>{t('nav.back')}</span>
     </button>
-    <a href="#/" class:active={tab === 'now'}><Icon name="disc" /><span>Playing</span></a>
-    <a href="#/search" class:active={tab === 'search'}><Icon name="search" /><span>Library</span></a>
+    <a href="#/" class:active={tab === 'now'}><Icon name="disc" /><span>{t('nav.playing')}</span></a>
+    <a href="#/search" class:active={tab === 'search'}><Icon name="search" /><span>{t('nav.library')}</span></a>
     {#if hasPlaylists()}
-      <a href="#/favorites" class:active={tab === 'favorites'}><Icon name="heart" /><span>Favorites</span></a>
+      <a href="#/favorites" class:active={tab === 'favorites'}><Icon name="heart" /><span>{t('nav.favorites')}</span></a>
     {/if}
     <a href="#/queue" class:active={tab === 'queue'}>
       <Icon name="queue" />
-      <span>Queue{app.queue.length ? ` (${app.queue.length})` : ''}</span>
+      <span>{t('nav.queue')}{app.queue.length ? ` (${app.queue.length})` : ''}</span>
     </a>
-    <button class:active={showJoin} onclick={() => (showJoin = true)}><Icon name="qr" /><span>Join</span></button>
+    <button class:active={showJoin} onclick={() => (showJoin = true)}><Icon name="qr" /><span>{t('nav.join')}</span></button>
     {#if hasPlaylists()}
-      <a href="#/playlists" class:active={tab === 'playlists'}><Icon name="playlist" /><span>Playlists</span></a>
+      <a href="#/playlists" class:active={tab === 'playlists'}><Icon name="playlist" /><span>{t('nav.playlists')}</span></a>
     {/if}
     {#if isAdmin()}
       <a href="#/admin" class:active={tab === 'admin'}><Icon name="settings" /><span>Admin</span></a>
     {/if}
   </nav>
   {#if !app.connected}
-    <div class="offline">Reconnecting to the jukebox...</div>
+    <div class="offline">{t('app.reconnecting')}</div>
   {/if}
   <main class:playing={route.path === '/'} class:wide={tab === 'admin'} style:--nav-height="{navHeight}px">
     {#if similarId}
@@ -163,7 +164,7 @@
   </main>
 
   {#if showJoin}
-    <Sheet title="Help a friend join" onclose={() => (showJoin = false)}>
+    <Sheet title={t('join.help_friend')} onclose={() => (showJoin = false)}>
       <JoinCard />
     </Sheet>
   {/if}

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '../lib/i18n.svelte'
   import { api } from '../lib/api'
   import Art from '../lib/Art.svelte'
   import ScrollRow from '../lib/ScrollRow.svelte'
@@ -116,26 +117,25 @@
       <div class="described-head">
         <div>
           <h2>
-            Matches <span class="muted">{described.summary.join(' · ')}</span>
-            {#if described.read_by_ai}<span class="tag">read by AI</span>{/if}
+            {t('search.matches')} <span class="muted">{described.summary.join(' · ')}</span>
+            {#if described.read_by_ai}<span class="tag">{t('search.read_by_ai')}</span>{/if}
           </h2>
           {#if described.tracks.length}
             <p class="small muted">
-              {described.total} {described.total === 1 ? 'song fits' : 'songs fit'}{described.total >
-              described.tracks.length
-                ? `, showing ${described.tracks.length}`
-                : ''}.{described.unknown.length ? ` Not sure about "${described.unknown.join(' ')}".` : ''}
+              {t('search.fit', { n: described.total })}{described.total > described.tracks.length
+                ? t('search.showing', { n: described.tracks.length })
+                : ''}.{described.unknown.length ? ` ${t('search.not_sure', { words: described.unknown.join(' ') })}` : ''}
             </p>
           {:else}
             <p class="small muted">
-              Nothing in the library fits that.{#if isAdmin()}
+              {t('search.nothing_fits')}{#if isAdmin()}
                 Genres come from your files' tags and from MusicBrainz (Admin > Rules), so songs without either can't
                 match a genre.{/if}
             </p>
           {/if}
         </div>
         {#if hasPlaylists() && described.tracks.length}
-          <button class="small-button" onclick={savePlaylist}>Save as playlist</button>
+          <button class="small-button" onclick={savePlaylist}>{t('search.save_playlist')}</button>
         {/if}
       </div>
       {#if described.artists.length}
@@ -158,7 +158,7 @@
     <!-- svelte-ignore a11y_autofocus -->
     <input
       type="search"
-      placeholder="Search, or describe: 80s rock, chill house..."
+            placeholder={t('search.placeholder')}
       bind:value={query}
       bind:this={input}
       autofocus
@@ -169,7 +169,7 @@
     {#if query}
       <button
         class="clear"
-        aria-label="Clear the search"
+        aria-label={t('search.clear')}
         onclick={() => {
           query = ''
           input?.focus()
@@ -182,13 +182,13 @@
 </div>
 
 {#if empty && !loading && !thinking && !described}
-  <p class="muted center">No matches for "{query.trim()}".</p>
+  <p class="muted center">{t('search.no_matches', { query: query.trim() })}</p>
 {/if}
 
 {#if results}
   {#if describedFirst}{@render describedSection()}{/if}
   {#if results.artists.length}
-    <h2>Artists</h2>
+    <h2>{t('library.artists')}</h2>
     <div class="chips">
       {#each results.artists as artist (artist.id)}
         <a class="chip" href="#/artist/{artist.id}">{artist.name}</a>
@@ -197,7 +197,7 @@
   {/if}
 
   {#if results.albums.length}
-    <h2>Albums</h2>
+    <h2>{t('library.albums')}</h2>
     <ScrollRow>
       {#each results.albums as album (album.id)}
         <a class="album" href="#/album/{album.id}">
@@ -210,13 +210,13 @@
   {/if}
 
   {#if results.tracks.length}
-    <h2>Songs</h2>
+    <h2>{t('library.songs')}</h2>
     {#each results.tracks as track (track.id)}
       <TrackRow {track} />
     {/each}
   {/if}
   {#if results.lyrics?.length}
-    <h2>Songs with these words</h2>
+    <h2>{t('search.lyric_matches')}</h2>
     {#each results.lyrics as hit (hit.track.id)}
       <TrackRow track={hit.track} />
       <p class="quote">“{hit.line}”</p>

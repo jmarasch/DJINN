@@ -1,0 +1,18 @@
+# Building DJINN for other processors with `cross` (Docker): the Pi images
+# use aarch64 (Pi 3 and newer) and arm-unknown-linux-gnueabihf (ARMv6, so
+# it also runs on a Pi 1, Pi 2 and Zero W). The audio library is the only
+# system library DJINN links to.
+[build]
+pre-build = [
+    "dpkg --add-architecture $CROSS_DEB_ARCH",
+    "apt-get update && apt-get install -y --no-install-recommends libasound2-dev:$CROSS_DEB_ARCH",
+]
+
+# The ARMv6 build needs Debian's multiarch folder for pkg-config. Set these
+# when building (cc-rs already compiles bundled C code for ARMv6 on this
+# target; tract's ARMv7 NEON kernels are only used where the CPU has them,
+# which marks the binary v7 without needing it):
+#   PKG_CONFIG_PATH_arm_unknown_linux_gnueabihf=/usr/lib/arm-linux-gnueabihf/pkgconfig
+#   PKG_CONFIG_ALLOW_CROSS=1
+[target.arm-unknown-linux-gnueabihf.env]
+passthrough = ["PKG_CONFIG_PATH_arm_unknown_linux_gnueabihf", "PKG_CONFIG_ALLOW_CROSS"]

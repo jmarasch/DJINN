@@ -902,12 +902,36 @@ async fn join_as_guest(
 #[derive(Serialize)]
 struct BootstrapStatus {
     needed: bool,
+    /// No setup link needed (a box without a screen, before the admin
+    /// account exists).
+    open: bool,
 }
 
 async fn bootstrap_status(State(state): State<AppState>) -> ApiResult<Json<BootstrapStatus>> {
+    let needed = !state.store.admin_exists().await?;
     Ok(Json(BootstrapStatus {
-        needed: !state.store.admin_exists().await?,
+        needed,
+        open: needed && state.open_setup(),
     }))
+}
+
+/// True if `token` is the one-time setup token, or setup is open (a box
+/// without a screen) and nobody has set it up yet.
+async fn setup_allowed(state: &AppState, token: &str) -> ApiResult<bool> {
+    if state.store.admin_exists().await? {
+        return Ok(false);
+    }
+    if state.open_setup() {
+        return Ok(true);
+    }
+    let expected = state
+        .bootstrap_token
+        .lock()
+        .map_err(|_| anyhow::anyhow!("bootstrap lock poisoned"))?
+        .clone();
+    Ok(expected
+        .as_deref()
+        .is_some_and(|t| constant_time_eq(t.as_bytes(), token.as_bytes())))
 }
 
 #[derive(Deserialize)]
@@ -923,15 +947,7 @@ async fn bootstrap(
     device: Device,
     Json(body): Json<BootstrapRequest>,
 ) -> ApiResult<impl IntoResponse> {
-    let expected = state
-        .bootstrap_token
-        .lock()
-        .map_err(|_| anyhow::anyhow!("bootstrap lock poisoned"))?
-        .clone();
-    let token_ok = expected
-        .as_deref()
-        .is_some_and(|t| constant_time_eq(t.as_bytes(), body.token.as_bytes()));
-    if !token_ok || state.store.admin_exists().await? {
+    if !setup_allowed(&state, &body.token).await? {
         return Err(ApiError::new(
             StatusCode::FORBIDDEN,
             "setup link is invalid or already used",
@@ -968,15 +984,7 @@ async fn bootstrap_node(
     State(state): State<AppState>,
     Json(body): Json<BootstrapNode>,
 ) -> ApiResult<StatusCode> {
-    let expected = state
-        .bootstrap_token
-        .lock()
-        .map_err(|_| anyhow::anyhow!("bootstrap lock poisoned"))?
-        .clone();
-    let token_ok = expected
-        .as_deref()
-        .is_some_and(|t| constant_time_eq(t.as_bytes(), body.token.as_bytes()));
-    if !token_ok || state.store.admin_exists().await? {
+    if !setup_allowed(&state, &body.token).await? {
         return Err(ApiError::new(
             StatusCode::FORBIDDEN,
             "setup link is invalid or already used",
@@ -1414,6 +1422,36 @@ mod tests {
     use super::*;
     use crate::test_util::call;
     use axum::http::Method;
+
+    #[tokio::test]
+    async fn a_box_without_a_screen_sets_up_without_the_link_but_only_once() {
+        let state = AppState::for_tests().await.with_open_setup(true);
+        let (_, body) = crate::test_util::get_body(&state, "/api/auth/bootstrap", "").await;
+        assert!(body.contains(r#""open":true"#), "{body}");
+        let first = r#"{"token":"","username":"admin","password":"hunter22"}"#;
+        let (status, _) = call(
+            &state,
+            Method::POST,
+            "/api/auth/bootstrap",
+            Some(first),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+        // Set up: closed again, link or not.
+        let again = r#"{"token":"","username":"other","password":"hunter22"}"#;
+        let (status, _) = call(
+            &state,
+            Method::POST,
+            "/api/auth/bootstrap",
+            Some(again),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let (_, body) = crate::test_util::get_body(&state, "/api/auth/bootstrap", "").await;
+        assert!(body.contains(r#""open":false"#), "{body}");
+    }
 
     #[tokio::test]
     async fn bootstrap_login_and_admin_gate() {

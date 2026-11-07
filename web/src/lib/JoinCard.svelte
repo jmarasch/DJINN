@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from './i18n.svelte'
   // The join QR code with steps for guests. Used by the /join page and the
   // Join button in the app.
   import { onMount } from 'svelte'
@@ -23,23 +24,21 @@
 <div class="join" class:big>
   <PublicNetworkNote />
   <div class="qr">
-    <img src="/api/join/qr.svg{roomQuery}" alt="QR code for {url}" />
+    <img src="/api/join/qr.svg{roomQuery}" alt={t('join.qr_alt', { url })} />
   </div>
-  {#if roomName}<p class="muted small">Joins {roomName}.</p>{/if}
+  {#if roomName}<p class="muted small">{t('join.joins_room', { room: roomName })}</p>{/if}
   {#if url}<p class="url">{url}</p>{/if}
   <ol>
-    <li>Scan the code with your phone camera, or type the address above.</li>
+    <li>{t('join.step_scan')}</li>
     {#if guestMode}
-      <li>Type your name. No account needed.</li>
+      <li>{t('join.step_name')}</li>
     {:else}
-      <li>Sign in. No account yet? Ask the host for one.</li>
+      <li>{t('join.step_sign_in')}</li>
     {/if}
-    <li>Search for a song or browse the library, then tap it to add it to the party queue.</li>
+    <li>{t('join.step_request')}</li>
   </ol>
-  <p class="muted small">Requests play in order. When the queue is empty, the party mix keeps going.</p>
-  <p class="muted small">
-    Android: if Chrome won't open the page, allow Chrome's Nearby devices permission in the phone's settings.
-  </p>
+  <p class="muted small">{t('join.order_note')}</p>
+  <p class="muted small">{t('join.android_note')}</p>
 </div>
 
 <style>

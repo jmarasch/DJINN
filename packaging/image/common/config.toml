@@ -1,0 +1,19 @@
+# DJINN on a box of its own (the install images). Settings made in the app
+# are kept in the database; this file only says where things live.
+
+[server]
+listen = "0.0.0.0:8066"
+tray = false
+# No screen to read a setup link from: until the admin account exists, the
+# first-start page at http://djinn.local:8066/setup works without one.
+open_setup = true
+# Shown on a screen plugged into the box, above the login prompt.
+console_banner = "/run/issue.d/djinn.issue"
+
+[database]
+path = "/var/lib/djinn/djinn.db"
+
+[library]
+# Music folders are added in the app (Admin > Library). /srv/music is ready
+# for copying music onto the box.
+roots = ["/srv/music"]

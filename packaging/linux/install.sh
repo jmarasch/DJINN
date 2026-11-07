@@ -88,26 +88,33 @@ elif [ -f "$here/djinn.desktop.in" ]; then
 else
     # On its own (piped from curl): fetch the latest release and run the
     # install.sh inside it.
-    if [ "$(uname -m)" != x86_64 ]; then
-        echo "Release downloads are for 64-bit PCs (x86_64) so far. On $(uname -m)," >&2
-        echo "build DJINN from source: $repo" >&2
-        exit 1
-    fi
+    # The download for this processor: 64-bit PCs, 64-bit ARM (Raspberry Pi
+    # 3, 4, 5), or 32-bit ARM (every Raspberry Pi).
+    case "$(uname -m)" in
+        x86_64) arch=x86_64 ;;
+        aarch64 | arm64) arch=aarch64 ;;
+        armv6l | armv7l | armv8l) arch=arm ;;
+        *)
+            echo "There's no DJINN download for $(uname -m) yet; build it from source: $repo" >&2
+            exit 1
+            ;;
+    esac
+    tarball="djinn-linux-$arch.tar.gz"
     tmp=$(mktemp -d)
     trap 'rm -rf "$tmp"' EXIT INT TERM
     echo "Downloading DJINN..."
-    download "$releases/djinn-linux-x86_64.tar.gz" "$tmp/djinn-linux-x86_64.tar.gz"
+    download "$releases/$tarball" "$tmp/$tarball"
     download "$releases/SHA256SUMS" "$tmp/SHA256SUMS"
     download "$releases/SHA256SUMS.sig" "$tmp/SHA256SUMS.sig"
     if ! check_signature "$tmp"; then
         echo "This release isn't signed with DJINN's release key, so it wasn't installed." >&2
         exit 1
     fi
-    if ! (cd "$tmp" && grep ' djinn-linux-x86_64.tar.gz$' SHA256SUMS | sha256sum -c --quiet - >/dev/null 2>&1); then
+    if ! (cd "$tmp" && grep " $tarball\$" SHA256SUMS | sha256sum -c --quiet - >/dev/null 2>&1); then
         echo "The download didn't match the release's checksum; try again." >&2
         exit 1
     fi
-    tar xzf "$tmp/djinn-linux-x86_64.tar.gz" -C "$tmp"
+    tar xzf "$tmp/$tarball" -C "$tmp"
     sh "$tmp/djinn/install.sh" "$@"
     exit
 fi

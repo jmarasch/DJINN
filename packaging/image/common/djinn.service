@@ -1,0 +1,22 @@
+[Unit]
+Description=DJINN party jukebox
+Documentation=https://github.com/jmarasch/DJINN
+After=network-online.target sound.target avahi-daemon.service
+Wants=network-online.target
+
+[Service]
+User=djinn
+Group=djinn
+SupplementaryGroups=audio
+Environment=HOME=/var/lib/djinn
+WorkingDirectory=/var/lib/djinn
+ExecStart=/opt/djinn/djinn --config /etc/djinn/config.toml --no-tray --log-file /var/lib/djinn/djinn.log
+# DJINN updates itself in place and starts again; systemd starts it again
+# too if it ever stops.
+Restart=always
+RestartSec=3
+# DJINN's own shutdown saves where the song was.
+TimeoutStopSec=20
+
+[Install]
+WantedBy=multi-user.target

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '../lib/i18n.svelte'
   import RoomPicker from '../lib/RoomPicker.svelte'
   import { api } from '../lib/api'
   import Art from '../lib/Art.svelte'
@@ -28,21 +29,19 @@
 </script>
 
 <div class="queue-title">
-  <h1>Queue</h1>
+  <h1>{t('queue.title')}</h1>
   <RoomPicker />
 </div>
 {#if app.queue.length === 0}
   <div class="empty">
     <img src="/images/empty-record.webp" alt="" />
-    <p class="muted">No requests yet. When the queue is empty, songs come from the auto pool.</p>
-    <a class="button primary" href="#/search">Find a song</a>
+    <p class="muted">{t('queue.empty')}</p>
+    <a class="button primary" href="#/search">{t('common.find_a_song')}</a>
   </div>
 {:else}
   <p class="muted small">
-    {app.queue.length} {app.queue.length === 1 ? 'song' : 'songs'}{mine
-      ? `, ${mine} from you (tap × to take yours back)`
-      : ''}. Want a song that's already here? Tap <Icon name="up" size={14} /> to ask for it too: it moves up a
-    place and uses one of your requests.
+    {t('queue.songs', { n: app.queue.length })}{mine ? t('queue.yours', { n: mine }) : ''}.
+    {t('queue.ask_too_before')} <Icon name="up" size={14} /> {t('queue.ask_too_after')}
   </p>
   <ol>
     {#each app.queue as item, i (item.id)}
@@ -55,12 +54,12 @@
             {#if item.track.duration_ms}· {duration(item.track.duration_ms)}{/if}
           </div>
           <div class="who small">
-            for {askedBy(item)}
-            {#if item.backers.length}<span class="count">{item.backers.length + 1} asked</span>{/if}
+            {t('queue.for', { name: askedBy(item) })}
+            {#if item.backers.length}<span class="count">{t('queue.asked', { n: item.backers.length + 1 })}</span>{/if}
           </div>
         </div>
         {#if involvement(item) === null && !app.pending.has(item.track.id)}
-          <button class="metoo" aria-label="Ask for {item.track.title} too" onclick={() => requestTrack(item.track.id)}>
+          <button class="metoo" aria-label={t('queue.ask_for_too', { title: item.track.title })} onclick={() => requestTrack(item.track.id)}>
             <Icon name="up" />
           </button>
         {/if}
@@ -83,7 +82,7 @@
           </div>
         {/if}
         {#if isAdmin() || involvement(item) !== null}
-          <button class="remove" aria-label="Remove {item.track.title}" onclick={() => cancelRequest(item.id)}>
+          <button class="remove" aria-label={t('queue.remove', { title: item.track.title })} onclick={() => cancelRequest(item.id)}>
             <Icon name="close" />
           </button>
         {/if}

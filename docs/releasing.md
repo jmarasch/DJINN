@@ -116,6 +116,43 @@ To try the whole workflow without publishing, run it from the Actions tab
 (Run workflow): it builds every download and the GPU pack, and skips
 signing and the release.
 
+## Raspberry Pi builds and install images
+
+Each release also builds DJINN for 64-bit ARM (`djinn-linux-aarch64`, on
+GitHub's ARM runners) and 32-bit ARMv6 (`djinn-linux-arm`, with `cross`
+on the regular runner; see `Cross.toml`), each with a tarball, so Pi
+boxes update themselves like any other. Locally:
+
+```sh
+cross build --release --target aarch64-unknown-linux-gnu -p djinn-server
+PKG_CONFIG_PATH_arm_unknown_linux_gnueabihf=/usr/lib/arm-linux-gnueabihf/pkgconfig PKG_CONFIG_ALLOW_CROSS=1 \
+  cross build --release --target arm-unknown-linux-gnueabihf -p djinn-server
+```
+
+The `images` job then builds, from those binaries (`packaging/image`):
+
+- `djinn-installer-pc-x86_64.iso`: Debian's netinstall disc (checked
+  against Debian's SHA512SUMS) with DJINN and installer answers added
+  (`pc/preseed.cfg`). It asks only the time zone, a maintenance login,
+  and to confirm erasing the disk; Debian comes from the internet during
+  the install. `pc/build-iso.sh BINARY OUT.iso [extra answers]`; the
+  extra answers file lets a test install run unattended in QEMU.
+- `djinn-pi-arm64.img.xz` (Pi 3, 4, 5) and `djinn-pi-armhf.img.xz` (every
+  Pi): Raspberry Pi OS Lite (checked against its published sha256) with
+  DJINN added, built in a privileged Docker container.
+  `pi/build-pi.sh arm64|armhf BINARY OUT.img.xz`.
+
+Both use `common/install-files.sh`, which only writes files (so a Pi's file
+system is prepared without running Pi code): DJINN in `/opt/djinn` owned by
+a `djinn` system account in the audio group (it updates itself), settings
+in `/etc/djinn/config.toml` (`open_setup` on, so the first-start page needs
+no setup link until the admin account exists; the address shown on a
+plugged-in screen), data in `/var/lib/djinn`, music in `/srv/music`, the
+systemd service, and the hostname `djinn` (http://djinn.local:8066 with the
+image's avahi). The images are unmodified Debian and Raspberry Pi OS apart
+from DJINN's files, so their GPL sources are Debian's and Raspberry Pi's
+own published sources.
+
 ## The GPU pack
 
 The same workflow builds the optional GPU pack: `djinn-gpu` (the AI

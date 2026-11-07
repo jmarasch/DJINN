@@ -3,6 +3,7 @@
   // " · 12 plays · ♥ 3" after a row's other details. Nothing when neither
   // is known or both are zero.
   import Icon from './Icon.svelte'
+  import { t } from './i18n.svelte'
 
   let {
     plays,
@@ -18,7 +19,7 @@
   const dot = (first: boolean) => (first && !lead ? '' : ' · ')
 </script>
 
-{#if plays}<span class="meta">{dot(true)}{plays.toLocaleString()} {plays === 1 ? 'play' : 'plays'}</span>{/if}
+{#if plays}<span class="meta">{dot(true)}{t('count.plays', { n: plays })}</span>{/if}
 {#if likes}<span class="meta likes" title="{likes} {likes === 1 ? 'person' : 'people'} favorited this"
     >{dot(!plays)}<Icon name="heart" size={12} /><span class="sr">Favorited by</span>{' ' + likes.toLocaleString()}</span
   >{/if}

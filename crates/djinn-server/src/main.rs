@@ -189,6 +189,16 @@ async fn run() -> anyhow::Result<()> {
     system_api::apply_ports(&store, &mut config).await?;
     // A node plays a room for a main DJINN: no library, no party app.
     if node_mode::is_node(&store).await? {
+        if let Some(banner) = &config.server.console_banner {
+            let url = banner::urls(config.server.listen)
+                .first()
+                .cloned()
+                .unwrap_or_default();
+            write_banner(
+                banner,
+                &format!("DJINN node: {url}/node (or http://djinn.local:8066/node)\n"),
+            );
+        }
         return node_mode::serve(store, &config.database.path, config.server.listen).await;
     }
     tokio::spawn(async {
@@ -281,6 +291,7 @@ async fn run() -> anyhow::Result<()> {
         config.audio.master_rate,
         playback_store.clone(),
     ))
+    .with_open_setup(config.server.open_setup)
     .with_stream(stream, cast_api::token(&store).await?)
     .with_go_listen(config.go.listen);
 
@@ -326,6 +337,18 @@ async fn run() -> anyhow::Result<()> {
         }
         Some(url)
     };
+    // A box without a screen of its own shows where to go on whatever
+    // screen is plugged in.
+    if let Some(banner) = &config.server.console_banner {
+        let text = match &setup_url {
+            Some(_) if config.server.open_setup => {
+                format!("DJINN: set it up at {base_url}/setup (or http://djinn.local:8066/setup)\n")
+            }
+            Some(url) => format!("DJINN: set it up at {url}\n"),
+            None => format!("DJINN is running: {base_url} (or http://djinn.local:8066)\n"),
+        };
+        write_banner(banner, &text);
+    }
 
     let listener = match bind(config.server.listen).await {
         Ok(listener) => listener,
@@ -476,6 +499,16 @@ async fn run() -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+/// Writes the address to show on the box's own screen (a login banner).
+pub fn write_banner(path: &std::path::Path, text: &str) {
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    if let Err(e) = std::fs::write(path, text) {
+        tracing::warn!(path = %path.display(), error = %e, "couldn't write the console banner");
+    }
 }
 
 /// Binds the listen address. Right after an update restart the old process

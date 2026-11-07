@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from './i18n.svelte'
   // "Not in the library?" under search results: ask the admin for a song.
   // Shown to admins, and to everyone when the admin allows it.
   import { api } from './api'
@@ -31,10 +32,10 @@
     sending = true
     try {
       await api.addWish(artist.trim(), title.trim())
-      toast("Asked. The admin will see it.")
+      toast(t('wish.asked'))
       asking = false
     } catch (err) {
-      toast(err instanceof Error ? err.message : 'Could not send it', true)
+      toast(err instanceof Error ? err.message : t('wish.failed'), true)
     } finally {
       sending = false
     }
@@ -43,21 +44,21 @@
 
 {#if allowed && query.trim()}
   <p class="ask small muted">
-    Not in the library? <button class="link" onclick={open}>Ask for it</button>
+    {t('wish.not_here')} <button class="link" onclick={open}>{t('wish.ask_for_it')}</button>
   </p>
 {/if}
 {#if asking}
-  <Sheet title="Ask for a song" onclose={() => (asking = false)}>
+  <Sheet title={t('wish.title')} onclose={() => (asking = false)}>
     <form onsubmit={send}>
       <label>
-        Artist
+        {t('wish.artist')}
         <input bind:value={artist} maxlength="200" required />
       </label>
       <label>
-        Song
+        {t('wish.song')}
         <input bind:value={title} maxlength="200" required />
       </label>
-      <button class="primary" disabled={sending || !artist.trim() || !title.trim()}>Ask</button>
+      <button class="primary" disabled={sending || !artist.trim() || !title.trim()}>{t('wish.ask')}</button>
     </form>
   </Sheet>
 {/if}

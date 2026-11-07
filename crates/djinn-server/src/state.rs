@@ -71,6 +71,8 @@ pub struct AppState {
     pub node_audio: Arc<crate::node_audio::Hub>,
     /// Players for the other rooms, and who follows whom.
     pub rooms: Arc<crate::rooms_rt::Rooms>,
+    /// First-time setup without the setup link (`server.open_setup`).
+    pub open_setup: Arc<AtomicBool>,
 }
 
 #[derive(Default)]
@@ -136,7 +138,18 @@ impl AppState {
             duplicates: Arc::default(),
             node_audio: Arc::default(),
             rooms: Arc::default(),
+            open_setup: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    pub fn with_open_setup(self, open: bool) -> Self {
+        self.open_setup
+            .store(open, std::sync::atomic::Ordering::Release);
+        self
+    }
+
+    pub fn open_setup(&self) -> bool {
+        self.open_setup.load(std::sync::atomic::Ordering::Acquire)
     }
 
     pub fn with_rooms(mut self, rooms: crate::rooms_rt::Rooms) -> Self {

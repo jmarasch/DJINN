@@ -229,7 +229,7 @@ export const api = {
   signIns: (limit = 200) => get<SignIn[]>(`/go/sign-ins?limit=${limit}`),
   turnOffUserTwoStep: (id: number) => del<void>(`/users/${id}/two-step`),
   logout: () => post<void>('/auth/logout'),
-  bootstrapStatus: () => get<{ needed: boolean }>('/auth/bootstrap'),
+  bootstrapStatus: () => get<{ needed: boolean; open?: boolean }>('/auth/bootstrap'),
   mode: () => get<Mode>('/auth/mode'),
   joinAsGuest: (name: string) => post<User>('/auth/guest', { name }),
   /** A User when signed in right away; { pending: true } when the account waits for approval. */

@@ -5,6 +5,8 @@
 
   const token = new URLSearchParams(location.search).get('token') ?? ''
   let needed = $state<boolean | null>(null)
+  /** A box without a screen: no setup link needed yet. */
+  let open = $state(false)
   let username = $state('')
   let password = $state('')
   let confirm = $state('')
@@ -41,7 +43,9 @@
   }
 
   onMount(async () => {
-    needed = (await api.bootstrapStatus()).needed
+    const status = await api.bootstrapStatus()
+    needed = status.needed
+    open = status.open ?? false
   })
 
   function finish() {
@@ -90,12 +94,12 @@
       from it: no library here, and phones keep using the main DJINN. Next you'll enter the main DJINN's address and
       accept this node there with your password.
     </p>
-    {#if !token}
+    {#if !token && !open}
       <p class="error">This page needs the setup link from the server log.</p>
     {/if}
     {#if error}<p class="error">{error}</p>{/if}
     <div class="choices">
-      <button class="primary" disabled={busy || !token} onclick={becomeNode}>Make this a node</button>
+      <button class="primary" disabled={busy || (!token && !open)} onclick={becomeNode}>Make this a node</button>
       <button disabled={busy} onclick={() => (kind = 'main')}>Back</button>
     </div>
   </div>
@@ -103,7 +107,7 @@
   <form class="card" onsubmit={submit}>
     <h1>Welcome to DJINN</h1>
     <p class="muted">Create the admin account. You can add guests afterwards.</p>
-    {#if !token}
+    {#if !token && !open}
       <p class="error">This page needs the setup link from the server log.</p>
     {/if}
     <label>
@@ -119,7 +123,7 @@
       <input type="password" bind:value={confirm} autocomplete="new-password" required />
     </label>
     {#if error}<p class="error">{error}</p>{/if}
-    <button class="primary" disabled={busy || !token}>{busy ? 'Creating...' : 'Create admin'}</button>
+    <button class="primary" disabled={busy || (!token && !open)}>{busy ? 'Creating...' : 'Create admin'}</button>
     <button type="button" class="link" onclick={() => (kind = 'node')}>
       Already have a main DJINN? Set this computer up as a node instead
     </button>
