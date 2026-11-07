@@ -312,4 +312,7 @@ class GoApi(private val account: Account) {
     }
 
     suspend fun saveResume(save: ResumeSave) = write("PUT", "/api/go/resume", save)
+
+    suspend fun reportSong(id: Long, reason: String, note: String?) =
+        write("POST", "/api/tracks/$id/report", SongReport(reason, note))
 }

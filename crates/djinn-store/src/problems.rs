@@ -26,6 +26,8 @@ pub enum ProblemKind {
     Tags,
     /// Added, but it failed when played or checked.
     WontPlay,
+    /// Listeners said it needs fixing.
+    Reported,
     NoArtist,
     NoAlbum,
     AlbumNoCover,
@@ -34,13 +36,14 @@ pub enum ProblemKind {
 }
 
 impl ProblemKind {
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::MissingFolder,
         Self::Unreadable,
         Self::BadName,
         Self::Unsupported,
         Self::Tags,
         Self::WontPlay,
+        Self::Reported,
         Self::NoArtist,
         Self::NoAlbum,
         Self::AlbumNoCover,
@@ -65,6 +68,7 @@ impl ProblemKind {
             Self::Unsupported => "unsupported",
             Self::Tags => "tags",
             Self::WontPlay => "wont_play",
+            Self::Reported => "reported",
             Self::NoArtist => "no_artist",
             Self::NoAlbum => "no_album",
             Self::AlbumNoCover => "album_no_cover",
@@ -137,6 +141,11 @@ macro_rules! wont_play_from {
         "FROM track_problems tp JOIN tracks t ON t.id = tp.track_id AND t.removed_at IS NULL"
     };
 }
+macro_rules! reported_from {
+    () => {
+        "FROM song_reports r JOIN tracks t ON t.id = r.track_id AND t.removed_at IS NULL"
+    };
+}
 macro_rules! no_artist_from {
     () => {
         "FROM tracks t WHERE t.removed_at IS NULL AND (t.artist IS NULL OR trim(t.artist) = '')"
@@ -190,7 +199,48 @@ macro_rules! album_columns {
     };
 }
 
+/// Why a listener says a song needs fixing.
+pub const REPORT_REASONS: [&str; 5] = [
+    "wrong_info",
+    "wrong_cover",
+    "sounds_bad",
+    "wrong_song",
+    "other",
+];
+
 impl Store {
+    /// Records a listener's report on a song, replacing their last one.
+    /// False if the song isn't in the library.
+    pub async fn report_song(
+        &self,
+        track_id: i64,
+        user_id: i64,
+        reason: &str,
+        note: Option<&str>,
+    ) -> Result<bool> {
+        let done = sqlx::query(
+            "INSERT OR REPLACE INTO song_reports (track_id, user_id, reason, note, created_at)
+             SELECT id, ?, ?, ?, ? FROM tracks WHERE id = ? AND removed_at IS NULL",
+        )
+        .bind(user_id)
+        .bind(reason)
+        .bind(note)
+        .bind(now_ms())
+        .bind(track_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(done.rows_affected() > 0)
+    }
+
+    /// Clears every report on a song (it's been fixed). How many there were.
+    pub async fn clear_song_reports(&self, track_id: i64) -> Result<u64> {
+        let done = sqlx::query("DELETE FROM song_reports WHERE track_id = ?")
+            .bind(track_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(done.rows_affected())
+    }
+
     /// Replaces what the last check found while walking the folders. A
     /// problem seen before keeps the time it was first noticed. Also drops
     /// unreadable-tag notes of songs no longer in the library.
@@ -249,6 +299,9 @@ impl Store {
             }
             K::Tags => sqlx::query_scalar(concat!("SELECT COUNT(*) ", tags_from!())),
             K::WontPlay => sqlx::query_scalar(concat!("SELECT COUNT(*) ", wont_play_from!())),
+            K::Reported => {
+                sqlx::query_scalar(concat!("SELECT COUNT(DISTINCT t.id) ", reported_from!()))
+            }
             K::NoArtist => sqlx::query_scalar(concat!("SELECT COUNT(*) ", no_artist_from!())),
             K::NoAlbum => sqlx::query_scalar(concat!("SELECT COUNT(*) ", no_album_from!())),
             K::AlbumNoCover => sqlx::query_scalar(concat!(
@@ -295,6 +348,16 @@ impl Store {
                 song_columns!("tp.error", "tp.noticed_at"),
                 wont_play_from!(),
                 " ORDER BY t.path LIMIT ? OFFSET ?"
+            )),
+            // Each report as reason, unit separator, note; record separators
+            // between reports.
+            K::Reported => sqlx::query_as(concat!(
+                "SELECT t.path,
+                        group_concat(r.reason || char(31) || coalesce(r.note, ''), char(30)) AS detail,
+                        t.id AS track_id, t.album_id, t.title, t.artist, t.album,
+                        max(r.created_at) AS noticed_at ",
+                reported_from!(),
+                " GROUP BY t.id ORDER BY noticed_at DESC LIMIT ? OFFSET ?"
             )),
             K::NoArtist => sqlx::query_as(concat!(
                 song_columns!("''", "NULL"),
@@ -441,6 +504,48 @@ mod tests {
             .unwrap();
         assert_eq!(albums[0].album.as_deref(), Some("Bare"));
         assert_eq!(albums[0].path.as_deref(), Some("/m/bare/1.flac"));
+    }
+
+    #[tokio::test]
+    async fn reports_group_by_song_and_clear() {
+        let store = Store::open_in_memory().await.unwrap();
+        store.save_scanned(&[song("/m/r.mp3", "R")]).await.unwrap();
+        let id = store.library_track_ids().await.unwrap()[0];
+        let ann = store
+            .create_user("ann", "h", crate::Role::User)
+            .await
+            .unwrap();
+        let bo = store
+            .create_user("bo", "h", crate::Role::Guest)
+            .await
+            .unwrap();
+        assert!(store
+            .report_song(id, ann.id, "wrong_cover", None)
+            .await
+            .unwrap());
+        assert!(store
+            .report_song(id, bo.id, "sounds_bad", Some("skips"))
+            .await
+            .unwrap());
+        // Reporting again replaces your report.
+        assert!(store
+            .report_song(id, ann.id, "wrong_info", None)
+            .await
+            .unwrap());
+        assert!(!store
+            .report_song(9999, ann.id, "other", None)
+            .await
+            .unwrap());
+
+        let items = store.problems(ProblemKind::Reported, 0, 10).await.unwrap();
+        assert_eq!(items.len(), 1);
+        let mut reports: Vec<&str> = items[0].detail.split('\u{1e}').collect();
+        reports.sort_unstable();
+        assert_eq!(reports, ["sounds_bad\u{1f}skips", "wrong_info\u{1f}"]);
+
+        assert_eq!(store.clear_song_reports(id).await.unwrap(), 2);
+        let counts = store.problem_counts().await.unwrap();
+        assert_eq!(count(&counts, ProblemKind::Reported), 0);
     }
 
     #[test]

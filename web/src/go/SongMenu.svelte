@@ -1,6 +1,7 @@
 <script lang="ts">
   // Everything you can do with one song in DJINN GO.
   import { api } from '../lib/api'
+  import ReportSong from '../lib/ReportSong.svelte'
   import Sheet from '../lib/Sheet.svelte'
   import { app, toast } from '../lib/state.svelte'
   import { addToEnd, likes, playNext, startRadio, toggleLike } from './player.svelte'
@@ -8,6 +9,7 @@
 
   const track = $derived(ui.menu)
   const close = () => (ui.menu = null)
+  let reporting = $state<{ id: number; title: string } | null>(null)
 
   async function sendToParty() {
     if (!track) return
@@ -58,8 +60,12 @@
       {#if song.artist_id}<a class="button" href="#/artist/{song.artist_id}" onclick={close}>Go to artist</a>{/if}
       <button onclick={sendToParty}>Send to the party</button>
       {#if app.me?.permissions?.downloads}<button onclick={download}>Download</button>{/if}
+      <button onclick={() => act(() => (reporting = { id: song.id, title: song.title }))}>Report a problem</button>
     </div>
   </Sheet>
+{/if}
+{#if reporting}
+  <ReportSong song={reporting} onclose={() => (reporting = null)} />
 {/if}
 
 <style>

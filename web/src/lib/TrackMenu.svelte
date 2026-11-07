@@ -3,6 +3,7 @@
   import AddToPlaylist from './AddToPlaylist.svelte'
   import { api } from './api'
   import GenreChips from './GenreChips.svelte'
+  import ReportSong from './ReportSong.svelte'
   import Icon from './Icon.svelte'
   import Sheet from './Sheet.svelte'
   import TagEditor from './TagEditor.svelte'
@@ -12,6 +13,7 @@
   let { track }: { track: Track } = $props()
   let menu = $state(false)
   let playlist = $state(false)
+  let reporting = $state(false)
   let tags = $state<TrackTags | null>(null)
   let editing = $state<TrackEdit | null>(null)
   // The "Sounds like" genre just taken off, for Undo while the menu is open.
@@ -121,7 +123,17 @@
       <button class="item" onclick={radio}><Icon name="radio" /> Start radio from this song</button>
       <button class="item" onclick={editTags}><Icon name="edit" /> Edit tags</button>
     {/if}
+    <button
+      class="item"
+      onclick={() => {
+        menu = false
+        reporting = true
+      }}><Icon name="warning" /> Report a problem</button
+    >
   </Sheet>
+{/if}
+{#if reporting}
+  <ReportSong song={track} onclose={() => (reporting = false)} />
 {/if}
 {#if editing}
   {@const t = editing.track}

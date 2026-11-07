@@ -4,13 +4,14 @@
 
 use axum::extract::{Path as RoutePath, Query, State};
 use axum::http::header;
+use axum::http::StatusCode;
 use axum::response::IntoResponse;
-use axum::routing::{get, put};
+use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
-use djinn_store::{ProblemItem, ProblemKind, Store};
+use djinn_store::{ProblemItem, ProblemKind, Store, REPORT_REASONS};
 use serde::{Deserialize, Serialize};
 
-use crate::auth::AdminUser;
+use crate::auth::{AdminUser, CurrentUser};
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 
@@ -18,6 +19,8 @@ use crate::state::AppState;
 pub const HIDDEN_KEY: &str = "problems_hidden";
 const PAGE: i64 = 100;
 const MAX_PAGE: i64 = 500;
+/// Longest note on a report, in characters.
+const MAX_NOTE: usize = 300;
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -25,6 +28,51 @@ pub fn router() -> Router<AppState> {
         .route("/library/problems.csv", get(csv))
         .route("/library/problems/hidden", put(set_hidden))
         .route("/library/problems/{kind}", get(list))
+        .route("/library/reports/{track_id}", delete(clear_reports))
+        .route("/tracks/{id}/report", post(report))
+}
+
+#[derive(Deserialize)]
+struct Report {
+    reason: String,
+    #[serde(default)]
+    note: Option<String>,
+}
+
+/// Anyone signed in (guests too) says a song needs fixing.
+async fn report(
+    CurrentUser(user): CurrentUser,
+    State(state): State<AppState>,
+    RoutePath(id): RoutePath<i64>,
+    Json(body): Json<Report>,
+) -> ApiResult<StatusCode> {
+    if !REPORT_REASONS.contains(&body.reason.as_str()) {
+        return Err(ApiError::bad_request("unknown reason"));
+    }
+    let note: Option<String> = body
+        .note
+        .as_deref()
+        .map(str::trim)
+        .filter(|n| !n.is_empty())
+        .map(|n| n.chars().take(MAX_NOTE).collect());
+    if !state
+        .store
+        .report_song(id, user.id, &body.reason, note.as_deref())
+        .await?
+    {
+        return Err(ApiError::not_found());
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// The song's been fixed: its reports go.
+async fn clear_reports(
+    _: AdminUser,
+    State(state): State<AppState>,
+    RoutePath(track_id): RoutePath<i64>,
+) -> ApiResult<StatusCode> {
+    state.store.clear_song_reports(track_id).await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(Serialize)]
@@ -238,5 +286,62 @@ mod tests {
         let (status, body) = get_body(&state, "/api/library/problems.csv", &admin).await;
         assert_eq!(status, StatusCode::OK);
         assert!(body.contains("unsupported,/m/a.wma,wma"));
+    }
+
+    #[tokio::test]
+    async fn listeners_report_songs_and_admins_clear_them() {
+        let state = AppState::for_tests().await;
+        state
+            .store
+            .save_scanned(&[djinn_store::ScannedTrack {
+                path: "/m/s.mp3".into(),
+                title: "S".into(),
+                ..Default::default()
+            }])
+            .await
+            .unwrap();
+        let id = state.store.library_track_ids().await.unwrap()[0];
+        let admin = session(&state, "ana", Role::Admin).await;
+        let listener = session(&state, "lu", Role::User).await;
+        let path = format!("/api/tracks/{id}/report");
+
+        let (status, _) = call(
+            &state,
+            Method::POST,
+            &path,
+            Some(r#"{"reason":"nonsense"}"#),
+            Some(&listener),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        let (status, _) = call(
+            &state,
+            Method::POST,
+            &path,
+            Some(r#"{"reason":"wrong_cover","note":"  it's the single  "}"#),
+            Some(&listener),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        let (status, _) = call(
+            &state,
+            Method::POST,
+            "/api/tracks/999/report",
+            Some(r#"{"reason":"other"}"#),
+            Some(&listener),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+
+        let (_, body) = get_body(&state, "/api/library/problems/reported", &admin).await;
+        assert!(body.contains("wrong_cover\\u001fit's the single"), "{body}");
+
+        let clear = format!("/api/library/reports/{id}");
+        let (status, _) = call(&state, Method::DELETE, &clear, None, Some(&listener)).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let (status, _) = call(&state, Method::DELETE, &clear, None, Some(&admin)).await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        let (_, body) = get_body(&state, "/api/library/problems/reported", &admin).await;
+        assert_eq!(body, "[]");
     }
 }

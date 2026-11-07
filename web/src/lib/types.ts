@@ -757,6 +757,7 @@ export type ProblemKind =
   | 'unsupported'
   | 'tags'
   | 'wont_play'
+  | 'reported'
   | 'no_artist'
   | 'no_album'
   | 'album_no_cover'

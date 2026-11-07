@@ -320,6 +320,19 @@ data class PlayReport(
     val at: Long? = null,
 )
 
+/** A listener saying a song needs fixing; `reason` is one of [REPORT_REASONS]. */
+@Serializable
+data class SongReport(val reason: String, val note: String? = null)
+
+/** Why a song needs fixing, as the server names them, with what to show. */
+val REPORT_REASONS = listOf(
+    "wrong_info" to "The title, artist or album is wrong",
+    "wrong_cover" to "The cover is wrong",
+    "sounds_bad" to "It sounds bad, skips or cuts off",
+    "wrong_song" to "It plays a different song",
+    "other" to "Something else",
+)
+
 @Serializable
 data class ResumeSave(
     val queue: List<Long>,

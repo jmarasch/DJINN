@@ -33,12 +33,14 @@ import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.PhoneInTalk
 import androidx.compose.material.icons.filled.Alarm
 import androidx.compose.material.icons.filled.Celebration
+import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -90,6 +92,7 @@ import com.newterrastudios.djinn.go.data.ApiException
 import com.newterrastudios.djinn.go.data.GoPlaylist
 import com.newterrastudios.djinn.go.data.KIND_DOWNLOAD
 import com.newterrastudios.djinn.go.data.OfflineSong
+import com.newterrastudios.djinn.go.data.REPORT_REASONS
 import com.newterrastudios.djinn.go.data.SoundKind
 import com.newterrastudios.djinn.go.data.Track
 import com.newterrastudios.djinn.go.work.DownloadWorker
@@ -385,6 +388,7 @@ fun SongMenu(track: Track, nav: Nav) {
     val context = LocalContext.current
     var kept by remember { mutableStateOf<OfflineSong?>(null) }
     var choosingPlaylist by remember { mutableStateOf<List<GoPlaylist>?>(null) }
+    var reporting by remember { mutableStateOf(false) }
     LaunchedEffect(track.id) { kept = nav.offline.local(track.id) }
     fun then(action: () -> Unit) {
         nav.menuFor = null
@@ -466,6 +470,26 @@ fun SongMenu(track: Track, nav: Nav) {
         track.artistId?.let { artist ->
             MenuRow("Go to artist", Icons.Default.Person) { then { nav.goTo(Screen.Artist(artist)) } }
         }
+        MenuRow("Report a problem", Icons.Default.Flag) { reporting = true }
+    }
+    if (reporting) {
+        ReportDialog(
+            title = track.title,
+            onDismiss = { reporting = false },
+            onSend = { reason, note ->
+                reporting = false
+                then {
+                    scope.launch {
+                        nav.message = try {
+                            nav.api.reportSong(track.id, reason, note)
+                            "Thanks, the admin will take a look."
+                        } catch (e: IOException) {
+                            if (e is ApiException) e.message else "Couldn't reach the server."
+                        }
+                    }
+                }
+            },
+        )
     }
     choosingPlaylist?.let { lists ->
         AlertDialog(
@@ -504,6 +528,45 @@ fun SongMenu(track: Track, nav: Nav) {
             confirmButton = { TextButton(onClick = { choosingPlaylist = null }) { Text("Cancel") } },
         )
     }
+}
+
+/** Asks what's wrong with a song: a reason and an optional note. */
+@Composable
+private fun ReportDialog(title: String, onDismiss: () -> Unit, onSend: (String, String?) -> Unit) {
+    var reason by remember { mutableStateOf<String?>(null) }
+    var note by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Report a problem") },
+        text = {
+            Column {
+                Text("What's wrong with \"$title\"?", style = MaterialTheme.typography.bodyMedium)
+                REPORT_REASONS.forEach { (id, label) ->
+                    Row(
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .selectable(selected = id == reason, onClick = { reason = id }),
+                    ) {
+                        androidx.compose.material3.RadioButton(selected = id == reason, onClick = { reason = id })
+                        Text(label)
+                    }
+                }
+                androidx.compose.material3.OutlinedTextField(
+                    value = note,
+                    onValueChange = { note = it.take(300) },
+                    label = { Text("Anything else (optional)") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = reason != null, onClick = {
+                reason?.let { onSend(it, note.trim().ifEmpty { null }) }
+            }) { Text("Send") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
 
 @Composable

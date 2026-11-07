@@ -5,6 +5,7 @@
   // about can be hidden.
   import { api } from './api'
   import { app, toast } from './state.svelte'
+  import { parseReports, reportShort } from './reports'
   import type { ProblemCount, ProblemItem, ProblemKind, ProblemSummary } from './types'
 
   const about: Record<ProblemKind, { label: string; hint: string }> = {
@@ -31,6 +32,10 @@
     wont_play: {
       label: "Songs that won't play",
       hint: 'These failed when played or checked, so the file is probably damaged or incomplete. Replace it with a good copy. DJINN tries again when the file changes.',
+    },
+    reported: {
+      label: 'Songs listeners reported',
+      hint: 'Listeners said these need fixing. Fix the song (Edit tags, a better copy, or a cover in its folder), then select Done to clear the reports.',
     },
     no_artist: {
       label: 'Songs with no artist',
@@ -112,6 +117,17 @@
     }
   }
 
+  async function done(item: ProblemItem) {
+    if (item.track_id === null) return
+    try {
+      await api.clearSongReports(item.track_id)
+      items = items.filter((i) => i !== item)
+      await load()
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not clear the reports', true)
+    }
+  }
+
   async function setHidden(kind: ProblemKind, hide: boolean) {
     if (!summary) return
     const kinds = summary.kinds.filter((k) => (k.kind === kind ? hide : k.hidden)).map((k) => k.kind)
@@ -152,7 +168,7 @@
             <li>
               {#if k.per_album}
                 <a href="#/album/{item.album_id}">{item.album}</a>
-                <span class="muted">{item.artist}</span>
+                <span class="muted"> · {item.artist}</span>
                 {#if item.path}<div class="path small mono">{folder(item.path)}</div>{/if}
               {:else if item.track_id !== null}
                 {#if item.album_id !== null}
@@ -160,9 +176,17 @@
                 {:else}
                   <span>{item.title}</span>
                 {/if}
-                {#if item.artist}<span class="muted">{item.artist}</span>{/if}
+                {#if item.artist}<span class="muted"> · {item.artist}</span>{/if}
                 <div class="path small mono">{item.path}</div>
-                {#if item.detail}<div class="small muted">{item.detail}</div>{/if}
+                {#if k.kind === 'reported'}
+                  {#each parseReports(item.detail) as report, r (r)}
+                    <div class="small">
+                      {reportShort[report.reason] ?? report.reason}{#if report.note}: <span class="muted">{report.note}</span
+                        >{/if}
+                    </div>
+                  {/each}
+                  <button class="small-button done" onclick={() => done(item)}>Done</button>
+                {:else if item.detail}<div class="small muted">{item.detail}</div>{/if}
               {:else}
                 {#if item.path}
                   <div>{name(item.path)}</div>
@@ -284,8 +308,10 @@
     overflow-wrap: anywhere;
   }
 
-  .items li > span + span::before {
-    content: ' · ';
+  /* List rows otherwise get plain buttons. */
+  .items .done {
+    margin-top: 6px;
+    background: var(--surface-2);
   }
 
   .path {
