@@ -13,7 +13,7 @@
 
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
@@ -122,6 +122,11 @@ pub struct Status {
     pub speaker_ms: Option<f64>,
     /// Speaker settings, as Main keeps them.
     pub audio: Option<crate::nodes::AudioSettings>,
+    /// Main can't be reached; playing cached songs (or quiet, if there are
+    /// none or the setting says stop).
+    pub offline: bool,
+    /// Songs in this node's cache.
+    pub cached: usize,
 }
 
 /// The node's running parts.
@@ -136,6 +141,11 @@ pub struct Node {
     clock_ready: Arc<AtomicBool>,
     /// Speaker settings from Main, for the player to follow.
     audio: Arc<tokio::sync::watch::Sender<Option<crate::nodes::AudioSettings>>>,
+    /// What's coming up in Main's room, to cache.
+    upcoming: Arc<Mutex<Vec<crate::nodes::Upcoming>>>,
+    cache: Arc<crate::node_offline::Cache>,
+    /// Main's last volume (f32 bits), for playing offline at the same level.
+    volume: Arc<AtomicU32>,
 }
 
 impl Node {
@@ -156,7 +166,7 @@ impl Node {
             .map(|f| crate::tls::security_code(&f));
         Ok(Node {
             store,
-            cache_dir: Arc::new(cache_dir),
+            cache_dir: Arc::new(cache_dir.clone()),
             status: Arc::new(RwLock::new(Status {
                 pairing,
                 name,
@@ -171,11 +181,19 @@ impl Node {
                 audio_problem: None,
                 speaker_ms: None,
                 audio: None,
+                offline: false,
+                cached: 0,
             })),
             wake: Arc::new(Notify::new()),
             offset: Arc::new(AtomicI64::new(0)),
             clock_ready: Arc::new(AtomicBool::new(false)),
             audio: Arc::new(tokio::sync::watch::Sender::new(None)),
+            upcoming: Arc::default(),
+            cache: Arc::new(crate::node_offline::Cache::new(
+                cache_dir.clone(),
+                crate::node_offline::CACHE_LIMIT_BYTES,
+            )),
+            volume: Arc::new(AtomicU32::new(1.0f32.to_bits())),
         })
     }
 
@@ -424,6 +442,13 @@ impl Node {
                 s.room_id = Some(room);
             }
         });
+        if let Ok(upcoming) =
+            serde_json::from_value::<Vec<crate::nodes::Upcoming>>(answer["upcoming"].clone())
+        {
+            if let Ok(mut list) = self.upcoming.lock() {
+                *list = upcoming;
+            }
+        }
         if let Ok(audio) =
             serde_json::from_value::<crate::nodes::AudioSettings>(answer["audio"].clone())
         {
@@ -436,6 +461,9 @@ impl Node {
     }
 }
 
+/// How long Main's music may be gone before playing from the cache (a
+/// shorter blip just waits).
+const OFFLINE_AFTER: Duration = Duration::from_secs(6);
 /// Clock samples kept: the quickest round trip among them gives the offset.
 const CLOCK_SAMPLES: usize = 10;
 const CLOCK_EVERY: Duration = Duration::from_secs(1);
@@ -517,26 +545,159 @@ impl Node {
     /// Plays Main's music while joined, reconnecting when the feed drops.
     async fn run_audio(self) {
         let mut player: Option<(djinn_engine::NodePlayer, u32, Option<String>)> = None;
+        let mut offline: Option<crate::node_offline::OfflinePlayer> = None;
+        let mut lost_since: Option<std::time::Instant> = None;
         loop {
             let Some((main, pin)) = self.joined_main().await else {
                 player = None;
-                self.update(|s| s.playing = false);
+                offline = None;
+                lost_since = None;
+                self.update(|s| {
+                    s.playing = false;
+                    s.offline = false;
+                });
                 tokio::time::sleep(Duration::from_secs(2)).await;
                 continue;
             };
+            if offline.is_some() || self.status().offline {
+                // Back to Main's music as soon as it answers.
+                if !self.main_answers(&main, &pin).await {
+                    tokio::time::sleep(Duration::from_secs(3)).await;
+                    continue;
+                }
+                offline = None;
+                lost_since = None;
+                tracing::info!("Main is back; following it again");
+                self.update(|s| s.offline = false);
+            }
             if !self.clock_ready.load(Ordering::Acquire) {
                 tokio::time::sleep(Duration::from_millis(200)).await;
                 continue;
             }
-            if let Err(e) = self.listen(&main, &pin, &mut player).await {
-                tracing::debug!(error = %format!("{e:#}"), "node audio stopped");
-                self.update(|s| {
-                    s.playing = false;
-                    s.audio_problem = Some(format!("{e:#}"));
-                });
+            match self.listen(&main, &pin, &mut player).await {
+                Ok(()) => lost_since = None,
+                Err(e) => {
+                    tracing::debug!(error = %format!("{e:#}"), "node audio stopped");
+                    lost_since.get_or_insert_with(std::time::Instant::now);
+                    self.update(|s| {
+                        s.playing = false;
+                        s.audio_problem = Some(format!("{e:#}"));
+                    });
+                }
+            }
+            // Gone a while (not just a blip): play from the cache.
+            if lost_since.is_some_and(|since| since.elapsed() >= OFFLINE_AFTER) {
+                player = None;
+                offline = self.go_offline();
+                self.update(|s| s.offline = true);
+                tracing::warn!(playing = offline.is_some(), "Main can't be reached");
+                continue;
             }
             tokio::time::sleep(Duration::from_secs(2)).await;
         }
+    }
+
+    /// True if Main answers right now.
+    async fn main_answers(&self, main: &str, pin: &str) -> bool {
+        let Ok(client) = pinned_client_with(
+            Some(pin.to_owned()),
+            Arc::new(Mutex::new(None)),
+            Some(Duration::from_secs(3)),
+        ) else {
+            return false;
+        };
+        client
+            .get(format!("{main}/api/nodes/clock"))
+            .send()
+            .await
+            .is_ok_and(|r| r.status().is_success())
+    }
+
+    /// Starts playing what was coming up from the cache, then stops or
+    /// keeps going as Main's setting for this node says. None if there's
+    /// nothing to play.
+    fn go_offline(&self) -> Option<crate::node_offline::OfflinePlayer> {
+        let upcoming = self.upcoming.lock().map(|u| u.clone()).unwrap_or_default();
+        let first = crate::node_offline::coming_up(&self.cache, &upcoming);
+        let audio = self.status().audio;
+        let keep_going = audio.as_ref().is_some_and(|a| a.offline == "cached");
+        if first.is_empty() && !keep_going {
+            return None;
+        }
+        let volume = f32::from_bits(self.volume.load(Ordering::Acquire));
+        match crate::node_offline::OfflinePlayer::start(
+            48_000,
+            audio.as_ref(),
+            volume,
+            first,
+            keep_going,
+            self.cache.files(),
+        ) {
+            Ok(player) => Some(player),
+            Err(e) => {
+                self.update(|s| s.audio_problem = Some(format!("can't play cached songs: {e:#}")));
+                None
+            }
+        }
+    }
+
+    /// Keeps copies of what's coming up in Main's room, while joined.
+    async fn run_cache(self) {
+        loop {
+            if let Some((main, pin)) = self.joined_main().await {
+                let upcoming = self.upcoming.lock().map(|u| u.clone()).unwrap_or_default();
+                for song in &upcoming {
+                    if !self.cache.has(song) {
+                        if let Err(e) = self.fetch(&main, &pin, song).await {
+                            tracing::debug!(error = %format!("{e:#}"), song = song.id, "couldn't cache a song");
+                            break;
+                        }
+                    }
+                    self.cache.touch(song);
+                }
+                let keep: Vec<PathBuf> = upcoming.iter().map(|s| self.cache.path(s)).collect();
+                let cache = Arc::clone(&self.cache);
+                let count = tokio::task::spawn_blocking(move || {
+                    cache.trim(&keep);
+                    cache.files().len()
+                })
+                .await
+                .unwrap_or(0);
+                self.update(|s| s.cached = count);
+            }
+            tokio::time::sleep(Duration::from_secs(10)).await;
+        }
+    }
+
+    /// Downloads one song into the cache.
+    async fn fetch(
+        &self,
+        main: &str,
+        pin: &str,
+        song: &crate::nodes::Upcoming,
+    ) -> anyhow::Result<()> {
+        use futures_util::StreamExt;
+        use tokio::io::AsyncWriteExt;
+        let (id, secret) = self.identity().await?;
+        let client = pinned_client_with(Some(pin.to_owned()), Arc::new(Mutex::new(None)), None)?;
+        let response = client
+            .get(format!("{main}/api/nodes/song/{}", song.id))
+            .header("authorization", format!("Node {id}:{secret}"))
+            .send()
+            .await?;
+        if !response.status().is_success() {
+            anyhow::bail!("Main answered {}", response.status());
+        }
+        let partial = self.cache.partial(song);
+        let mut file = tokio::fs::File::create(&partial).await?;
+        let mut body = response.bytes_stream();
+        while let Some(chunk) = body.next().await {
+            file.write_all(&chunk?).await?;
+        }
+        file.flush().await?;
+        drop(file);
+        tokio::fs::rename(&partial, self.cache.path(song)).await?;
+        Ok(())
     }
 
     /// One connection to Main's feed, until it ends.
@@ -610,6 +771,9 @@ impl Node {
             }
             if let Some((p, _, _)) = player.as_ref() {
                 for piece in pieces {
+                    if let djinn_engine::Mark::Volume(v) = piece.mark {
+                        self.volume.store(v.to_bits(), Ordering::Release);
+                    }
                     p.piece(piece)?;
                 }
                 let error = p.error_ms();
@@ -944,6 +1108,7 @@ pub async fn serve(
     tokio::spawn(node.clone().run());
     tokio::spawn(node.clone().run_clock());
     tokio::spawn(node.clone().run_audio());
+    tokio::spawn(node.clone().run_cache());
     let listener = tokio::net::TcpListener::bind(listen).await?;
     tracing::info!(%listen, "running as a node; its page is at /node");
     axum::serve(listener, router(node))

@@ -573,6 +573,17 @@ impl Store {
     }
 
     /// Playable tracks by id, in the order given (missing ones skipped).
+    /// The files of the songs with these ids that are still in the library.
+    pub async fn track_paths(&self, ids: &[i64]) -> Result<std::collections::HashMap<i64, String>> {
+        let rows: Vec<(i64, String)> = sqlx::query_as(
+            "SELECT id, path FROM tracks WHERE id IN (SELECT value FROM json_each(?)) AND removed_at IS NULL",
+        )
+        .bind(json_ids(ids))
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.into_iter().collect())
+    }
+
     pub async fn tracks_by_ids(&self, ids: &[i64]) -> Result<Vec<Track>> {
         let list = json_ids(ids);
         let found: Vec<Track> = sqlx::query_as(concat!(

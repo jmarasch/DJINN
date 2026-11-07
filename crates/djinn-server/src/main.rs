@@ -39,6 +39,7 @@ mod lyrics;
 mod network;
 mod node_audio;
 mod node_mode;
+mod node_offline;
 mod nodes;
 mod party_api;
 mod player_api;

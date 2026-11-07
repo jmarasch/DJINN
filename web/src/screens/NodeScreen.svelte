@@ -19,6 +19,8 @@
     sync_ms: number | null
     audio_problem: string | null
     speaker_ms: number | null
+    offline: boolean
+    cached: number
   }
 
   let status = $state<NodeStatus | null>(null)
@@ -138,7 +140,10 @@
         {#if status.problem}<p class="error">{status.problem}</p>{/if}
         {#if status.pairing === 'joined'}
           <p class="small">
-            {#if status.playing}
+            {#if status.offline}
+              The main DJINN can't be reached. Playing cached songs until it's back (or quiet, if this node is set to
+              stop).
+            {:else if status.playing}
               Playing Main's music in step.
             {:else if status.sync_ms == null}
               Matching clocks with Main...
@@ -162,6 +167,10 @@
           {#if status.main_code}
             <dt>Main's security code</dt>
             <dd class="code">{status.main_code}</dd>
+          {/if}
+          {#if status.pairing === 'joined'}
+            <dt>Cached songs</dt>
+            <dd>{status.cached}</dd>
           {/if}
           {#if status.pairing === 'joined' && status.sync_ms != null}
             <dt>Clock matched to</dt>

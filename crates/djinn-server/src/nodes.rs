@@ -38,6 +38,7 @@ pub fn router() -> Router<AppState> {
         .route("/nodes/me", get(me))
         .route("/nodes/me/audio", put(put_my_audio))
         .route("/nodes/me/devices", post(put_my_devices))
+        .route("/nodes/song/{id}", get(song))
         .route("/nodes/{id}/audio", put(put_audio))
         .route("/nodes/clock", get(crate::node_audio::clock))
         .route("/nodes/stream", get(crate::node_audio::stream))
@@ -276,6 +277,53 @@ async fn save_audio(state: &AppState, id: i64, audio: &AudioSettings) -> ApiResu
     Ok(())
 }
 
+/// A song coming up, for the node to cache.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Upcoming {
+    pub id: i64,
+    /// The file's extension, so the cached copy decodes the same.
+    pub ext: String,
+}
+
+/// Songs playing and coming up in Main's room, in order, at most this many.
+const UPCOMING: usize = 12;
+
+async fn upcoming(state: &AppState) -> ApiResult<Vec<Upcoming>> {
+    let now_playing = state.jukebox.lock().await.now_playing();
+    let queue = state.store.queue(djinn_store::MAIN_ROOM).await?;
+    let mut ids: Vec<i64> = Vec::new();
+    let mut push = |id: i64| {
+        if !ids.contains(&id) {
+            ids.push(id);
+        }
+    };
+    if let Some(entry) = &now_playing.current {
+        push(entry.track.id);
+    }
+    for item in &queue {
+        push(item.track.id);
+    }
+    if let Some(entry) = &now_playing.up_next {
+        push(entry.track.id);
+    }
+    for entry in &now_playing.later {
+        push(entry.track.id);
+    }
+    ids.truncate(UPCOMING);
+    let paths = state.store.track_paths(&ids).await?;
+    Ok(ids
+        .into_iter()
+        .filter_map(|id| {
+            let path = paths.get(&id)?;
+            let ext = std::path::Path::new(path)
+                .extension()?
+                .to_str()?
+                .to_ascii_lowercase();
+            Some(Upcoming { id, ext })
+        })
+        .collect())
+}
+
 #[derive(Serialize)]
 struct MeAnswer {
     status: String,
@@ -283,6 +331,8 @@ struct MeAnswer {
     room_id: i64,
     server_name: String,
     audio: AudioSettings,
+    /// Songs to cache, in play order (only once accepted).
+    upcoming: Vec<Upcoming>,
 }
 
 /// A node checking in: still waiting, accepted (and which room), or (401)
@@ -298,8 +348,14 @@ async fn me(
         .node_seen(node.id, address.as_deref(), None)
         .await?;
     let audio = AudioSettings::of(&node);
+    let upcoming = if node.status == "approved" {
+        upcoming(&state).await?
+    } else {
+        Vec::new()
+    };
     Ok(Json(MeAnswer {
         audio,
+        upcoming,
         status: node.status,
         name: node.name,
         room_id: node.room_id,
@@ -486,6 +542,26 @@ async fn put_my_devices(
         .set_node_devices(node.id, &serde_json::to_string(&devices)?)
         .await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// A song's file, for a joined node's cache.
+async fn song(
+    State(state): State<AppState>,
+    NodeAuth(node): NodeAuth,
+    Path(id): Path<i64>,
+    request: axum::extract::Request,
+) -> ApiResult<axum::response::Response> {
+    use tower::ServiceExt;
+    if node.status != "approved" {
+        return Err(ApiError::forbidden());
+    }
+    let paths = state.store.track_paths(&[id]).await?;
+    let path = paths.get(&id).ok_or_else(ApiError::not_found)?;
+    let response = tower_http::services::ServeFile::new(path)
+        .oneshot(request)
+        .await
+        .map_err(anyhow::Error::from)?;
+    Ok(axum::response::IntoResponse::into_response(response))
 }
 
 /// Declines a request or kicks a node.
