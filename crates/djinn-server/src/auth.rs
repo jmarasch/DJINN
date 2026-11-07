@@ -160,6 +160,7 @@ pub fn router() -> Router<AppState> {
             "/auth/bootstrap",
             get(bootstrap_status).post(bootstrap).layer(small()),
         )
+        .route("/auth/bootstrap/node", post(bootstrap_node).layer(small()))
         .route("/auth/mode", get(mode))
         .route("/auth/guest", post(join_as_guest).layer(small()))
         .route("/auth/signup", post(sign_up).layer(small()))
@@ -954,6 +955,43 @@ async fn bootstrap(
         AppendHeaders([(SET_COOKIE, cookie)]),
         Json(me_for(&state, user).await?),
     ))
+}
+
+#[derive(Deserialize)]
+struct BootstrapNode {
+    token: String,
+}
+
+/// On a fresh install, makes this box a node instead of a main DJINN, with
+/// the same one-time token; DJINN starts again as a node.
+async fn bootstrap_node(
+    State(state): State<AppState>,
+    Json(body): Json<BootstrapNode>,
+) -> ApiResult<StatusCode> {
+    let expected = state
+        .bootstrap_token
+        .lock()
+        .map_err(|_| anyhow::anyhow!("bootstrap lock poisoned"))?
+        .clone();
+    let token_ok = expected
+        .as_deref()
+        .is_some_and(|t| constant_time_eq(t.as_bytes(), body.token.as_bytes()));
+    if !token_ok || state.store.admin_exists().await? {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "setup link is invalid or already used",
+        ));
+    }
+    state
+        .store
+        .set_setting(crate::node_mode::ROLE, "node")
+        .await?;
+    if let Ok(mut token) = state.bootstrap_token.lock() {
+        *token = None;
+    }
+    tracing::info!("set up as a node; starting again");
+    state.update.restart(&state.shutdown_request);
+    Ok(StatusCode::ACCEPTED)
 }
 
 async fn list_users(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json<Vec<User>>> {

@@ -10,6 +10,35 @@
   let confirm = $state('')
   let error = $state('')
   let busy = $state(false)
+  /** Main (the full DJINN) or a node (plays a room for a main DJINN). */
+  let kind = $state<'main' | 'node'>('main')
+  let becomingNode = $state(false)
+
+  async function becomeNode() {
+    busy = true
+    error = ''
+    try {
+      await api.bootstrapNode(token)
+      becomingNode = true
+      // DJINN starts again as a node; its page appears once it's back.
+      const wait = async () => {
+        try {
+          const res = await fetch('/api/node/status')
+          if (res.ok) {
+            location.href = '/node'
+            return
+          }
+        } catch {
+          // Still starting.
+        }
+        setTimeout(wait, 1500)
+      }
+      setTimeout(wait, 2000)
+    } catch (err) {
+      error = err instanceof Error ? err.message : 'Setup failed'
+      busy = false
+    }
+  }
 
   onMount(async () => {
     needed = (await api.bootstrapStatus()).needed
@@ -45,6 +74,31 @@
     <p class="muted">An admin account exists. Sign in instead.</p>
     <a class="button primary" href="/" onclick={finish}>Go to sign in</a>
   </div>
+{:else if becomingNode}
+  <div class="card">
+    <h1>Starting as a node</h1>
+    <p class="muted">
+      <span class="spinner" aria-hidden="true"></span> DJINN is starting again as a node. This page moves on by itself.
+      If it doesn't within a minute, start DJINN again and open this address.
+    </p>
+  </div>
+{:else if needed && kind === 'node'}
+  <div class="card">
+    <h1>Set up as a node</h1>
+    <p class="muted">
+      A node plays one room's music on this computer's speakers, in step with your main DJINN, and takes everything
+      from it: no library here, and phones keep using the main DJINN. Next you'll enter the main DJINN's address and
+      accept this node there with your password.
+    </p>
+    {#if !token}
+      <p class="error">This page needs the setup link from the server log.</p>
+    {/if}
+    {#if error}<p class="error">{error}</p>{/if}
+    <div class="choices">
+      <button class="primary" disabled={busy || !token} onclick={becomeNode}>Make this a node</button>
+      <button disabled={busy} onclick={() => (kind = 'main')}>Back</button>
+    </div>
+  </div>
 {:else if needed}
   <form class="card" onsubmit={submit}>
     <h1>Welcome to DJINN</h1>
@@ -66,5 +120,21 @@
     </label>
     {#if error}<p class="error">{error}</p>{/if}
     <button class="primary" disabled={busy || !token}>{busy ? 'Creating...' : 'Create admin'}</button>
+    <button type="button" class="link" onclick={() => (kind = 'node')}>
+      Already have a main DJINN? Set this computer up as a node instead
+    </button>
   </form>
 {/if}
+
+<style>
+  .choices {
+    display: flex;
+    gap: 8px;
+  }
+
+  .link {
+    background: transparent;
+    color: var(--muted);
+    text-decoration: underline;
+  }
+</style>

@@ -233,6 +233,7 @@ export const api = {
   signUp: (username: string, password: string, invite?: string) =>
     post<User | { pending: true }>('/auth/signup', { username, password, invite }),
   checkInvite: (token: string) => get<{ role: string }>(`/auth/invite/${encodeURIComponent(token)}`),
+  bootstrapNode: (token: string) => post<void>('/auth/bootstrap/node', { token }),
   bootstrap: (token: string, username: string, password: string) =>
     post<User>('/auth/bootstrap', { token, username, password }),
 

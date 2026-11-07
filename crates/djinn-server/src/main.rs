@@ -37,6 +37,7 @@ mod likes_api;
 mod logs;
 mod lyrics;
 mod network;
+mod node_mode;
 mod nodes;
 mod party_api;
 mod player_api;
@@ -182,6 +183,10 @@ async fn run() -> anyhow::Result<()> {
     tracing::info!(path = %config.database.path.display(), "database ready");
     logs::apply(&store).await?;
     system_api::apply_ports(&store, &mut config).await?;
+    // A node plays a room for a main DJINN: no library, no party app.
+    if node_mode::is_node(&store).await? {
+        return node_mode::serve(store, &config.database.path, config.server.listen).await;
+    }
     tokio::spawn(async {
         let mut hourly = tokio::time::interval(std::time::Duration::from_secs(60 * 60));
         loop {
