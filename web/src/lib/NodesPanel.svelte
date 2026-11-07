@@ -6,6 +6,7 @@
   import { api } from './api'
   import { toast } from './state.svelte'
   import type { HouseNode, NodeList } from './types'
+  import NodeSpeakerSettings from './NodeSpeakerSettings.svelte'
 
   let list = $state<NodeList | null>(null)
   let failed = $state(false)
@@ -13,6 +14,8 @@
   let accepting = $state<HouseNode | null>(null)
   let password = $state('')
   let kicking = $state<HouseNode | null>(null)
+  /** The node whose speaker settings are open. */
+  let tuning = $state<number | null>(null)
 
   async function load() {
     try {
@@ -154,6 +157,9 @@
               : ''}{node.version ? ` · ${node.version}` : ''}
           </span>
         </div>
+        <button class:on={tuning === node.id} onclick={() => (tuning = tuning === node.id ? null : node.id)}>
+          Speaker
+        </button>
         {#if kicking?.id === node.id}
           <button class="danger" onclick={() => remove(node)}>Kick and wipe</button>
           <button onclick={() => (kicking = null)}>Cancel</button>
@@ -161,6 +167,13 @@
           <button onclick={() => (kicking = node)}>Kick</button>
         {/if}
       </div>
+      {#if tuning === node.id}
+        <NodeSpeakerSettings
+          audio={node.audio}
+          speakers={node.speakers}
+          save={(audio) => api.setNodeAudio(node.id, audio)}
+        />
+      {/if}
       {#if kicking?.id === node.id}
         <p class="small muted">
           {node.name} is shut out at once and wipes every cached song, now if it's connected or when it next starts.

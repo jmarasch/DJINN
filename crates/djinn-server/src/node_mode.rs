@@ -44,7 +44,8 @@ const NODE_STATE: &str = "node_state";
 /// Main's port when an address doesn't say.
 const MAIN_PORT: u16 = 8066;
 const CHECK_WAITING: Duration = Duration::from_secs(5);
-const CHECK_JOINED: Duration = Duration::from_secs(30);
+/// Joined nodes check in often, so a setting changed on Main arrives soon.
+const CHECK_JOINED: Duration = Duration::from_secs(5);
 
 /// True if this box is set up as a node.
 pub async fn is_node(store: &Store) -> anyhow::Result<bool> {
@@ -119,6 +120,8 @@ pub struct Status {
     /// How far this node's speaker runs from Main's, in ms, as measured
     /// (late is positive).
     pub speaker_ms: Option<f64>,
+    /// Speaker settings, as Main keeps them.
+    pub audio: Option<crate::nodes::AudioSettings>,
 }
 
 /// The node's running parts.
@@ -131,6 +134,8 @@ pub struct Node {
     /// Main's clock minus this one (µs), and whether that's known yet.
     offset: Arc<AtomicI64>,
     clock_ready: Arc<AtomicBool>,
+    /// Speaker settings from Main, for the player to follow.
+    audio: Arc<tokio::sync::watch::Sender<Option<crate::nodes::AudioSettings>>>,
 }
 
 impl Node {
@@ -165,10 +170,12 @@ impl Node {
                 sync_ms: None,
                 audio_problem: None,
                 speaker_ms: None,
+                audio: None,
             })),
             wake: Arc::new(Notify::new()),
             offset: Arc::new(AtomicI64::new(0)),
             clock_ready: Arc::new(AtomicBool::new(false)),
+            audio: Arc::new(tokio::sync::watch::Sender::new(None)),
         })
     }
 
@@ -417,6 +424,14 @@ impl Node {
                 s.room_id = Some(room);
             }
         });
+        if let Ok(audio) =
+            serde_json::from_value::<crate::nodes::AudioSettings>(answer["audio"].clone())
+        {
+            if self.status().audio.as_ref() != Some(&audio) {
+                self.update(|s| s.audio = Some(audio.clone()));
+                self.audio.send_replace(Some(audio));
+            }
+        }
         Ok(Some(if joined { CHECK_JOINED } else { CHECK_WAITING }))
     }
 }
@@ -501,7 +516,7 @@ impl Node {
 
     /// Plays Main's music while joined, reconnecting when the feed drops.
     async fn run_audio(self) {
-        let mut player: Option<(djinn_engine::NodePlayer, u32)> = None;
+        let mut player: Option<(djinn_engine::NodePlayer, u32, Option<String>)> = None;
         loop {
             let Some((main, pin)) = self.joined_main().await else {
                 player = None;
@@ -529,7 +544,7 @@ impl Node {
         &self,
         main: &str,
         pin: &str,
-        player: &mut Option<(djinn_engine::NodePlayer, u32)>,
+        player: &mut Option<(djinn_engine::NodePlayer, u32, Option<String>)>,
     ) -> anyhow::Result<()> {
         use futures_util::StreamExt;
         let (id, secret) = self.identity().await?;
@@ -548,14 +563,24 @@ impl Node {
             .get("x-djinn-rate")
             .and_then(|v| v.to_str().ok()?.parse().ok())
             .unwrap_or(48_000);
-        if player.as_ref().is_none_or(|(_, r)| *r != rate) {
+        let mut settings_rx = self.audio.subscribe();
+        let audio = settings_rx.borrow_and_update().clone();
+        let device = audio.as_ref().and_then(|a| a.device.clone());
+        if player
+            .as_ref()
+            .is_none_or(|(_, r, d)| *r != rate || *d != device)
+        {
+            *player = None;
             let offset = Arc::clone(&self.offset);
+            let settings = node_settings(audio.as_ref());
+            let wanted = device.clone();
             let started = tokio::task::spawn_blocking(move || {
-                djinn_engine::NodePlayer::start(None, rate, 0, 1.0, offset)
+                djinn_engine::NodePlayer::start(wanted, rate, settings, offset)
             })
             .await?;
+            self.report_speakers(main, pin).await;
             match started {
-                Ok(p) => *player = Some((p, rate)),
+                Ok(p) => *player = Some((p, rate, device)),
                 Err(e) => anyhow::bail!("can't open this computer's speakers: {e}"),
             }
         }
@@ -571,7 +596,19 @@ impl Node {
             buffer.extend_from_slice(&chunk);
             let pieces = crate::node_audio::decode(&mut buffer)
                 .ok_or_else(|| anyhow::anyhow!("Main sent something odd"))?;
-            if let Some((p, _)) = player.as_ref() {
+            if settings_rx.has_changed().unwrap_or(false) {
+                let audio = settings_rx.borrow_and_update().clone();
+                let device = audio.as_ref().and_then(|a| a.device.clone());
+                if player.as_ref().is_some_and(|(_, _, d)| *d != device) {
+                    // Another speaker: open it on the next connection.
+                    *player = None;
+                    break;
+                }
+                if let Some((p, _, _)) = player.as_ref() {
+                    p.set(node_settings(audio.as_ref()))?;
+                }
+            }
+            if let Some((p, _, _)) = player.as_ref() {
                 for piece in pieces {
                     p.piece(piece)?;
                 }
@@ -585,6 +622,75 @@ impl Node {
         }
         self.update(|s| s.playing = false);
         Ok(())
+    }
+}
+
+impl Node {
+    /// Tells Main which speakers this box has, so Admin can offer them.
+    async fn report_speakers(&self, main: &str, pin: &str) {
+        let Ok(devices) = tokio::task::spawn_blocking(djinn_engine::output_devices).await else {
+            return;
+        };
+        let devices: Vec<serde_json::Value> = devices
+            .unwrap_or_default()
+            .into_iter()
+            .map(|d| serde_json::json!({ "id": d.id, "name": d.name, "is_default": d.is_default }))
+            .collect();
+        let Ok((id, secret)) = self.identity().await else {
+            return;
+        };
+        let Ok(client) = pinned_client(Some(pin.to_owned()), Arc::new(Mutex::new(None))) else {
+            return;
+        };
+        let _ = client
+            .post(format!("{main}/api/nodes/me/devices"))
+            .header("authorization", format!("Node {id}:{secret}"))
+            .json(&serde_json::json!({ "devices": devices }))
+            .send()
+            .await;
+    }
+
+    /// Sends settings changed on this node's page to Main, which keeps them.
+    async fn save_audio(&self, audio: &crate::nodes::AudioSettings) -> Result<(), String> {
+        let (main, pin) = self
+            .joined_main()
+            .await
+            .ok_or("this node hasn't joined a main DJINN")?;
+        let (id, secret) = self.identity().await.map_err(|e| e.to_string())?;
+        let client =
+            pinned_client(Some(pin), Arc::new(Mutex::new(None))).map_err(|e| e.to_string())?;
+        let response = client
+            .put(format!("{main}/api/nodes/me/audio"))
+            .header("authorization", format!("Node {id}:{secret}"))
+            .json(audio)
+            .send()
+            .await
+            .map_err(|e| format!("can't reach Main: {}", plain_error(&e)))?;
+        if !response.status().is_success() {
+            let answer: serde_json::Value = response.json().await.unwrap_or_default();
+            return Err(answer["error"]
+                .as_str()
+                .unwrap_or("Main refused")
+                .to_owned());
+        }
+        self.update(|s| s.audio = Some(audio.clone()));
+        self.audio.send_replace(Some(audio.clone()));
+        Ok(())
+    }
+}
+
+/// The player's settings from Main's.
+fn node_settings(audio: Option<&crate::nodes::AudioSettings>) -> djinn_engine::NodeSettings {
+    match audio {
+        Some(a) => djinn_engine::NodeSettings {
+            delay_ms: a.delay_ms.clamp(0, 2000) as u32,
+            trim: a.trim.clamp(0.0, 1.0) as f32,
+            equalizer: a.equalizer.engine_config(),
+        },
+        None => djinn_engine::NodeSettings {
+            trim: 1.0,
+            ..djinn_engine::NodeSettings::default()
+        },
     }
 }
 
@@ -762,8 +868,41 @@ pub fn router(node: Node) -> Router {
         .route("/api/node/status", get(status))
         .route("/api/node/connect", post(connect))
         .route("/api/node/ask-again", post(ask_again))
+        .route("/api/node/audio", get(get_audio).put(put_audio))
         .fallback(crate::web::static_handler)
         .with_state(node)
+}
+
+#[derive(Serialize)]
+struct NodeAudioView {
+    audio: Option<crate::nodes::AudioSettings>,
+    speakers: Vec<serde_json::Value>,
+}
+
+/// This node's speaker settings and its speakers, for its page.
+async fn get_audio(State(node): State<Node>) -> Json<NodeAudioView> {
+    let speakers = tokio::task::spawn_blocking(djinn_engine::output_devices)
+        .await
+        .ok()
+        .and_then(Result::ok)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|d| serde_json::json!({ "id": d.id, "name": d.name, "is_default": d.is_default }))
+        .collect();
+    Json(NodeAudioView {
+        audio: node.status().audio,
+        speakers,
+    })
+}
+
+async fn put_audio(
+    State(node): State<Node>,
+    Json(body): Json<crate::nodes::AudioSettings>,
+) -> ApiResult<StatusCode> {
+    node.save_audio(&body)
+        .await
+        .map_err(|e| ApiError::new(StatusCode::BAD_REQUEST, e))?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn status(State(node): State<Node>) -> Json<Status> {

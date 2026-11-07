@@ -15,7 +15,9 @@ use axum::http::request::Parts;
 use axum::http::{header, StatusCode};
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
-use djinn_store::{JoinRequest, Joined, Node};
+use djinn_store::{JoinRequest, Joined, Node, NodeAudio};
+
+use crate::jukebox::EqualizerSettings;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -34,6 +36,9 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/nodes/join", post(join))
         .route("/nodes/me", get(me))
+        .route("/nodes/me/audio", put(put_my_audio))
+        .route("/nodes/me/devices", post(put_my_devices))
+        .route("/nodes/{id}/audio", put(put_audio))
         .route("/nodes/clock", get(crate::node_audio::clock))
         .route("/nodes/stream", get(crate::node_audio::stream))
         .route("/nodes", get(list))
@@ -212,12 +217,72 @@ impl FromRequestParts<AppState> for NodeAuth {
     }
 }
 
+/// A node's speaker settings as pages and nodes see them.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct AudioSettings {
+    /// Device id; None for the system default.
+    pub device: Option<String>,
+    pub delay_ms: i64,
+    /// Volume trim, 0 to 1.
+    pub trim: f64,
+    pub equalizer: EqualizerSettings,
+    /// "stop" or "cached".
+    pub offline: String,
+}
+
+impl AudioSettings {
+    fn of(node: &Node) -> AudioSettings {
+        AudioSettings {
+            device: node.device.clone(),
+            delay_ms: node.delay_ms,
+            trim: node.trim,
+            equalizer: node
+                .equalizer
+                .as_deref()
+                .and_then(|e| serde_json::from_str(e).ok())
+                .unwrap_or_default(),
+            offline: node.offline.clone(),
+        }
+    }
+}
+
+async fn save_audio(state: &AppState, id: i64, audio: &AudioSettings) -> ApiResult<()> {
+    if !audio.equalizer.valid()
+        || !(0..=2000).contains(&audio.delay_ms)
+        || !(0.0..=1.0).contains(&audio.trim)
+    {
+        return Err(ApiError::bad_request(
+            "those speaker settings are out of range",
+        ));
+    }
+    if !matches!(audio.offline.as_str(), "stop" | "cached") {
+        return Err(ApiError::bad_request("offline must be stop or cached"));
+    }
+    let equalizer = serde_json::to_string(&audio.equalizer)?;
+    let device = audio.device.as_deref().filter(|d| !d.is_empty());
+    state
+        .store
+        .set_node_audio(
+            id,
+            &NodeAudio {
+                device,
+                delay_ms: audio.delay_ms,
+                trim: audio.trim,
+                equalizer: Some(&equalizer),
+                offline: &audio.offline,
+            },
+        )
+        .await?;
+    Ok(())
+}
+
 #[derive(Serialize)]
 struct MeAnswer {
     status: String,
     name: String,
     room_id: i64,
     server_name: String,
+    audio: AudioSettings,
 }
 
 /// A node checking in: still waiting, accepted (and which room), or (401)
@@ -232,7 +297,9 @@ async fn me(
         .store
         .node_seen(node.id, address.as_deref(), None)
         .await?;
+    let audio = AudioSettings::of(&node);
     Ok(Json(MeAnswer {
+        audio,
         status: node.status,
         name: node.name,
         room_id: node.room_id,
@@ -246,6 +313,9 @@ struct ListedNode {
     node: Node,
     /// The code the node's own screen shows, to compare.
     code: String,
+    audio: AudioSettings,
+    /// The speakers the node reported.
+    speakers: Vec<serde_json::Value>,
 }
 
 #[derive(Serialize)]
@@ -264,6 +334,12 @@ async fn list(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json<Nod
         .into_iter()
         .map(|node| ListedNode {
             code: pairing_code(&node.node_id, &node.secret_hash),
+            audio: AudioSettings::of(&node),
+            speakers: node
+                .devices
+                .as_deref()
+                .and_then(|d| serde_json::from_str(d).ok())
+                .unwrap_or_default(),
             node,
         })
         .collect();
@@ -347,6 +423,68 @@ async fn update(
             return Err(ApiError::bad_request("there's no such room"));
         }
     }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn put_audio(
+    _: AdminUser,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Json(body): Json<AudioSettings>,
+) -> ApiResult<StatusCode> {
+    if state.store.node(id).await?.is_none() {
+        return Err(ApiError::not_found());
+    }
+    save_audio(&state, id, &body).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Settings changed on the node's own page.
+async fn put_my_audio(
+    State(state): State<AppState>,
+    NodeAuth(node): NodeAuth,
+    Json(body): Json<AudioSettings>,
+) -> ApiResult<StatusCode> {
+    if node.status != "approved" {
+        return Err(ApiError::forbidden());
+    }
+    save_audio(&state, node.id, &body).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize, Serialize)]
+struct Speaker {
+    id: String,
+    name: String,
+    #[serde(default)]
+    is_default: bool,
+}
+
+#[derive(Deserialize)]
+struct Speakers {
+    devices: Vec<Speaker>,
+}
+
+/// The node's speakers, so Admin can offer them.
+async fn put_my_devices(
+    State(state): State<AppState>,
+    NodeAuth(node): NodeAuth,
+    Json(body): Json<Speakers>,
+) -> ApiResult<StatusCode> {
+    let devices: Vec<Speaker> = body
+        .devices
+        .into_iter()
+        .take(32)
+        .map(|d| Speaker {
+            id: d.id.chars().take(300).collect(),
+            name: d.name.chars().take(120).collect(),
+            is_default: d.is_default,
+        })
+        .collect();
+    state
+        .store
+        .set_node_devices(node.id, &serde_json::to_string(&devices)?)
+        .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -547,6 +685,119 @@ mod tests {
         let (status, body) = send(&state, Method::GET, "/api/nodes/me", None, node, true).await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
         assert!(body.contains("unknown node"));
+    }
+
+    #[tokio::test]
+    async fn speaker_settings_go_both_ways_and_are_checked() {
+        let state = AppState::for_tests().await;
+        let admin = admin_with_password(&state).await;
+        let cookie = Some(("cookie", admin.as_str()));
+        state.store.set_setting(NODES_JOIN, "1").await.unwrap();
+        let (status, _) = send(
+            &state,
+            Method::POST,
+            "/api/nodes/join",
+            Some(JOIN),
+            None,
+            true,
+        )
+        .await;
+        assert_eq!(status, StatusCode::ACCEPTED);
+        let id = state
+            .store
+            .node_by_node_id("kitchen-0001")
+            .await
+            .unwrap()
+            .unwrap()
+            .id;
+        let signed = format!("Node kitchen-0001:{SECRET}");
+        let node = Some(("authorization", signed.as_str()));
+        let audio = |delay: i64, offline: &str| {
+            format!(
+                r#"{{"device":"hw:1","delay_ms":{delay},"trim":0.8,"offline":"{offline}","equalizer":{{"enabled":true,"bands_db":[1,0,0,0,0,0,0,0,0,0,0,0],"output_gain_db":0}}}}"#
+            )
+        };
+        // Not before it's accepted.
+        let (status, _) = send(
+            &state,
+            Method::PUT,
+            "/api/nodes/me/audio",
+            Some(&audio(10, "stop")),
+            node,
+            true,
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        state.store.approve_node(id, 1).await.unwrap();
+
+        let path = format!("/api/nodes/{id}/audio");
+        let (status, _) = send(
+            &state,
+            Method::PUT,
+            &path,
+            Some(&audio(150, "cached")),
+            cookie,
+            false,
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        let (_, me) = send(&state, Method::GET, "/api/nodes/me", None, node, true).await;
+        assert!(
+            me.contains(r#""delay_ms":150"#) && me.contains(r#""offline":"cached""#),
+            "{me}"
+        );
+        assert!(me.contains(r#""device":"hw:1""#), "{me}");
+
+        // The node's page changes them too.
+        let (status, _) = send(
+            &state,
+            Method::PUT,
+            "/api/nodes/me/audio",
+            Some(&audio(40, "stop")),
+            node,
+            true,
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        let (_, list) = send(&state, Method::GET, "/api/nodes", None, cookie, false).await;
+        assert!(list.contains(r#""delay_ms":40"#), "{list}");
+
+        // Out of range.
+        let (status, _) = send(
+            &state,
+            Method::PUT,
+            &path,
+            Some(&audio(5000, "stop")),
+            cookie,
+            false,
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        let (status, _) = send(
+            &state,
+            Method::PUT,
+            &path,
+            Some(&audio(10, "sometimes")),
+            cookie,
+            false,
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+
+        // Its speakers, reported for Admin.
+        let speakers = r#"{"devices":[{"id":"hw:1","name":"USB DAC","is_default":false}]}"#;
+        let (status, _) = send(
+            &state,
+            Method::POST,
+            "/api/nodes/me/devices",
+            Some(speakers),
+            node,
+            true,
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        let (_, list) = send(&state, Method::GET, "/api/nodes", None, cookie, false).await;
+        assert!(list.contains("USB DAC"), "{list}");
     }
 
     #[tokio::test]

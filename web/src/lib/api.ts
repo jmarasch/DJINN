@@ -1,5 +1,6 @@
 import type {
   About,
+  NodeAudio,
   NodeList,
   Lyrics,
   LyricsSettings,
@@ -250,6 +251,7 @@ export const api = {
   acceptNode: (id: number, password: string) => post<void>(`/nodes/${id}/accept`, { password }),
   renameNode: (id: number, name: string) => patch<void>(`/nodes/${id}`, { name }),
   removeNode: (id: number) => del<void>(`/nodes/${id}`),
+  setNodeAudio: (id: number, audio: NodeAudio) => put<void>(`/nodes/${id}/audio`, audio),
   artists: (sort: ArtistSort, offset: number) => get<Page<ArtistSummary>>(`/artists?sort=${sort}&offset=${offset}`),
   albums: (sort: AlbumSort, filter: AlbumFilter, offset: number) => get<Page<Album>>(`/albums?sort=${sort}&filter=${filter}&offset=${offset}`),
   /** Where each letter (or year) starts in a list, for the jump strip. */

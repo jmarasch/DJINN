@@ -1332,6 +1332,27 @@ export interface HouseNode {
   last_seen: number | null
   /** The code the node's own screen shows, to compare. */
   code: string
+  audio: NodeAudio
+  /** The speakers the node reported. */
+  speakers: NodeSpeaker[]
+}
+
+/** A node's speaker settings, kept on Main. */
+export interface NodeAudio {
+  /** Device id; null for the system default. */
+  device: string | null
+  delay_ms: number
+  /** Volume trim, 0 to 1. */
+  trim: number
+  equalizer: EqualizerSettings
+  /** What to do once Main is gone and what was loaded has played. */
+  offline: 'stop' | 'cached'
+}
+
+export interface NodeSpeaker {
+  id: string
+  name: string
+  is_default: boolean
 }
 
 export interface NodeList {

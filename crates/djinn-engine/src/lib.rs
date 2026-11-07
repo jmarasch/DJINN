@@ -42,7 +42,7 @@ pub use features::{
 };
 pub use fingerprint::fingerprint;
 pub use loudness::{measure_loudness, Loudness, REFERENCE_LUFS};
-pub use node_player::NodePlayer;
+pub use node_player::{NodePlayer, NodeSettings};
 pub use player::MAX_CROSSFADE_SECS;
 pub use tap::{stream_tap, StreamTap, TapReader};
 pub use timed::{timed_tap, Mark, Piece, TimedReader, TimedTap};

@@ -10,7 +10,7 @@ use crate::{now_ms, Result, Store};
 /// How many join requests may wait at once, so nobody can flood Admin.
 pub const MAX_PENDING_NODES: i64 = 5;
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, FromRow)]
+#[derive(Clone, Debug, PartialEq, Serialize, FromRow)]
 pub struct Node {
     pub id: i64,
     pub node_id: String,
@@ -26,6 +26,26 @@ pub struct Node {
     pub requested_at: i64,
     pub approved_at: Option<i64>,
     pub last_seen: Option<i64>,
+    /// Speaker device id; None for the system default.
+    pub device: Option<String>,
+    pub delay_ms: i64,
+    pub trim: f64,
+    /// Equalizer settings as JSON; None for off.
+    pub equalizer: Option<String>,
+    /// "stop" or "cached": what to do once Main is gone and what was
+    /// loaded has played.
+    pub offline: String,
+    /// The speakers the node last reported, as JSON.
+    pub devices: Option<String>,
+}
+
+/// A node's speaker settings.
+pub struct NodeAudio<'a> {
+    pub device: Option<&'a str>,
+    pub delay_ms: i64,
+    pub trim: f64,
+    pub equalizer: Option<&'a str>,
+    pub offline: &'a str,
 }
 
 /// A node asking to join.
@@ -55,7 +75,7 @@ impl Store {
     pub async fn nodes(&self) -> Result<Vec<Node>> {
         Ok(sqlx::query_as(
             "SELECT id, node_id, name, secret_hash, status, room_id, address, version, platform,
-                    requested_at, approved_at, last_seen
+                    requested_at, approved_at, last_seen, device, delay_ms, trim, equalizer, offline, devices
              FROM nodes ORDER BY status = 'approved', name, id",
         )
         .fetch_all(&self.pool)
@@ -65,7 +85,7 @@ impl Store {
     pub async fn node_by_node_id(&self, node_id: &str) -> Result<Option<Node>> {
         Ok(sqlx::query_as(
             "SELECT id, node_id, name, secret_hash, status, room_id, address, version, platform,
-                    requested_at, approved_at, last_seen
+                    requested_at, approved_at, last_seen, device, delay_ms, trim, equalizer, offline, devices
              FROM nodes WHERE node_id = ?",
         )
         .bind(node_id)
@@ -76,7 +96,7 @@ impl Store {
     pub async fn node(&self, id: i64) -> Result<Option<Node>> {
         Ok(sqlx::query_as(
             "SELECT id, node_id, name, secret_hash, status, room_id, address, version, platform,
-                    requested_at, approved_at, last_seen
+                    requested_at, approved_at, last_seen, device, delay_ms, trim, equalizer, offline, devices
              FROM nodes WHERE id = ?",
         )
         .bind(id)
@@ -206,6 +226,30 @@ impl Store {
         .bind(id)
         .execute(&self.pool)
         .await?;
+        Ok(())
+    }
+
+    pub async fn set_node_audio(&self, id: i64, audio: &NodeAudio<'_>) -> Result<bool> {
+        let result = sqlx::query(
+            "UPDATE nodes SET device = ?, delay_ms = ?, trim = ?, equalizer = ?, offline = ? WHERE id = ?",
+        )
+        .bind(audio.device)
+        .bind(audio.delay_ms.clamp(0, 2000))
+        .bind(audio.trim.clamp(0.0, 1.0))
+        .bind(audio.equalizer)
+        .bind(if audio.offline == "cached" { "cached" } else { "stop" })
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
+    pub async fn set_node_devices(&self, id: i64, devices: &str) -> Result<()> {
+        sqlx::query("UPDATE nodes SET devices = ? WHERE id = ?")
+            .bind(devices)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 

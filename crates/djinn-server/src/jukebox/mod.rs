@@ -81,7 +81,7 @@ const PLAN_AHEAD: usize = 4;
 
 pub type EngineSink = Box<dyn Fn(Command) + Send + Sync>;
 
-#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct EqualizerSettings {
     pub enabled: bool,
@@ -98,7 +98,7 @@ impl EqualizerSettings {
             && (MIN_OUTPUT_GAIN_DB..=MAX_OUTPUT_GAIN_DB).contains(&self.output_gain_db)
     }
 
-    fn engine_config(self) -> EqualizerConfig {
+    pub fn engine_config(self) -> EqualizerConfig {
         EqualizerConfig {
             enabled: self.enabled,
             bands_db: self.bands_db,

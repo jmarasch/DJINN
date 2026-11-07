@@ -4,6 +4,21 @@
   import { toast } from './state.svelte'
   import type { EqualizerSettings } from './types'
 
+  let {
+    load = () => api.equalizer(),
+    store = async (settings: EqualizerSettings) => {
+      await api.saveEqualizer(settings)
+    },
+    title = 'Equalizer',
+    note = 'Shape the party mix on every output, including casting and Tune In. Normal levels stay intact; peaks near clipping are softened.',
+  }: {
+    /** Where the settings come from and go (the party mix by default). */
+    load?: () => Promise<EqualizerSettings>
+    store?: (settings: EqualizerSettings) => Promise<void>
+    title?: string
+    note?: string
+  } = $props()
+
   const bands = ['32', '64', '125', '250', '500', '1k', '2k', '4k', '6k', '8k', '12k', '16k']
   const presets = [
     { id: 'flat', label: 'Flat', gains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
@@ -25,7 +40,7 @@
   )
 
   onMount(() => {
-    api.equalizer()
+    load()
       .then((found) => {
         settings = found
         loaded = true
@@ -45,7 +60,7 @@
       pending++
       saving = true
       inFlight = inFlight
-        .then(() => api.saveEqualizer(next))
+        .then(() => store(next))
         .catch((e) => {
           toast(e instanceof Error ? e.message : 'Could not save equalizer', true)
         })
@@ -73,10 +88,10 @@
 
 <section class="card">
   <div class="heading">
-    <h2>Equalizer</h2>
+    <h2>{title}</h2>
     {#if loaded}<button class="small-button" onclick={flat} disabled={selectedPreset === 'flat' && settings.output_gain_db === 0}>Reset flat</button>{/if}
   </div>
-  <p class="small muted">Shape the party mix on every output, including casting and Tune In. Normal levels stay intact; peaks near clipping are softened.</p>
+  <p class="small muted">{note}</p>
   {#if loaded}
     <label class="switch big">
       <input type="checkbox" bind:checked={settings.enabled} onchange={() => save()} />

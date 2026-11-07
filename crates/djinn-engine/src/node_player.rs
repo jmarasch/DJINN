@@ -18,6 +18,7 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use crate::drift::DriftControl;
+use crate::equalizer::{Equalizer, EqualizerConfig};
 use crate::error::EngineError;
 use crate::output::Output;
 use crate::timed::{Mark, Piece};
@@ -32,6 +33,16 @@ const SEAM_SECS: f64 = 0.005;
 const RESTART_GAP_SECS: f64 = 1.0;
 /// How often the player thread looks at the speaker.
 const TICK: Duration = Duration::from_millis(5);
+
+/// A node's speaker settings, changeable while it plays.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct NodeSettings {
+    /// Extra delay for this box's speakers (Bluetooth lag and such).
+    pub delay_ms: u32,
+    /// Volume trim, 0 to 1, on top of Main's volume.
+    pub trim: f32,
+    pub equalizer: EqualizerConfig,
+}
 
 /// What the schedule needs from a speaker (the real device, or a simulated
 /// one in tests).
@@ -105,6 +116,7 @@ pub(crate) struct Schedule {
     pub(crate) drift: DriftControl,
     last_measure: Option<i64>,
     volume: f32,
+    equalizer: Equalizer,
 }
 
 impl Schedule {
@@ -119,7 +131,27 @@ impl Schedule {
             drift: DriftControl::default(),
             last_measure: None,
             volume: 1.0,
+            equalizer: Equalizer::new(rate),
         }
+    }
+
+    /// New speaker settings: a delay change moves everything waiting (and
+    /// the drift control fixes the speaker), trim and EQ apply at once.
+    pub fn set(&mut self, settings: NodeSettings, speaker: &mut impl Speaker) {
+        let delay_us = i64::from(settings.delay_ms) * 1000;
+        let moved = delay_us - self.delay_us;
+        if moved != 0 {
+            self.delay_us = delay_us;
+            for chunk in &mut self.queue {
+                chunk.at += moved;
+            }
+            if let Some(due) = self.next_due.as_mut() {
+                *due += moved;
+            }
+        }
+        self.trim = settings.trim.clamp(0.0, 1.0);
+        speaker.set_gain(self.volume * self.trim);
+        self.equalizer.set(settings.equalizer);
     }
 
     fn frames_to_us(&self, frames: usize) -> i64 {
@@ -136,9 +168,13 @@ impl Schedule {
         match piece.mark {
             Mark::Audio { play_at_us, .. } => {
                 if piece.samples.len() >= 2 {
+                    let mut samples = piece.samples;
+                    if self.equalizer.active() {
+                        self.equalizer.process(&mut samples);
+                    }
                     self.queue.push_back(Chunk {
                         at: play_at_us - offset + self.delay_us,
-                        samples: piece.samples,
+                        samples,
                         pos: 0,
                     });
                 }
@@ -301,6 +337,7 @@ impl Schedule {
 
 enum Msg {
     Piece(Piece),
+    Settings(NodeSettings),
     Stop,
 }
 
@@ -320,8 +357,7 @@ impl NodePlayer {
     pub fn start(
         device: Option<String>,
         rate: u32,
-        delay_ms: u32,
-        trim: f32,
+        settings: NodeSettings,
         offset: Arc<AtomicI64>,
     ) -> Result<NodePlayer, EngineError> {
         let (tx, rx) = mpsc::channel();
@@ -343,7 +379,8 @@ impl NodePlayer {
                         return;
                     }
                 };
-                let mut schedule = Schedule::new(rate, delay_ms, trim);
+                let mut schedule = Schedule::new(rate, settings.delay_ms, settings.trim);
+                schedule.set(settings, &mut output);
                 loop {
                     loop {
                         match rx.try_recv() {
@@ -356,6 +393,7 @@ impl NodePlayer {
                                     &mut output,
                                 );
                             }
+                            Ok(Msg::Settings(settings)) => schedule.set(settings, &mut output),
                             Ok(Msg::Stop) | Err(mpsc::TryRecvError::Disconnected) => return,
                             Err(mpsc::TryRecvError::Empty) => break,
                         }
@@ -383,6 +421,13 @@ impl NodePlayer {
     /// How far off the speaker runs, in ms (late is positive), as measured.
     pub fn error_ms(&self) -> f64 {
         self.error_us.load(Ordering::Acquire) as f64 / 1000.0
+    }
+
+    /// Changes delay, trim or EQ while playing.
+    pub fn set(&self, settings: NodeSettings) -> Result<(), EngineError> {
+        self.tx
+            .send(Msg::Settings(settings))
+            .map_err(|_| EngineError::Stopped)
     }
 
     /// Hands over a piece of Main's stream.
@@ -628,6 +673,35 @@ mod tests {
             now += step;
         }
         assert!(worst < 2.0, "worst {worst} ms");
+    }
+
+    #[test]
+    fn a_new_delay_moves_what_is_waiting() {
+        let mut speaker = Simulated::new(1000, 0.0);
+        let mut schedule = Schedule::new(1000, 0, 1.0);
+        let audio = Piece {
+            mark: Mark::Audio {
+                frames: 10,
+                play_at_us: 1_000_000,
+            },
+            samples: numbered(0, 10),
+        };
+        schedule.push(audio, 0, 0, &mut speaker);
+        let settings = NodeSettings {
+            delay_ms: 120,
+            trim: 0.5,
+            ..NodeSettings::default()
+        };
+        schedule.set(settings, &mut speaker);
+        assert_eq!(schedule.queue[0].at, 1_120_000);
+        schedule.set(
+            NodeSettings {
+                delay_ms: 20,
+                ..settings
+            },
+            &mut speaker,
+        );
+        assert_eq!(schedule.queue[0].at, 1_020_000);
     }
 
     #[test]

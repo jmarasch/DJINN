@@ -3,6 +3,8 @@
   // enter Main's address; then compare the codes and accept it on Main.
   // Once joined this page only shows status; leaving is Main's Kick.
   import { onMount } from 'svelte'
+  import NodeSpeakerSettings from '../lib/NodeSpeakerSettings.svelte'
+  import type { NodeAudio, NodeSpeaker } from '../lib/types'
 
   interface NodeStatus {
     pairing: 'setup' | 'waiting' | 'joined' | 'declined' | 'kicked' | 'changed'
@@ -26,6 +28,24 @@
   let error = $state('')
   let busy = $state(false)
   let editing = $state(false)
+  let speakerOpen = $state(false)
+  let speakerView = $state<{ audio: NodeAudio | null; speakers: NodeSpeaker[] } | null>(null)
+
+  async function openSpeaker() {
+    speakerOpen = !speakerOpen
+    if (!speakerOpen) return
+    const res = await fetch('/api/node/audio')
+    speakerView = res.ok ? await res.json() : null
+  }
+
+  async function saveAudio(audio: NodeAudio) {
+    const res = await fetch('/api/node/audio', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(audio),
+    })
+    if (!res.ok) throw new Error((await res.json().catch(() => null))?.error ?? 'Could not save')
+  }
 
   async function load() {
     try {
@@ -167,6 +187,14 @@
           </p>
         {/if}
         {#if error}<p class="error">{error}</p>{/if}
+        {#if status.pairing === 'joined'}
+          <button onclick={openSpeaker}>{speakerOpen ? 'Hide speaker settings' : 'Speaker settings'}</button>
+          {#if speakerOpen && speakerView?.audio}
+            <NodeSpeakerSettings audio={speakerView.audio} speakers={speakerView.speakers} save={saveAudio} />
+          {:else if speakerOpen && speakerView}
+            <p class="small muted">Settings arrive from the main DJINN in a moment.</p>
+          {/if}
+        {/if}
         <div class="buttons">
           {#if status.pairing === 'waiting'}
             <button disabled={busy} onclick={() => ((editing = true), (address = status?.main ?? ''))}>
