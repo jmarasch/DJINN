@@ -1,6 +1,6 @@
 //! REST API mounted under `/api`.
 
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::http::{header, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::get;
@@ -82,17 +82,34 @@ struct Join {
 
 /// The address guests open. Public: the join page is shown on a screen
 /// for people who aren't signed in yet.
-async fn join(State(state): State<AppState>) -> Json<Join> {
+/// A join link can name the room the guest walks into.
+#[derive(serde::Deserialize)]
+struct JoinQuery {
+    room: Option<i64>,
+}
+
+fn join_url_for(state: &AppState, room: Option<i64>) -> String {
+    match room.filter(|r| *r != djinn_store::MAIN_ROOM) {
+        Some(room) => format!("{}/?room={room}", state.join_url.trim_end_matches('/')),
+        None => state.join_url.to_string(),
+    }
+}
+
+async fn join(State(state): State<AppState>, Query(query): Query<JoinQuery>) -> Json<Join> {
     // Answers with the last check; a reload shows a newer one.
     crate::network::refresh(&state);
     Json(Join {
-        url: state.join_url.to_string(),
+        url: join_url_for(&state, query.room),
         public_network: state.network.public(),
     })
 }
 
-async fn join_qr(State(state): State<AppState>) -> ApiResult<impl IntoResponse> {
-    let code = QrCode::new(state.join_url.as_bytes()).map_err(anyhow::Error::from)?;
+async fn join_qr(
+    State(state): State<AppState>,
+    Query(query): Query<JoinQuery>,
+) -> ApiResult<impl IntoResponse> {
+    let url = join_url_for(&state, query.room);
+    let code = QrCode::new(url.as_bytes()).map_err(anyhow::Error::from)?;
     let svg = code
         .render::<svg::Color>()
         .min_dimensions(320, 320)

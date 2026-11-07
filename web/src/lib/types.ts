@@ -503,6 +503,8 @@ export interface OutputConfig {
   enabled: boolean
   volume_trim: number
   delay_ms: number
+  /** The room its speakers play. */
+  room_id: number
 }
 
 export interface OutputList {
@@ -1360,4 +1362,19 @@ export interface NodeList {
   /** This server's security code, which a node shows when it first connects. */
   security_code: string | null
   nodes: HouseNode[]
+}
+
+/** An area with its own speakers; its own party unless linked to another. */
+export interface Room {
+  id: number
+  name: string
+  /** The room this one plays along with; null plays its own. */
+  linked_to: number | null
+  position: number
+}
+
+export interface RoomList {
+  rooms: Room[]
+  /** The room this person is in. */
+  mine: number
 }

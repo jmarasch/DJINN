@@ -6,6 +6,9 @@
   import { reloadIfUpdated } from '../lib/state.svelte'
   import type { Lyrics, NowPlaying, PlayerState, Track } from '../lib/types'
 
+  /** Which room this screen shows (Main when missing). */
+  const room = new URLSearchParams(location.search).get('room')
+  const roomPart = room ? `room=${encodeURIComponent(room)}` : ''
   let nowPlaying = $state<NowPlaying>({ current: null, position_ms: 0, up_next: null })
   let player = $state<PlayerState | null>(null)
   let lyrics = $state<Lyrics | null | undefined>(undefined)
@@ -49,7 +52,7 @@
 
   async function load() {
     try {
-      const res = await fetch('/api/lyrics-page')
+      const res = await fetch(roomPart ? `/api/lyrics-page?${roomPart}` : '/api/lyrics-page')
       if (!res.ok) {
         error = (await res.json().catch(() => null))?.error ?? 'The lyrics page is not available.'
         setTimeout(load, 10_000)
@@ -76,7 +79,7 @@
     lyricsFor = id
     lyrics = id == null ? null : undefined
     if (id == null) return
-    fetch(`/api/lyrics-page?track=${id}`)
+    fetch(`/api/lyrics-page?track=${id}${roomPart ? `&${roomPart}` : ''}`)
       .then((res) => (res.ok ? res.json() : null))
       .then((found) => {
         if (lyricsFor === id) lyrics = found
@@ -88,7 +91,7 @@
 
   function listen() {
     events?.close()
-    events = new EventSource('/api/lyrics-page/events')
+    events = new EventSource(roomPart ? `/api/lyrics-page/events?${roomPart}` : '/api/lyrics-page/events')
     const on = <T,>(name: string, handle: (data: T) => void) =>
       events?.addEventListener(name, (e) => handle(JSON.parse((e as MessageEvent).data)))
     on<{ web_build: string | null }>('hello', (data) => reloadIfUpdated(data.web_build))

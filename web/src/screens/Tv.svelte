@@ -13,6 +13,9 @@
   const casting = params.has('cast')
   /** What DJINN gave the cast, to get the stream with. */
   const castKey = params.get('cast')
+  /** Which room this screen shows (Main when missing). */
+  const room = params.get('room')
+  const roomQuery = room ? `room=${encodeURIComponent(room)}` : ''
 
   let nowPlaying = $state<NowPlaying>({ current: null, position_ms: 0, up_next: null })
   let player = $state<PlayerState | null>(null)
@@ -50,7 +53,8 @@
 
   async function load() {
     try {
-      const res = await fetch(castKey ? `/api/tv?key=${encodeURIComponent(castKey)}` : '/api/tv')
+      const query = [castKey ? `key=${encodeURIComponent(castKey)}` : '', roomQuery].filter(Boolean).join('&')
+      const res = await fetch(query ? `/api/tv?${query}` : '/api/tv')
       if (!res.ok) {
         error = (await res.json().catch(() => null))?.error ?? 'The TV page is not available.'
         setTimeout(load, 10_000)
@@ -75,7 +79,7 @@
 
   function listen() {
     events?.close()
-    events = new EventSource('/api/tv/events')
+    events = new EventSource(roomQuery ? `/api/tv/events?${roomQuery}` : '/api/tv/events')
     const on = <T,>(name: string, handle: (data: T) => void) =>
       events?.addEventListener(name, (e) => handle(JSON.parse((e as MessageEvent).data)))
     on<{ web_build: string | null }>('hello', (data) => reloadIfUpdated(data.web_build))

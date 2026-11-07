@@ -32,6 +32,7 @@
   import UsersPanel from '../lib/UsersPanel.svelte'
   import GoPanel from '../lib/GoPanel.svelte'
   import NodesPanel from '../lib/NodesPanel.svelte'
+  import RoomsPanel from '../lib/RoomsPanel.svelte'
   import { app, logout, toast } from '../lib/state.svelte'
   import type { LibraryRoot, RequestLogEntry, Settings } from '../lib/types'
 
@@ -387,6 +388,8 @@
   <GoPanel />
 {:else if t === 'nodes'}
   <NodesPanel />
+{:else if t === 'rooms'}
+  <RoomsPanel />
 {:else if t === 'log'}
   <section class="card">
     <div class="log-head">

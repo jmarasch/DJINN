@@ -15,8 +15,7 @@ import type {
   PlayerState,
   QueueItem,
   ScanProgress,
-  User,
-} from './types'
+  User, Room } from './types'
 
 export const app = $state({
   me: null as User | null,
@@ -29,6 +28,9 @@ export const app = $state({
   /** False until the first /api/me check finishes. */
   ready: false,
   connected: false,
+  /** Every room, and the one this person is in (pickers show only with two or more). */
+  rooms: [] as Room[],
+  room: 1,
   nowPlaying: { current: null, position_ms: 0, up_next: null } as NowPlaying,
   player: {
     state: 'idle',
@@ -81,8 +83,39 @@ export function reloadIfUpdated(serverBuild: string | null) {
   if (serverBuild && mine && !mine.endsWith(serverBuild)) location.reload()
 }
 
+/** Loads the rooms, first moving to the room a join link named (?room=). */
+async function loadRooms() {
+  const params = new URLSearchParams(location.search)
+  const asked = Number(params.get('room'))
+  if (asked > 0) {
+    params.delete('room')
+    const rest = params.toString()
+    history.replaceState(null, '', location.pathname + (rest ? `?${rest}` : '') + location.hash)
+    try {
+      await api.chooseRoom(asked)
+    } catch {
+      // A room that's gone: stay where they were.
+    }
+  }
+  try {
+    const list = await api.rooms()
+    app.rooms = list.rooms
+    app.room = list.mine
+  } catch {
+    // Rooms just don't show.
+  }
+}
+
+/** Moves to another room: its queue, its music, its live updates. */
+export async function switchRoom(id: number) {
+  await api.chooseRoom(id)
+  app.room = id
+  connect()
+}
+
 export function connect() {
   events?.close()
+  void loadRooms()
   events = new EventSource('/api/events')
   events.onopen = () => (app.connected = true)
   const on = <T>(name: string, handle: (data: T) => void) =>

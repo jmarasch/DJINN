@@ -1,4 +1,5 @@
 <script lang="ts">
+  import RoomPicker from '../lib/RoomPicker.svelte'
   import { api } from '../lib/api'
   import Art from '../lib/Art.svelte'
   import { byline, duration } from '../lib/format'
@@ -26,7 +27,10 @@
   }
 </script>
 
-<h1>Queue</h1>
+<div class="queue-title">
+  <h1>Queue</h1>
+  <RoomPicker />
+</div>
 {#if app.queue.length === 0}
   <div class="empty">
     <img src="/images/empty-record.webp" alt="" />
@@ -89,6 +93,14 @@
 {/if}
 
 <style>
+  .queue-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
   .empty {
     display: flex;
     flex-direction: column;

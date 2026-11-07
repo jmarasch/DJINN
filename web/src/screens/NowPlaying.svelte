@@ -19,6 +19,7 @@
   import { checkPlayHere, playHere, startPlayHere, stopPlayHere } from '../lib/playHere.svelte'
   import { cycleTheme, theme } from '../lib/theme.svelte'
   import LyricsView from '../lib/LyricsView.svelte'
+  import RoomPicker from '../lib/RoomPicker.svelte'
   import type { Lyrics } from '../lib/types'
 
   const current = $derived(app.nowPlaying.current)
@@ -146,7 +147,8 @@
     <span></span>
   {/if}
   <div class="display-actions">
-    <a class="button" href="/tv" title="Switch to TV display">TV display</a>
+    <RoomPicker />
+    <a class="button" href={app.room > 1 ? `/tv?room=${app.room}` : '/tv'} title="Switch to TV display">TV display</a>
     <button class="theme" onclick={cycleTheme} aria-label="Theme: {themeLabel}" title="Theme: {themeLabel}">
       <Icon name="theme" size={18} />
       {themeLabel}
