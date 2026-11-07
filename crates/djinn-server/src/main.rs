@@ -37,6 +37,7 @@ mod likes_api;
 mod logs;
 mod lyrics;
 mod network;
+mod node_audio;
 mod node_mode;
 mod nodes;
 mod party_api;
@@ -219,12 +220,16 @@ async fn run() -> anyhow::Result<()> {
     // A copy of the mix for casting, encoded to MP3 while anyone listens.
     let (tap, tap_reader) = djinn_engine::stream_tap(4.0, config.audio.master_rate);
     let stream = djinn_cast::stream::LiveStream::start(tap_reader, config.audio.master_rate)?;
-    let engine = Engine::start_with_tap(
+    // The mix again, stamped with when it's heard, for nodes.
+    let (timed, timed_reader) = djinn_engine::timed_tap(4.0, config.audio.master_rate);
+    let node_audio = node_audio::Hub::start(timed_reader, config.audio.master_rate)?;
+    let engine = Engine::start_with_taps(
         EngineConfig {
             master_rate: config.audio.master_rate,
             outputs,
         },
         Some(tap),
+        Some(timed),
         move |event| {
             let _ = engine_tx.send(event);
         },
@@ -268,6 +273,7 @@ async fn run() -> anyhow::Result<()> {
         events,
     )
     .with_join_url(base_url.clone())
+    .with_node_audio(node_audio)
     .with_stream(stream, cast_api::token(&store).await?)
     .with_go_listen(config.go.listen);
 

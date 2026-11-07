@@ -11,7 +11,9 @@
 //! accepted, the node's page only shows status, so nobody on the network can
 //! repoint it; leaving goes through Main's Kick.
 
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
@@ -107,6 +109,16 @@ pub struct Status {
     pub room_id: Option<i64>,
     /// Why the last try didn't work, in words.
     pub problem: Option<String>,
+    /// Playing Main's music right now.
+    pub playing: bool,
+    /// How closely this node's clock is known to match Main's, in ms (half
+    /// the quickest round trip lately); None until matched.
+    pub sync_ms: Option<f64>,
+    /// Why the music isn't playing, in words.
+    pub audio_problem: Option<String>,
+    /// How far this node's speaker runs from Main's, in ms, as measured
+    /// (late is positive).
+    pub speaker_ms: Option<f64>,
 }
 
 /// The node's running parts.
@@ -116,6 +128,9 @@ pub struct Node {
     cache_dir: Arc<PathBuf>,
     status: Arc<RwLock<Status>>,
     wake: Arc<Notify>,
+    /// Main's clock minus this one (µs), and whether that's known yet.
+    offset: Arc<AtomicI64>,
+    clock_ready: Arc<AtomicBool>,
 }
 
 impl Node {
@@ -146,8 +161,14 @@ impl Node {
                 code: None,
                 room_id: None,
                 problem: None,
+                playing: false,
+                sync_ms: None,
+                audio_problem: None,
+                speaker_ms: None,
             })),
             wake: Arc::new(Notify::new()),
+            offset: Arc::new(AtomicI64::new(0)),
+            clock_ready: Arc::new(AtomicBool::new(false)),
         })
     }
 
@@ -400,6 +421,173 @@ impl Node {
     }
 }
 
+/// Clock samples kept: the quickest round trip among them gives the offset.
+const CLOCK_SAMPLES: usize = 10;
+const CLOCK_EVERY: Duration = Duration::from_secs(1);
+/// Samples before the clock counts as matched.
+const CLOCK_READY: usize = 4;
+
+impl Node {
+    /// Main's address and its pinned certificate, once joined.
+    async fn joined_main(&self) -> Option<(String, String)> {
+        if self.status().pairing != Pairing::Joined {
+            return None;
+        }
+        let main = self.status().main?;
+        let pin = self
+            .store
+            .get_setting(NODE_MAIN_FP)
+            .await
+            .ok()
+            .flatten()
+            .filter(|f| !f.is_empty())?;
+        Some((main, pin))
+    }
+
+    /// Keeps `offset` (Main's clock minus this one) current while joined:
+    /// asks Main the time every second and believes the quickest answers,
+    /// whose network delay is smallest and most even.
+    async fn run_clock(self) {
+        let mut samples: VecDeque<(i64, i64)> = VecDeque::new();
+        loop {
+            let Some((main, pin)) = self.joined_main().await else {
+                samples.clear();
+                self.clock_ready.store(false, Ordering::Release);
+                self.update(|s| s.sync_ms = None);
+                tokio::time::sleep(Duration::from_secs(2)).await;
+                continue;
+            };
+            let client = match pinned_client(Some(pin), Arc::new(Mutex::new(None))) {
+                Ok(client) => client,
+                Err(_) => {
+                    tokio::time::sleep(CLOCK_EVERY).await;
+                    continue;
+                }
+            };
+            // Quick ones while starting, then steady.
+            let wait = if samples.len() < CLOCK_READY {
+                Duration::from_millis(150)
+            } else {
+                CLOCK_EVERY
+            };
+            let t0 = djinn_engine::clock::now_micros();
+            let answer = client.get(format!("{main}/api/nodes/clock")).send().await;
+            let t1 = djinn_engine::clock::now_micros();
+            let main_now = match answer {
+                Ok(r) if r.status().is_success() => r
+                    .json::<serde_json::Value>()
+                    .await
+                    .ok()
+                    .and_then(|v| v["now_us"].as_i64()),
+                _ => None,
+            };
+            if let Some(main_now) = main_now {
+                let rtt = t1 - t0;
+                samples.push_back((main_now - (t0 + t1) / 2, rtt));
+                while samples.len() > CLOCK_SAMPLES {
+                    samples.pop_front();
+                }
+                if let Some(&(offset, rtt)) = samples.iter().min_by_key(|s| s.1) {
+                    self.offset.store(offset, Ordering::Release);
+                    if samples.len() >= CLOCK_READY {
+                        self.clock_ready.store(true, Ordering::Release);
+                    }
+                    self.update(|s| s.sync_ms = Some(rtt as f64 / 2000.0));
+                }
+            }
+            tokio::time::sleep(wait).await;
+        }
+    }
+
+    /// Plays Main's music while joined, reconnecting when the feed drops.
+    async fn run_audio(self) {
+        let mut player: Option<(djinn_engine::NodePlayer, u32)> = None;
+        loop {
+            let Some((main, pin)) = self.joined_main().await else {
+                player = None;
+                self.update(|s| s.playing = false);
+                tokio::time::sleep(Duration::from_secs(2)).await;
+                continue;
+            };
+            if !self.clock_ready.load(Ordering::Acquire) {
+                tokio::time::sleep(Duration::from_millis(200)).await;
+                continue;
+            }
+            if let Err(e) = self.listen(&main, &pin, &mut player).await {
+                tracing::debug!(error = %format!("{e:#}"), "node audio stopped");
+                self.update(|s| {
+                    s.playing = false;
+                    s.audio_problem = Some(format!("{e:#}"));
+                });
+            }
+            tokio::time::sleep(Duration::from_secs(2)).await;
+        }
+    }
+
+    /// One connection to Main's feed, until it ends.
+    async fn listen(
+        &self,
+        main: &str,
+        pin: &str,
+        player: &mut Option<(djinn_engine::NodePlayer, u32)>,
+    ) -> anyhow::Result<()> {
+        use futures_util::StreamExt;
+        let (id, secret) = self.identity().await?;
+        let client = pinned_client_with(Some(pin.to_owned()), Arc::new(Mutex::new(None)), None)?;
+        let response = client
+            .get(format!("{main}/api/nodes/stream"))
+            .header("authorization", format!("Node {id}:{secret}"))
+            .send()
+            .await
+            .map_err(|e| anyhow::anyhow!("can't reach Main: {}", plain_error(&e)))?;
+        if !response.status().is_success() {
+            anyhow::bail!("Main refused the music ({})", response.status());
+        }
+        let rate: u32 = response
+            .headers()
+            .get("x-djinn-rate")
+            .and_then(|v| v.to_str().ok()?.parse().ok())
+            .unwrap_or(48_000);
+        if player.as_ref().is_none_or(|(_, r)| *r != rate) {
+            let offset = Arc::clone(&self.offset);
+            let started = tokio::task::spawn_blocking(move || {
+                djinn_engine::NodePlayer::start(None, rate, 0, 1.0, offset)
+            })
+            .await?;
+            match started {
+                Ok(p) => *player = Some((p, rate)),
+                Err(e) => anyhow::bail!("can't open this computer's speakers: {e}"),
+            }
+        }
+        self.update(|s| {
+            s.playing = true;
+            s.audio_problem = None;
+        });
+        let mut buffer = Vec::new();
+        let mut body = response.bytes_stream();
+        while let Some(chunk) = body.next().await {
+            let chunk = chunk
+                .map_err(|e| anyhow::anyhow!("the music from Main stopped: {}", plain_error(&e)))?;
+            buffer.extend_from_slice(&chunk);
+            let pieces = crate::node_audio::decode(&mut buffer)
+                .ok_or_else(|| anyhow::anyhow!("Main sent something odd"))?;
+            if let Some((p, _)) = player.as_ref() {
+                for piece in pieces {
+                    p.piece(piece)?;
+                }
+                let error = p.error_ms();
+                self.update(|s| s.speaker_ms = Some(error));
+            }
+            if self.status().pairing != Pairing::Joined {
+                *player = None;
+                break;
+            }
+        }
+        self.update(|s| s.playing = false);
+        Ok(())
+    }
+}
+
 fn random_hex(bytes: usize) -> anyhow::Result<String> {
     let mut buf = vec![0u8; bytes];
     getrandom::fill(&mut buf).map_err(|e| anyhow::anyhow!("no system randomness: {e}"))?;
@@ -535,6 +723,16 @@ fn pinned_client(
     expected: Option<String>,
     seen: Arc<Mutex<Option<String>>>,
 ) -> anyhow::Result<reqwest::Client> {
+    pinned_client_with(expected, seen, Some(Duration::from_secs(15)))
+}
+
+/// A pinned client; `timeout` None for the live audio, which never ends
+/// (a stalled read still fails after a while).
+fn pinned_client_with(
+    expected: Option<String>,
+    seen: Arc<Mutex<Option<String>>>,
+    timeout: Option<Duration>,
+) -> anyhow::Result<reqwest::Client> {
     let provider = Arc::new(rustls::crypto::ring::default_provider());
     let config = rustls::ClientConfig::builder_with_provider(Arc::clone(&provider))
         .with_safe_default_protocol_versions()?
@@ -545,11 +743,15 @@ fn pinned_client(
             provider,
         }))
         .with_no_client_auth();
-    Ok(reqwest::Client::builder()
+    let builder = reqwest::Client::builder()
         .use_preconfigured_tls(config)
-        .timeout(Duration::from_secs(15))
-        .user_agent(concat!("DJINN-node/", env!("CARGO_PKG_VERSION")))
-        .build()?)
+        .connect_timeout(Duration::from_secs(10))
+        .user_agent(concat!("DJINN-node/", env!("CARGO_PKG_VERSION")));
+    let builder = match timeout {
+        Some(timeout) => builder.timeout(timeout),
+        None => builder.read_timeout(Duration::from_secs(10)),
+    };
+    Ok(builder.build()?)
 }
 
 // --- The node's page ---
@@ -601,6 +803,8 @@ pub async fn serve(
     std::fs::create_dir_all(&cache_dir)?;
     let node = Node::new(store.clone(), cache_dir).await?;
     tokio::spawn(node.clone().run());
+    tokio::spawn(node.clone().run_clock());
+    tokio::spawn(node.clone().run_audio());
     let listener = tokio::net::TcpListener::bind(listen).await?;
     tracing::info!(%listen, "running as a node; its page is at /node");
     axum::serve(listener, router(node))

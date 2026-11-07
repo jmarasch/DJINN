@@ -13,6 +13,10 @@
     code: string | null
     room_id: number | null
     problem: string | null
+    playing: boolean
+    sync_ms: number | null
+    audio_problem: string | null
+    speaker_ms: number | null
   }
 
   let status = $state<NodeStatus | null>(null)
@@ -112,6 +116,18 @@
           {/if}
         </p>
         {#if status.problem}<p class="error">{status.problem}</p>{/if}
+        {#if status.pairing === 'joined'}
+          <p class="small">
+            {#if status.playing}
+              Playing Main's music in step.
+            {:else if status.sync_ms == null}
+              Matching clocks with Main...
+            {:else}
+              Not playing right now.
+            {/if}
+            {#if status.audio_problem && !status.playing}<span class="error"> {status.audio_problem}</span>{/if}
+          </p>
+        {/if}
 
         {#if status.pairing === 'waiting'}
           <p class="muted">
@@ -126,6 +142,18 @@
           {#if status.main_code}
             <dt>Main's security code</dt>
             <dd class="code">{status.main_code}</dd>
+          {/if}
+          {#if status.pairing === 'joined' && status.sync_ms != null}
+            <dt>Clock matched to</dt>
+            <dd>within {status.sync_ms.toFixed(1)} ms</dd>
+          {/if}
+          {#if status.pairing === 'joined' && status.playing && status.speaker_ms != null}
+            <dt>Speaker timing</dt>
+            <dd>
+              {Math.abs(status.speaker_ms) < 0.5
+                ? 'on time'
+                : `${Math.abs(status.speaker_ms).toFixed(1)} ms ${status.speaker_ms > 0 ? 'behind' : 'ahead of'} Main`}
+            </dd>
           {/if}
           {#if status.code && status.pairing === 'waiting'}
             <dt>This request's code</dt>

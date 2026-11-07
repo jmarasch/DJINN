@@ -34,6 +34,8 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/nodes/join", post(join))
         .route("/nodes/me", get(me))
+        .route("/nodes/clock", get(crate::node_audio::clock))
+        .route("/nodes/stream", get(crate::node_audio::stream))
         .route("/nodes", get(list))
         .route("/nodes/settings", put(put_settings))
         .route("/nodes/{id}/accept", post(accept))

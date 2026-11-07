@@ -27,6 +27,9 @@ use crate::OutputDevice;
 const AHEAD_SECS: f64 = 0.5;
 /// A gap or overlap between chunks bigger than this is filled or skipped.
 const SEAM_SECS: f64 = 0.005;
+/// A gap in Main's stream longer than this (it went quiet) starts playback
+/// afresh instead of being padded with silence.
+const RESTART_GAP_SECS: f64 = 1.0;
 /// How often the player thread looks at the speaker.
 const TICK: Duration = Duration::from_millis(5);
 
@@ -99,7 +102,7 @@ pub(crate) struct Schedule {
     /// When the next frame handed over is due; None until started.
     next_due: Option<i64>,
     paused_at: Option<i64>,
-    drift: DriftControl,
+    pub(crate) drift: DriftControl,
     last_measure: Option<i64>,
     volume: f32,
 }
@@ -186,6 +189,10 @@ impl Schedule {
         if self.paused_at.is_some() {
             return;
         }
+        // Played everything and drained: the next audio starts afresh.
+        if self.next_due.is_some() && self.queue.is_empty() && speaker.latency() < 0.02 {
+            self.next_due = None;
+        }
         if self.next_due.is_none() && !self.start(now, speaker) {
             return;
         }
@@ -257,6 +264,11 @@ impl Schedule {
             if chunk.pos == 0 {
                 // A new chunk: line its start up with where playback is.
                 let gap = chunk.at - due;
+                if gap > (RESTART_GAP_SECS * 1e6) as i64 {
+                    // Main went quiet a while: line up from scratch.
+                    self.next_due = None;
+                    return;
+                }
                 if gap > seam {
                     speaker.insert_silence(gap as f64 / 1e6);
                     self.next_due = Some(chunk.at);
@@ -297,6 +309,8 @@ enum Msg {
 pub struct NodePlayer {
     tx: mpsc::Sender<Msg>,
     thread: Option<JoinHandle<()>>,
+    /// The speaker's smoothed timing error, µs (late is positive).
+    error_us: Arc<AtomicI64>,
 }
 
 impl NodePlayer {
@@ -312,6 +326,8 @@ impl NodePlayer {
     ) -> Result<NodePlayer, EngineError> {
         let (tx, rx) = mpsc::channel();
         let (ready_tx, ready_rx) = mpsc::channel();
+        let error_us = Arc::new(AtomicI64::new(0));
+        let error_out = Arc::clone(&error_us);
         let thread = std::thread::Builder::new()
             .name("djinn-node-player".to_owned())
             .spawn(move || {
@@ -349,6 +365,7 @@ impl NodePlayer {
                         return;
                     }
                     schedule.tick(crate::clock::now_micros(), &mut output);
+                    error_out.store((schedule.drift.error() * 1e6) as i64, Ordering::Release);
                     std::thread::sleep(TICK);
                 }
             })
@@ -359,7 +376,13 @@ impl NodePlayer {
         Ok(NodePlayer {
             tx,
             thread: Some(thread),
+            error_us,
         })
+    }
+
+    /// How far off the speaker runs, in ms (late is positive), as measured.
+    pub fn error_ms(&self) -> f64 {
+        self.error_us.load(Ordering::Acquire) as f64 / 1000.0
     }
 
     /// Hands over a piece of Main's stream.
@@ -552,6 +575,59 @@ mod tests {
                 "drift {drift}: worst {settled} ms once settled"
             );
         }
+    }
+
+    /// Main plays, goes quiet for a while (nothing queued), then plays
+    /// again: the node lines up afresh instead of padding the silence.
+    #[test]
+    fn after_a_quiet_spell_it_starts_on_time_again() {
+        let rate = 48_000u32;
+        let mut speaker = Simulated::new(rate, 50e-6);
+        let mut schedule = Schedule::new(rate, 0, 1.0);
+        let chunk = 480usize;
+        let step = 1000i64;
+        let mut now = 0i64;
+        let mut worst: f64 = 0.0;
+        // (stream frame of chunk start, its due time), so errors can be checked.
+        let mut dues: Vec<(u64, i64)> = Vec::new();
+        let mut frame = 0u64;
+        let mut next_at = 500_000i64;
+        while now < 40_000_000 {
+            let playing = !(5_000_000..20_000_000).contains(&now);
+            if now == 20_000_000 {
+                next_at = now + 300_000;
+            }
+            while playing && next_at < now + 300_000 {
+                dues.push((frame, next_at));
+                schedule.push(
+                    Piece {
+                        mark: Mark::Audio {
+                            frames: chunk as u32,
+                            play_at_us: next_at,
+                        },
+                        samples: numbered(frame, chunk),
+                    },
+                    0,
+                    now,
+                    &mut speaker,
+                );
+                frame += chunk as u64;
+                next_at += (chunk as i64 * 1_000_000) / i64::from(rate);
+            }
+            let before = speaker.heard.len();
+            schedule.tick(now, &mut speaker);
+            for &(f, heard_in) in &speaker.heard[before..] {
+                // Ignore the first second of each spell.
+                if (1_000_000..5_000_000).contains(&now) || now >= 21_000_000 {
+                    let (start, due) = dues.iter().rev().find(|d| d.0 <= f).copied().unwrap();
+                    let due = due + ((f - start) as i64 * 1_000_000) / i64::from(rate);
+                    worst = worst.max(((now + heard_in - due) as f64 / 1000.0).abs());
+                }
+            }
+            speaker.advance(step as f64 / 1e6);
+            now += step;
+        }
+        assert!(worst < 2.0, "worst {worst} ms");
     }
 
     #[test]

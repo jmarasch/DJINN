@@ -67,6 +67,8 @@ pub struct AppState {
     /// Copies of songs, worked out when asked and kept until the library
     /// changes.
     pub duplicates: Arc<tokio::sync::Mutex<Option<Arc<crate::duplicates::Duplicates>>>>,
+    /// The mix, timed, for nodes.
+    pub node_audio: Arc<crate::node_audio::Hub>,
 }
 
 #[derive(Default)]
@@ -130,7 +132,13 @@ impl AppState {
             tickets: Arc::default(),
             converter: Arc::default(),
             duplicates: Arc::default(),
+            node_audio: Arc::default(),
         }
+    }
+
+    pub fn with_node_audio(mut self, hub: crate::node_audio::Hub) -> Self {
+        self.node_audio = Arc::new(hub);
+        self
     }
 
     pub fn with_stream(mut self, stream: djinn_cast::stream::LiveStream, token: String) -> Self {
