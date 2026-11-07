@@ -87,6 +87,19 @@ impl AppState {
         }
     }
 
+    /// The jukebox whose music `room` hears: Main's while a quiet room
+    /// follows it, otherwise the room's own (or its leader's). What's
+    /// playing comes from here; the queue is still the room's.
+    pub fn sound_jukebox_for(&self, room: i64) -> Arc<Mutex<Jukebox>> {
+        self.jukebox_for(self.rooms.audio_leader(room))
+    }
+
+    /// True while `room` (not Main) is quiet and playing Main's music.
+    pub fn follows_main(&self, room: i64) -> bool {
+        let leader = self.rooms.leader(room);
+        leader != MAIN_ROOM && self.rooms.audio_leader(leader) == MAIN_ROOM
+    }
+
     /// The node feed for `room` (Main's while a quiet room follows it).
     pub fn hub_for(&self, room: i64) -> Arc<Hub> {
         let leader = self.rooms.audio_leader(room);
@@ -333,6 +346,7 @@ async fn check_quiet(
         .current
         .map(|e| e.track.id);
     let mut changed = false;
+    let mut nudge = Vec::new();
     for room in rooms {
         let rules = quiet_rules(&state.store, room).await?;
         let following = state
@@ -348,6 +362,7 @@ async fn check_quiet(
             }
             waiting.remove(&room);
             changed = true;
+            nudge.push(room);
             tracing::info!(room, "quiet room follows Main");
         } else if following && !quiet {
             // A request: take over now, or once Main's song ends.
@@ -363,6 +378,7 @@ async fn check_quiet(
                 }
                 waiting.remove(&room);
                 changed = true;
+                nudge.push(room);
                 tracing::info!(room, "room plays its own music again");
             }
         } else if following && !rules.follow_main {
@@ -370,10 +386,19 @@ async fn check_quiet(
                 f.remove(&room);
             }
             changed = true;
+            nudge.push(room);
         }
     }
     if changed {
         apply_outputs(state).await?;
+    }
+    // Live updates notice the switch on their next event and send the
+    // room's screens what it hears now.
+    for room in nudge {
+        if let Some(events) = state.room_events(room) {
+            let now = state.jukebox_for(room).lock().await.player_state();
+            let _ = events.send(ServerEvent::PlayerState(now));
+        }
     }
     Ok(())
 }

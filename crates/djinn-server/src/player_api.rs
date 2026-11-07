@@ -192,7 +192,8 @@ async fn now_playing(
     CurrentUser(user): CurrentUser,
     State(state): State<AppState>,
 ) -> Json<NowPlayingResponse> {
-    let jukebox = state.jukebox_of(user.id).await;
+    let room = state.room_of(user.id).await;
+    let jukebox = state.sound_jukebox_for(room);
     let jukebox = jukebox.lock().await;
     Json(NowPlayingResponse {
         now_playing: jukebox.now_playing(),

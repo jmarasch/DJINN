@@ -407,7 +407,7 @@ async fn page(
     check_page(&state).await?;
     let room = query.room.unwrap_or(djinn_store::MAIN_ROOM);
     let (now_playing, player) = {
-        let jukebox = state.jukebox_for(room);
+        let jukebox = state.sound_jukebox_for(room);
         let jukebox = jukebox.lock().await;
         (jukebox.now_playing(), jukebox.player_state())
     };
