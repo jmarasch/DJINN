@@ -9,10 +9,12 @@ on:
   push:
     # Nightly tags are made by this workflow, so they don't start it again.
     tags: ['v*', '!v*-nightly']
-  # 08:00 UTC is 3 AM Eastern in winter and 4 AM in summer. GitHub runs
-  # this from main's copy of the workflow, whatever branch it builds.
+  # 08:13 UTC is about 3 AM Eastern in winter and 4 AM in summer; off the
+  # hour, since GitHub delays or drops schedules at the top of the hour.
+  # GitHub runs this from main's copy of the workflow, whatever branch it
+  # builds.
   schedule:
-    - cron: '0 8 * * *'
+    - cron: '13 8 * * *'
   # From the Actions tab: a dry run (builds everything, publishes nothing),
   # or a nightly right away, built even if dev hasn't changed.
   workflow_dispatch:

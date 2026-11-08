@@ -17,7 +17,7 @@ There are two branches and two kinds of release:
 - **`main`** is stable. It only moves when `dev` is ready to become a
   stable release: open a pull request from `dev` to `main`, merge it, and
   tag it (below).
-- **Nightly builds.** Each night at 08:00 UTC (3 AM Eastern in winter,
+- **Nightly builds.** Each night at 08:13 UTC (about 3 AM Eastern in winter,
   4 AM in summer) the Release workflow looks at `dev`. If it moved since
   the last nightly or stable release, it builds everything a stable release
   has, numbered by the date (`2027.1.5-nightly` in Cargo, tag
