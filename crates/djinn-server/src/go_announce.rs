@@ -124,12 +124,14 @@ impl Announcer {
         port: u16,
         fingerprint: Option<String>,
     ) -> anyhow::Result<Self> {
-        Self::start_as(SERVICE, store, port, fingerprint).await
+        Self::start_as(SERVICE, store, port, fingerprint, None).await
     }
 
-    /// Announces this main DJINN to nodes being set up.
-    pub async fn start_main(store: &Store, port: u16) -> anyhow::Result<Self> {
-        Self::start_as(MAIN_SERVICE, store, port, None).await
+    /// Announces this main DJINN to boxes being set up, saying whether nodes
+    /// can ask to join right now.
+    pub async fn start_main(store: &Store, port: u16, joining: bool) -> anyhow::Result<Self> {
+        let join = if joining { "1" } else { "0" };
+        Self::start_as(MAIN_SERVICE, store, port, None, Some(join)).await
     }
 
     async fn start_as(
@@ -137,6 +139,7 @@ impl Announcer {
         store: &Store,
         port: u16,
         fingerprint: Option<String>,
+        join: Option<&str>,
     ) -> anyhow::Result<Self> {
         let name = server_name(store).await?;
         let id = server_id(store).await?;
@@ -145,6 +148,9 @@ impl Announcer {
             ("name".to_owned(), name.clone()),
             ("id".to_owned(), id.clone()),
         ]);
+        if let Some(join) = join {
+            properties.insert("join".to_owned(), join.to_owned());
+        }
         if let Some(fingerprint) = &fingerprint {
             properties.insert("fp".to_owned(), fingerprint.clone());
         }

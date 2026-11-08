@@ -36,6 +36,8 @@ pub struct AppState {
     pub roots_changed: Arc<Notify>,
     /// The URL guests open, shown on the join page.
     pub join_url: Arc<String>,
+    /// Main DJINNs heard on the network, while this one isn't set up.
+    pub found_mains: Arc<std::sync::Mutex<Vec<crate::node_mode::FoundMain>>>,
     /// Whether Windows has the guests' network set to Public.
     pub network: Arc<crate::network::Watch>,
     /// Guests may join with just a name. Mirrors the `guest_mode` setting.
@@ -121,6 +123,7 @@ impl AppState {
             session_ending: Arc::new(AtomicBool::new(false)),
             roots_changed: Arc::new(Notify::new()),
             join_url: Arc::new(String::new()),
+            found_mains: Arc::default(),
             network: Arc::default(),
             guest_mode: Arc::new(AtomicBool::new(false)),
             stream: None,

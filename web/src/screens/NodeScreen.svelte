@@ -14,7 +14,8 @@
     /** Main's TV page for this node's room, once joined. */
     screen?: string | null
     /** Main DJINNs heard on this network letting nodes join. */
-    mains?: { name: string; address: string }[]
+    mains?: { name: string; address: string; joining: boolean }[]
+    audio?: { screen?: string } | null
     main_code: string | null
     code: string | null
     room_id: number | null
@@ -105,6 +106,10 @@
   const showForm = $derived(!!status && (status.pairing === 'setup' || editing))
 </script>
 
+{#if onScreen && status?.pairing === 'joined' && status.audio?.screen === 'off'}
+  <div class="blank"></div>
+{/if}
+
 <main class="narrow">
   <div class="card">
     <h1>DJINN node</h1>
@@ -113,14 +118,15 @@
     {:else if status}
       {#if showForm}
         <p class="muted">
-          This computer plays one room's music for a main DJINN. Turn on Admin &gt; Nodes &gt; "Allow nodes to ask to
-          join" there first, and it appears here.
+          This computer plays one room's music for a main DJINN. Pick yours below, and turn on Admin &gt; Nodes &gt;
+          "Allow nodes to ask to join" there before asking.
         </p>
         {#if status.mains?.length}
           <div class="mains">
             {#each status.mains as main (main.address)}
               <button type="button" class:primary={address === main.address} onclick={() => (address = main.address)}>
                 <b>{main.name}</b> <span class="small">{main.address}</span>
+                {#if !main.joining}<br /><span class="small">Not letting nodes join right now</span>{/if}
               </button>
             {/each}
           </div>
@@ -242,6 +248,14 @@
 </main>
 
 <style>
+  .blank {
+    position: fixed;
+    inset: 0;
+    z-index: 10;
+    background: #000;
+    cursor: none;
+  }
+
   .mains {
     display: flex;
     flex-direction: column;

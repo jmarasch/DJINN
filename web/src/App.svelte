@@ -22,6 +22,7 @@
   import PlaylistView from './screens/PlaylistView.svelte'
   import Queue from './screens/Queue.svelte'
   import Search from './screens/Search.svelte'
+  import NotSetUp from './lib/NotSetUp.svelte'
   import Setup from './screens/Setup.svelte'
   import Signup from './screens/Signup.svelte'
   import Genre from './screens/Genre.svelte'
@@ -35,6 +36,7 @@
   let navHeight = $state(0)
 
   const onSetupPage = $state(location.pathname === '/setup')
+  let notSetUp = $state<Awaited<ReturnType<typeof api.bootstrapStatus>> | null>(null)
   // Invite links open /signup; the sign-in screen can switch to it too.
   let signingUp = $state(location.pathname === '/signup')
   // The join page is for guests who haven't signed in yet; the TV page is
@@ -53,7 +55,7 @@
     // A box nobody has set up: there's no account to sign in with yet.
     if (!me && !onSetupPage) {
       const status = await api.bootstrapStatus().catch(() => null)
-      if (status?.open) location.replace('/setup')
+      if (status?.needed) notSetUp = status
     }
   })
 
@@ -102,6 +104,8 @@
   <main class="narrow">
     {#if onSetupPage}
       <Setup />
+    {:else if notSetUp}
+      <NotSetUp status={notSetUp} />
     {:else if signingUp}
       <Signup onback={() => (signingUp = false)} />
     {:else if app.mode?.guest_mode && !app.hostLogin}

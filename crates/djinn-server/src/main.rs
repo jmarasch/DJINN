@@ -313,6 +313,7 @@ async fn run() -> anyhow::Result<()> {
     }
     rooms_rt::watch_quiet(state.clone());
     nodes::watch_joining(state.clone(), config.server.listen.port());
+    node_mode::find_mains_during_setup(state.clone());
 
     let guest_mode = settings::flag(&store, settings::GUEST_MODE, false).await?;
     state

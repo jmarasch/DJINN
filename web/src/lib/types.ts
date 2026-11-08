@@ -1351,6 +1351,8 @@ export interface NodeAudio {
   offline: 'stop' | 'cached'
   /** Plays straight through instead of correcting itself against Main. */
   free_run?: boolean
+  /** What a screen plugged into the node shows. */
+  screen?: 'tv' | 'lyrics' | 'status' | 'off'
 }
 
 export interface NodeSpeaker {

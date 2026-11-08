@@ -2,6 +2,7 @@
   // Full-screen lyrics for a TV or spare screen: no sign-in, read only. The
   // line being sung is lit and follows the music. The admin can turn it off.
   import { onMount } from 'svelte'
+  import { followNodeScreen } from '../lib/screenFollow'
   import LyricsView from '../lib/LyricsView.svelte'
   import { reloadIfUpdated } from '../lib/state.svelte'
   import type { Lyrics, NowPlaying, PlayerState, Track } from '../lib/types'
@@ -142,7 +143,9 @@
     wake()
     const onVisible = () => keepAwake()
     document.addEventListener('visibilitychange', onVisible)
+    const stopFollowing = followNodeScreen()
     return () => {
+      stopFollowing()
       events?.close()
       wakeLock?.release()
       document.removeEventListener('visibilitychange', onVisible)

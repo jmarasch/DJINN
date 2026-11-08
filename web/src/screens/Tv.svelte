@@ -1,6 +1,7 @@
 <script lang="ts">
   // Full-screen now playing for a TV or spare tablet: no sign-in, read only.
   import { onMount } from 'svelte'
+  import { followNodeScreen } from '../lib/screenFollow'
   import ArtistSlideshow from '../lib/ArtistSlideshow.svelte'
   import { duration } from '../lib/format'
   import { reloadIfUpdated } from '../lib/state.svelte'
@@ -168,12 +169,14 @@
     load()
     keepAwake()
     showCursor()
+    const stopFollowing = followNodeScreen()
     const tick = setInterval(() => {
       if (player?.state === 'playing') position = basePosition + (performance.now() - baseAt)
     }, 250)
     const onVisible = () => keepAwake()
     document.addEventListener('visibilitychange', onVisible)
     return () => {
+      stopFollowing()
       clearInterval(tick)
       events?.close()
       wakeLock?.release()

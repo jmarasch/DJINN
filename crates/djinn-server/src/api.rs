@@ -109,14 +109,17 @@ async fn join_qr(
     Query(query): Query<JoinQuery>,
 ) -> ApiResult<impl IntoResponse> {
     let url = join_url_for(&state, query.room);
-    let code = QrCode::new(url.as_bytes()).map_err(anyhow::Error::from)?;
-    let svg = code
+    Ok(([(header::CONTENT_TYPE, "image/svg+xml")], qr_svg(&url)?))
+}
+
+/// A QR code for `url`, as an SVG image.
+pub fn qr_svg(url: &str) -> anyhow::Result<String> {
+    Ok(QrCode::new(url.as_bytes())?
         .render::<svg::Color>()
         .min_dimensions(320, 320)
         .dark_color(svg::Color("#14111f"))
         .light_color(svg::Color("#ffffff"))
-        .build();
-    Ok(([(header::CONTENT_TYPE, "image/svg+xml")], svg))
+        .build())
 }
 
 async fn not_found() -> StatusCode {

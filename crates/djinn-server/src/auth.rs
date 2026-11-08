@@ -161,6 +161,7 @@ pub fn router() -> Router<AppState> {
             get(bootstrap_status).post(bootstrap).layer(small()),
         )
         .route("/auth/bootstrap/node", post(bootstrap_node).layer(small()))
+        .route("/auth/bootstrap/qr.svg", get(setup_qr))
         .route("/auth/mode", get(mode))
         .route("/auth/guest", post(join_as_guest).layer(small()))
         .route("/auth/signup", post(sign_up).layer(small()))
@@ -907,6 +908,8 @@ struct BootstrapStatus {
     open: bool,
     /// Where to open this from another device, while setup is open.
     address: Option<String>,
+    /// Main DJINNs heard on the network, while nobody has set this one up.
+    mains: Vec<crate::node_mode::FoundMain>,
 }
 
 async fn bootstrap_status(State(state): State<AppState>) -> ApiResult<Json<BootstrapStatus>> {
@@ -916,7 +919,30 @@ async fn bootstrap_status(State(state): State<AppState>) -> ApiResult<Json<Boots
         needed,
         open,
         address: open.then(|| state.join_url.to_string()),
+        mains: if needed {
+            state
+                .found_mains
+                .lock()
+                .map(|found| found.clone())
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        },
     }))
+}
+
+/// A QR code for the first-start page, only while setup is open (it needs no
+/// secret then; a setup link's token never goes in one).
+async fn setup_qr(State(state): State<AppState>) -> ApiResult<axum::response::Response> {
+    if !state.open_setup() || state.store.admin_exists().await? {
+        return Err(ApiError::not_found());
+    }
+    let url = format!("{}/setup", state.join_url.trim_end_matches('/'));
+    Ok((
+        [(axum::http::header::CONTENT_TYPE, "image/svg+xml")],
+        crate::api::qr_svg(&url)?,
+    )
+        .into_response())
 }
 
 /// What a screen plugged into this box shows (the kiosk opens this): the
@@ -924,7 +950,7 @@ async fn bootstrap_status(State(state): State<AppState>) -> ApiResult<Json<Boots
 pub async fn screen(State(state): State<AppState>) -> ApiResult<axum::response::Redirect> {
     let setup = state.open_setup() && !state.store.admin_exists().await?;
     Ok(axum::response::Redirect::temporary(if setup {
-        "/setup?screen=1"
+        "/?screen=1"
     } else {
         "/tv"
     }))

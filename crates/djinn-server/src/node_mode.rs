@@ -143,6 +143,8 @@ pub struct FoundMain {
     pub name: String,
     /// What to enter as Main's address, like "192.168.1.10:8066".
     pub address: String,
+    /// Its "Allow nodes to ask to join" is on.
+    pub joining: bool,
 }
 
 /// The node's running parts.
@@ -869,60 +871,94 @@ impl Node {
     }
 }
 
-impl Node {
-    /// Listens for main DJINNs on the network while this node has none.
-    fn find_mains(self) {
-        let settled =
-            |node: &Node| matches!(node.status().pairing, Pairing::Joined | Pairing::Waiting);
-        loop {
-            if settled(&self) {
-                std::thread::sleep(Duration::from_secs(5));
+/// Listens for main DJINNs on the network whenever `wanted` says so, telling
+/// `publish` the list as it changes. Runs on its own thread, for good.
+fn browse_mains(wanted: impl Fn() -> bool, publish: impl Fn(Vec<FoundMain>)) {
+    loop {
+        if !wanted() {
+            std::thread::sleep(Duration::from_secs(5));
+            continue;
+        }
+        let browsing = mdns_sd::ServiceDaemon::new().and_then(|daemon| {
+            let events = daemon.browse(crate::go_announce::MAIN_SERVICE)?;
+            Ok((daemon, events))
+        });
+        let (daemon, events) = match browsing {
+            Ok(browsing) => browsing,
+            Err(e) => {
+                tracing::debug!(error = %e, "can't listen for main DJINNs");
+                std::thread::sleep(Duration::from_secs(30));
                 continue;
             }
-            let browsing = mdns_sd::ServiceDaemon::new().and_then(|daemon| {
-                let events = daemon.browse(crate::go_announce::MAIN_SERVICE)?;
-                Ok((daemon, events))
-            });
-            let (daemon, events) = match browsing {
-                Ok(browsing) => browsing,
-                Err(e) => {
-                    tracing::debug!(error = %e, "can't listen for main DJINNs");
-                    std::thread::sleep(Duration::from_secs(30));
-                    continue;
+        };
+        let mut found = std::collections::BTreeMap::new();
+        while wanted() && !events.is_disconnected() {
+            match events.recv_timeout(Duration::from_secs(1)) {
+                Ok(mdns_sd::ServiceEvent::ServiceResolved(service)) => {
+                    let addresses: Vec<std::net::Ipv4Addr> = service
+                        .get_addresses_v4()
+                        .into_iter()
+                        .filter_map(|ip| ip.to_string().parse().ok())
+                        .collect();
+                    let Some(ip) = best_address(&addresses) else {
+                        continue;
+                    };
+                    let name = service
+                        .get_property_val_str("name")
+                        .map_or_else(|| ip.to_string(), str::to_owned);
+                    let address = format!("{ip}:{}", service.get_port());
+                    let joining = service.get_property_val_str("join") == Some("1");
+                    found.insert(
+                        service.get_fullname().to_owned(),
+                        FoundMain {
+                            name,
+                            address,
+                            joining,
+                        },
+                    );
                 }
-            };
-            let mut found = std::collections::BTreeMap::new();
-            while !settled(&self) && !events.is_disconnected() {
-                match events.recv_timeout(Duration::from_secs(1)) {
-                    Ok(mdns_sd::ServiceEvent::ServiceResolved(service)) => {
-                        let addresses: Vec<std::net::Ipv4Addr> = service
-                            .get_addresses_v4()
-                            .into_iter()
-                            .filter_map(|ip| ip.to_string().parse().ok())
-                            .collect();
-                        let Some(ip) = best_address(&addresses) else {
-                            continue;
-                        };
-                        let name = service
-                            .get_property_val_str("name")
-                            .map_or_else(|| ip.to_string(), str::to_owned);
-                        let address = format!("{ip}:{}", service.get_port());
-                        found.insert(
-                            service.get_fullname().to_owned(),
-                            FoundMain { name, address },
-                        );
-                    }
-                    Ok(mdns_sd::ServiceEvent::ServiceRemoved(_, fullname)) => {
-                        found.remove(&fullname);
-                    }
-                    _ => continue,
+                Ok(mdns_sd::ServiceEvent::ServiceRemoved(_, fullname)) => {
+                    found.remove(&fullname);
                 }
-                let list: Vec<FoundMain> = found.values().cloned().collect();
-                self.update(|s| s.mains = list);
+                _ => continue,
             }
-            let _ = daemon.shutdown();
-            self.update(|s| s.mains = Vec::new());
+            publish(found.values().cloned().collect());
         }
+        let _ = daemon.shutdown();
+        publish(Vec::new());
+    }
+}
+
+impl Node {
+    /// Listens for main DJINNs while this node has none.
+    fn find_mains(self) {
+        let looking = self.clone();
+        browse_mains(
+            move || !matches!(looking.status().pairing, Pairing::Joined | Pairing::Waiting),
+            move |list| self.update(|s| s.mains = list),
+        );
+    }
+}
+
+/// While nobody has set up this DJINN, listens for main DJINNs, so the
+/// first-start page can ask whether this box is meant as a node for one.
+pub fn find_mains_during_setup(state: crate::state::AppState) {
+    let handle = tokio::runtime::Handle::current();
+    let store = state.store.clone();
+    let spawned = std::thread::Builder::new()
+        .name("djinn-find-mains".to_owned())
+        .spawn(move || {
+            browse_mains(
+                move || !handle.block_on(store.admin_exists()).unwrap_or(true),
+                move |list| {
+                    if let Ok(mut found) = state.found_mains.lock() {
+                        *found = list;
+                    }
+                },
+            );
+        });
+    if let Err(e) = spawned {
+        tracing::warn!(error = %e, "can't listen for main DJINNs");
     }
 }
 

@@ -17,6 +17,10 @@
   /** On the box's own screen (the kiosk opens /screen). */
   const onScreen = new URLSearchParams(location.search).has('screen')
   let address = $state<string | null>(null)
+  /** Main DJINNs heard on this network. */
+  let mains = $state<{ name: string; address: string; joining: boolean }[]>([])
+  /** Said this box is its own main DJINN, not a node for what was found. */
+  let notNode = $state(false)
   let becomingNode = $state(false)
 
   async function becomeNode() {
@@ -30,7 +34,7 @@
         try {
           const res = await fetch('/api/node/status')
           if (res.ok) {
-            location.href = '/node'
+            location.href = onScreen ? '/node?screen=1' : '/node'
             return
           }
         } catch {
@@ -50,17 +54,21 @@
       needed = status.needed
       open = status.open ?? false
       address = status.address ?? null
+      mains = status.mains ?? []
     })
-    if (!onScreen) return
-    // Set up from a phone: follow along on the screen.
     const timer = setInterval(async () => {
       try {
-        const node = await fetch('/api/node/status')
-        if (node.ok && node.headers.get('content-type')?.includes('json')) {
-          location.replace('/node?screen=1')
-          return
+        if (onScreen) {
+          // Set up from a phone: follow along on the screen.
+          const node = await fetch('/api/node/status')
+          if (node.ok && node.headers.get('content-type')?.includes('json')) {
+            location.replace('/node?screen=1')
+            return
+          }
         }
-        if (!(await api.bootstrapStatus()).needed) location.replace('/tv')
+        const status = await api.bootstrapStatus()
+        mains = status.mains ?? []
+        if (onScreen && !status.needed) location.replace('/tv')
       } catch {
         // Restarting; the next look finds out.
       }
@@ -121,6 +129,19 @@
     <div class="choices">
       <button class="primary" disabled={busy || (!token && !open)} onclick={becomeNode}>Make this a node</button>
       <button disabled={busy} onclick={() => (kind = null)}>Back</button>
+    </div>
+  </div>
+{:else if needed && kind === null && mains.length && !notNode}
+  <div class="card">
+    <h1>Is this box a node?</h1>
+    <p>
+      Found {mains.length === 1 ? 'a main DJINN' : 'main DJINNs'} on this network:
+      <b>{mains.map((m) => m.name).join(', ')}</b>.
+    </p>
+    <p class="muted">A node plays a room for a main DJINN, and takes its music and settings from it.</p>
+    <div class="kinds">
+      <button class="primary" onclick={() => (kind = 'node')}>Yes, set this up as a node</button>
+      <button onclick={() => (notNode = true)}>No, this is a separate main DJINN</button>
     </div>
   </div>
 {:else if needed && kind === null}

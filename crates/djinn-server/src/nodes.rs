@@ -40,6 +40,7 @@ pub fn router() -> Router<AppState> {
         .route("/nodes/me/devices", post(put_my_devices))
         .route("/nodes/song/{id}", get(song))
         .route("/nodes/{id}/audio", put(put_audio))
+        .route("/nodes/{id}/screen", get(screen_of))
         .route("/nodes/clock", get(crate::node_audio::clock))
         .route("/nodes/stream", get(crate::node_audio::stream))
         .route("/nodes", get(list))
@@ -232,6 +233,16 @@ pub struct AudioSettings {
     /// Plays straight through instead of correcting itself against Main.
     #[serde(default)]
     pub free_run: bool,
+    /// What a screen plugged into it shows: `SCREENS`.
+    #[serde(default = "default_screen")]
+    pub screen: String,
+}
+
+/// What a node's screen can show.
+const SCREENS: &[&str] = &["tv", "lyrics", "status", "off"];
+
+fn default_screen() -> String {
+    "tv".to_owned()
 }
 
 impl AudioSettings {
@@ -247,6 +258,7 @@ impl AudioSettings {
                 .unwrap_or_default(),
             offline: node.offline.clone(),
             free_run: node.free_run,
+            screen: node.screen.clone(),
         }
     }
 }
@@ -258,6 +270,11 @@ async fn save_audio(state: &AppState, id: i64, audio: &AudioSettings) -> ApiResu
     {
         return Err(ApiError::bad_request(
             "those speaker settings are out of range",
+        ));
+    }
+    if !SCREENS.contains(&audio.screen.as_str()) {
+        return Err(ApiError::bad_request(
+            "that's not something a screen can show",
         ));
     }
     if !matches!(audio.offline.as_str(), "stop" | "cached") {
@@ -276,6 +293,7 @@ async fn save_audio(state: &AppState, id: i64, audio: &AudioSettings) -> ApiResu
                 equalizer: Some(&equalizer),
                 offline: &audio.offline,
                 free_run: audio.free_run,
+                screen: &audio.screen,
             },
         )
         .await?;
@@ -342,8 +360,48 @@ struct MeAnswer {
     /// The room whose music it plays now (its room's leader, or Main's while
     /// a quiet room follows Main); a change means reconnecting.
     audio_room: i64,
-    /// What a screen plugged into the node shows: its room's TV page.
-    screen: String,
+    /// The page a screen plugged into the node shows; None for the node's
+    /// own page (its status, or blank).
+    screen: Option<String>,
+}
+
+/// The page on Main that a node's screen should show, or None for the
+/// node's own page. Pages opened this way check back (`screen_of`), so a
+/// change of setting reaches a screen already showing one.
+fn screen_url(state: &AppState, node: &Node) -> Option<String> {
+    let page = match node.screen.as_str() {
+        "tv" => "tv",
+        "lyrics" => "lyrics",
+        _ => return None,
+    };
+    Some(format!(
+        "{}/{page}?room={}&screen_for={}",
+        state.join_url.trim_end_matches('/'),
+        node.room_id,
+        node.id
+    ))
+}
+
+#[derive(Serialize)]
+struct ScreenAnswer {
+    url: Option<String>,
+}
+
+/// What a node's screen should show now. Public, like the pages themselves:
+/// the browser on the node's screen has no sign-in.
+async fn screen_of(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> ApiResult<Json<ScreenAnswer>> {
+    let node = state
+        .store
+        .node(id)
+        .await?
+        .filter(|node| node.status == "approved")
+        .ok_or_else(ApiError::not_found)?;
+    Ok(Json(ScreenAnswer {
+        url: screen_url(&state, &node),
+    }))
 }
 
 /// A node checking in: still waiting, accepted (and which room), or (401)
@@ -368,11 +426,7 @@ async fn me(
         audio,
         upcoming,
         audio_room: state.rooms.audio_leader(node.room_id),
-        screen: format!(
-            "{}/tv?room={}",
-            state.join_url.trim_end_matches('/'),
-            node.room_id
-        ),
+        screen: screen_url(&state, &node),
         status: node.status,
         name: node.name,
         room_id: node.room_id,
@@ -513,26 +567,40 @@ async fn give_own_room(state: &AppState, id: i64) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Lets nodes being set up find this server: announced on the network while
-/// `nodes_join` is on. Nodes never announce this, so they don't list each
-/// other.
+/// Lets boxes being set up find this server, and whether nodes can ask to
+/// join it. Announced once it's set up, unless the admin turned off being
+/// found on the network (joining being on still announces). Nodes never
+/// announce this, so they don't list each other.
 pub fn watch_joining(state: AppState, port: u16) {
     tokio::spawn(async move {
-        let mut announcer: Option<crate::go_announce::Announcer> = None;
+        // What's being announced, and whether it said nodes can join.
+        let mut announcing: Option<(crate::go_announce::Announcer, bool)> = None;
         loop {
-            let open = settings::flag(&state.store, NODES_JOIN, false)
+            let joining = settings::flag(&state.store, NODES_JOIN, false)
                 .await
                 .unwrap_or(false);
-            if open && announcer.is_none() {
-                match crate::go_announce::Announcer::start_main(&state.store, port).await {
-                    Ok(started) => announcer = Some(started),
-                    Err(e) => {
-                        tracing::warn!(error = %format!("{e:#}"), "couldn't announce to nodes")
-                    }
-                }
-            } else if !open {
-                if let Some(stopping) = announcer.take() {
+            let findable = settings::flag(&state.store, crate::go_announce::GO_DISCOVERABLE, true)
+                .await
+                .unwrap_or(true);
+            let set_up = state.store.admin_exists().await.unwrap_or(false);
+            let name = crate::go_announce::server_name(&state.store)
+                .await
+                .unwrap_or_default();
+            let wanted = set_up && (joining || findable);
+            let stale = announcing
+                .as_ref()
+                .is_some_and(|(now, said)| !wanted || *said != joining || now.name != name);
+            if stale {
+                if let Some((stopping, _)) = announcing.take() {
                     stopping.stop();
+                }
+            }
+            if wanted && announcing.is_none() {
+                match crate::go_announce::Announcer::start_main(&state.store, port, joining).await {
+                    Ok(started) => announcing = Some((started, joining)),
+                    Err(e) => {
+                        tracing::warn!(error = %format!("{e:#}"), "couldn't announce to nodes");
+                    }
                 }
             }
             tokio::time::sleep(std::time::Duration::from_secs(3)).await;
@@ -722,6 +790,33 @@ mod tests {
             .unwrap()
             .unwrap()
             .id
+    }
+
+    #[tokio::test]
+    async fn a_nodes_screen_shows_what_its_settings_say() {
+        let state = AppState::for_tests()
+            .await
+            .with_join_url("http://main:8066/".into());
+        let id = ask_to_join(&state, "ccc", "Den").await;
+        // Only for accepted nodes.
+        let path = format!("/api/nodes/{id}/screen");
+        let (status, _) = send(&state, Method::GET, &path, None, None, false).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+
+        let node = state.store.node(id).await.unwrap().unwrap();
+        assert_eq!(
+            screen_url(&state, &node).unwrap(),
+            format!("http://main:8066/tv?room=1&screen_for={id}")
+        );
+        let with = |screen: &str| Node {
+            screen: screen.to_owned(),
+            ..node.clone()
+        };
+        assert!(screen_url(&state, &with("lyrics"))
+            .unwrap()
+            .contains("/lyrics?room=1"));
+        assert_eq!(screen_url(&state, &with("status")), None);
+        assert_eq!(screen_url(&state, &with("off")), None);
     }
 
     #[tokio::test]
