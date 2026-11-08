@@ -37,8 +37,9 @@ xorriso -osirrox on -indev "$cache/$iso" -extract / "$work/iso" 2>/dev/null
 chmod -R u+w "$work/iso"
 mkdir -p "$work/iso/djinn"
 cp "$binary" "$work/iso/djinn/djinn"
-cp "$here/../common/install-files.sh" "$here/../common/config.toml" "$here/../common/djinn.service" "$work/iso/djinn/"
-chmod 755 "$work/iso/djinn/djinn" "$work/iso/djinn/install-files.sh"
+cp "$here/../common/install-files.sh" "$here/../common/config.toml" "$here/../common/djinn.service" \
+    "$here/../common/kiosk.sh" "$here/late.sh" "$work/iso/djinn/"
+chmod 755 "$work/iso/djinn/djinn" "$work/iso/djinn/install-files.sh" "$work/iso/djinn/kiosk.sh" "$work/iso/djinn/late.sh"
 
 # The answers go inside the installer's own startup files, where it looks
 # first.
@@ -47,22 +48,33 @@ cp "$here/preseed.cfg" "$work/initrd/preseed.cfg"
 [ -n "$extra" ] && cat "$extra" >> "$work/initrd/preseed.cfg"
 (cd "$work/initrd" && echo preseed.cfg | cpio -H newc -o --quiet | gzip) >> "$work/iso/install.amd/initrd.gz"
 
-# Straight to "Install DJINN" after a few seconds, on BIOS and UEFI PCs.
+# Straight to "Install DJINN" after a few seconds, on BIOS and UEFI PCs;
+# the second entry also sets up a screen (kiosk) showing the TV page.
 cat > "$work/iso/isolinux/isolinux.cfg" <<'CFG'
+ui vesamenu.c32
 default djinn
 prompt 0
-timeout 50
+timeout 100
+menu title DJINN
 label djinn
-  menu label Install DJINN (erases the disk you choose)
+  menu label Install DJINN (headless; erases the disk you choose)
   kernel /install.amd/vmlinuz
   append vga=788 initrd=/install.amd/initrd.gz auto=true priority=high --- quiet
+label screen
+  menu label Install DJINN with a screen (shows the TV page)
+  kernel /install.amd/vmlinuz
+  append vga=788 initrd=/install.amd/initrd.gz auto=true priority=high djinn_screen=1 --- quiet
 CFG
 cat > "$work/iso/boot/grub/grub.cfg" <<'CFG'
-set timeout=5
+set timeout=10
 set default=0
 insmod all_video
-menuentry "Install DJINN (erases the disk you choose)" {
+menuentry "Install DJINN (headless; erases the disk you choose)" {
     linux /install.amd/vmlinuz auto=true priority=high --- quiet
+    initrd /install.amd/initrd.gz
+}
+menuentry "Install DJINN with a screen (shows the TV page)" {
+    linux /install.amd/vmlinuz auto=true priority=high djinn_screen=1 --- quiet
     initrd /install.amd/initrd.gz
 }
 CFG

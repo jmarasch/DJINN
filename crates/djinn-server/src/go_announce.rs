@@ -21,6 +21,8 @@ const SERVER_ID: &str = "server_id";
 /// 1 to announce GO on the network, which is the default.
 pub const GO_DISCOVERABLE: &str = "go_discoverable";
 const SERVICE: &str = "_djinn-go._tcp.local.";
+/// What nodes being set up look for: main DJINNs letting nodes join.
+pub const MAIN_SERVICE: &str = "_djinn-main._tcp.local.";
 const MAX_NAME: usize = 40;
 
 /// This computer's own name, or something readable when it has none.
@@ -122,6 +124,20 @@ impl Announcer {
         port: u16,
         fingerprint: Option<String>,
     ) -> anyhow::Result<Self> {
+        Self::start_as(SERVICE, store, port, fingerprint).await
+    }
+
+    /// Announces this main DJINN to nodes being set up.
+    pub async fn start_main(store: &Store, port: u16) -> anyhow::Result<Self> {
+        Self::start_as(MAIN_SERVICE, store, port, None).await
+    }
+
+    async fn start_as(
+        service: &str,
+        store: &Store,
+        port: u16,
+        fingerprint: Option<String>,
+    ) -> anyhow::Result<Self> {
         let name = server_name(store).await?;
         let id = server_id(store).await?;
         let host = format!("{}.local.", host_label(&computer_name()));
@@ -134,7 +150,7 @@ impl Announcer {
         }
         // Named by id, since two servers may share a name and names can have
         // characters that don't survive every phone's mDNS.
-        let info = ServiceInfo::new(SERVICE, &format!("djinn-{id}"), &host, (), port, properties)?
+        let info = ServiceInfo::new(service, &format!("djinn-{id}"), &host, (), port, properties)?
             .enable_addr_auto();
         let fullname = info.get_fullname().to_owned();
         let daemon = ServiceDaemon::new()?;

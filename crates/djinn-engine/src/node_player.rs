@@ -42,6 +42,9 @@ pub struct NodeSettings {
     /// Volume trim, 0 to 1, on top of Main's volume.
     pub trim: f32,
     pub equalizer: EqualizerConfig,
+    /// Line up once when music starts, then play straight through: no speed
+    /// nudges, skips or padding to stay in step. Slowly drifts from Main.
+    pub free_run: bool,
 }
 
 /// What the schedule needs from a speaker (the real device, or a simulated
@@ -117,6 +120,7 @@ pub(crate) struct Schedule {
     last_measure: Option<i64>,
     volume: f32,
     equalizer: Equalizer,
+    free_run: bool,
 }
 
 impl Schedule {
@@ -132,6 +136,7 @@ impl Schedule {
             last_measure: None,
             volume: 1.0,
             equalizer: Equalizer::new(rate),
+            free_run: false,
         }
     }
 
@@ -148,6 +153,20 @@ impl Schedule {
             if let Some(due) = self.next_due.as_mut() {
                 *due += moved;
             }
+            // Nothing corrects a free-running speaker, so move it now.
+            if self.free_run && self.next_due.is_some() {
+                if moved > 0 {
+                    speaker.insert_silence(moved as f64 / 1e6);
+                } else {
+                    speaker.skip_ahead(-moved as f64 / 1e6);
+                }
+            }
+        }
+        if settings.free_run != self.free_run {
+            self.free_run = settings.free_run;
+            speaker.set_ratio(1.0);
+            self.drift.restart();
+            self.last_measure = None;
         }
         self.trim = settings.trim.clamp(0.0, 1.0);
         speaker.set_gain(self.volume * self.trim);
@@ -236,7 +255,9 @@ impl Schedule {
         if let Some(error) = self.error(now, speaker) {
             let dt = self.last_measure.map_or(0.0, |t| (now - t) as f64 / 1e6);
             self.last_measure = Some(now);
-            if dt > 0.0 && speaker.latency() > 0.05 {
+            if dt > 0.0 && self.free_run {
+                self.drift.watch(error, dt);
+            } else if dt > 0.0 && speaker.latency() > 0.05 {
                 if let Some(jump) = self.drift.update(error, dt) {
                     if jump > 0.0 {
                         speaker.skip_ahead(jump);
@@ -300,12 +321,15 @@ impl Schedule {
             if chunk.pos == 0 {
                 // A new chunk: line its start up with where playback is.
                 let gap = chunk.at - due;
-                if gap > (RESTART_GAP_SECS * 1e6) as i64 {
+                let restart = (RESTART_GAP_SECS * 1e6) as i64;
+                if gap > restart || (self.free_run && gap < -restart) {
                     // Main went quiet a while: line up from scratch.
                     self.next_due = None;
                     return;
                 }
-                if gap > seam {
+                if self.free_run {
+                    // Small differences are left alone: played straight on.
+                } else if gap > seam {
                     speaker.insert_silence(gap as f64 / 1e6);
                     self.next_due = Some(chunk.at);
                     continue;
@@ -595,6 +619,99 @@ mod tests {
             now += step;
         }
         worst
+    }
+
+    /// A speaker that counts corrections, each of which can be heard.
+    struct Counting {
+        inner: Simulated,
+        corrections: usize,
+    }
+
+    impl Speaker for Counting {
+        fn latency(&self) -> f64 {
+            self.inner.latency()
+        }
+        fn free_frames(&mut self) -> usize {
+            self.inner.free_frames()
+        }
+        fn write(&mut self, samples: &[f32]) {
+            self.inner.write(samples);
+        }
+        fn skip_ahead(&mut self, secs: f64) {
+            self.corrections += 1;
+            self.inner.skip_ahead(secs);
+        }
+        fn insert_silence(&mut self, secs: f64) {
+            self.corrections += 1;
+            self.inner.insert_silence(secs);
+        }
+        fn set_ratio(&mut self, relative: f64) {
+            self.inner.set_ratio(relative);
+        }
+        fn flush(&mut self) {
+            self.inner.flush();
+        }
+        fn set_paused(&mut self, paused: bool) {
+            self.inner.set_paused(paused);
+        }
+        fn set_gain(&mut self, gain: f32) {
+            self.inner.set_gain(gain);
+        }
+    }
+
+    /// Plays 20 s with Main's times wobbling by up to 8 ms, as over Wi-Fi.
+    /// Returns the corrections after the first one that lines it up.
+    fn corrections_with_jitter(free_run: bool) -> usize {
+        let rate = 48_000;
+        let chunk = 2400usize;
+        let mut speaker = Counting {
+            inner: Simulated::new(rate, 0.0),
+            corrections: 0,
+        };
+        let mut schedule = Schedule::new(rate, 0, 1.0);
+        schedule.set(
+            NodeSettings {
+                trim: 1.0,
+                free_run,
+                ..NodeSettings::default()
+            },
+            &mut speaker,
+        );
+        let (mut now, mut sent, mut lined_up) = (0i64, 0u64, 0usize);
+        let wobble = [0i64, 8000, -8000, 6000, -3000, 8000, -6000, 2000];
+        while now < 20_000_000 {
+            while (sent as i64 * 1_000_000) / i64::from(rate) < now + 300_000 {
+                let index = (sent as usize / chunk) % wobble.len();
+                schedule.push(
+                    Piece {
+                        mark: Mark::Audio {
+                            frames: chunk as u32,
+                            play_at_us: 100_000
+                                + (sent as i64 * 1_000_000) / i64::from(rate)
+                                + wobble[index],
+                        },
+                        samples: numbered(sent, chunk),
+                    },
+                    0,
+                    now,
+                    &mut speaker,
+                );
+                sent += chunk as u64;
+            }
+            schedule.tick(now, &mut speaker);
+            if now < 200_000 {
+                lined_up = speaker.corrections;
+            }
+            speaker.inner.advance(0.001);
+            now += 1000;
+        }
+        speaker.corrections - lined_up
+    }
+
+    #[test]
+    fn free_running_plays_straight_through_a_wobbly_clock() {
+        assert!(corrections_with_jitter(false) > 0, "in step: it corrects");
+        assert_eq!(corrections_with_jitter(true), 0);
     }
 
     #[test]

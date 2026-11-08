@@ -11,6 +11,10 @@
     name: string
     main: string | null
     main_name: string | null
+    /** Main's TV page for this node's room, once joined. */
+    screen?: string | null
+    /** Main DJINNs heard on this network letting nodes join. */
+    mains?: { name: string; address: string }[]
     main_code: string | null
     code: string | null
     room_id: number | null
@@ -49,12 +53,17 @@
     if (!res.ok) throw new Error((await res.json().catch(() => null))?.error ?? 'Could not save')
   }
 
+  const onScreen = new URLSearchParams(location.search).has('screen')
+
   async function load() {
     try {
       const res = await fetch('/api/node/status')
       if (!res.ok) throw new Error()
       status = await res.json()
       unreachable = false
+      // On the box's own screen (the kiosk opens /screen): show Main's TV
+      // page once joined.
+      if (onScreen && status?.pairing === 'joined' && status.screen) location.replace(status.screen)
       if (!name && status) name = status.name
     } catch {
       unreachable = true
@@ -104,12 +113,23 @@
     {:else if status}
       {#if showForm}
         <p class="muted">
-          This computer plays one room's music for a main DJINN. Enter the main DJINN's address (as shown in its
-          browser bar, like 192.168.1.10:8066). Turn on Admin &gt; Nodes &gt; "Allow nodes to ask to join" there first.
+          This computer plays one room's music for a main DJINN. Turn on Admin &gt; Nodes &gt; "Allow nodes to ask to
+          join" there first, and it appears here.
         </p>
+        {#if status.mains?.length}
+          <div class="mains">
+            {#each status.mains as main (main.address)}
+              <button type="button" class:primary={address === main.address} onclick={() => (address = main.address)}>
+                <b>{main.name}</b> <span class="small">{main.address}</span>
+              </button>
+            {/each}
+          </div>
+        {:else}
+          <p class="small muted"><span class="spinner" aria-hidden="true"></span> Looking for main DJINNs on this network...</p>
+        {/if}
         <form onsubmit={connect}>
           <label>
-            Main DJINN's address
+            Main DJINN's address (pick one above, or type it)
             <input bind:value={address} placeholder="192.168.1.10:8066" autocapitalize="none" required />
           </label>
           <label>
@@ -222,6 +242,13 @@
 </main>
 
 <style>
+  .mains {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+
   main.narrow {
     max-width: 460px;
     margin: 0 auto;

@@ -61,6 +61,15 @@ impl DriftControl {
         None
     }
 
+    /// Only measures, for showing: no correction comes of it.
+    pub fn watch(&mut self, error: f64, dt: f64) {
+        let filtered = match self.filtered {
+            Some(f) => f + (error - f) * (1.0 - (-dt / FILTER_SECS).exp()),
+            None => error,
+        };
+        self.filtered = Some(filtered);
+    }
+
     /// Starts measuring afresh (after a jump), keeping the learned drift.
     pub fn restart(&mut self) {
         self.filtered = None;

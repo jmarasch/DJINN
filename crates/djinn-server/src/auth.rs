@@ -905,13 +905,28 @@ struct BootstrapStatus {
     /// No setup link needed (a box without a screen, before the admin
     /// account exists).
     open: bool,
+    /// Where to open this from another device, while setup is open.
+    address: Option<String>,
 }
 
 async fn bootstrap_status(State(state): State<AppState>) -> ApiResult<Json<BootstrapStatus>> {
     let needed = !state.store.admin_exists().await?;
+    let open = needed && state.open_setup();
     Ok(Json(BootstrapStatus {
         needed,
-        open: needed && state.open_setup(),
+        open,
+        address: open.then(|| state.join_url.to_string()),
+    }))
+}
+
+/// What a screen plugged into this box shows (the kiosk opens this): the
+/// first-start page until the box is set up, then the TV page.
+pub async fn screen(State(state): State<AppState>) -> ApiResult<axum::response::Redirect> {
+    let setup = state.open_setup() && !state.store.admin_exists().await?;
+    Ok(axum::response::Redirect::temporary(if setup {
+        "/setup?screen=1"
+    } else {
+        "/tv"
     }))
 }
 

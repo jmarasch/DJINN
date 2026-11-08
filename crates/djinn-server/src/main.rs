@@ -312,6 +312,7 @@ async fn run() -> anyhow::Result<()> {
         tracing::error!(error = %format!("{e:#}"), "starting the rooms failed");
     }
     rooms_rt::watch_quiet(state.clone());
+    nodes::watch_joining(state.clone(), config.server.listen.port());
 
     let guest_mode = settings::flag(&store, settings::GUEST_MODE, false).await?;
     state
@@ -584,6 +585,8 @@ fn app(state: AppState) -> Router {
     Router::new()
         .nest("/api", api::router())
         .merge(cast_api::stream_router())
+        // What a screen plugged into this box shows (the kiosk opens it).
+        .route("/screen", axum::routing::get(auth::screen))
         .fallback(web::static_handler)
         .layer(middleware::from_fn(security::same_origin))
         .layer(middleware::from_fn_with_state(state.clone(), party_headers))

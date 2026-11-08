@@ -1,6 +1,7 @@
 <script lang="ts">
   import { t } from './lib/i18n.svelte'
   import { onMount } from 'svelte'
+  import { api } from './lib/api'
   import Icon from './lib/Icon.svelte'
   import JoinCard from './lib/JoinCard.svelte'
   import { goBack, navigation, param, route } from './lib/router.svelte'
@@ -49,6 +50,11 @@
     const me = await refreshMe()
     if (me) connect()
     else await refreshMode()
+    // A box nobody has set up: there's no account to sign in with yet.
+    if (!me && !onSetupPage) {
+      const status = await api.bootstrapStatus().catch(() => null)
+      if (status?.open) location.replace('/setup')
+    }
   })
 
   // Signing out (or being signed out) re-checks how to get back in.

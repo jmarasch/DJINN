@@ -129,6 +129,20 @@ pub struct Status {
     pub cached: usize,
     /// The room whose music Main sends it now.
     pub audio_room: Option<i64>,
+    /// The page a plugged-in screen shows once joined (Main's TV page for
+    /// this node's room).
+    pub screen: Option<String>,
+    /// Main DJINNs heard on the network letting nodes join, while this node
+    /// hasn't got one. Other nodes don't announce this.
+    pub mains: Vec<FoundMain>,
+}
+
+/// A main DJINN heard on the network.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct FoundMain {
+    pub name: String,
+    /// What to enter as Main's address, like "192.168.1.10:8066".
+    pub address: String,
 }
 
 /// The node's running parts.
@@ -186,6 +200,8 @@ impl Node {
                 offline: false,
                 cached: 0,
                 audio_room: None,
+                screen: None,
+                mains: Vec::new(),
             })),
             wake: Arc::new(Notify::new()),
             offset: Arc::new(AtomicI64::new(0)),
@@ -445,6 +461,7 @@ impl Node {
                 s.room_id = Some(room);
             }
             s.audio_room = answer["audio_room"].as_i64();
+            s.screen = answer["screen"].as_str().map(str::to_owned);
         });
         if let Ok(upcoming) =
             serde_json::from_value::<Vec<crate::nodes::Upcoming>>(answer["upcoming"].clone())
@@ -852,6 +869,79 @@ impl Node {
     }
 }
 
+impl Node {
+    /// Listens for main DJINNs on the network while this node has none.
+    fn find_mains(self) {
+        let settled =
+            |node: &Node| matches!(node.status().pairing, Pairing::Joined | Pairing::Waiting);
+        loop {
+            if settled(&self) {
+                std::thread::sleep(Duration::from_secs(5));
+                continue;
+            }
+            let browsing = mdns_sd::ServiceDaemon::new().and_then(|daemon| {
+                let events = daemon.browse(crate::go_announce::MAIN_SERVICE)?;
+                Ok((daemon, events))
+            });
+            let (daemon, events) = match browsing {
+                Ok(browsing) => browsing,
+                Err(e) => {
+                    tracing::debug!(error = %e, "can't listen for main DJINNs");
+                    std::thread::sleep(Duration::from_secs(30));
+                    continue;
+                }
+            };
+            let mut found = std::collections::BTreeMap::new();
+            while !settled(&self) && !events.is_disconnected() {
+                match events.recv_timeout(Duration::from_secs(1)) {
+                    Ok(mdns_sd::ServiceEvent::ServiceResolved(service)) => {
+                        let addresses: Vec<std::net::Ipv4Addr> = service
+                            .get_addresses_v4()
+                            .into_iter()
+                            .filter_map(|ip| ip.to_string().parse().ok())
+                            .collect();
+                        let Some(ip) = best_address(&addresses) else {
+                            continue;
+                        };
+                        let name = service
+                            .get_property_val_str("name")
+                            .map_or_else(|| ip.to_string(), str::to_owned);
+                        let address = format!("{ip}:{}", service.get_port());
+                        found.insert(
+                            service.get_fullname().to_owned(),
+                            FoundMain { name, address },
+                        );
+                    }
+                    Ok(mdns_sd::ServiceEvent::ServiceRemoved(_, fullname)) => {
+                        found.remove(&fullname);
+                    }
+                    _ => continue,
+                }
+                let list: Vec<FoundMain> = found.values().cloned().collect();
+                self.update(|s| s.mains = list);
+            }
+            let _ = daemon.shutdown();
+            self.update(|s| s.mains = Vec::new());
+        }
+    }
+}
+
+/// The address a server is most likely reachable at: a home network's
+/// before a container's or VPN's.
+fn best_address(addresses: &[std::net::Ipv4Addr]) -> Option<std::net::Ipv4Addr> {
+    let rank = |ip: &std::net::Ipv4Addr| match ip.octets() {
+        [192, 168, ..] => 0,
+        [10, ..] => 1,
+        [172, ..] => 2,
+        _ => 3,
+    };
+    addresses
+        .iter()
+        .filter(|ip| !ip.is_loopback() && !ip.is_link_local())
+        .min_by_key(|ip| rank(ip))
+        .copied()
+}
+
 /// The player's settings from Main's.
 fn node_settings(audio: Option<&crate::nodes::AudioSettings>) -> djinn_engine::NodeSettings {
     match audio {
@@ -859,6 +949,7 @@ fn node_settings(audio: Option<&crate::nodes::AudioSettings>) -> djinn_engine::N
             delay_ms: a.delay_ms.clamp(0, 2000) as u32,
             trim: a.trim.clamp(0.0, 1.0) as f32,
             equalizer: a.equalizer.engine_config(),
+            free_run: a.free_run,
         },
         None => djinn_engine::NodeSettings {
             trim: 1.0,
@@ -1038,6 +1129,9 @@ fn pinned_client_with(
 pub fn router(node: Node) -> Router {
     Router::new()
         .route("/", get(|| async { Redirect::to("/node") }))
+        // A plugged-in screen: the node's page (pairing codes) until it
+        // joins, then Main's TV page for its room.
+        .route("/screen", get(|| async { Redirect::to("/node?screen=1") }))
         .route("/api/node/status", get(status))
         .route("/api/node/connect", post(connect))
         .route("/api/node/ask-again", post(ask_again))
@@ -1118,6 +1212,10 @@ pub async fn serve(
     tokio::spawn(node.clone().run_clock());
     tokio::spawn(node.clone().run_audio());
     tokio::spawn(node.clone().run_cache());
+    let browsing = node.clone();
+    std::thread::Builder::new()
+        .name("djinn-find-mains".to_owned())
+        .spawn(move || browsing.find_mains())?;
     let listener = tokio::net::TcpListener::bind(listen).await?;
     tracing::info!(%listen, "running as a node; its page is at /node");
     axum::serve(listener, router(node))
@@ -1133,6 +1231,21 @@ pub async fn serve(
 mod tests {
     use super::*;
     use crate::state::AppState;
+
+    #[test]
+    fn the_home_network_address_is_preferred() {
+        let ip = |s: &str| s.parse::<std::net::Ipv4Addr>().unwrap();
+        assert_eq!(
+            best_address(&[
+                ip("172.17.0.1"),
+                ip("127.0.0.1"),
+                ip("192.168.0.81"),
+                ip("10.0.0.2")
+            ]),
+            Some(ip("192.168.0.81"))
+        );
+        assert_eq!(best_address(&[ip("127.0.0.1")]), None);
+    }
 
     #[test]
     fn addresses_become_encrypted_urls() {

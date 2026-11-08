@@ -1349,6 +1349,8 @@ export interface NodeAudio {
   equalizer: EqualizerSettings
   /** What to do once Main is gone and what was loaded has played. */
   offline: 'stop' | 'cached'
+  /** Plays straight through instead of correcting itself against Main. */
+  free_run?: boolean
 }
 
 export interface NodeSpeaker {

@@ -75,6 +75,21 @@
       <option value="cached">Play what's loaded, then keep playing cached songs</option>
     </select>
   </label>
+  <label class="check">
+    <input
+      type="checkbox"
+      checked={!draft.free_run}
+      onchange={(e) => {
+        draft.free_run = !e.currentTarget.checked
+        changed(0)
+      }}
+    />
+    Keep in step with the main DJINN
+  </label>
+  <p class="small muted">
+    On: this node makes small corrections to stay with the main speakers. Off: it lines up when music starts, then plays
+    straight through and slowly drifts. Turn it off if you hear clicks or pops, to see whether the corrections cause them.
+  </p>
   {#if error}<p class="error">{error}</p>{/if}
 </div>
 
@@ -100,5 +115,11 @@
     display: flex;
     flex-direction: column;
     gap: 4px;
+  }
+
+  label.check {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
   }
 </style>

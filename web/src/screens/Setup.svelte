@@ -12,8 +12,11 @@
   let confirm = $state('')
   let error = $state('')
   let busy = $state(false)
-  /** Main (the full DJINN) or a node (plays a room for a main DJINN). */
-  let kind = $state<'main' | 'node'>('main')
+  /** Main (the full DJINN) or a node (plays a room for a main DJINN); asked first. */
+  let kind = $state<'main' | 'node' | null>(null)
+  /** On the box's own screen (the kiosk opens /screen). */
+  const onScreen = new URLSearchParams(location.search).has('screen')
+  let address = $state<string | null>(null)
   let becomingNode = $state(false)
 
   async function becomeNode() {
@@ -42,10 +45,27 @@
     }
   }
 
-  onMount(async () => {
-    const status = await api.bootstrapStatus()
-    needed = status.needed
-    open = status.open ?? false
+  onMount(() => {
+    void api.bootstrapStatus().then((status) => {
+      needed = status.needed
+      open = status.open ?? false
+      address = status.address ?? null
+    })
+    if (!onScreen) return
+    // Set up from a phone: follow along on the screen.
+    const timer = setInterval(async () => {
+      try {
+        const node = await fetch('/api/node/status')
+        if (node.ok && node.headers.get('content-type')?.includes('json')) {
+          location.replace('/node?screen=1')
+          return
+        }
+        if (!(await api.bootstrapStatus()).needed) location.replace('/tv')
+      } catch {
+        // Restarting; the next look finds out.
+      }
+    }, 3000)
+    return () => clearInterval(timer)
   })
 
   function finish() {
@@ -100,8 +120,24 @@
     {#if error}<p class="error">{error}</p>{/if}
     <div class="choices">
       <button class="primary" disabled={busy || (!token && !open)} onclick={becomeNode}>Make this a node</button>
-      <button disabled={busy} onclick={() => (kind = 'main')}>Back</button>
+      <button disabled={busy} onclick={() => (kind = null)}>Back</button>
     </div>
+  </div>
+{:else if needed && kind === null}
+  <div class="card">
+    <h1>Welcome to DJINN</h1>
+    <p class="muted">What will this computer be?</p>
+    <div class="kinds">
+      <button class="primary" onclick={() => (kind = 'main')}>
+        <b>Main DJINN</b><br /><span class="small">Holds the music library and runs the party.</span>
+      </button>
+      <button class="primary" onclick={() => (kind = 'node')}>
+        <b>Node</b><br /><span class="small">Plays a room for a main DJINN you already have.</span>
+      </button>
+    </div>
+    {#if onScreen && address}
+      <p class="muted">No keyboard here? Open <b>{address}/setup</b> on a phone or computer on this network.</p>
+    {/if}
   </div>
 {:else if needed}
   <form class="card" onsubmit={submit}>
@@ -124,13 +160,18 @@
     </label>
     {#if error}<p class="error">{error}</p>{/if}
     <button class="primary" disabled={busy || (!token && !open)}>{busy ? 'Creating...' : 'Create admin'}</button>
-    <button type="button" class="link" onclick={() => (kind = 'node')}>
-      Already have a main DJINN? Set this computer up as a node instead
-    </button>
+    <button type="button" class="link" onclick={() => (kind = null)}>Back</button>
   </form>
 {/if}
 
 <style>
+  .kinds {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+
   .choices {
     display: flex;
     gap: 8px;

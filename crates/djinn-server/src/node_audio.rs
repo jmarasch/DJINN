@@ -34,6 +34,10 @@ const BACKLOG: usize = 512;
 const POLL: Duration = Duration::from_millis(5);
 
 /// Encodes one piece of the stream as a frame.
+/// How often a quiet stream says it's still there (well inside the node's
+/// 10 second read timeout).
+const STILL_HERE_EVERY: std::time::Duration = std::time::Duration::from_secs(3);
+
 pub fn encode(piece: &Piece) -> Bytes {
     let mut body = Vec::with_capacity(1 + 12 + piece.samples.len() * 2);
     match piece.mark {
@@ -250,7 +254,7 @@ pub async fn stream(
     let (first, listening) = hub.listen();
     let rate = hub.rate();
     tracing::info!(node = %node.name, "node listening");
-    let live = frames_for(first, listening);
+    let live = frames_for(first, listening, hub);
     let body = Body::from_stream(futures_util::StreamExt::map(
         live,
         Ok::<_, std::convert::Infallible>,
@@ -270,16 +274,30 @@ pub async fn stream(
 }
 
 /// The first frames, then each live one; a node that falls behind skips
-/// ahead (the next chunk's time says where it belongs).
-fn frames_for(first: Vec<Bytes>, listening: Listening) -> impl futures_util::Stream<Item = Bytes> {
+/// ahead (the next chunk's time says where it belongs). While nothing plays,
+/// the volume goes out every few seconds so the node knows Main is still
+/// there and doesn't take a quiet room for a lost server.
+fn frames_for(
+    first: Vec<Bytes>,
+    listening: Listening,
+    hub: std::sync::Arc<Hub>,
+) -> impl futures_util::Stream<Item = Bytes> {
     let first = futures_util::stream::iter(first);
     // The stream owns `listening`, so the node counts until it's gone.
-    let live = futures_util::stream::unfold(listening, |mut listening| async move {
+    let live = futures_util::stream::unfold((listening, hub), |(mut listening, hub)| async move {
         loop {
-            match listening.frames.recv().await {
-                Ok(frame) => return Some((frame, listening)),
-                Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                Err(broadcast::error::RecvError::Closed) => return None,
+            match tokio::time::timeout(STILL_HERE_EVERY, listening.frames.recv()).await {
+                Ok(Ok(frame)) => return Some((frame, (listening, hub))),
+                Ok(Err(broadcast::error::RecvError::Lagged(_))) => continue,
+                Ok(Err(broadcast::error::RecvError::Closed)) => return None,
+                Err(_) => {
+                    let volume = hub.state.lock().map(|s| s.0).unwrap_or(1.0);
+                    let frame = encode(&Piece {
+                        mark: Mark::Volume(volume),
+                        samples: Vec::new(),
+                    });
+                    return Some((frame, (listening, hub)));
+                }
             }
         }
     });

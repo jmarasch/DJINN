@@ -57,6 +57,7 @@
       const res = await fetch(query ? `/api/tv?${query}` : '/api/tv')
       if (!res.ok) {
         error = (await res.json().catch(() => null))?.error ?? 'The TV page is not available.'
+        void becameNode()
         setTimeout(load, 10_000)
         return
       }
@@ -73,7 +74,19 @@
       if (casting && !soundOn) setTimeout(toggleSound, 0)
     } catch {
       error = 'Cannot reach the jukebox. Retrying...'
+      void becameNode()
       setTimeout(load, 5_000)
+    }
+  }
+
+  /** This box was just set up as a node (a kiosk screen opened this page
+   * before that): show the node's page, with its pairing codes. */
+  async function becameNode() {
+    try {
+      const res = await fetch('/api/node/status')
+      if (res.ok && res.headers.get('content-type')?.includes('json')) location.replace('/node?screen=1')
+    } catch {
+      // Still restarting; the next try asks again.
     }
   }
 

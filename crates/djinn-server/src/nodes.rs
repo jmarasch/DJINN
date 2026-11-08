@@ -229,6 +229,9 @@ pub struct AudioSettings {
     pub equalizer: EqualizerSettings,
     /// "stop" or "cached".
     pub offline: String,
+    /// Plays straight through instead of correcting itself against Main.
+    #[serde(default)]
+    pub free_run: bool,
 }
 
 impl AudioSettings {
@@ -243,6 +246,7 @@ impl AudioSettings {
                 .and_then(|e| serde_json::from_str(e).ok())
                 .unwrap_or_default(),
             offline: node.offline.clone(),
+            free_run: node.free_run,
         }
     }
 }
@@ -271,6 +275,7 @@ async fn save_audio(state: &AppState, id: i64, audio: &AudioSettings) -> ApiResu
                 trim: audio.trim,
                 equalizer: Some(&equalizer),
                 offline: &audio.offline,
+                free_run: audio.free_run,
             },
         )
         .await?;
@@ -337,6 +342,8 @@ struct MeAnswer {
     /// The room whose music it plays now (its room's leader, or Main's while
     /// a quiet room follows Main); a change means reconnecting.
     audio_room: i64,
+    /// What a screen plugged into the node shows: its room's TV page.
+    screen: String,
 }
 
 /// A node checking in: still waiting, accepted (and which room), or (401)
@@ -361,6 +368,11 @@ async fn me(
         audio,
         upcoming,
         audio_room: state.rooms.audio_leader(node.room_id),
+        screen: format!(
+            "{}/tv?room={}",
+            state.join_url.trim_end_matches('/'),
+            node.room_id
+        ),
         status: node.status,
         name: node.name,
         room_id: node.room_id,
@@ -455,7 +467,77 @@ async fn accept(
         ));
     }
     tracing::info!(node = id, by = %me.user.username, "node accepted");
+    give_own_room(&state, id).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// A node just accepted gets a room of its own, named after it (unless an
+/// admin already placed it). The room plays along with Main until someone
+/// asks for a song there, so the node isn't silent.
+async fn give_own_room(state: &AppState, id: i64) -> anyhow::Result<()> {
+    let Some(node) = state.store.node(id).await? else {
+        return Ok(());
+    };
+    if node.room_id != djinn_store::MAIN_ROOM {
+        return Ok(());
+    }
+    let mut room = None;
+    for attempt in 1..=20 {
+        let name = if attempt == 1 {
+            node.name.clone()
+        } else {
+            format!("{} {attempt}", node.name)
+        };
+        match state.store.create_room(&name).await {
+            Ok(made) => {
+                room = Some(made);
+                break;
+            }
+            Err(djinn_store::RoomError::NameTaken) => {}
+            Err(e) => return Err(e.into()),
+        }
+    }
+    let Some(room) = room else {
+        return Ok(());
+    };
+    state
+        .store
+        .set_setting(
+            &crate::jukebox::room_key(room.id, crate::rooms_rt::FOLLOW_MAIN),
+            "1",
+        )
+        .await?;
+    state.store.set_node_room(id, room.id).await?;
+    crate::rooms_rt::sync(state).await?;
+    tracing::info!(node = %node.name, room = room.id, "node has its own room");
+    Ok(())
+}
+
+/// Lets nodes being set up find this server: announced on the network while
+/// `nodes_join` is on. Nodes never announce this, so they don't list each
+/// other.
+pub fn watch_joining(state: AppState, port: u16) {
+    tokio::spawn(async move {
+        let mut announcer: Option<crate::go_announce::Announcer> = None;
+        loop {
+            let open = settings::flag(&state.store, NODES_JOIN, false)
+                .await
+                .unwrap_or(false);
+            if open && announcer.is_none() {
+                match crate::go_announce::Announcer::start_main(&state.store, port).await {
+                    Ok(started) => announcer = Some(started),
+                    Err(e) => {
+                        tracing::warn!(error = %format!("{e:#}"), "couldn't announce to nodes")
+                    }
+                }
+            } else if !open {
+                if let Some(stopping) = announcer.take() {
+                    stopping.stop();
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        }
+    });
 }
 
 #[derive(Deserialize)]
@@ -618,6 +700,64 @@ mod tests {
             .await
             .unwrap();
         (status, String::from_utf8_lossy(&bytes).into_owned())
+    }
+
+    async fn ask_to_join(state: &AppState, node_id: &str, name: &str) -> i64 {
+        state
+            .store
+            .request_node_join(&djinn_store::JoinRequest {
+                node_id,
+                name,
+                secret_hash: "hash",
+                address: None,
+                version: None,
+                platform: None,
+            })
+            .await
+            .unwrap();
+        state
+            .store
+            .node_by_node_id(node_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .id
+    }
+
+    #[tokio::test]
+    async fn an_accepted_node_gets_its_own_room_that_follows_main() {
+        let state = AppState::for_tests().await;
+        let first = ask_to_join(&state, "aaa", "Kitchen").await;
+        give_own_room(&state, first).await.unwrap();
+        let room = state.store.node(first).await.unwrap().unwrap().room_id;
+        assert_ne!(room, djinn_store::MAIN_ROOM);
+        assert_eq!(
+            state.store.room(room).await.unwrap().unwrap().name,
+            "Kitchen"
+        );
+        assert!(
+            crate::rooms_rt::quiet_rules(&state.store, room)
+                .await
+                .unwrap()
+                .follow_main
+        );
+
+        // A second node with that name gets a room of its own too.
+        let second = ask_to_join(&state, "bbb", "Kitchen").await;
+        give_own_room(&state, second).await.unwrap();
+        let other = state.store.node(second).await.unwrap().unwrap().room_id;
+        assert_ne!(other, room);
+        assert_eq!(
+            state.store.room(other).await.unwrap().unwrap().name,
+            "Kitchen 2"
+        );
+
+        // One an admin already placed stays where it is.
+        give_own_room(&state, first).await.unwrap();
+        assert_eq!(
+            state.store.node(first).await.unwrap().unwrap().room_id,
+            room
+        );
     }
 
     async fn admin_with_password(state: &AppState) -> String {
