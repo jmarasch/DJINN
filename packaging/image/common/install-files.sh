@@ -3,7 +3,8 @@
 # run inside the installer's target): the program in /opt/djinn, a system
 # account `djinn` in the audio group, /etc/djinn/config.toml, data in
 # /var/lib/djinn, music in /srv/music, the systemd service (enabled), and
-# the hostname `djinn` (so it's http://djinn.local:8066 on the network).
+# the hostname `djinn` (so it's http://djinn.local:8066 on the network)
+# unless DJINN_KEEP_HOSTNAME=1 (the PC installer asks for a name).
 #
 # It only writes files, so a Pi's file system can be prepared from a PC
 # without running anything built for the Pi.
@@ -39,19 +40,47 @@ fi
 install -d -m 750 "$root/var/lib/djinn"
 chown -R "$uid:$uid" "$root/opt/djinn" "$root/var/lib/djinn" "$root/srv/music"
 
-echo djinn > "$root/etc/hostname"
-if grep -q '^127.0.1.1' "$root/etc/hosts" 2>/dev/null; then
-    sed -i 's/^127\.0\.1\.1.*/127.0.1.1\tdjinn/' "$root/etc/hosts"
-else
-    printf '127.0.1.1\tdjinn\n' >> "$root/etc/hosts"
+if [ "${DJINN_KEEP_HOSTNAME:-}" != 1 ]; then
+    echo djinn > "$root/etc/hostname"
+    if grep -q '^127.0.1.1' "$root/etc/hosts" 2>/dev/null; then
+        sed -i 's/^127\.0\.1\.1.*/127.0.1.1\tdjinn/' "$root/etc/hosts"
+    else
+        printf '127.0.1.1\tdjinn\n' >> "$root/etc/hosts"
+    fi
 fi
 
 # The address on a plugged-in screen until DJINN writes its own.
 install -d -m 755 "$root/etc/issue.d"
-printf 'DJINN: open http://djinn.local:8066 on a phone or computer on this network\n\n' > "$root/etc/issue.d/djinn.issue"
+# \n is the box's own name to the login screen.
+printf 'DJINN: open http://\\n.local:8066 on a phone or computer on this network\n\n' > "$root/etc/issue.d/djinn.issue"
 # DJINN (not root) rewrites the banner at each start, with the address it
 # found; this makes the file its own.
 install -d -m 755 "$root/etc/tmpfiles.d"
+# Debian's automatic security updates, daily. The PC disc installs them; a
+# Raspberry Pi image gets them on its first start with a network (the image
+# is put together on a PC, where its packages can't be installed).
+install -d -m 755 "$root/etc/apt/apt.conf.d"
+cat > "$root/etc/apt/apt.conf.d/20auto-upgrades" <<'APT'
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Unattended-Upgrade "1";
+APT
+cat > "$root/etc/systemd/system/djinn-auto-updates.service" <<'UNIT'
+[Unit]
+Description=Install automatic security updates (once)
+Wants=network-online.target
+After=network-online.target
+ConditionPathExists=!/usr/bin/unattended-upgrade
+
+[Service]
+Type=oneshot
+Environment=DEBIAN_FRONTEND=noninteractive
+ExecStart=/bin/sh -c 'apt-get update && apt-get install -y --no-install-recommends unattended-upgrades'
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+ln -sf /etc/systemd/system/djinn-auto-updates.service "$root/etc/systemd/system/multi-user.target.wants/djinn-auto-updates.service"
+
 cat > "$root/etc/tmpfiles.d/djinn.conf" <<'TMP'
 d /run/issue.d 0755 root root -
 f /run/issue.d/djinn.issue 0644 djinn djinn -

@@ -197,7 +197,10 @@ async fn run() -> anyhow::Result<()> {
                 .unwrap_or_default();
             write_banner(
                 banner,
-                &format!("DJINN node: {url}/node (or http://djinn.local:8066/node)\n"),
+                &format!(
+                    "DJINN node: {url}/node (or http://{}.local:8066/node)\n",
+                    go_announce::computer_name()
+                ),
             );
         }
         return node_mode::serve(store, &config.database.path, config.server.listen).await;
@@ -345,10 +348,16 @@ async fn run() -> anyhow::Result<()> {
     if let Some(banner) = &config.server.console_banner {
         let text = match &setup_url {
             Some(_) if config.server.open_setup => {
-                format!("DJINN: set it up at {base_url}/setup (or http://djinn.local:8066/setup)\n")
+                format!(
+                    "DJINN: set it up at {base_url}/setup (or http://{}.local:8066/setup)\n",
+                    go_announce::computer_name()
+                )
             }
             Some(url) => format!("DJINN: set it up at {url}\n"),
-            None => format!("DJINN is running: {base_url} (or http://djinn.local:8066)\n"),
+            None => format!(
+                "DJINN is running: {base_url} (or http://{}.local:8066)\n",
+                go_announce::computer_name()
+            ),
         };
         write_banner(banner, &text);
     }
