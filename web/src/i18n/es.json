@@ -505,5 +505,9 @@
   "problem.file_missing": "Falta el archivo",
   "problem.wont_play": "El archivo no se reproduce",
   "library.jump_to": "Ir a {label}",
-  "update.mismatch": "La descarga no coincide con lo que el servidor dijo que enviaba."
+  "update.mismatch": "La descarga no coincide con lo que el servidor dijo que enviaba.",
+  "go.album_queued": {
+    "one": "Se añadió {n} canción a la cola",
+    "other": "Se añadieron {n} canciones a la cola"
+  }
 }

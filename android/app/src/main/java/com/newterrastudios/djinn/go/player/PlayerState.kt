@@ -326,8 +326,20 @@ class PlayerState(private val api: GoApi) {
         positionMs = ms
     }
 
+    /**
+     * Plays a song from Up next. The songs between it and the one playing go,
+     * as if skipped through; the one playing stays behind it for Previous.
+     */
     fun jumpTo(index: Int) {
-        controller?.seekToDefaultPosition(index)
+        val player = controller ?: return
+        val next = player.currentMediaItemIndex + 1
+        // Shuffled, the list's order isn't the playing order: just jump.
+        if (!player.shuffleModeEnabled && index > next) {
+            player.removeMediaItems(next, index)
+            player.seekToDefaultPosition(next)
+        } else {
+            player.seekToDefaultPosition(index)
+        }
     }
 
     fun remove(index: Int) {

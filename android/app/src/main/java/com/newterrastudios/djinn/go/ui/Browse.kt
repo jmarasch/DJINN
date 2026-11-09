@@ -982,6 +982,18 @@ fun AlbumScreen(id: Long, nav: Nav) {
                         }
                         LikeHeart(album.id, nav.likedAlbums, album.title, nav.api::setAlbumLike, nav)
                     }
+                    if (album.tracks.isNotEmpty()) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            TextButton(onClick = {
+                                album.tracks.forEach(nav.player::playNext)
+                                nav.message = t("go.album_queued", "n" to album.tracks.size)
+                            }) { Text(t("menu.play_next")) }
+                            TextButton(onClick = {
+                                album.tracks.forEach(nav.player::addToEnd)
+                                nav.message = t("go.album_queued", "n" to album.tracks.size)
+                            }) { Text(t("menu.add_to_end")) }
+                        }
+                    }
                     DownloadAll(album.tracks, nav)
                 }
             }

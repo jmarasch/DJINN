@@ -505,5 +505,9 @@
   "problem.file_missing": "Fichier manquant",
   "problem.wont_play": "Le fichier ne se lit pas",
   "library.jump_to": "Aller à {label}",
-  "update.mismatch": "Le téléchargement ne correspond pas à ce que le serveur annonçait."
+  "update.mismatch": "Le téléchargement ne correspond pas à ce que le serveur annonçait.",
+  "go.album_queued": {
+    "one": "{n} chanson ajoutée à la file",
+    "other": "{n} chansons ajoutées à la file"
+  }
 }

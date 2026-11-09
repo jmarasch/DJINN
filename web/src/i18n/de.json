@@ -505,5 +505,9 @@
   "problem.file_missing": "Datei fehlt",
   "problem.wont_play": "Datei lässt sich nicht abspielen",
   "library.jump_to": "Springe zu {label}",
-  "update.mismatch": "Der Download passt nicht zu dem, was der Server angekündigt hat."
+  "update.mismatch": "Der Download passt nicht zu dem, was der Server angekündigt hat.",
+  "go.album_queued": {
+    "one": "{n} Lied zur Warteschlange hinzugefügt",
+    "other": "{n} Lieder zur Warteschlange hinzugefügt"
+  }
 }

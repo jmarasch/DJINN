@@ -505,5 +505,9 @@
   "problem.file_missing": "File is missing",
   "problem.wont_play": "File won't play",
   "library.jump_to": "Jump to {label}",
-  "update.mismatch": "The download didn't match what the server said it was sending."
+  "update.mismatch": "The download didn't match what the server said it was sending.",
+  "go.album_queued": {
+    "one": "Added {n} song to the queue",
+    "other": "Added {n} songs to the queue"
+  }
 }
