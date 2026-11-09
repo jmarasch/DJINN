@@ -369,19 +369,15 @@ export function moveInQueue(from: number, to: number) {
   saveResume()
 }
 
-/** Plays a song from Up next. The songs between it and the one playing go,
- * as if skipped through; the one playing stays behind it for Previous. */
+/** Plays a song from Up next now. The songs that were ahead of it stay
+ * coming up, after it; the one playing stays behind it for Previous. */
 export function jumpTo(index: number) {
   report()
-  const from = player.index + 1
-  if (player.index >= 0 && index > from) {
-    for (const gone of player.queue.splice(from, index - from)) {
-      added.delete(gone)
-      addedToEnd.delete(gone)
-      const at = unshuffled.findIndex((t) => t.id === gone.id)
-      if (at >= 0) unshuffled.splice(at, 1)
-    }
-    index = from
+  const next = player.index + 1
+  if (player.index >= 0 && index > next) {
+    const [song] = player.queue.splice(index, 1)
+    player.queue.splice(next, 0, song)
+    index = next
     preloaded = null
   }
   start(index)
