@@ -2,43 +2,31 @@
 
 export const adminGroups = [
   {
-    label: 'Party',
+    label: 'Dashboard',
+    tabs: [{ id: 'home', label: 'Dashboard' }],
+  },
+  {
+    label: 'Settings',
     tabs: [
-      { id: 'home', label: 'Home' },
-      { id: 'rules', label: 'Rules' },
+      { id: 'rules', label: 'Party' },
       { id: 'smart', label: 'Smart play' },
       { id: 'audio', label: 'Audio' },
-      { id: 'stats', label: 'Stats' },
-      { id: 'log', label: 'Request log' },
-    ],
-  },
-  {
-    label: 'People',
-    tabs: [
       { id: 'users', label: 'Users' },
       { id: 'go', label: 'DJINN GO' },
-    ],
-  },
-  {
-    label: 'House',
-    tabs: [
       { id: 'rooms', label: 'Rooms' },
       { id: 'nodes', label: 'Nodes' },
-    ],
-  },
-  {
-    label: 'Library',
-    tabs: [
       { id: 'library', label: 'Library' },
-      { id: 'problems', label: 'Problems' },
       { id: 'ai', label: 'AI' },
+      { id: 'system', label: 'System' },
     ],
   },
   {
-    label: 'System',
+    label: 'Metrics and logs',
     tabs: [
-      { id: 'system', label: 'System' },
-      { id: 'about', label: 'About' },
+      { id: 'stats', label: 'Stats' },
+      { id: 'log', label: 'Request log' },
+      { id: 'serverlog', label: 'Server log' },
+      { id: 'problems', label: 'Library problems' },
     ],
   },
 ] as const
@@ -47,7 +35,8 @@ export type AdminTab = (typeof adminGroups)[number]['tabs'][number]['id']
 
 const ids: readonly string[] = adminGroups.flatMap((g) => g.tabs.map((t) => t.id))
 
-/** The tab a path like "/admin/smart" names; Home for "/admin" or anything unknown. */
+/** The tab a path like "/admin/smart" names; the dashboard for "/admin" or anything unknown
+ * (old links to /admin/about land there too, where About now is). */
 export function adminTabFor(path: string): AdminTab {
   const id = path.match(/^\/admin\/([a-z]+)$/)?.[1] ?? ''
   return (ids.includes(id) ? id : 'home') as AdminTab

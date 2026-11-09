@@ -30,6 +30,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.Text
@@ -192,6 +193,8 @@ fun MainScreen(nav: Nav) {
         bottomBar = {
             Column {
                 if (top != Screen.NowPlaying) MiniPlayer(nav)
+                // Icons only on phones; tablets (600 dp and wider) keep the words.
+                val labels = LocalConfiguration.current.screenWidthDp >= 600
                 NavigationBar {
                     Tab.entries.forEach { tab ->
                         NavigationBarItem(
@@ -208,18 +211,31 @@ fun MainScreen(nav: Nav) {
                                         Tab.Mine -> Icons.Default.Favorite
                                         Tab.Account -> Icons.Default.Settings
                                     },
-                                    contentDescription = null,
+                                    contentDescription = if (labels) null else t(tab.key),
                                 )
                             },
-                            label = { Text(com.newterrastudios.djinn.go.i18n.t(tab.key)) },
+                            label = if (labels) {
+                                { Text(t(tab.key)) }
+                            } else {
+                                null
+                            },
                         )
                     }
                     NavigationBarItem(
                         selected = top == Screen.NowPlaying,
                         enabled = nav.player.current != null,
                         onClick = nav::showPlayer,
-                        icon = { Icon(Icons.Default.PlayCircle, contentDescription = null) },
-                        label = { Text(t("nav.playing")) },
+                        icon = {
+                            Icon(
+                                Icons.Default.PlayCircle,
+                                contentDescription = if (labels) null else t("nav.playing"),
+                            )
+                        },
+                        label = if (labels) {
+                            { Text(t("nav.playing")) }
+                        } else {
+                            null
+                        },
                     )
                 }
             }

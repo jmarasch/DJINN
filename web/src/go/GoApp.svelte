@@ -296,8 +296,8 @@
     opacity: 0.5;
   }
 
-  /* Icons only on narrow phones. */
-  @media (max-width: 520px) {
+  /* Icons only on phones; tablets keep the words (Android's app does the same). */
+  @media (max-width: 599px) {
     nav a span,
     nav button span {
       display: none;

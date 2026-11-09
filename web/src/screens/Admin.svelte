@@ -39,9 +39,11 @@
   let { tab = 'home' }: { tab?: AdminTab } = $props()
 
   // Two layouts: one section at a time, or every section on one page with
-  // the menu jumping to each section and card. This browser remembers.
+  // the menu jumping to each section and card. Only sections are offered for
+  // now; set this to bring the one-page layout and its switch back.
+  const OFFER_ONE_PAGE = false
   type Layout = 'sections' | 'page'
-  let layout = $state<Layout>(storedLayout())
+  let layout = $state<Layout>(OFFER_ONE_PAGE ? storedLayout() : 'sections')
   const allTabs: AdminTab[] = adminGroups.flatMap((g) => g.tabs.map((t) => t.id))
 
   function storedLayout(): Layout {
@@ -275,6 +277,8 @@
 {#snippet sectionContent(t: AdminTab)}
 {#if t === 'home'}
   <AdminHome />
+  <SystemStatus />
+  <AboutPanel />
 {:else if t === 'stats'}
   <StatsPanel />
   <SearchesWishes />
@@ -472,22 +476,22 @@
     </form>
   </section>
 {:else if t === 'system'}
-  <SystemStatus />
   <UpdatePanel />
   <BackupPanel />
-  <LogViewer />
   <ResetPanel />
-{:else if t === 'about'}
-  <AboutPanel />
+{:else if t === 'serverlog'}
+  <LogViewer />
 {/if}
 {/snippet}
 
 <div class="admin" class:one-page={layout === 'page'}>
 <aside class="side">
-  <div class="layout" role="group" aria-label="Layout">
-    <button class:active={layout === 'page'} aria-pressed={layout === 'page'} onclick={() => setLayout('page')}>One page</button>
-    <button class:active={layout === 'sections'} aria-pressed={layout === 'sections'} onclick={() => setLayout('sections')}>Sections</button>
-  </div>
+  {#if OFFER_ONE_PAGE}
+    <div class="layout" role="group" aria-label="Layout">
+      <button class:active={layout === 'page'} aria-pressed={layout === 'page'} onclick={() => setLayout('page')}>One page</button>
+      <button class:active={layout === 'sections'} aria-pressed={layout === 'sections'} onclick={() => setLayout('sections')}>Sections</button>
+    </div>
+  {/if}
   <input class="find" type="search" placeholder="Find a setting" aria-label="Find a setting" bind:value={query} />
   {#if query.trim()}
     <ul class="results">
@@ -555,7 +559,7 @@
 </aside>
 
 <div class="admin-content" bind:this={content}>
-{#if layout === 'sections'}<h1>{tab === 'home' ? 'Admin' : adminTabLabel(tab)}</h1>{/if}
+{#if layout === 'sections'}<h1>{adminTabLabel(tab)}</h1>{/if}
 <PublicNetworkNote />
 
 {#if layout === 'page'}

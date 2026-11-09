@@ -103,7 +103,7 @@
         level: 'bad',
         label: 'Network',
         detail: 'Windows has this network set to Public, which keeps phones out',
-        href: '#/admin/system',
+        href: '#/admin/home',
       })
     }
     return lines

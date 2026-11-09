@@ -146,15 +146,15 @@ export const adminEntries: AdminEntry[] = [
   { label: 'Read searches with AI', tab: 'ai', keywords: 'ai reader qwen search' },
   { label: 'Use the graphics card', tab: 'ai', keywords: 'gpu nvidia cuda' },
   // System
-  { label: 'Status', tab: 'system', keywords: 'running uptime addresses' },
-  { label: 'Server ports', tab: 'system', keywords: 'port 8066 8067' },
+  { label: 'Status', tab: 'home', keywords: 'running uptime addresses' },
+  { label: 'Server ports', tab: 'home', keywords: 'port 8066 8067' },
   { label: 'Updates', tab: 'system', keywords: 'update version nightly stable channel', key: 'update_check' },
   { label: 'Install updates by themselves', tab: 'system', keywords: 'automatic updates', key: 'update_auto' },
   { label: 'Back up and restore', tab: 'system', keywords: 'backup restore zip' },
-  { label: 'Log', tab: 'system', keywords: 'log errors tracing download' },
+  { label: 'Log', tab: 'serverlog', keywords: 'log errors tracing download' },
   { label: 'Clear and reset', tab: 'system', keywords: 'reset clear history start over' },
   // About
-  { label: 'Credits', tab: 'about', keywords: 'about version license' },
+  { label: 'Credits', tab: 'home', keywords: 'about version license' },
 ]
 
 const fold = (text: string) =>
