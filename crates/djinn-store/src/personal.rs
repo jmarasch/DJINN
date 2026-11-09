@@ -212,7 +212,7 @@ impl Store {
 
     /// Records a song played in GO.
     pub async fn record_go_play(&self, user_id: i64, track_id: i64, ms_played: i64) -> Result<()> {
-        self.record_go_play_at(user_id, track_id, ms_played, None)
+        self.record_go_play_at(user_id, track_id, ms_played, None, false)
             .await
     }
 
@@ -224,13 +224,14 @@ impl Store {
         track_id: i64,
         ms_played: i64,
         at: Option<i64>,
+        play_less: bool,
     ) -> Result<()> {
         let now = now_ms();
         let at = at
             .filter(|at| (now - OLDEST_REPORT_MS..=now).contains(at))
             .unwrap_or(now);
         let skipped = ms_played < SKIP_BEFORE_MS;
-        if skipped {
+        if skipped && !play_less {
             let heard: bool = sqlx::query_scalar(
                 "SELECT EXISTS (SELECT 1 FROM go_plays WHERE user_id = ? AND track_id = ?
                                 AND skipped = 0 AND at BETWEEN ? AND ?)",
@@ -246,13 +247,14 @@ impl Store {
             }
         }
         sqlx::query(
-            "INSERT INTO go_plays (user_id, track_id, at, ms_played, skipped)
-             SELECT ?, id, ?, ?, ? FROM tracks WHERE id = ?",
+            "INSERT INTO go_plays (user_id, track_id, at, ms_played, skipped, play_less)
+             SELECT ?, id, ?, ?, ?, ? FROM tracks WHERE id = ?",
         )
         .bind(user_id)
         .bind(at)
         .bind(ms_played.max(0))
-        .bind(skipped)
+        .bind(skipped || play_less)
+        .bind(play_less)
         .bind(track_id)
         .execute(&self.pool)
         .await?;
@@ -337,6 +339,17 @@ impl Store {
             played.into_iter().map(|(id, _)| id).collect(),
             skipped.into_iter().map(|(id, _)| id).collect(),
         ))
+    }
+
+    /// Songs someone marked "play less" since `since`.
+    pub async fn go_play_less_since(&self, user_id: i64, since: i64) -> Result<Vec<i64>> {
+        Ok(sqlx::query_scalar(
+            "SELECT DISTINCT track_id FROM go_plays WHERE user_id = ? AND at >= ? AND play_less = 1",
+        )
+        .bind(user_id)
+        .bind(since)
+        .fetch_all(&self.pool)
+        .await?)
     }
 
     pub async fn save_resume(&self, user_id: i64, resume: &Resume) -> Result<()> {

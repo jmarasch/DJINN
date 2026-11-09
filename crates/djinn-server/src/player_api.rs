@@ -212,8 +212,25 @@ async fn pause(AdminUser(admin): AdminUser, State(state): State<AppState>) -> St
     StatusCode::NO_CONTENT
 }
 
-async fn skip(AdminUser(admin): AdminUser, State(state): State<AppState>) -> StatusCode {
-    state.jukebox_of(admin.id).await.lock().await.skip(&admin);
+#[derive(serde::Deserialize)]
+struct SkipQuery {
+    /// Also play it less (`?less=1`).
+    #[serde(default)]
+    less: u8,
+}
+
+async fn skip(
+    AdminUser(admin): AdminUser,
+    State(state): State<AppState>,
+    axum::extract::Query(query): axum::extract::Query<SkipQuery>,
+) -> StatusCode {
+    let jukebox = state.jukebox_of(admin.id).await;
+    let mut jukebox = jukebox.lock().await;
+    if query.less == 1 {
+        jukebox.skip_play_less(&admin);
+    } else {
+        jukebox.skip(&admin);
+    }
     StatusCode::NO_CONTENT
 }
 

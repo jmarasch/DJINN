@@ -37,6 +37,8 @@ pub struct SongHistory {
     pub requests: i64,
     /// Played to the end.
     pub finished: i64,
+    /// Times it was skipped and marked "play less" (a plain skip doesn't
+    /// count against a song).
     pub skipped: i64,
 }
 
@@ -177,7 +179,7 @@ impl Store {
                  FROM request_events WHERE style_id = ? \
                  UNION ALL \
                  SELECT track_id, 0, CASE WHEN skipped = 0 AND ended_at IS NOT NULL THEN 1 ELSE 0 END, \
-                        skipped FROM play_events WHERE style_id = ? \
+                        play_less FROM play_events WHERE style_id = ? \
              ) GROUP BY track_id",
         )
         .bind(style_id)
@@ -211,6 +213,11 @@ mod tests {
     }
 
     async fn request_and_play(store: &Store, track: i64, user: i64, skipped: bool) {
+        play(store, track, user, skipped, i64::from(skipped)).await;
+    }
+
+    /// A request that plays and is skipped (or not), with a "play less" level.
+    async fn play(store: &Store, track: i64, user: i64, skipped: bool, play_less: i64) {
         let (item, _) = store
             .add_request(
                 crate::MAIN_ROOM,
@@ -226,10 +233,37 @@ mod tests {
             .await
             .unwrap();
         store
-            .finish_play_event(play, 1000, skipped, None)
+            .finish_play_event(play, 1000, skipped, None, play_less)
             .await
             .unwrap();
         store.remove_request(item.id).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn only_play_less_counts_against_a_song_and_votes_count_double() {
+        let (store, track, user) = store_with_song().await;
+        let skipped = |store: &Store| {
+            let store = store.clone();
+            async move { store.party_history(1).await.unwrap()[0].skipped }
+        };
+        // A plain skip may only mean "the next song, now".
+        play(&store, track, user, true, 0).await;
+        assert_eq!(skipped(&store).await, 0);
+        // Someone chose "skip and play less".
+        play(&store, track, user, true, 1).await;
+        assert_eq!(skipped(&store).await, 1);
+        // The room's skip votes sent it away.
+        play(&store, track, user, true, 2).await;
+        assert_eq!(skipped(&store).await, 3, "a voted skip counts twice");
+        // Radio and the auto mix see only the marked ones.
+        let marked = store.plays_since(0).await.unwrap();
+        assert_eq!(
+            marked.iter().map(|p| (p.1, p.2)).collect::<Vec<_>>(),
+            vec![(true, true), (true, true), (true, false)]
+        );
+        // "Play less" on a song that wasn't skipped counts for nothing.
+        play(&store, track, user, false, 2).await;
+        assert_eq!(skipped(&store).await, 3);
     }
 
     #[tokio::test]

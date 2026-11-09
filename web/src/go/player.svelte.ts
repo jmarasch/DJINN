@@ -191,9 +191,9 @@ for (const deck of decks) {
 const canPlay = (mime: string) => decks[0].canPlayType(mime) !== ''
 
 /** Records the song being left in your history. */
-function report() {
+function report(playLess = false) {
   const song = current()
-  if (song && heardMs > 0) api.goPlayed(song.id, heardMs).catch(() => {})
+  if (song && heardMs > 0) api.goPlayed(song.id, heardMs, playLess).catch(() => {})
   heardMs = 0
 }
 
@@ -405,6 +405,17 @@ export function toggle() {
 export function next() {
   if (player.index < 0) return
   report()
+  const at = player.index + 1 < player.queue.length ? player.index + 1 : player.repeat === 'all' ? 0 : -1
+  if (at >= 0) start(at)
+}
+
+/** Skips and counts it against the song: radio plays it (and songs like it)
+ * less. A plain skip doesn't, since it may only mean "the next one, now". */
+export function nextPlayLess() {
+  if (player.index < 0) return
+  // Counts as heard for a moment at least, so the report isn't dropped.
+  if (heardMs <= 0) heardMs = 1
+  report(true)
   const at = player.index + 1 < player.queue.length ? player.index + 1 : player.repeat === 'all' ? 0 : -1
   if (at >= 0) start(at)
 }

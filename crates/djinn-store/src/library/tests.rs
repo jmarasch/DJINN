@@ -1323,7 +1323,7 @@ async fn a_skip_right_after_hearing_the_song_doesnt_count() {
     let full = crate::SKIP_BEFORE_MS;
     let now = crate::now_ms();
     store
-        .record_go_play_at(sam, favorite, full, Some(now - 60_000))
+        .record_go_play_at(sam, favorite, full, Some(now - 60_000), false)
         .await
         .unwrap();
     store.record_go_play(sam, favorite, 1).await.unwrap();

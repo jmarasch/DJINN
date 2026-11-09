@@ -225,6 +225,9 @@ pub struct Jukebox {
     volume: u8,
     crossfade: u8,
     skip_requested_by: Option<i64>,
+    /// The skip asked for also counts against the song: 0 no, 1 someone chose
+    /// "play less", 2 the room's skip votes did (counts double).
+    skip_play_less: u8,
     /// People who voted to skip the song playing.
     skip_votes: HashSet<i64>,
     /// Votes that skip a song; 0 when skip voting is off.
@@ -362,6 +365,7 @@ impl Jukebox {
             volume,
             crossfade,
             skip_requested_by: None,
+            skip_play_less: 0,
             skip_votes: HashSet::new(),
             skip_votes_needed,
             songs_started: 0,
@@ -643,6 +647,15 @@ impl Jukebox {
 
     pub fn skip(&mut self, by: &User) {
         self.skip_requested_by = Some(by.id);
+        self.skip_play_less = 0;
+        (self.engine)(Command::Skip);
+    }
+
+    /// Skips and counts it against the song: the auto mix and radio play it
+    /// (and, in radio, songs like it) less. A plain skip doesn't.
+    pub fn skip_play_less(&mut self, by: &User) {
+        self.skip_requested_by = Some(by.id);
+        self.skip_play_less = 1;
         (self.engine)(Command::Skip);
     }
 
@@ -685,7 +698,11 @@ impl Jukebox {
         self.skip_votes.insert(user.id);
         let skipped = self.skip_votes.len() >= self.skip_votes_needed as usize;
         if skipped {
-            self.skip(user);
+            // The room voted it away: that counts against the song, twice as
+            // much as one person choosing "play less".
+            self.skip_requested_by = Some(user.id);
+            self.skip_play_less = 2;
+            (self.engine)(Command::Skip);
         }
         self.send(ServerEvent::PlayerState(self.player_state()));
         Ok(skipped)
@@ -893,6 +910,11 @@ impl Jukebox {
         } else {
             None
         };
+        let play_less = if skipped {
+            i64::from(std::mem::take(&mut self.skip_play_less))
+        } else {
+            0
+        };
         let finished = match self.playing.take_if(|p| p.pending.track.id == id) {
             Some(playing) => Some(playing),
             None => self
@@ -908,6 +930,7 @@ impl Jukebox {
                     i64::try_from(playing.offset_ms + played_ms).unwrap_or(i64::MAX),
                     skipped,
                     skipped_by,
+                    play_less,
                 )
                 .await?;
             self.save_resume().await?;

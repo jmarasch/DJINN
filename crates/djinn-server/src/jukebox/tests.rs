@@ -307,6 +307,8 @@ async fn radio_plays_the_seed_then_songs_like_it() {
     h.finish(first).await;
     let second = h.play_next().await;
     assert!(pool.iter().any(|(id, _)| *id == second));
+    let admin = h.admin.clone();
+    h.jukebox.skip_play_less(&admin);
     h.event(EngineEvent::TrackEnded {
         id: TrackId(second),
         played_ms: 500,
@@ -318,7 +320,11 @@ async fn radio_plays_the_seed_then_songs_like_it() {
     assert_ne!(third, second, "the skipped song played recently");
     let (played, skipped) = heard.lock().unwrap().last().cloned().unwrap();
     assert_eq!(played, [seed], "what played through steers the radio");
-    assert_eq!(skipped, [second], "and what was skipped steers it away");
+    assert_eq!(
+        skipped,
+        [second],
+        "and what was marked play less steers it away"
+    );
 
     // It's still on after a restart.
     let (events, _) = broadcast::channel(4);
@@ -326,6 +332,33 @@ async fn radio_plays_the_seed_then_songs_like_it() {
         .await
         .unwrap();
     assert_eq!(again.player_state().playlist.unwrap().name, "Radio: Song 0");
+}
+
+#[tokio::test]
+async fn a_plain_skip_does_not_steer_radio_away() {
+    let mut h = Harness::new(0).await;
+    let heard: Heard = Arc::default();
+    h.jukebox.set_mixer(Arc::new(FixedMixer {
+        pool: vec![(h.tracks[1], 1.0), (h.tracks[2], 1.0)],
+        heard: Arc::clone(&heard),
+    }));
+    h.jukebox
+        .start_radio(RadioSeed::Track { id: h.tracks[0] }, "Song 0".into())
+        .await
+        .unwrap();
+    let first = h.play_next().await;
+    h.finish(first).await;
+    let second = h.play_next().await;
+    // Skipped, but only because the next song was wanted more.
+    h.event(EngineEvent::TrackEnded {
+        id: TrackId(second),
+        played_ms: 500,
+        reason: EndReason::Skipped,
+    })
+    .await;
+    h.play_next().await;
+    let (_, skipped) = heard.lock().unwrap().last().cloned().unwrap();
+    assert!(skipped.is_empty(), "nothing is steered away from");
 }
 
 #[tokio::test]
@@ -497,6 +530,51 @@ async fn only_owner_or_admin_removes_requests() {
         .await
         .unwrap()
         .is_empty());
+}
+
+/// What "play less" level each play was recorded with, oldest first.
+async fn play_less_levels(h: &Harness) -> Vec<i64> {
+    djinn_store::sqlx::query_scalar("SELECT play_less FROM play_events ORDER BY id")
+        .fetch_all(h.store.pool())
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn only_chosen_skips_count_against_a_song_and_votes_count_most() {
+    async fn end(h: &mut Harness, id: i64) {
+        h.event(EngineEvent::TrackEnded {
+            id: TrackId(id),
+            played_ms: 3000,
+            reason: EndReason::Skipped,
+        })
+        .await;
+    }
+
+    let mut h = Harness::new(4).await;
+    let (admin, user) = (h.admin.clone(), h.user.clone());
+    let other = h.store.create_user("other", "h", Role::User).await.unwrap();
+    h.jukebox.set_skip_votes_needed(2);
+    h.event(EngineEvent::NextNeeded { after: None }).await;
+    // A plain skip: not now, but nothing against the song.
+    let first = h.play_next().await;
+    h.jukebox.skip(&admin);
+    end(&mut h, first).await;
+    // "Skip and play less" from one person.
+    let second = h.play_next().await;
+    h.jukebox.skip_play_less(&admin);
+    end(&mut h, second).await;
+    // The room's votes.
+    let third = h.play_next().await;
+    assert!(!h.jukebox.vote_skip(&user).unwrap());
+    assert!(h.jukebox.vote_skip(&other).unwrap());
+    end(&mut h, third).await;
+    // An admin using the vote button skips at once: that's a plain skip.
+    let fourth = h.play_next().await;
+    assert!(h.jukebox.vote_skip(&admin).unwrap());
+    end(&mut h, fourth).await;
+
+    assert_eq!(play_less_levels(&h).await, [0, 1, 2, 0]);
 }
 
 #[tokio::test]
@@ -850,7 +928,7 @@ async fn a_restart_carries_on_with_the_song_playing() {
         .unwrap();
     assert_eq!(
         h.store.plays_since(0).await.unwrap(),
-        [(first, false)],
+        [(first, false, false)],
         "one play, finished"
     );
 }

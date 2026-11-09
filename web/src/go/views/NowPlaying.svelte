@@ -13,6 +13,7 @@
     jumpTo,
     likes,
     next,
+    nextPlayLess,
     player,
     previous,
     removeAt,
@@ -165,6 +166,13 @@
         </button>
         <button class="small-button" class:on={lyricsOpen} aria-pressed={lyricsOpen} onclick={toggleLyrics}>
           <Icon name="lyrics" size={18} /> Lyrics
+        </button>
+        <button
+          class="small-button"
+          title="Skip it, and play it (and songs like it) less in radio and the mix"
+          onclick={nextPlayLess}
+        >
+          Skip, play less
         </button>
         <button class="small-button" onclick={() => (ui.menu = song)}>More</button>
         {#if player.downloadUrl}<a class="button small-button" href={player.downloadUrl} download>Download</a>{/if}

@@ -428,9 +428,10 @@ impl Store {
 
     /// Songs that started since `since` (Unix ms) and have ended, newest
     /// first, with whether each was skipped.
-    pub async fn plays_since(&self, since: i64) -> Result<Vec<(i64, bool)>> {
+    /// Recent plays, newest first: (song, skipped, marked "play less").
+    pub async fn plays_since(&self, since: i64) -> Result<Vec<(i64, bool, bool)>> {
         let rows = sqlx::query_as(
-            "SELECT track_id, skipped FROM play_events \
+            "SELECT track_id, skipped, play_less > 0 FROM play_events \
              WHERE started_at >= ? AND ended_at IS NOT NULL \
              ORDER BY started_at DESC, id DESC LIMIT 200",
         )
@@ -469,15 +470,18 @@ impl Store {
         played_ms: i64,
         skipped: bool,
         skipped_by: Option<i64>,
+        play_less: i64,
     ) -> Result<()> {
         sqlx::query(
-            "UPDATE play_events SET ended_at = ?, played_ms = ?, skipped = ?, skipped_by = ?
+            "UPDATE play_events SET ended_at = ?, played_ms = ?, skipped = ?, skipped_by = ?,
+                    play_less = ?
              WHERE id = ?",
         )
         .bind(now_ms())
         .bind(played_ms)
         .bind(skipped)
         .bind(skipped_by)
+        .bind(if skipped { play_less.clamp(0, 2) } else { 0 })
         .bind(id)
         .execute(&self.pool)
         .await?;
@@ -759,7 +763,7 @@ mod tests {
             .await
             .unwrap();
         store
-            .finish_play_event(first, 1000, false, None)
+            .finish_play_event(first, 1000, false, None, 0)
             .await
             .unwrap();
         store

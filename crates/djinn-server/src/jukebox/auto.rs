@@ -174,8 +174,10 @@ impl Jukebox {
             .started_at
             .max(djinn_store::now_ms() - RADIO_MEMORY_MS);
         let plays = self.store.plays_since(since).await?;
+        // Played through pulls the mix along; "play less" pushes it away; a
+        // plain skip does neither (it may only mean not now).
         let played: Vec<i64> = plays.iter().filter(|p| !p.1).map(|p| p.0).collect();
-        let skipped: Vec<i64> = plays.iter().filter(|p| p.1).map(|p| p.0).collect();
+        let skipped: Vec<i64> = plays.iter().filter(|p| p.2).map(|p| p.0).collect();
         let mut pool = mixer.radio(&radio.seed, &played, &skipped);
         pool.truncate(RADIO_POOL);
         tracing::debug!(

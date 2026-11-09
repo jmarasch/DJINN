@@ -256,6 +256,14 @@
       <button class="round" aria-label="Skip" disabled={!current} onclick={() => control(api.skip)}>
         <Icon name="skip" size={26} />
       </button>
+      <button
+        class="small-button"
+        disabled={!current}
+        title="Skip it, and the auto mix plays it (and songs like it) less"
+        onclick={() => control(api.skipLess)}
+      >
+        Skip, play less
+      </button>
     </div>
     <div class="audio">
       <label class="volume">

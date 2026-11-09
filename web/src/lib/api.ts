@@ -194,8 +194,8 @@ export const api = {
   goLikedIds: () => get<LikedIds>('/go/likes/ids'),
   goLike: (kind: LikeKind, id: number, on: boolean) =>
     on ? put<void>(`/go/likes/${kind}/${id}`, {}) : del<void>(`/go/likes/${kind}/${id}`),
-  goPlayed: (trackId: number, msPlayed: number) =>
-    post<void>('/go/plays', { track_id: trackId, ms_played: Math.round(msPlayed) }),
+  goPlayed: (trackId: number, msPlayed: number, playLess = false) =>
+    post<void>('/go/plays', { track_id: trackId, ms_played: Math.round(msPlayed), play_less: playLess }),
   goHistory: (offset = 0) => get<Played[]>(`/go/history?offset=${offset}`),
   goYear: (year?: number) => get<GoYear>(year ? `/go/year?year=${year}` : '/go/year'),
   goResume: () => get<GoResume | null>('/go/resume'),
@@ -344,6 +344,8 @@ export const api = {
   play: () => post<void>('/player/play'),
   pause: () => post<void>('/player/pause'),
   skip: () => post<void>('/player/skip'),
+  /** Skips and counts it against the song, so the mix plays it less. */
+  skipLess: () => post<void>('/player/skip?less=1'),
   setVolume: (volume: number) => put<void>('/player/volume', { volume }),
   setCrossfade: (secs: number) => put<void>('/player/crossfade', { secs }),
 

@@ -148,6 +148,9 @@ struct PlayReport {
     ms_played: i64,
     /// When, for a play reported later (it happened offline). Now without.
     at: Option<i64>,
+    /// Skipped with "play less": counts against the song in radio.
+    #[serde(default)]
+    play_less: bool,
 }
 
 #[derive(Deserialize)]
@@ -196,7 +199,13 @@ async fn played(
 ) -> ApiResult<StatusCode> {
     state
         .store
-        .record_go_play_at(me.user.id, body.track_id, body.ms_played, body.at)
+        .record_go_play_at(
+            me.user.id,
+            body.track_id,
+            body.ms_played,
+            body.at,
+            body.play_less,
+        )
         .await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -414,9 +423,11 @@ async fn radio(
         .store
         .go_listening_since(me.user.id, now - RADIO_FRESH_MS)
         .await?;
-    let (_, skipped_list) = state
+    // Only "play less" keeps songs (and ones like them) away; a plain skip
+    // just means not now.
+    let skipped_list = state
         .store
-        .go_listening_since(me.user.id, now - RADIO_SKIPS_MS)
+        .go_play_less_since(me.user.id, now - RADIO_SKIPS_MS)
         .await?;
     let heard: HashSet<i64> = fresh_played
         .iter()
