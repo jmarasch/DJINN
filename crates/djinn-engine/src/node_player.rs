@@ -7,9 +7,10 @@
 //! It starts the speaker so the first frame lands on time (padding with
 //! silence or skipping in), then measures how early or late the speaker runs
 //! and nudges its speed with the same [`DriftControl`] that keeps Main's own
-//! extra speakers in step; big jumps (a hiccup on the network) are fixed at
-//! once. A pause holds the speaker and moves the waiting chunks later by
-//! however long it lasted, as Main's own buffered audio is.
+//! extra speakers in step. Only big jumps (a hiccup on the network) are fixed
+//! at once; anything smaller is eased away by speed alone, since a skip or a
+//! pad is heard as a click. A pause holds the speaker and moves the waiting
+//! chunks later by however long it lasted, as Main's own buffered audio is.
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -26,11 +27,13 @@ use crate::OutputDevice;
 
 /// How far ahead of its time audio is handed to the speaker.
 const AHEAD_SECS: f64 = 0.5;
-/// A gap or overlap between chunks bigger than this is filled or skipped.
-const SEAM_SECS: f64 = 0.005;
 /// A gap in Main's stream longer than this (it went quiet) starts playback
 /// afresh instead of being padded with silence.
 const RESTART_GAP_SECS: f64 = 1.0;
+/// Off by more than this, a node in step jumps (skips or pads) instead of
+/// only easing its speed. Anything smaller is slewed, which can't click; the
+/// wobble of a clock matched over Wi-Fi stays well inside it.
+const JUMP_SECS: f64 = 0.1;
 /// How often the player thread looks at the speaker.
 const TICK: Duration = Duration::from_millis(5);
 
@@ -121,6 +124,11 @@ pub(crate) struct Schedule {
     volume: f32,
     equalizer: Equalizer,
     free_run: bool,
+    /// How far playback is behind Main's stamps (µs): where the chunk now
+    /// playing was due minus where it's being played. Small differences
+    /// aren't fixed with a skip or a pad (those click); this goes into the
+    /// error the speed is eased by instead.
+    lag_us: i64,
 }
 
 impl Schedule {
@@ -132,11 +140,12 @@ impl Schedule {
             queue: VecDeque::new(),
             next_due: None,
             paused_at: None,
-            drift: DriftControl::default(),
+            drift: DriftControl::with_resync(JUMP_SECS),
             last_measure: None,
             volume: 1.0,
             equalizer: Equalizer::new(rate),
             free_run: false,
+            lag_us: 0,
         }
     }
 
@@ -153,8 +162,8 @@ impl Schedule {
             if let Some(due) = self.next_due.as_mut() {
                 *due += moved;
             }
-            // Nothing corrects a free-running speaker, so move it now.
-            if self.free_run && self.next_due.is_some() {
+            // Asked for: move the speaker now rather than easing over to it.
+            if self.next_due.is_some() {
                 if moved > 0 {
                     speaker.insert_silence(moved as f64 / 1e6);
                 } else {
@@ -236,7 +245,8 @@ impl Schedule {
     fn error(&self, now: i64, speaker: &impl Speaker) -> Option<f64> {
         let due = self.next_due?;
         let heard = now + (speaker.latency() * 1e6) as i64;
-        Some((heard - due) as f64 / 1e6)
+        let lag = if self.free_run { 0 } else { self.lag_us };
+        Some((heard - due + lag) as f64 / 1e6)
     }
 
     /// Keeps the speaker fed and on time. Call often.
@@ -299,6 +309,7 @@ impl Schedule {
             speaker.insert_silence((due - heard) as f64 / 1e6);
         }
         self.next_due = Some(due);
+        self.lag_us = 0;
         self.drift.restart();
         self.last_measure = None;
         true
@@ -307,7 +318,6 @@ impl Schedule {
     /// Hands audio over up to [`AHEAD_SECS`] before it's due.
     fn feed(&mut self, now: i64, speaker: &mut impl Speaker) {
         let horizon = now + (AHEAD_SECS * 1e6) as i64;
-        let seam = (SEAM_SECS * 1e6) as i64;
         loop {
             let Some(due) = self.next_due else { return };
             if due > horizon {
@@ -327,19 +337,10 @@ impl Schedule {
                     self.next_due = None;
                     return;
                 }
-                if self.free_run {
-                    // Small differences are left alone: played straight on.
-                } else if gap > seam {
-                    speaker.insert_silence(gap as f64 / 1e6);
-                    self.next_due = Some(chunk.at);
-                    continue;
-                } else if gap < -seam {
-                    let skip = ((-gap) as i128 * i128::from(rate) / 1_000_000) as usize;
-                    chunk.pos = skip.min(chunk.frames());
-                    if chunk.pos >= chunk.frames() {
-                        self.queue.pop_front();
-                        continue;
-                    }
+                if !self.free_run {
+                    // Played straight on, with no skip or pad (those click):
+                    // the speed eases the difference away.
+                    self.lag_us = -gap;
                 }
             }
             let free = speaker.free_frames();
@@ -709,8 +710,10 @@ mod tests {
     }
 
     #[test]
-    fn free_running_plays_straight_through_a_wobbly_clock() {
-        assert!(corrections_with_jitter(false) > 0, "in step: it corrects");
+    fn a_wobbly_clock_never_causes_a_skip_or_a_pad() {
+        // Wi-Fi-sized wobble: in step eases it away by speed; free running
+        // ignores it. Neither clicks.
+        assert_eq!(corrections_with_jitter(false), 0);
         assert_eq!(corrections_with_jitter(true), 0);
     }
 

@@ -1353,6 +1353,8 @@ export interface NodeAudio {
   free_run?: boolean
   /** What a screen plugged into the node shows. */
   screen?: 'tv' | 'lyrics' | 'status' | 'off'
+  /** Songs, playing and coming up, the node keeps copies of. */
+  cache_ahead?: number
 }
 
 export interface NodeSpeaker {

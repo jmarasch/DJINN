@@ -41,6 +41,8 @@ pub struct Node {
     pub free_run: bool,
     /// What a screen plugged into it shows: "tv", "lyrics", "status" or "off".
     pub screen: String,
+    /// How many songs, playing and coming up, it keeps copies of.
+    pub cache_ahead: i64,
 }
 
 /// A node's speaker settings.
@@ -52,6 +54,7 @@ pub struct NodeAudio<'a> {
     pub offline: &'a str,
     pub free_run: bool,
     pub screen: &'a str,
+    pub cache_ahead: i64,
 }
 
 /// A node asking to join.
@@ -81,7 +84,7 @@ impl Store {
     pub async fn nodes(&self) -> Result<Vec<Node>> {
         Ok(sqlx::query_as(
             "SELECT id, node_id, name, secret_hash, status, room_id, address, version, platform,
-                    requested_at, approved_at, last_seen, device, delay_ms, trim, equalizer, offline, devices, free_run, screen
+                    requested_at, approved_at, last_seen, device, delay_ms, trim, equalizer, offline, devices, free_run, screen, cache_ahead
              FROM nodes ORDER BY status = 'approved', name, id",
         )
         .fetch_all(&self.pool)
@@ -91,7 +94,7 @@ impl Store {
     pub async fn node_by_node_id(&self, node_id: &str) -> Result<Option<Node>> {
         Ok(sqlx::query_as(
             "SELECT id, node_id, name, secret_hash, status, room_id, address, version, platform,
-                    requested_at, approved_at, last_seen, device, delay_ms, trim, equalizer, offline, devices, free_run, screen
+                    requested_at, approved_at, last_seen, device, delay_ms, trim, equalizer, offline, devices, free_run, screen, cache_ahead
              FROM nodes WHERE node_id = ?",
         )
         .bind(node_id)
@@ -102,7 +105,7 @@ impl Store {
     pub async fn node(&self, id: i64) -> Result<Option<Node>> {
         Ok(sqlx::query_as(
             "SELECT id, node_id, name, secret_hash, status, room_id, address, version, platform,
-                    requested_at, approved_at, last_seen, device, delay_ms, trim, equalizer, offline, devices, free_run, screen
+                    requested_at, approved_at, last_seen, device, delay_ms, trim, equalizer, offline, devices, free_run, screen, cache_ahead
              FROM nodes WHERE id = ?",
         )
         .bind(id)
@@ -237,7 +240,7 @@ impl Store {
 
     pub async fn set_node_audio(&self, id: i64, audio: &NodeAudio<'_>) -> Result<bool> {
         let result = sqlx::query(
-            "UPDATE nodes SET device = ?, delay_ms = ?, trim = ?, equalizer = ?, offline = ?, free_run = ?, screen = ? WHERE id = ?",
+            "UPDATE nodes SET device = ?, delay_ms = ?, trim = ?, equalizer = ?, offline = ?, free_run = ?, screen = ?, cache_ahead = ? WHERE id = ?",
         )
         .bind(audio.device)
         .bind(audio.delay_ms.clamp(0, 2000))
@@ -246,6 +249,7 @@ impl Store {
         .bind(if audio.offline == "cached" { "cached" } else { "stop" })
         .bind(audio.free_run)
         .bind(audio.screen)
+        .bind(audio.cache_ahead.clamp(1, 50))
         .bind(id)
         .execute(&self.pool)
         .await?;

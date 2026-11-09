@@ -24,6 +24,8 @@ const MAX_ADJUST: f64 = 0.002;
 
 #[derive(Debug, Default)]
 pub(crate) struct DriftControl {
+    /// Errors beyond this are fixed at once; `RESYNC_SECS` unless set.
+    resync: Option<f64>,
     filtered: Option<f64>,
     age: f64,
     integral: f64,
@@ -31,6 +33,14 @@ pub(crate) struct DriftControl {
 }
 
 impl DriftControl {
+    /// Fixes at once only errors beyond `secs`, slewing everything smaller.
+    pub fn with_resync(secs: f64) -> Self {
+        DriftControl {
+            resync: Some(secs),
+            ..DriftControl::default()
+        }
+    }
+
     /// Feeds the timing error in seconds (positive when the output plays
     /// late) measured `dt` seconds after the last one. Returns an error to
     /// fix at once, if it is too large to slew.
@@ -44,7 +54,7 @@ impl DriftControl {
         if self.age < WARMUP_SECS {
             return None;
         }
-        if filtered.abs() > RESYNC_SECS {
+        if filtered.abs() > self.resync.unwrap_or(RESYNC_SECS) {
             self.filtered = None;
             self.age = 0.0;
             return Some(filtered);

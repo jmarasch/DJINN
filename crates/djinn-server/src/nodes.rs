@@ -236,6 +236,13 @@ pub struct AudioSettings {
     /// What a screen plugged into it shows: `SCREENS`.
     #[serde(default = "default_screen")]
     pub screen: String,
+    /// Songs, playing and coming up, it keeps copies of (1 to 50).
+    #[serde(default = "default_cache_ahead")]
+    pub cache_ahead: i64,
+}
+
+fn default_cache_ahead() -> i64 {
+    12
 }
 
 /// What a node's screen can show.
@@ -259,6 +266,7 @@ impl AudioSettings {
             offline: node.offline.clone(),
             free_run: node.free_run,
             screen: node.screen.clone(),
+            cache_ahead: node.cache_ahead,
         }
     }
 }
@@ -294,6 +302,7 @@ async fn save_audio(state: &AppState, id: i64, audio: &AudioSettings) -> ApiResu
                 offline: &audio.offline,
                 free_run: audio.free_run,
                 screen: &audio.screen,
+                cache_ahead: audio.cache_ahead,
             },
         )
         .await?;
@@ -308,10 +317,10 @@ pub struct Upcoming {
     pub ext: String,
 }
 
-/// Songs playing and coming up in Main's room, in order, at most this many.
-const UPCOMING: usize = 12;
-
-async fn upcoming(state: &AppState, room: i64) -> ApiResult<Vec<Upcoming>> {
+/// Songs playing and coming up in Main's room, in order, at most `limit`.
+/// Past the requests, the auto mix only plans a few songs ahead, so a big
+/// limit only fills up while people have asked for plenty.
+async fn upcoming(state: &AppState, room: i64, limit: usize) -> ApiResult<Vec<Upcoming>> {
     let room = state.rooms.leader(room);
     let now_playing = state.jukebox_for(room).lock().await.now_playing();
     let queue = state.store.queue(room).await?;
@@ -333,7 +342,7 @@ async fn upcoming(state: &AppState, room: i64) -> ApiResult<Vec<Upcoming>> {
     for entry in &now_playing.later {
         push(entry.track.id);
     }
-    ids.truncate(UPCOMING);
+    ids.truncate(limit.clamp(1, 50));
     let paths = state.store.track_paths(&ids).await?;
     Ok(ids
         .into_iter()
@@ -418,7 +427,7 @@ async fn me(
         .await?;
     let audio = AudioSettings::of(&node);
     let upcoming = if node.status == "approved" {
-        upcoming(&state, node.room_id).await?
+        upcoming(&state, node.room_id, node.cache_ahead as usize).await?
     } else {
         Vec::new()
     };

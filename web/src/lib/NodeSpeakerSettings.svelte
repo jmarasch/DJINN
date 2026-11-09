@@ -103,8 +103,25 @@
     Keep in step with the main DJINN
   </label>
   <p class="small muted">
-    On: this node makes small corrections to stay with the main speakers. Off: it lines up when music starts, then plays
-    straight through and slowly drifts. Turn it off if you hear clicks or pops, to see whether the corrections cause them.
+    On: this node eases its speed very slightly to stay with the main speakers, and only jumps if it gets more than a
+    tenth of a second out. Off: it lines up when music starts, then plays straight through and slowly drifts.
+  </p>
+  <label>
+    Songs to keep ready: {draft.cache_ahead ?? 12}
+    <input
+      type="range"
+      min="1"
+      max="50"
+      value={draft.cache_ahead ?? 12}
+      oninput={(e) => {
+        draft.cache_ahead = Number(e.currentTarget.value)
+        changed()
+      }}
+    />
+  </label>
+  <p class="small muted">
+    Copies of what's playing and coming up, so a song is ready before it starts and the node can carry on if the main
+    DJINN goes away. Past the requests, only a few songs are planned ahead.
   </p>
   {#if error}<p class="error">{error}</p>{/if}
 </div>
