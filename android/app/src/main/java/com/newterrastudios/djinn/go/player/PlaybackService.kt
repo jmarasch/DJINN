@@ -56,7 +56,7 @@ import kotlinx.coroutines.launch
 import java.util.concurrent.ConcurrentHashMap
 
 /** How the player names a song; it becomes a real link only when it's fetched. */
-private const val TRACK_SCHEME = "djinn"
+internal const val TRACK_SCHEME = "djinn"
 private const val SAVE_EVERY_MS = 15_000L
 /** Links work for a few hours on the server; a fresh one well before that. */
 private const val LINK_LIFE_MS = 60 * 60 * 1000L
@@ -77,6 +77,7 @@ class PlaybackService : MediaLibraryService() {
     /** Telling the server what happened outlives the service. */
     private val reports = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var reporter: Reporter? = null
+    private var cacheAhead: CacheAhead? = null
     private var talkOverFocus: TalkOverFocus? = null
     private val links = ConcurrentHashMap<Long, HeldLink>()
     private var session: MediaLibrarySession? = null
@@ -144,6 +145,11 @@ class PlaybackService : MediaLibraryService() {
             .setWakeMode(C.WAKE_MODE_NETWORK)
             .build()
         reporter = Reporter(player).also(player::addListener)
+        cacheAhead = CacheAhead(scope, caching, { app.prefs.cacheAhead }) { mediaId ->
+            val id = mediaId.toLongOrNull()
+            // Kept songs, here or for another server, play from their files.
+            if (id == null || app.offline.local(id) != null) null else "${app.account.scope}|$mediaId"
+        }.also(player::addListener)
         val focus = TalkOverFocus(this, player).also(player::addListener)
         talkOverFocus = focus
         scope.launch {
@@ -177,6 +183,7 @@ class PlaybackService : MediaLibraryService() {
     }
 
     override fun onDestroy() {
+        cacheAhead?.stop()
         reporter?.finish()
         talkOverFocus?.release()
         session?.run {

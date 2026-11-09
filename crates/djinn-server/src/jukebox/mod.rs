@@ -80,6 +80,11 @@ pub const TONE_ID: i64 = -7;
 /// Auto mix songs planned beyond the next one, so screens can show what's
 /// coming and it plays in that order.
 const PLAN_AHEAD: usize = 4;
+/// The most auto mix songs planned when nodes ask to keep more ready.
+const MAX_PLAN: usize = 50;
+/// How long a node's ask for a longer plan holds without being repeated
+/// (nodes check in every 5 s).
+const PLAN_WISH_SECS: u64 = 30;
 
 pub type EngineSink = Box<dyn Fn(Command) + Send + Sync>;
 
@@ -259,6 +264,8 @@ pub struct Jukebox {
     resuming: Option<Pending>,
     /// Last position saved for the song playing, in whole seconds.
     saved_second: Option<u64>,
+    /// Songs planned ahead that nodes asked for, and when they last asked.
+    plan_wish: Option<(usize, Instant)>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -384,6 +391,7 @@ impl Jukebox {
             party: None,
             resuming: None,
             saved_second: None,
+            plan_wish: None,
         };
         (jukebox.engine)(Command::SetVolume(gain(volume)));
         (jukebox.engine)(Command::SetCrossfade(u32::from(crossfade)));
@@ -468,8 +476,37 @@ impl Jukebox {
                 .front()
                 .or(self.queued.as_ref())
                 .map(Pending::entry),
-            later: self.planned.iter().map(Pending::entry).collect(),
+            later: self
+                .planned
+                .iter()
+                .take(PLAN_AHEAD)
+                .map(Pending::entry)
+                .collect(),
         }
+    }
+
+    /// How many auto mix songs to plan: PLAN_AHEAD, or more while nodes ask
+    /// to keep more ready.
+    fn plan_len(&self) -> usize {
+        match self.plan_wish {
+            Some((n, at)) if at.elapsed().as_secs() < PLAN_WISH_SECS => {
+                n.clamp(PLAN_AHEAD, MAX_PLAN)
+            }
+            _ => PLAN_AHEAD,
+        }
+    }
+
+    /// A node wants `more` auto mix songs planned (beyond what's queued), to
+    /// keep them ready. The largest ask from the last PLAN_WISH_SECS counts.
+    /// Returns every planned song, in order.
+    pub async fn plan_for_nodes(&mut self, more: usize) -> anyhow::Result<Vec<i64>> {
+        let more = more.min(MAX_PLAN);
+        self.plan_wish = Some(match self.plan_wish {
+            Some((n, at)) if at.elapsed().as_secs() < PLAN_WISH_SECS / 2 => (n.max(more), at),
+            _ => (more, Instant::now()),
+        });
+        self.top_up_plan().await?;
+        Ok(self.planned.iter().map(|p| p.track.id).collect())
     }
 
     pub fn player_state(&self) -> PlayerState {

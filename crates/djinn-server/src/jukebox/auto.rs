@@ -333,7 +333,8 @@ impl Jukebox {
         if self.active.is_none() || self.start_at.is_some() {
             return Ok(());
         }
-        if self.planned.len() >= super::PLAN_AHEAD {
+        let want = self.plan_len();
+        if self.planned.len() >= want {
             return Ok(());
         }
         let pool = self.auto_mix().await?;
@@ -347,7 +348,7 @@ impl Jukebox {
             .chain(self.planned.iter())
             .map(|p| p.track.id)
             .collect();
-        while self.planned.len() < super::PLAN_AHEAD {
+        while self.planned.len() < want {
             let Some(next) = self.draw_after(&pool, &ahead).await? else {
                 break;
             };

@@ -325,8 +325,17 @@ pub struct Upcoming {
 /// limit only fills up while people have asked for plenty.
 async fn upcoming(state: &AppState, room: i64, limit: usize) -> ApiResult<Vec<Upcoming>> {
     let room = state.rooms.leader(room);
-    let now_playing = state.jukebox_for(room).lock().await.now_playing();
+    let limit = limit.clamp(1, 50);
     let queue = state.store.queue(room).await?;
+    let player = state.jukebox_for(room);
+    let (now_playing, planned) = {
+        let mut jukebox = player.lock().await;
+        // Ask the auto mix to plan far enough for the rest (the playing
+        // song and the one lined up count too).
+        let more = limit.saturating_sub(queue.len() + 2);
+        let planned = jukebox.plan_for_nodes(more).await?;
+        (jukebox.now_playing(), planned)
+    };
     let mut ids: Vec<i64> = Vec::new();
     let mut push = |id: i64| {
         if !ids.contains(&id) {
@@ -342,10 +351,10 @@ async fn upcoming(state: &AppState, room: i64, limit: usize) -> ApiResult<Vec<Up
     if let Some(entry) = &now_playing.up_next {
         push(entry.track.id);
     }
-    for entry in &now_playing.later {
-        push(entry.track.id);
+    for id in planned {
+        push(id);
     }
-    ids.truncate(limit.clamp(1, 50));
+    ids.truncate(limit);
     let paths = state.store.track_paths(&ids).await?;
     Ok(ids
         .into_iter()

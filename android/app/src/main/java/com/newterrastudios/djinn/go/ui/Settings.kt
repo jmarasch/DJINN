@@ -59,6 +59,8 @@ private val QUALITIES = listOf(0, 96, 128, 192, 320)
 private fun qualityLabel(kbps: Int) =
     if (kbps == 0) t("settings.full_quality") else t("settings.mp3_rate", "kbps" to kbps)
 private val SMART_LIMITS = listOf(512, 1024, 2048, 5120, 10240)
+/** Songs to fetch ahead from the queue; 0 is off. */
+private val AHEAD_CHOICES = listOf(0, 1, 3, 5, 10)
 
 fun sizeText(context: Context, bytes: Long): String = Formatter.formatShortFileSize(context, bytes)
 
@@ -97,6 +99,7 @@ fun SettingsScreen(nav: Nav) {
     var smart by remember { mutableStateOf(prefs.smartCache) }
     var limit by remember { mutableIntStateOf(prefs.smartLimitMb) }
     var wifi by remember { mutableStateOf(prefs.wifiOnly) }
+    var ahead by remember { mutableIntStateOf(prefs.cacheAhead) }
     val downloads = kept.filter { it.kind == KIND_DOWNLOAD }
     val smartSongs = kept.filter { it.kind == KIND_SMART }
     var confirmSignOut by remember { mutableStateOf(false) }
@@ -210,6 +213,34 @@ fun SettingsScreen(nav: Nav) {
                     wifi = it
                     prefs.wifiOnly = it
                 }
+                Text(
+                    t("settings.fetch_ahead"),
+                    style = MaterialTheme.typography.bodyLarge,
+                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp),
+                )
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    AHEAD_CHOICES.forEach { n ->
+                        val selected = ahead == n
+                        Text(
+                            if (n == 0) t("settings.fetch_ahead_off") else n.toString(),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier
+                                .clickable {
+                                    ahead = n
+                                    prefs.cacheAhead = n
+                                }
+                                .padding(8.dp),
+                        )
+                    }
+                }
+                Note(t("settings.fetch_ahead_note"))
                 Toggle(
                     t("settings.smart_cache"),
                     t("settings.smart_cache_note"),

@@ -253,6 +253,10 @@ class Prefs(context: Context, private val scope: () -> String = { "" }) {
     var smartLimitMb: Int
         get() = prefs.getInt("smart_limit_mb", 2048)
         set(value) = prefs.edit { putInt("smart_limit_mb", value) }
+    /** Songs fetched ahead from the queue into the recent cache; 0 is off. */
+    var cacheAhead: Int
+        get() = prefs.getInt("cache_ahead", DEFAULT_CACHE_AHEAD)
+        set(value) = prefs.edit { putInt("cache_ahead", value) }
     var wifiOnly: Boolean
         get() = prefs.getBoolean("wifi_only", true)
         set(value) = prefs.edit { putBoolean("wifi_only", value) }
@@ -312,6 +316,7 @@ class Prefs(context: Context, private val scope: () -> String = { "" }) {
     companion object {
         private val lookJson = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
         const val DEFAULT_KBPS = 128
+        const val DEFAULT_CACHE_AHEAD = 3
         const val DEFAULT_VISUALS_LEAD_MS = 250
     }
 }

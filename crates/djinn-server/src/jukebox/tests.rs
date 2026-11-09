@@ -1007,6 +1007,41 @@ async fn planned_songs_play_in_the_order_shown() {
 }
 
 #[tokio::test]
+async fn nodes_asking_for_more_get_a_longer_plan_played_in_order() {
+    let mut h = Harness::new(30).await;
+    h.event(EngineEvent::NextNeeded { after: None }).await;
+    let planned = h.jukebox.plan_for_nodes(12).await.unwrap();
+    assert_eq!(planned.len(), 12, "planned as far as asked");
+    let unique: std::collections::HashSet<_> = planned.iter().collect();
+    assert_eq!(unique.len(), planned.len(), "no repeats in the plan");
+    assert_eq!(
+        h.jukebox.now_playing().later.len(),
+        PLAN_AHEAD,
+        "screens still get the usual few"
+    );
+    let first = h.play_next().await;
+    h.finish(first).await;
+    let mut played = Vec::new();
+    for _ in 0..planned.len() {
+        let id = h.play_next().await;
+        played.push(id);
+        h.finish(id).await;
+    }
+    assert_eq!(played, planned);
+}
+
+#[tokio::test]
+async fn a_short_playlist_plans_no_further_than_itself() {
+    let mut h = Harness::new(5).await;
+    h.event(EngineEvent::NextNeeded { after: None }).await;
+    let planned = h.jukebox.plan_for_nodes(20).await.unwrap();
+    assert!(
+        planned.len() < 5,
+        "the plan stops where the playlist comes round"
+    );
+}
+
+#[tokio::test]
 async fn a_request_pushes_the_auto_mix_back_without_skipping_any() {
     let mut h = Harness::new(6).await;
     let list = h.jukebox.active_playlist().unwrap();
