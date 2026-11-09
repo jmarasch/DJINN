@@ -6,7 +6,6 @@
   import { api } from './api'
   import { toast } from './state.svelte'
   import type { HouseNode, NodeList } from './types'
-  import NodeSpeakerSettings from './NodeSpeakerSettings.svelte'
 
   let list = $state<NodeList | null>(null)
   let failed = $state(false)
@@ -15,7 +14,6 @@
   let password = $state('')
   let kicking = $state<HouseNode | null>(null)
   /** The node whose speaker settings are open. */
-  let tuning = $state<number | null>(null)
 
   async function load() {
     try {
@@ -57,6 +55,20 @@
       await load()
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Could not accept', true)
+    }
+  }
+
+  /** Opens the node's own page with a one-time link that lets this browser
+   * manage it. The tab opens first, so a popup blocker allows it. */
+  async function manage(node: HouseNode) {
+    const tab = window.open('', '_blank')
+    try {
+      const { url } = await api.nodeManageLink(node.id)
+      if (tab) tab.location.href = url
+      else location.href = url
+    } catch (e) {
+      tab?.close()
+      toast(e instanceof Error ? e.message : 'Could not open it', true)
     }
   }
 
@@ -157,8 +169,8 @@
               : ''}{node.version ? ` · ${node.version}` : ''}
           </span>
         </div>
-        <button class:on={tuning === node.id} onclick={() => (tuning = tuning === node.id ? null : node.id)}>
-          Speaker
+        <button title="Opens the node's own page, where its speaker, timing, screen and other settings are" onclick={() => manage(node)}>
+          Manage
         </button>
         {#if kicking?.id === node.id}
           <button class="danger" onclick={() => remove(node)}>Kick and wipe</button>
@@ -167,13 +179,6 @@
           <button onclick={() => (kicking = node)}>Kick</button>
         {/if}
       </div>
-      {#if tuning === node.id}
-        <NodeSpeakerSettings
-          audio={node.audio}
-          speakers={node.speakers}
-          save={(audio) => api.setNodeAudio(node.id, audio)}
-        />
-      {/if}
       {#if kicking?.id === node.id}
         <p class="small muted">
           {node.name} is shut out at once and wipes every cached song, now if it's connected or when it next starts.

@@ -269,6 +269,8 @@ export const api = {
   roomQuiet: (id: number) => get<{ follow_main: boolean; takeover: 'now' | 'after_song' }>(`/rooms/${id}/quiet`),
   setRoomQuiet: (id: number, rules: { follow_main: boolean; takeover: 'now' | 'after_song' }) =>
     put<void>(`/rooms/${id}/quiet`, rules),
+  /** A one-time link that opens a node's own page, ready to manage it. */
+  nodeManageLink: (id: number) => post<{ url: string }>(`/nodes/${id}/manage`),
   playSyncTone: (id: number) => post<void>(`/rooms/${id}/sync-tone`),
   roomTiming: (id: number) => get<RoomTiming>(`/rooms/${id}/timing`),
   /** Moves one speaker later (+ms) or earlier (-ms). */

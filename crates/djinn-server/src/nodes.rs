@@ -41,6 +41,8 @@ pub fn router() -> Router<AppState> {
         .route("/nodes/song/{id}", get(song))
         .route("/nodes/{id}/audio", put(put_audio))
         .route("/nodes/{id}/screen", get(screen_of))
+        .route("/nodes/{id}/manage", post(manage_link))
+        .route("/nodes/me/manage-check", post(manage_check))
         .route("/nodes/clock", get(crate::node_audio::clock))
         .route("/nodes/stream", get(crate::node_audio::stream))
         .route("/nodes", get(list))
@@ -394,6 +396,84 @@ fn screen_url(state: &AppState, node: &Node) -> Option<String> {
 #[derive(Serialize)]
 struct ScreenAnswer {
     url: Option<String>,
+}
+
+/// One-time links to manage a node on its own page: (SHA-256 of the token,
+/// node id, good until in ms). Kept in memory: a restart ends them, which
+/// only means asking for another.
+static MANAGE_LINKS: std::sync::Mutex<Vec<(String, i64, i64)>> = std::sync::Mutex::new(Vec::new());
+/// How long a manage link works, unused.
+const MANAGE_LINK_MS: i64 = 10 * 60 * 1000;
+/// The port a node's own page listens on (the install images' setting).
+const NODE_PAGE_PORT: u16 = 8066;
+
+#[derive(Serialize)]
+struct ManageLink {
+    url: String,
+}
+
+/// A one-time link that opens a node's own page ready to manage it. The
+/// node checks it with this server (`manage_check`), over the connection
+/// it already trusts, before letting that browser change anything.
+async fn manage_link(
+    _: AdminUser,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> ApiResult<Json<ManageLink>> {
+    let node = state
+        .store
+        .node(id)
+        .await?
+        .filter(|node| node.status == "approved")
+        .ok_or_else(ApiError::not_found)?;
+    let address = node.address.ok_or_else(|| {
+        ApiError::bad_request("this node hasn't checked in yet, so its address isn't known")
+    })?;
+    let mut bytes = [0u8; 16];
+    getrandom::fill(&mut bytes).map_err(|e| anyhow::anyhow!("no system randomness: {e}"))?;
+    let token = hex(&bytes);
+    let now = djinn_store::now_ms();
+    if let Ok(mut links) = MANAGE_LINKS.lock() {
+        links.retain(|link| link.2 > now);
+        links.push((hash_secret(&token), id, now + MANAGE_LINK_MS));
+    }
+    let host = if address.contains(':') {
+        format!("[{address}]")
+    } else {
+        address
+    };
+    Ok(Json(ManageLink {
+        url: format!("http://{host}:{NODE_PAGE_PORT}/node?manage={token}"),
+    }))
+}
+
+#[derive(Deserialize)]
+struct ManageCheck {
+    token: String,
+}
+
+/// A node asking whether a manage link someone opened on it is real (and
+/// for it). Each link works once.
+async fn manage_check(
+    NodeAuth(node): NodeAuth,
+    Json(body): Json<ManageCheck>,
+) -> ApiResult<StatusCode> {
+    let hash = hash_secret(&body.token);
+    let now = djinn_store::now_ms();
+    let mut links = MANAGE_LINKS
+        .lock()
+        .map_err(|_| anyhow::anyhow!("manage links unavailable"))?;
+    links.retain(|link| link.2 > now);
+    match links
+        .iter()
+        .position(|link| link.0 == hash && link.1 == node.id)
+    {
+        Some(at) => {
+            links.remove(at);
+            Ok(StatusCode::NO_CONTENT)
+        }
+        None => Err(ApiError::forbidden()),
+    }
 }
 
 /// What a node's screen should show now. Public, like the pages themselves:
@@ -887,6 +967,78 @@ mod tests {
 
     const SECRET: &str = "0123456789abcdef0123456789abcdef";
     const JOIN: &str = r#"{"node_id":"kitchen-0001","name":"Kitchen","secret":"0123456789abcdef0123456789abcdef","version":"2026.11.7","platform":"linux-aarch64"}"#;
+
+    #[tokio::test]
+    async fn a_manage_link_works_once_and_only_for_its_node() {
+        let state = AppState::for_tests().await;
+        let admin = admin_with_password(&state).await;
+        let cookie = Some(("cookie", admin.as_str()));
+        let signed = format!("Node kitchen-0001:{SECRET}");
+        let node = Some(("authorization", signed.as_str()));
+        settings::set_flag(&state.store, NODES_JOIN, true)
+            .await
+            .unwrap();
+        let (status, _) = send(
+            &state,
+            Method::POST,
+            "/api/nodes/join",
+            Some(JOIN),
+            None,
+            true,
+        )
+        .await;
+        assert_eq!(status, StatusCode::ACCEPTED);
+        let id = state
+            .store
+            .node_by_node_id("kitchen-0001")
+            .await
+            .unwrap()
+            .unwrap()
+            .id;
+        let manage = format!("/api/nodes/{id}/manage");
+        // Not before it's accepted.
+        let (status, _) = send(&state, Method::POST, &manage, None, cookie, false).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        state.store.approve_node(id, 1).await.unwrap();
+        state
+            .store
+            .node_seen(id, Some("192.168.1.30"), None)
+            .await
+            .unwrap();
+        // Only admins get one.
+        let (status, _) = send(&state, Method::POST, &manage, None, None, false).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        let (status, body) = send(&state, Method::POST, &manage, None, cookie, false).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let url: String = serde_json::from_str::<serde_json::Value>(&body).unwrap()["url"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        assert!(
+            url.starts_with("http://192.168.1.30:8066/node?manage="),
+            "{url}"
+        );
+        let token = url.split("manage=").nth(1).unwrap();
+
+        let check = format!(r#"{{"token":"{token}"}}"#);
+        let path = "/api/nodes/me/manage-check";
+        // Someone guessing gets nothing.
+        let (status, _) = send(
+            &state,
+            Method::POST,
+            path,
+            Some(r#"{"token":"guess"}"#),
+            node,
+            true,
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        // The node checks it once; a second time it's spent.
+        let (status, _) = send(&state, Method::POST, path, Some(&check), node, true).await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        let (status, _) = send(&state, Method::POST, path, Some(&check), node, true).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
 
     #[tokio::test]
     async fn a_node_joins_only_when_allowed_and_accepted_then_can_be_kicked() {

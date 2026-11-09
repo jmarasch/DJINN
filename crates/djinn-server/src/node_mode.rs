@@ -19,7 +19,7 @@ use std::time::Duration;
 
 use axum::extract::State;
 use axum::http::StatusCode;
-use axum::response::Redirect;
+use axum::response::{IntoResponse, Redirect};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use djinn_store::Store;
@@ -164,7 +164,15 @@ pub struct Node {
     cache: Arc<crate::node_offline::Cache>,
     /// Main's last volume (f32 bits), for playing offline at the same level.
     volume: Arc<AtomicU32>,
+    /// Browsers let in to manage this node (by a link from Main's Admin >
+    /// Nodes > Manage), and until when.
+    managers: Arc<Mutex<std::collections::HashMap<String, std::time::Instant>>>,
 }
+
+/// The cookie that says a browser may manage this node.
+const MANAGE_COOKIE: &str = "djinn_node_manage";
+/// How long a browser stays let in after opening a manage link.
+const MANAGE_FOR: Duration = Duration::from_secs(12 * 60 * 60);
 
 impl Node {
     pub async fn new(store: Store, cache_dir: PathBuf) -> anyhow::Result<Node> {
@@ -215,6 +223,7 @@ impl Node {
                 crate::node_offline::CACHE_LIMIT_BYTES,
             )),
             volume: Arc::new(AtomicU32::new(1.0f32.to_bits())),
+            managers: Arc::default(),
         })
     }
 
@@ -843,6 +852,46 @@ impl Node {
     }
 
     /// Sends settings changed on this node's page to Main, which keeps them.
+    /// Asks Main whether a manage link is real and for this node; if so,
+    /// lets the browser in and gives back its cookie value.
+    async fn let_in(&self, token: &str) -> Result<String, String> {
+        let (main, pin) = self
+            .joined_main()
+            .await
+            .ok_or("this node hasn't joined a main DJINN")?;
+        let (id, secret) = self.identity().await.map_err(|e| e.to_string())?;
+        let client =
+            pinned_client(Some(pin), Arc::new(Mutex::new(None))).map_err(|e| e.to_string())?;
+        let response = client
+            .post(format!("{main}/api/nodes/me/manage-check"))
+            .header("authorization", format!("Node {id}:{secret}"))
+            .json(&serde_json::json!({ "token": token }))
+            .send()
+            .await
+            .map_err(|e| format!("can't reach Main: {}", plain_error(&e)))?;
+        if !response.status().is_success() {
+            return Err("that link has expired or was already used: open Manage again".into());
+        }
+        let cookie = random_hex(16).map_err(|e| e.to_string())?;
+        if let Ok(mut managers) = self.managers.lock() {
+            let now = std::time::Instant::now();
+            managers.retain(|_, until| *until > now);
+            managers.insert(cookie.clone(), now + MANAGE_FOR);
+        }
+        Ok(cookie)
+    }
+
+    /// Whether this request comes from a browser let in to manage the node.
+    fn managing(&self, headers: &axum::http::HeaderMap) -> bool {
+        let Some(cookie) = cookie_value(headers, MANAGE_COOKIE) else {
+            return false;
+        };
+        let now = std::time::Instant::now();
+        self.managers
+            .lock()
+            .is_ok_and(|managers| managers.get(&cookie).is_some_and(|until| *until > now))
+    }
+
     async fn save_audio(&self, audio: &crate::nodes::AudioSettings) -> Result<(), String> {
         let (main, pin) = self
             .joined_main()
@@ -1172,6 +1221,7 @@ pub fn router(node: Node) -> Router {
         .route("/api/node/connect", post(connect))
         .route("/api/node/ask-again", post(ask_again))
         .route("/api/node/audio", get(get_audio).put(put_audio))
+        .route("/api/node/manage", get(manage_state).post(manage))
         .fallback(crate::web::static_handler)
         .with_state(node)
 }
@@ -1198,10 +1248,69 @@ async fn get_audio(State(node): State<Node>) -> Json<NodeAudioView> {
     })
 }
 
+/// A cookie's value from a request.
+fn cookie_value(headers: &axum::http::HeaderMap, name: &str) -> Option<String> {
+    headers
+        .get_all(axum::http::header::COOKIE)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|value| value.split(';'))
+        .filter_map(|pair| pair.trim().split_once('='))
+        .find(|(key, _)| *key == name)
+        .map(|(_, value)| value.to_owned())
+}
+
+#[derive(Serialize)]
+struct ManageState {
+    managing: bool,
+}
+
+async fn manage_state(
+    State(node): State<Node>,
+    headers: axum::http::HeaderMap,
+) -> Json<ManageState> {
+    Json(ManageState {
+        managing: node.managing(&headers),
+    })
+}
+
+#[derive(Deserialize)]
+struct ManageBody {
+    token: String,
+}
+
+/// Opening a manage link from Main: checked with Main, then this browser
+/// may manage the node for a while.
+async fn manage(
+    State(node): State<Node>,
+    Json(body): Json<ManageBody>,
+) -> ApiResult<axum::response::Response> {
+    let cookie = node
+        .let_in(&body.token)
+        .await
+        .map_err(|e| ApiError::new(StatusCode::FORBIDDEN, e))?;
+    let set = format!(
+        "{MANAGE_COOKIE}={cookie}; HttpOnly; SameSite=Strict; Path=/; Max-Age={}",
+        MANAGE_FOR.as_secs()
+    );
+    Ok((
+        StatusCode::NO_CONTENT,
+        [(axum::http::header::SET_COOKIE, set)],
+    )
+        .into_response())
+}
+
 async fn put_audio(
     State(node): State<Node>,
+    headers: axum::http::HeaderMap,
     Json(body): Json<crate::nodes::AudioSettings>,
 ) -> ApiResult<StatusCode> {
+    if !node.managing(&headers) {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "open this page from the main DJINN's Admin > Nodes > Manage to change settings",
+        ));
+    }
     node.save_audio(&body)
         .await
         .map_err(|e| ApiError::new(StatusCode::BAD_REQUEST, e))?;
@@ -1267,6 +1376,20 @@ pub async fn serve(
 mod tests {
     use super::*;
     use crate::state::AppState;
+
+    #[test]
+    fn the_manage_cookie_is_found_among_others() {
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert(
+            axum::http::header::COOKIE,
+            "a=1; djinn_node_manage=abc123; b=2".parse().unwrap(),
+        );
+        assert_eq!(
+            cookie_value(&headers, MANAGE_COOKIE).as_deref(),
+            Some("abc123")
+        );
+        assert_eq!(cookie_value(&headers, "missing"), None);
+    }
 
     #[test]
     fn the_home_network_address_is_preferred() {

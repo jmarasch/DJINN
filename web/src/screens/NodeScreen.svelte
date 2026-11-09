@@ -55,6 +55,28 @@
   }
 
   const onScreen = new URLSearchParams(location.search).has('screen')
+  /** Let in to manage this node (a link from the main DJINN's Admin > Nodes > Manage). */
+  let managing = $state(false)
+
+  /** Opens a manage link if this page came with one, then asks whether this
+   * browser may manage the node. */
+  async function checkManaging() {
+    const params = new URLSearchParams(location.search)
+    const token = params.get('manage')
+    if (token) {
+      params.delete('manage')
+      const rest = params.toString()
+      history.replaceState(null, '', location.pathname + (rest ? `?${rest}` : ''))
+      const res = await fetch('/api/node/manage', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ token }),
+      }).catch(() => null)
+      if (res && !res.ok) error = (await res.json().catch(() => null))?.error ?? 'That manage link did not work'
+    }
+    const res = await fetch('/api/node/manage').catch(() => null)
+    managing = !!res?.ok && !!(await res.json()).managing
+  }
 
   async function load() {
     try {
@@ -74,6 +96,7 @@
   onMount(() => {
     document.title = 'DJINN node'
     void load()
+    void checkManaging()
     const timer = setInterval(load, 3000)
     return () => clearInterval(timer)
   })
@@ -222,7 +245,12 @@
           </p>
         {/if}
         {#if error}<p class="error">{error}</p>{/if}
-        {#if status.pairing === 'joined'}
+        {#if status.pairing === 'joined' && !managing}
+          <p class="small muted">
+            To change this node's settings, open it from the main DJINN: Admin &gt; Nodes &gt; Manage.
+          </p>
+        {/if}
+        {#if status.pairing === 'joined' && managing}
           <button onclick={openSpeaker}>{speakerOpen ? 'Hide speaker settings' : 'Speaker settings'}</button>
           {#if speakerOpen && speakerView?.audio}
             <NodeSpeakerSettings audio={speakerView.audio} speakers={speakerView.speakers} save={saveAudio} />
