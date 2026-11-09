@@ -42,6 +42,7 @@ pub fn router() -> Router<AppState> {
         .route("/nodes/{id}/audio", put(put_audio))
         .route("/nodes/{id}/screen", get(screen_of))
         .route("/nodes/{id}/manage", post(manage_link))
+        .route("/nodes/me/build", get(crate::node_builds::serve))
         .route("/nodes/me/manage-check", post(manage_check))
         .route("/nodes/clock", get(crate::node_audio::clock))
         .route("/nodes/stream", get(crate::node_audio::stream))
@@ -374,7 +375,12 @@ struct MeAnswer {
     /// The page a screen plugged into the node shows; None for the node's
     /// own page (its status, or blank).
     screen: Option<String>,
+    /// A newer DJINN for the node to put in place, when it's behind.
+    update: Option<crate::node_builds::NodeUpdate>,
 }
+
+/// The header a node's check-in says its version in.
+pub const NODE_VERSION_HEADER: &str = "x-djinn-version";
 
 /// The page on Main that a node's screen should show, or None for the
 /// node's own page. Pages opened this way check back (`screen_of`), so a
@@ -499,12 +505,22 @@ async fn me(
     State(state): State<AppState>,
     ClientIp(ip): ClientIp,
     NodeAuth(node): NodeAuth,
+    headers: axum::http::HeaderMap,
 ) -> ApiResult<Json<MeAnswer>> {
     let address = ip.map(|ip| ip.to_string());
+    // Which version the node runs now (it changes when it updates).
+    let version = headers
+        .get(NODE_VERSION_HEADER)
+        .and_then(|v| v.to_str().ok())
+        .map(|v| v.chars().take(40).collect::<String>());
     state
         .store
-        .node_seen(node.id, address.as_deref(), None)
+        .node_seen(node.id, address.as_deref(), version.as_deref())
         .await?;
+    let node = Node {
+        version: version.or(node.version),
+        ..node
+    };
     let audio = AudioSettings::of(&node);
     let upcoming = if node.status == "approved" {
         upcoming(&state, node.room_id, node.cache_ahead as usize).await?
@@ -516,6 +532,7 @@ async fn me(
         upcoming,
         audio_room: state.rooms.audio_leader(node.room_id),
         screen: screen_url(&state, &node),
+        update: crate::node_builds::offer(&state, &node),
         status: node.status,
         name: node.name,
         room_id: node.room_id,
@@ -967,6 +984,68 @@ mod tests {
 
     const SECRET: &str = "0123456789abcdef0123456789abcdef";
     const JOIN: &str = r#"{"node_id":"kitchen-0001","name":"Kitchen","secret":"0123456789abcdef0123456789abcdef","version":"2026.11.7","platform":"linux-aarch64"}"#;
+
+    #[tokio::test]
+    async fn a_node_behind_is_offered_the_update_once_main_has_it() {
+        let state = AppState::for_tests().await;
+        admin_with_password(&state).await;
+        settings::set_flag(&state.store, NODES_JOIN, true)
+            .await
+            .unwrap();
+        let old = r#"{"node_id":"den-0001","name":"Den","secret":"0123456789abcdef0123456789abcdef","version":"2020.1.1","platform":"linux-aarch64"}"#;
+        let (status, _) = send(
+            &state,
+            Method::POST,
+            "/api/nodes/join",
+            Some(old),
+            None,
+            true,
+        )
+        .await;
+        assert_eq!(status, StatusCode::ACCEPTED);
+        let id = state
+            .store
+            .node_by_node_id("den-0001")
+            .await
+            .unwrap()
+            .unwrap()
+            .id;
+        state.store.approve_node(id, 1).await.unwrap();
+        let signed = format!("Node den-0001:{SECRET}");
+        let node = Some(("authorization", signed.as_str()));
+        // The file isn't here yet (fetching it can't work in a test): nothing offered.
+        let (_, body) = send(&state, Method::GET, "/api/nodes/me", None, node, true).await;
+        assert!(body.contains(r#""update":null"#), "{body}");
+        // Once it's here, it's offered with its sum, and served to the node.
+        let dir = state
+            .art_dir
+            .parent()
+            .unwrap()
+            .join("node-builds")
+            .join(env!("DJINN_RELEASE_VERSION"));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("djinn-linux-aarch64"), b"new program").unwrap();
+        std::fs::write(dir.join("djinn-linux-aarch64.sha256"), "abc123").unwrap();
+        let (_, body) = send(&state, Method::GET, "/api/nodes/me", None, node, true).await;
+        assert!(body.contains(r#""sha256":"abc123""#), "{body}");
+        let (status, file) =
+            send(&state, Method::GET, "/api/nodes/me/build", None, node, true).await;
+        assert_eq!((status, file.as_str()), (StatusCode::OK, "new program"));
+        // A node that says it's up to date isn't offered anything.
+        let mut req = axum::http::Request::builder()
+            .uri("/api/nodes/me")
+            .header("authorization", signed.as_str())
+            .header(NODE_VERSION_HEADER, env!("DJINN_RELEASE_VERSION"))
+            .body(Body::empty())
+            .unwrap();
+        req.extensions_mut().insert(DirectTls);
+        let res = crate::app(state.clone()).oneshot(req).await.unwrap();
+        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert!(String::from_utf8_lossy(&bytes).contains(r#""update":null"#));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[tokio::test]
     async fn a_manage_link_works_once_and_only_for_its_node() {

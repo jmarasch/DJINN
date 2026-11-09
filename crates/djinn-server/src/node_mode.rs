@@ -167,7 +167,14 @@ pub struct Node {
     /// Browsers let in to manage this node (by a link from Main's Admin >
     /// Nodes > Manage), and until when.
     managers: Arc<Mutex<std::collections::HashMap<String, std::time::Instant>>>,
+    /// Putting an update from Main in place now; and when the last try
+    /// failed, so it isn't tried again on every check-in.
+    updating: Arc<AtomicBool>,
+    update_failed: Arc<Mutex<Option<std::time::Instant>>>,
 }
+
+/// After a failed update, how long before trying again.
+const UPDATE_RETRY: Duration = Duration::from_secs(10 * 60);
 
 /// The cookie that says a browser may manage this node.
 const MANAGE_COOKIE: &str = "djinn_node_manage";
@@ -224,6 +231,8 @@ impl Node {
             )),
             volume: Arc::new(AtomicU32::new(1.0f32.to_bits())),
             managers: Arc::default(),
+            updating: Arc::default(),
+            update_failed: Arc::default(),
         })
     }
 
@@ -376,6 +385,10 @@ impl Node {
                 client
                     .get(format!("{main}/api/nodes/me"))
                     .header("authorization", &auth)
+                    .header(
+                        crate::nodes::NODE_VERSION_HEADER,
+                        env!("DJINN_RELEASE_VERSION"),
+                    )
                     .send()
                     .await,
             )
@@ -489,7 +502,74 @@ impl Node {
                 self.audio.send_replace(Some(audio));
             }
         }
+        if let Ok(update) =
+            serde_json::from_value::<crate::node_builds::NodeUpdate>(answer["update"].clone())
+        {
+            self.start_update(update);
+        }
         Ok(Some(if joined { CHECK_JOINED } else { CHECK_WAITING }))
+    }
+
+    /// Takes a newer DJINN from Main: downloads it over the pinned
+    /// connection, checks its sum, puts it in place and starts again.
+    fn start_update(&self, update: crate::node_builds::NodeUpdate) {
+        let recently_failed = self
+            .update_failed
+            .lock()
+            .ok()
+            .and_then(|failed| *failed)
+            .is_some_and(|at| at.elapsed() < UPDATE_RETRY);
+        if recently_failed || self.updating.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        let node = self.clone();
+        tokio::spawn(async move {
+            tracing::info!(version = %update.version, "updating from Main");
+            if let Err(e) = node.put_update_in_place(&update).await {
+                tracing::warn!(error = %e, "couldn't update from Main");
+                if let Ok(mut failed) = node.update_failed.lock() {
+                    *failed = Some(std::time::Instant::now());
+                }
+                node.updating.store(false, Ordering::Release);
+            }
+        });
+    }
+
+    async fn put_update_in_place(
+        &self,
+        update: &crate::node_builds::NodeUpdate,
+    ) -> Result<(), String> {
+        let (main, pin) = self
+            .joined_main()
+            .await
+            .ok_or("this node hasn't joined a main DJINN")?;
+        let (id, secret) = self.identity().await.map_err(|e| e.to_string())?;
+        let client =
+            pinned_client(Some(pin), Arc::new(Mutex::new(None))).map_err(|e| e.to_string())?;
+        let bytes = client
+            .get(format!("{main}/api/nodes/me/build"))
+            .header("authorization", format!("Node {id}:{secret}"))
+            .timeout(Duration::from_secs(600))
+            .send()
+            .await
+            .and_then(reqwest::Response::error_for_status)
+            .map_err(|e| format!("download from Main failed: {}", plain_error(&e)))?
+            .bytes()
+            .await
+            .map_err(|e| format!("download from Main failed: {}", plain_error(&e)))?;
+        let got = crate::node_builds::hex(&Sha256::digest(&bytes));
+        if got != update.sha256 {
+            return Err("the download doesn't match what Main said it was".into());
+        }
+        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        let new = exe.with_file_name("djinn.update");
+        std::fs::write(&new, &bytes).map_err(|e| format!("can't save it: {e}"))?;
+        crate::update::replace(&exe, &new).map_err(|e| {
+            let _ = std::fs::remove_file(&new);
+            format!("can't put it in place: {e}")
+        })?;
+        tracing::info!(version = %update.version, "updated from Main; starting again");
+        crate::update::restart(&exe).map_err(|e| format!("can't start again: {e}"))
     }
 }
 

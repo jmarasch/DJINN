@@ -561,6 +561,11 @@ fn parse_version(v: &str) -> Option<(u64, u64, u64, bool)> {
 }
 
 /// True if `version` is newer than this copy.
+/// Whether version `a` comes after version `b`.
+pub fn newer(a: &str, b: &str) -> bool {
+    matches!((parse_version(a), parse_version(b)), (Some(a), Some(b)) if a > b)
+}
+
 fn is_newer(version: &str) -> bool {
     match (
         parse_version(version),
@@ -685,7 +690,7 @@ async fn install(state: &AppState, release: &Release) -> Result<(), String> {
 }
 
 /// Puts `new` in place of the running program at `exe`.
-fn replace(exe: &Path, new: &Path) -> std::io::Result<()> {
+pub(crate) fn replace(exe: &Path, new: &Path) -> std::io::Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;

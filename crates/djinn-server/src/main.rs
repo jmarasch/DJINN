@@ -38,6 +38,7 @@ mod logs;
 mod lyrics;
 mod network;
 mod node_audio;
+mod node_builds;
 mod node_mode;
 mod node_offline;
 mod nodes;
