@@ -24,6 +24,7 @@ pub fn router() -> Router<AppState> {
         .route("/rooms/{id}/quiet", get(get_quiet).put(put_quiet))
         .route("/rooms/{id}/rules", get(get_rules).put(put_rules))
         .route("/rooms/{id}/sync-tone", post(sync_tone))
+        .route("/rooms/{id}/timing", get(timing).post(nudge))
 }
 
 fn room_error(e: RoomError) -> ApiError {
@@ -280,6 +281,149 @@ async fn sync_tone(
     Ok(StatusCode::ACCEPTED)
 }
 
+/// The longest any speaker is held back for timing (what Main's own outputs
+/// allow).
+const MAX_TIMING_MS: i64 = djinn_engine::MAX_DELAY_MS as i64;
+
+/// A speaker in a room's timing: one of this computer's outputs or a node.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+struct TimingSpeaker {
+    /// "output" or "node".
+    kind: &'static str,
+    id: i64,
+    name: String,
+    delay_ms: i64,
+}
+
+#[derive(Serialize)]
+struct Timing {
+    speakers: Vec<TimingSpeaker>,
+    max_ms: i64,
+}
+
+/// Every speaker playing what `room` plays (rooms linked together share
+/// one), in a steady order.
+async fn timing_speakers(state: &AppState, room: i64) -> ApiResult<Vec<TimingSpeaker>> {
+    let leader = state.rooms.leader(room);
+    let same = |r: i64| state.rooms.leader(r) == leader;
+    let mut speakers: Vec<TimingSpeaker> = state
+        .store
+        .outputs()
+        .await?
+        .into_iter()
+        .filter(|o| o.enabled && same(o.room_id))
+        .map(|o| TimingSpeaker {
+            kind: "output",
+            id: o.id,
+            name: o.label,
+            delay_ms: o.delay_ms,
+        })
+        .collect();
+    speakers.extend(
+        state
+            .store
+            .nodes()
+            .await?
+            .into_iter()
+            .filter(|n| n.status == "approved" && same(n.room_id))
+            .map(|n| TimingSpeaker {
+                kind: "node",
+                id: n.id,
+                name: n.name,
+                delay_ms: n.delay_ms,
+            }),
+    );
+    Ok(speakers)
+}
+
+async fn timing(
+    _: AdminUser,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> ApiResult<Json<Timing>> {
+    if state.store.room(id).await?.is_none() {
+        return Err(ApiError::not_found());
+    }
+    Ok(Json(Timing {
+        speakers: timing_speakers(&state, id).await?,
+        max_ms: MAX_TIMING_MS,
+    }))
+}
+
+#[derive(Deserialize)]
+struct Nudge {
+    kind: String,
+    id: i64,
+    /// Later (positive) or earlier (negative), in ms.
+    ms: i64,
+}
+
+/// New delays after moving one speaker by `ms`. Nothing can play before
+/// the music reaches it, so moving one earlier than zero holds all the
+/// others back instead; the earliest always sits at zero. None if it would
+/// go past the longest delay allowed.
+fn nudged(speakers: &[TimingSpeaker], kind: &str, id: i64, ms: i64) -> Option<Vec<i64>> {
+    let mut delays: Vec<i64> = speakers
+        .iter()
+        .map(|s| {
+            if s.kind == kind && s.id == id {
+                s.delay_ms + ms
+            } else {
+                s.delay_ms
+            }
+        })
+        .collect();
+    let lowest = delays.iter().copied().min().unwrap_or(0);
+    for delay in &mut delays {
+        *delay -= lowest;
+    }
+    delays
+        .iter()
+        .all(|d| (0..=MAX_TIMING_MS).contains(d))
+        .then_some(delays)
+}
+
+/// Moves one speaker in a room's timing earlier or later.
+async fn nudge(
+    _: AdminUser,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Json(body): Json<Nudge>,
+) -> ApiResult<Json<Timing>> {
+    let speakers = timing_speakers(&state, id).await?;
+    if !speakers
+        .iter()
+        .any(|s| s.kind == body.kind && s.id == body.id)
+    {
+        return Err(ApiError::not_found());
+    }
+    let delays =
+        nudged(&speakers, &body.kind, body.id, body.ms.clamp(-1000, 1000)).ok_or_else(|| {
+            ApiError::bad_request(format!(
+                "that would hold a speaker back more than {MAX_TIMING_MS} ms"
+            ))
+        })?;
+    let outputs = state.store.outputs().await?;
+    for (speaker, delay) in speakers.iter().zip(delays) {
+        if speaker.delay_ms == delay {
+            continue;
+        }
+        if speaker.kind == "node" {
+            state.store.set_node_delay(speaker.id, delay).await?;
+        } else if let Some(output) = outputs.iter().find(|o| o.id == speaker.id) {
+            state
+                .store
+                .update_output(output.id, output.enabled, output.volume_trim, delay)
+                .await?;
+        }
+    }
+    crate::rooms_rt::apply_outputs(&state).await?;
+    Ok(Json(Timing {
+        speakers: timing_speakers(&state, id).await?,
+        max_ms: MAX_TIMING_MS,
+    }))
+}
+
 async fn resync(_: AdminUser, State(state): State<AppState>) -> ApiResult<StatusCode> {
     crate::rooms_rt::sync(&state).await?;
     Ok(StatusCode::NO_CONTENT)
@@ -288,6 +432,28 @@ async fn resync(_: AdminUser, State(state): State<AppState>) -> ApiResult<Status
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn speaker(kind: &'static str, id: i64, delay_ms: i64) -> TimingSpeaker {
+        TimingSpeaker {
+            kind,
+            id,
+            name: String::new(),
+            delay_ms,
+        }
+    }
+
+    #[test]
+    fn moving_a_speaker_earlier_than_zero_holds_the_others_back() {
+        let room = [speaker("output", 1, 0), speaker("node", 7, 40)];
+        // Later and earlier, within what's there.
+        assert_eq!(nudged(&room, "node", 7, 10), Some(vec![0, 50]));
+        assert_eq!(nudged(&room, "node", 7, -40), Some(vec![0, 0]));
+        // Earlier than the earliest: the rest wait instead.
+        assert_eq!(nudged(&room, "node", 7, -60), Some(vec![20, 0]));
+        assert_eq!(nudged(&room, "output", 1, -15), Some(vec![0, 55]));
+        // Not past the longest delay.
+        assert_eq!(nudged(&room, "node", 7, MAX_TIMING_MS), None);
+    }
     use crate::test_util::{call, get_body, session};
     use axum::http::Method;
     use djinn_store::Role;

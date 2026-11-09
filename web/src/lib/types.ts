@@ -1384,3 +1384,16 @@ export interface RoomList {
   /** The room this person is in. */
   mine: number
 }
+
+/** A speaker in a room's timing: one of Main's outputs or a node. */
+export interface TimingSpeaker {
+  kind: 'output' | 'node'
+  id: number
+  name: string
+  delay_ms: number
+}
+
+export interface RoomTiming {
+  speakers: TimingSpeaker[]
+  max_ms: number
+}

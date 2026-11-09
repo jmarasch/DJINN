@@ -256,6 +256,16 @@ impl Store {
         Ok(result.rows_affected() > 0)
     }
 
+    /// Sets only a node's delay (the room timing tool), 0 to 2000 ms.
+    pub async fn set_node_delay(&self, id: i64, delay_ms: i64) -> Result<bool> {
+        let result = sqlx::query("UPDATE nodes SET delay_ms = ? WHERE id = ?")
+            .bind(delay_ms.clamp(0, 2000))
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
     pub async fn set_node_devices(&self, id: i64, devices: &str) -> Result<()> {
         sqlx::query("UPDATE nodes SET devices = ? WHERE id = ?")
             .bind(devices)

@@ -5,7 +5,7 @@
   import { onMount } from 'svelte'
   import { api } from './api'
   import { app, toast } from './state.svelte'
-  import type { HouseNode, OutputConfig, Room } from './types'
+  import type { HouseNode, OutputConfig, Room, RoomTiming, TimingSpeaker } from './types'
 
   let rooms = $state<Room[]>([])
   let outputs = $state<OutputConfig[]>([])
@@ -18,6 +18,31 @@
   let quiet = $state<Record<number, { follow_main: boolean; takeover: 'now' | 'after_song' }>>({})
   /** The room whose queue rules are open, and the rules being edited. */
   let ruling = $state<number | null>(null)
+  /** The room whose timing is open, and its speakers. */
+  let timingRoom = $state<number | null>(null)
+  let timing = $state<RoomTiming | null>(null)
+
+  async function openTiming(room: Room) {
+    if (timingRoom === room.id) {
+      timingRoom = null
+      return
+    }
+    timingRoom = room.id
+    timing = null
+    try {
+      timing = await api.roomTiming(room.id)
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not load the timing', true)
+    }
+  }
+
+  async function nudge(room: Room, speaker: TimingSpeaker, ms: number) {
+    try {
+      timing = await api.nudgeTiming(room.id, speaker.kind, speaker.id, ms)
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not change it', true)
+    }
+  }
   let rules = $state({ max_queue: 0, per_user_limit: 3, skip_votes: 0 })
 
   async function openRules(room: Room) {
@@ -184,15 +209,49 @@
         {ruling === room.id ? 'Hide queue rules' : 'Queue rules'}
       </button>
       {#if room.linked_to === null}
-        <button
-          class="small-button"
-          title="30 seconds of clicks through every speaker and node in this room, so you can set each one's delay until they click together. Only while the room is quiet."
-          onclick={() => run(() => api.playSyncTone(room.id), `Clicks playing in ${room.name} for 30 seconds`)}
-        >
-          Sync test clicks
+        <button class="small-button" onclick={() => openTiming(room)}>
+          {timingRoom === room.id ? 'Hide timing' : 'Timing'}
         </button>
       {/if}
     </div>
+    {#if timingRoom === room.id}
+      <div class="timing">
+        <p class="small muted">
+          Play the timing sound, then move each speaker earlier or later until the tocks land together. Nothing can play
+          before the music reaches it, so moving one earlier holds the others back instead. Nodes change within a few
+          seconds; this computer's speakers at once.
+        </p>
+        <button
+          class="small-button"
+          onclick={() => run(() => api.playSyncTone(room.id), `Timing sound playing in ${room.name} for 30 seconds`)}
+        >
+          Play the timing sound (30 s)
+        </button>
+        {#if !timing}
+          <p class="small muted">Loading...</p>
+        {:else if !timing.speakers.length}
+          <p class="small muted">No speakers or nodes in this room yet.</p>
+        {:else}
+          <ul>
+            {#each timing.speakers as speaker (speaker.kind + speaker.id)}
+              <li>
+                <span class="who">
+                  {speaker.name}
+                  <span class="small muted">{speaker.kind === 'node' ? 'node' : 'this computer'}, held back {speaker.delay_ms} ms</span>
+                </span>
+                <span class="nudges">
+                  <button class="small-button" aria-label="{speaker.name} 10 ms earlier" onclick={() => nudge(room, speaker, -10)}>-10</button>
+                  <button class="small-button" aria-label="{speaker.name} 1 ms earlier" onclick={() => nudge(room, speaker, -1)}>-1</button>
+                  <button class="small-button" aria-label="{speaker.name} 1 ms later" onclick={() => nudge(room, speaker, 1)}>+1</button>
+                  <button class="small-button" aria-label="{speaker.name} 10 ms later" onclick={() => nudge(room, speaker, 10)}>+10</button>
+                </span>
+              </li>
+            {/each}
+          </ul>
+          <p class="small muted">- is earlier, + is later, in milliseconds.</p>
+        {/if}
+      </div>
+    {/if}
     {#if ruling === room.id}
       <form
         class="rules"
@@ -284,6 +343,40 @@
     align-items: center;
     gap: 8px;
     margin-top: 10px;
+  }
+
+  .timing {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 10px;
+  }
+
+  .timing ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .timing li {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .timing .who {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .nudges {
+    display: flex;
+    gap: 4px;
   }
 
   .room-tools {
