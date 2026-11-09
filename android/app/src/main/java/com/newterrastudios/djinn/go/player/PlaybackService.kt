@@ -28,7 +28,10 @@ import androidx.media3.session.CacheBitmapLoader
 import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
+import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionCommands
+import androidx.media3.session.SessionResult
+import android.os.Bundle
 import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
@@ -57,6 +60,8 @@ import java.util.concurrent.ConcurrentHashMap
 
 /** How the player names a song; it becomes a real link only when it's fetched. */
 internal const val TRACK_SCHEME = "djinn"
+/** The app's own "Skip, play less": reports the song as one to play less, then skips it. */
+internal val SKIP_PLAY_LESS = SessionCommand("djinn.SKIP_PLAY_LESS", Bundle.EMPTY)
 private const val SAVE_EVERY_MS = 15_000L
 /** Links work for a few hours on the server; a fresh one well before that. */
 private const val LINK_LIFE_MS = 60 * 60 * 1000L
@@ -303,7 +308,16 @@ class PlaybackService : MediaLibraryService() {
             lastTick = if (player.isPlaying) now else 0L
         }
 
-        private fun report() {
+        /** "Skip, play less": the song counts against itself, then the next one plays. */
+        fun skipPlayLess() {
+            count()
+            // Counts as heard for a moment at least, so the report isn't dropped.
+            if (heardMs <= 0) heardMs = 1
+            report(playLess = true)
+            player.seekToNextMediaItem()
+        }
+
+        private fun report(playLess: Boolean = false) {
             count()
             val id = hearing
             val ms = heardMs
@@ -314,18 +328,22 @@ class PlaybackService : MediaLibraryService() {
             // Another server's song: it hears about it when that server is next in use.
             hearingFor?.let { other ->
                 reports.launch {
-                    app.offline.dao.addPlay(PendingPlay(server = other, trackId = id, msPlayed = ms, at = at))
+                    app.offline.dao.addPlay(
+                        PendingPlay(server = other, trackId = id, msPlayed = ms, at = at, playLess = playLess),
+                    )
                 }
                 return
             }
             val server = app.account.scope
             reports.launch {
                 try {
-                    app.api.reportPlay(id, ms, at)
+                    app.api.reportPlay(id, ms, at, playLess)
                 } catch (e: IOException) {
                     // Not reachable: it goes when it can. The server saying no is final.
                     if (e !is com.newterrastudios.djinn.go.data.ApiException && server != null) {
-                        app.offline.dao.addPlay(PendingPlay(server = server, trackId = id, msPlayed = ms, at = at))
+                        app.offline.dao.addPlay(
+                            PendingPlay(server = server, trackId = id, msPlayed = ms, at = at, playLess = playLess),
+                        )
                         SyncWorker.enqueue(this@PlaybackService)
                     }
                 }
@@ -362,11 +380,33 @@ class PlaybackService : MediaLibraryService() {
                 session.isAutomotiveController(controller) ||
                 session.isMediaNotificationController(controller) ||
                 mayBrowse(controller.packageName)
+            if (controller.uid == Process.myUid()) {
+                val base = super.onConnect(session, controller)
+                return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
+                    .setAvailableSessionCommands(
+                        base.availableSessionCommands.buildUpon().add(SKIP_PLAY_LESS).build(),
+                    )
+                    .setAvailablePlayerCommands(base.availablePlayerCommands)
+                    .build()
+            }
             if (full) return super.onConnect(session, controller)
             return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
                 .setAvailableSessionCommands(SessionCommands.EMPTY)
                 .setAvailablePlayerCommands(REMOTE_BUTTONS)
                 .build()
+        }
+
+        override fun onCustomCommand(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo,
+            customCommand: SessionCommand,
+            args: Bundle,
+        ): ListenableFuture<SessionResult> {
+            if (customCommand.customAction != SKIP_PLAY_LESS.customAction) {
+                return super.onCustomCommand(session, controller, customCommand, args)
+            }
+            reporter?.skipPlayLess()
+            return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
         }
 
         /**

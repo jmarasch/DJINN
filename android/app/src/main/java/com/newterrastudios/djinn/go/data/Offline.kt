@@ -85,6 +85,8 @@ data class PendingPlay(
     @ColumnInfo(name = "track_id") val trackId: Long,
     @ColumnInfo(name = "ms_played") val msPlayed: Long,
     val at: Long,
+    /** Skipped with "Skip, play less". */
+    @ColumnInfo(name = "play_less", defaultValue = "0") val playLess: Boolean = false,
 )
 
 /** A like changed while the server couldn't be reached. */
@@ -172,7 +174,7 @@ interface OfflineDao {
 
 @Database(
     entities = [OfflineSong::class, SavedSound::class, PendingPlay::class, PendingLike::class, PendingAdd::class],
-    version = 2,
+    version = 3,
     exportSchema = false,
 )
 abstract class OfflineDb : RoomDatabase() {
@@ -189,9 +191,15 @@ abstract class OfflineDb : RoomDatabase() {
             }
         }
 
+        private val ADD_PLAY_LESS = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE pending_plays ADD COLUMN play_less INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         fun open(context: Context) =
             Room.databaseBuilder(context, OfflineDb::class.java, "offline.db")
-                .addMigrations(ADD_PENDING_ADDS)
+                .addMigrations(ADD_PENDING_ADDS, ADD_PLAY_LESS)
                 .build()
     }
 }
@@ -560,7 +568,7 @@ class OfflineStore(
         val server = account.scope ?: return@withContext
         for (play in dao.plays().filter { it.server == server }) {
             try {
-                api.reportPlay(play.trackId, play.msPlayed, play.at)
+                api.reportPlay(play.trackId, play.msPlayed, play.at, play.playLess)
             } catch (e: ApiException) {
                 if (e.status == 401) return@withContext
             }

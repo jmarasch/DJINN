@@ -173,6 +173,7 @@
   "player.pause": "Pause",
   "player.play": "Play",
   "player.next": "Next",
+  "player.skip_play_less": "Skip, play less",
   "player.repeat": "Repeat",
   "player.like": "Like",
   "player.unlike": "Unlike",

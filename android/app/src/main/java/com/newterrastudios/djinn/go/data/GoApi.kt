@@ -243,8 +243,8 @@ class GoApi(private val account: Account) {
 
     suspend fun playLinks(id: Long): PlayLinks = withContext(Dispatchers.IO) { playLinksBlocking(id) }
 
-    suspend fun reportPlay(id: Long, msPlayed: Long, at: Long? = null) =
-        write("POST", "/api/go/plays", PlayReport(id, msPlayed, at))
+    suspend fun reportPlay(id: Long, msPlayed: Long, at: Long? = null, playLess: Boolean = false) =
+        write("POST", "/api/go/plays", PlayReport(id, msPlayed, at, playLess))
 
     suspend fun me(): Me = get("/api/me")
     suspend fun track(id: Long): Track = get("/api/tracks/$id")

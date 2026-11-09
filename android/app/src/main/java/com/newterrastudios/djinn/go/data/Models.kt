@@ -347,6 +347,8 @@ data class PlayReport(
     @SerialName("ms_played") val msPlayed: Long,
     /** When it was heard, for a play reported later. */
     val at: Long? = null,
+    /** Skipped with "Skip, play less": counts against the song in radio. */
+    @SerialName("play_less") val playLess: Boolean = false,
 )
 
 /** Your year on GO, from `/api/go/year`. */

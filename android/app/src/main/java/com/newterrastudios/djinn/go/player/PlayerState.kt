@@ -316,6 +316,11 @@ class PlayerState(private val api: GoApi) {
         controller?.seekToNextMediaItem()
     }
 
+    /** Skips the song, and has it (and songs like it) play less in radio and the mix. */
+    fun skipPlayLess() {
+        controller?.sendCustomCommand(SKIP_PLAY_LESS, android.os.Bundle.EMPTY)
+    }
+
     /** To the song's start, or the song before if just begun. */
     fun previous() {
         controller?.seekToPrevious()

@@ -312,6 +312,11 @@ fun NowPlayingScreen(nav: Nav) {
                                 tint = if (showLyrics) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
+                        if (casting == null) {
+                            TextButton(onClick = player::skipPlayLess) {
+                                Text(t("player.skip_play_less"))
+                            }
+                        }
                     }
                 }
                 player.error?.let { Text(it, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center) }
