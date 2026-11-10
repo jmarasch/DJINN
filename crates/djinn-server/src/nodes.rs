@@ -717,7 +717,8 @@ pub fn watch_joining(state: AppState, port: u16) {
                 ),
                 Err(_) => false,
             };
-            let wanted = set_up && (joining || findable || missing);
+            let wanted =
+                set_up && (joining || findable || missing || state.join_url.moved_lately());
             let stale = announcing
                 .as_ref()
                 .is_some_and(|(now, said)| !wanted || *said != joining || now.name != name);

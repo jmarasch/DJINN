@@ -27,7 +27,9 @@ class DjinnApp : Application(), SingletonImageLoader.Factory {
     }
 
     val account by lazy { Account(this) }
-    val api by lazy { GoApi(account) }
+    val api by lazy { GoApi(account).also { it.onUnreachable = { seeker.lost() } } }
+    /** Follows the server in use to a new address on the network. */
+    val seeker by lazy { com.newterrastudios.djinn.go.data.ServerSeeker(this, account) }
     val prefs by lazy { Prefs(this) { account.scope.orEmpty() } }
     val offline by lazy { OfflineStore(this, account, api, prefs) }
     val updater by lazy { AppUpdater(this, api, account) }

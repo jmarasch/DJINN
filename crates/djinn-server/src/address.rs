@@ -4,6 +4,7 @@
 //! screens all carry it, so a change reaches them without restarting DJINN.
 
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::RwLock;
 use std::time::Duration;
 
@@ -13,17 +14,30 @@ use crate::state::AppState;
 /// How often the network is looked at. Cheap: one list of interfaces.
 const CHECK_EVERY: Duration = Duration::from_secs(10);
 
-/// The address guests open (`http://192.168.1.20:8066`).
+/// After a new address, how long this computer announces itself even when
+/// set to stay hidden, so phones and nodes that knew the old one find it.
+pub const ANNOUNCE_AFTER_MOVE: Duration = Duration::from_secs(60 * 60);
+
+/// The address guests open (`http://192.168.1.20:8066`), and when it last
+/// changed (ms; 0 never).
 #[derive(Default)]
-pub struct JoinUrl(RwLock<String>);
+pub struct JoinUrl(RwLock<String>, AtomicI64);
 
 impl JoinUrl {
     pub fn new(url: String) -> Self {
-        Self(RwLock::new(url))
+        Self(RwLock::new(url), AtomicI64::new(0))
     }
 
     pub fn get(&self) -> String {
         self.0.read().map(|u| u.clone()).unwrap_or_default()
+    }
+
+    /// The address changed within ANNOUNCE_AFTER_MOVE.
+    pub fn moved_lately(&self) -> bool {
+        let at = self.1.load(Ordering::Relaxed);
+        at > 0
+            && djinn_store::now_ms() - at
+                < i64::try_from(ANNOUNCE_AFTER_MOVE.as_millis()).unwrap_or(i64::MAX)
     }
 
     /// Without the trailing slash, for adding a path.
@@ -35,6 +49,7 @@ impl JoinUrl {
         if let Ok(mut current) = self.0.write() {
             *current = url;
         }
+        self.1.store(djinn_store::now_ms(), Ordering::Relaxed);
     }
 }
 
@@ -79,6 +94,16 @@ pub fn watch(state: AppState, listen: SocketAddr, on_change: OnChange) {
             on_change(&url);
             let _ = state.events.send(ServerEvent::Address { url: url.clone() });
             crate::network::refresh(&state);
+            // Phones find it by its announcement (even if hidden, for a
+            // while: `moved_lately`); stop that again afterwards.
+            if let Err(e) = crate::go::apply(&state).await {
+                tracing::warn!(error = %format!("{e:#}"), "couldn't announce the new address");
+            }
+            let later = state.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(ANNOUNCE_AFTER_MOVE + Duration::from_secs(5)).await;
+                let _ = crate::go::apply(&later).await;
+            });
             // Cast devices were sent the old address.
             crate::cast_api::recast(&state).await;
         }
@@ -128,7 +153,9 @@ mod tests {
     fn the_shared_address_changes_for_everyone() {
         let join = JoinUrl::new("http://192.168.1.5:8066/".into());
         assert_eq!(join.base(), "http://192.168.1.5:8066");
+        assert!(!join.moved_lately());
         join.set("http://192.168.1.9:8066".into());
         assert_eq!(join.get(), "http://192.168.1.9:8066");
+        assert!(join.moved_lately(), "announced for a while after");
     }
 }

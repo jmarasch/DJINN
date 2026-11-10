@@ -253,7 +253,8 @@ async fn announce(state: &AppState, on: bool) -> anyhow::Result<()> {
     let go = &state.go;
     let wanted = on
         && go.running.lock().is_ok_and(|r| r.is_some())
-        && settings::flag(&state.store, GO_DISCOVERABLE, true).await?;
+        && (settings::flag(&state.store, GO_DISCOVERABLE, true).await?
+            || state.join_url.moved_lately());
     let name = go_announce::server_name(&state.store).await?;
     let fingerprint = go.encryption.fingerprint();
     let stale = go

@@ -51,6 +51,10 @@ class GoApi(private val account: Account) {
     private val jsonType = "application/json".toMediaType()
 
     private val pins = { account.servers.value.mapNotNull { it.pin }.toSet() }
+
+    /** Called when the server in use can't be reached, to look for it elsewhere. */
+    @Volatile
+    var onUnreachable: () -> Unit = {}
     private val trust = PinnedTrust(pins)
 
     /** Shared with the player and images, so they carry the sign-in too. */
@@ -85,7 +89,14 @@ class GoApi(private val account: Account) {
             } == true
             val named = request.newBuilder().header("User-Agent", "DJINN GO for Android")
             if (token != null && ours) named.header("Authorization", "Bearer $token")
-            chain.proceed(named.build())
+            try {
+                chain.proceed(named.build())
+            } catch (e: IOException) {
+                // Couldn't connect (not the server saying no, not a stop asked for):
+                // it may have a new address.
+                if (ours && e !is ApiException && !chain.call().isCanceled()) onUnreachable()
+                throw e
+            }
         })
         .build()
 
