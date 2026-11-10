@@ -34,7 +34,7 @@ impl Store {
 
     /// Forgets what the AI heard in every song, so it listens again.
     pub async fn clear_listening(&self) -> Result<()> {
-        sqlx::query("UPDATE track_sound SET heard = NULL, heard_version = NULL")
+        sqlx::query("DELETE FROM track_heard")
             .execute(&self.pool)
             .await?;
         Ok(())

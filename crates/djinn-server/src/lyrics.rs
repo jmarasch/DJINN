@@ -69,7 +69,7 @@ pub fn start(state: &AppState) {
             if let Err(e) = read_files(&state).await {
                 tracing::warn!(error = %format!("{e:#}"), "reading lyrics failed");
             }
-            if settings::flag(&state.store, LYRICS_LOOKUP, false)
+            if settings::flag(&state.store, LYRICS_LOOKUP, true)
                 .await
                 .unwrap_or(false)
             {
@@ -137,7 +137,7 @@ async fn look_up(state: &AppState) -> anyhow::Result<()> {
         set_phase("looking up");
         for song in batch {
             if *state.shutdown.borrow()
-                || !settings::flag(&state.store, LYRICS_LOOKUP, false).await?
+                || !settings::flag(&state.store, LYRICS_LOOKUP, true).await?
             {
                 return Ok(());
             }
@@ -276,7 +276,7 @@ async fn get_settings(
     State(state): State<AppState>,
 ) -> ApiResult<Json<LyricsSettings>> {
     Ok(Json(LyricsSettings {
-        lookup: settings::flag(&state.store, LYRICS_LOOKUP, false).await?,
+        lookup: settings::flag(&state.store, LYRICS_LOOKUP, true).await?,
         page: page_on(&state).await?,
     }))
 }
@@ -286,7 +286,7 @@ async fn put_settings(
     State(state): State<AppState>,
     Json(body): Json<LyricsSettings>,
 ) -> ApiResult<StatusCode> {
-    let was = settings::flag(&state.store, LYRICS_LOOKUP, false).await?;
+    let was = settings::flag(&state.store, LYRICS_LOOKUP, true).await?;
     settings::set_flag(&state.store, LYRICS_LOOKUP, body.lookup).await?;
     settings::set_flag(&state.store, LYRICS_PAGE, body.page).await?;
     if body.lookup && !was {

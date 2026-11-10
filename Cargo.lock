@@ -1521,6 +1521,7 @@ dependencies = [
 name = "djinn-store"
 version = "2026.11.5"
 dependencies = [
+ "half",
  "serde",
  "sqlx",
  "thiserror 2.0.21",

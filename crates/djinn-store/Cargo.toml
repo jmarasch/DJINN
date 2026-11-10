@@ -6,6 +6,7 @@ publish.workspace = true
 license.workspace = true
 
 [dependencies]
+half = "2"
 serde.workspace = true
 sqlx.workspace = true
 thiserror.workspace = true

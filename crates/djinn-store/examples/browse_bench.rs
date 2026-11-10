@@ -46,7 +46,7 @@ async fn seed(path: &Path, songs: i64, blobs: bool) -> Result<(), Box<dyn std::e
         .await?;
     }
     let features = vec![7_u8; 37 * 4];
-    let heard = vec![9_u8; 512 * 4];
+    let heard = vec![9_u8; 512 * 2];
     for id in 0..songs {
         let album = id / PER_ALBUM;
         let artist = album / PER_ARTIST;
@@ -74,14 +74,17 @@ async fn seed(path: &Path, songs: i64, blobs: bool) -> Result<(), Box<dyn std::e
         .await?;
         if blobs {
             sqlx::query(
-                "INSERT INTO track_sound (track_id, features, features_version, heard, heard_version)
-                 VALUES (?, ?, 1, ?, 1)",
+                "INSERT INTO track_sound (track_id, features, features_version) VALUES (?, ?, 1)",
             )
             .bind(id + 1)
             .bind(&features)
-            .bind(&heard)
             .execute(&mut *tx)
             .await?;
+            sqlx::query("INSERT INTO track_heard (track_id, heard, version) VALUES (?, ?, 1)")
+                .bind(id + 1)
+                .bind(&heard)
+                .execute(&mut *tx)
+                .await?;
         }
         sqlx::query("INSERT INTO track_artists (track_id, artist_id, position, featured) VALUES (?, ?, 0, 0)")
             .bind(id + 1)

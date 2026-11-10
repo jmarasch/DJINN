@@ -179,8 +179,8 @@ impl Store {
     pub async fn tracks_to_hear(&self, version: i64, limit: i64) -> Result<Vec<(i64, String)>> {
         let rows = sqlx::query_as(
             "SELECT t.id, t.path FROM tracks t \
-             LEFT JOIN track_sound s ON s.track_id = t.id \
-             WHERE t.removed_at IS NULL AND (s.heard_version IS NULL OR s.heard_version < ?) \
+             LEFT JOIN track_heard h ON h.track_id = t.id \
+             WHERE t.removed_at IS NULL AND (h.version IS NULL OR h.version < ?) \
              ORDER BY t.id LIMIT ?",
         )
         .bind(version)
@@ -192,12 +192,12 @@ impl Store {
 
     /// Records what the AI model heard; `None` if there was nothing.
     pub async fn save_heard(&self, id: i64, version: i64, heard: Option<&[f32]>) -> Result<()> {
-        let blob = heard.map(|v| v.iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<u8>>());
+        let blob = heard.map(to_half);
         sqlx::query(
-            "INSERT INTO track_sound (track_id, heard, heard_version) \
+            "INSERT INTO track_heard (track_id, heard, version) \
              SELECT id, ?, ? FROM tracks WHERE id = ? \
              ON CONFLICT (track_id) DO UPDATE SET heard = excluded.heard, \
-                heard_version = excluded.heard_version",
+                version = excluded.version",
         )
         .bind(blob)
         .bind(version)
@@ -210,32 +210,24 @@ impl Store {
     /// Every playable song the AI model heard with `version`.
     pub async fn heard_rows(&self, version: i64) -> Result<Vec<(i64, Vec<f32>)>> {
         let rows: Vec<(i64, Vec<u8>)> = sqlx::query_as(
-            "SELECT t.id, s.heard FROM track_sound s JOIN tracks t ON t.id = s.track_id \
-             WHERE t.removed_at IS NULL AND s.heard IS NOT NULL AND s.heard_version = ?",
+            "SELECT t.id, h.heard FROM track_heard h JOIN tracks t ON t.id = h.track_id \
+             WHERE t.removed_at IS NULL AND h.heard IS NOT NULL AND h.version = ?",
         )
         .bind(version)
         .fetch_all(self.pool())
         .await?;
         Ok(rows
             .into_iter()
-            .map(|(id, blob)| {
-                let v = blob
-                    .as_chunks::<4>()
-                    .0
-                    .iter()
-                    .map(|b| f32::from_le_bytes(*b))
-                    .collect();
-                (id, v)
-            })
+            .map(|(id, blob)| (id, from_half(&blob)))
             .collect())
     }
 
     /// (heard, waiting) song counts for the AI model's `version`.
     pub async fn heard_progress(&self, version: i64) -> Result<(i64, i64)> {
         let counts = sqlx::query_as(
-            "SELECT count(*) FILTER (WHERE s.heard_version >= ?1), \
-                    count(*) FILTER (WHERE s.heard_version IS NULL OR s.heard_version < ?1) \
-             FROM tracks t LEFT JOIN track_sound s ON s.track_id = t.id \
+            "SELECT count(*) FILTER (WHERE h.version >= ?1), \
+                    count(*) FILTER (WHERE h.version IS NULL OR h.version < ?1) \
+             FROM tracks t LEFT JOIN track_heard h ON h.track_id = t.id \
              WHERE t.removed_at IS NULL",
         )
         .bind(version)
@@ -384,6 +376,23 @@ impl Store {
     }
 }
 
+/// What the AI heard, stored at half precision: plenty for comparing
+/// songs, at half the room.
+pub(crate) fn to_half(values: &[f32]) -> Vec<u8> {
+    values
+        .iter()
+        .flat_map(|x| half::f16::from_f32(*x).to_le_bytes())
+        .collect()
+}
+
+pub(crate) fn from_half(blob: &[u8]) -> Vec<f32> {
+    blob.as_chunks::<2>()
+        .0
+        .iter()
+        .map(|b| half::f16::from_le_bytes(*b).to_f32())
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -466,12 +475,12 @@ mod tests {
 
         // What the AI heard is kept, and redone with the file too.
         store
-            .save_heard(todo[0].0, 1, Some(&[0.6, 0.8]))
+            .save_heard(todo[0].0, 1, Some(&[0.5, 0.75]))
             .await
             .unwrap();
         assert_eq!(
             store.heard_rows(1).await.unwrap(),
-            [(todo[0].0, vec![0.6, 0.8])]
+            [(todo[0].0, vec![0.5, 0.75])]
         );
         assert_eq!(store.heard_progress(1).await.unwrap(), (1, 2));
 
@@ -481,5 +490,48 @@ mod tests {
         store.save_scanned(&[changed]).await.unwrap();
         assert_eq!(store.tracks_to_analyze(1, 1, 10).await.unwrap().len(), 1);
         assert_eq!(store.tracks_to_hear(1, 10).await.unwrap().len(), 3);
+    }
+
+    #[test]
+    fn half_precision_keeps_what_comparing_needs() {
+        let values = [0.123_456_f32, -0.031_25, 0.0, 0.999];
+        let blob = to_half(&values);
+        assert_eq!(blob.len(), values.len() * 2, "half the room");
+        for (back, was) in from_half(&blob).iter().zip(values) {
+            assert!((back - was).abs() < 1e-3, "{back} vs {was}");
+        }
+    }
+
+    #[tokio::test]
+    async fn full_precision_rows_are_halved_once_at_start() {
+        let path = std::env::temp_dir().join(format!("djinn-halve-{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let id = {
+            let store = Store::open(&path).await.unwrap();
+            store
+                .save_scanned(&[track("/m/a.flac", 60_000)])
+                .await
+                .unwrap();
+            let id = store.tracks_to_hear(1, 1).await.unwrap()[0].0;
+            // As migration 52 leaves a row from before it.
+            let full: Vec<u8> = [0.25_f32, -0.5]
+                .iter()
+                .flat_map(|x| x.to_le_bytes())
+                .collect();
+            sqlx::query("INSERT INTO track_heard (track_id, heard, version) VALUES (?, ?, 1)")
+                .bind(id)
+                .bind(full)
+                .execute(store.pool())
+                .await
+                .unwrap();
+            store.set_setting(crate::HEARD_TO_HALF, "1").await.unwrap();
+            store.close().await;
+            id
+        };
+        let store = Store::open(&path).await.unwrap();
+        assert_eq!(store.heard_rows(1).await.unwrap(), [(id, vec![0.25, -0.5])]);
+        assert_eq!(store.get_setting(crate::HEARD_TO_HALF).await.unwrap(), None);
+        store.close().await;
+        let _ = std::fs::remove_file(&path);
     }
 }
