@@ -41,6 +41,19 @@ const NODE_MAIN: &str = "node_main";
 const NODE_MAIN_FP: &str = "node_main_fingerprint";
 const NODE_NAME: &str = "node_name";
 const NODE_STATE: &str = "node_state";
+/// Who Main is (its server id) and its name on the network, from check-ins,
+/// for finding it again at a new address.
+const NODE_MAIN_ID: &str = "node_main_id";
+const NODE_MAIN_HOST: &str = "node_main_host";
+/// Addresses Main had before, newest first, one per line.
+const NODE_MAIN_PAST: &str = "node_main_past";
+const PAST_KEPT: usize = 5;
+/// Main out of reach this long: look for it elsewhere.
+const SEARCH_AFTER: Duration = Duration::from_secs(15);
+/// And at most this often.
+const SEARCH_EVERY: Duration = Duration::from_secs(30);
+/// How long to listen for Main's announcement each time.
+const LISTEN_FOR: Duration = Duration::from_secs(if cfg!(test) { 1 } else { 6 });
 /// Main's port when an address doesn't say.
 const MAIN_PORT: u16 = 8066;
 const CHECK_WAITING: Duration = Duration::from_secs(5);
@@ -171,6 +184,9 @@ pub struct Node {
     /// failed, so it isn't tried again on every check-in.
     updating: Arc<AtomicBool>,
     update_failed: Arc<Mutex<Option<std::time::Instant>>>,
+    /// Since when Main hasn't answered check-ins, and the last search for it.
+    lost_since: Arc<Mutex<Option<std::time::Instant>>>,
+    searched_at: Arc<Mutex<Option<std::time::Instant>>>,
 }
 
 /// After a failed update, how long before trying again.
@@ -233,6 +249,8 @@ impl Node {
             managers: Arc::default(),
             updating: Arc::default(),
             update_failed: Arc::default(),
+            lost_since: Arc::default(),
+            searched_at: Arc::default(),
         })
     }
 
@@ -416,6 +434,15 @@ impl Node {
             Ok(response) => response,
             Err(e) => {
                 let changed = matches!((&pinned, seen.lock().ok().and_then(|s| s.clone())), (Some(p), Some(s)) if *p != s);
+                // Joined, so it's Main that moved (or something else took its
+                // old address): look for it, knowing it by its certificate.
+                if status.pairing == Pairing::Joined {
+                    if let Some(pin) = &pinned {
+                        if self.search_if_due(&main, pin, changed).await? {
+                            return Ok(Some(Duration::ZERO));
+                        }
+                    }
+                }
                 if changed {
                     self.set_pairing(Pairing::Changed).await?;
                     self.update(|s| {
@@ -453,7 +480,17 @@ impl Node {
             }
             return Ok(None);
         }
+        if let Ok(mut lost) = self.lost_since.lock() {
+            *lost = None;
+        }
         let answer: serde_json::Value = response.json().await.unwrap_or_default();
+        for (key, field) in [(NODE_MAIN_ID, "server_id"), (NODE_MAIN_HOST, "host")] {
+            if let Some(value) = answer[field].as_str().filter(|v| !v.is_empty()) {
+                if self.store.get_setting(key).await?.as_deref() != Some(value) {
+                    self.store.set_setting(key, value).await?;
+                }
+            }
+        }
         if !http.is_success() {
             let message = answer["error"]
                 .as_str()
@@ -508,6 +545,73 @@ impl Node {
             self.start_update(update);
         }
         Ok(Some(if joined { CHECK_JOINED } else { CHECK_WAITING }))
+    }
+
+    /// Main didn't answer at `main`. Once it's been gone SEARCH_AFTER (or
+    /// straight away when something else answered there), and not more
+    /// often than SEARCH_EVERY, looks for it: its announcement on the
+    /// network, the addresses it had before, its name. Only an answer with
+    /// the pinned certificate counts. True if it was found (and saved).
+    async fn search_if_due(&self, main: &str, pin: &str, now: bool) -> anyhow::Result<bool> {
+        let started = std::time::Instant::now();
+        let lost = self
+            .lost_since
+            .lock()
+            .map(|mut l| *l.get_or_insert(started))
+            .unwrap_or(started);
+        let due = now || started.duration_since(lost) >= SEARCH_AFTER;
+        let recent = self
+            .searched_at
+            .lock()
+            .ok()
+            .and_then(|s| *s)
+            .is_some_and(|at| at.elapsed() < SEARCH_EVERY);
+        if !due || (recent && !now) {
+            return Ok(false);
+        }
+        if let Ok(mut at) = self.searched_at.lock() {
+            *at = Some(started);
+        }
+        self.update(|s| {
+            s.problem = Some("Can't reach Main; looking for it on the network...".into())
+        });
+        let id = self
+            .store
+            .get_setting(NODE_MAIN_ID)
+            .await?
+            .unwrap_or_default();
+        let host = self
+            .store
+            .get_setting(NODE_MAIN_HOST)
+            .await?
+            .unwrap_or_default();
+        let past = self
+            .store
+            .get_setting(NODE_MAIN_PAST)
+            .await?
+            .unwrap_or_default();
+        let heard = tokio::task::spawn_blocking(|| announced_mains(LISTEN_FOR))
+            .await
+            .unwrap_or_default();
+        let candidates = search_order(main, &id, &heard, &past, &host);
+        for candidate in candidates {
+            if self.main_answers(&candidate, pin).await {
+                tracing::info!(from = %main, to = %candidate, "found Main at a new address");
+                self.store.set_setting(NODE_MAIN, &candidate).await?;
+                self.store
+                    .set_setting(NODE_MAIN_PAST, &remember_past(&past, main))
+                    .await?;
+                if let Ok(mut lost) = self.lost_since.lock() {
+                    *lost = None;
+                }
+                self.update(|s| {
+                    s.main = Some(candidate.clone());
+                    s.problem = None;
+                });
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     /// Takes a newer DJINN from Main: downloads it over the pinned
@@ -1091,6 +1195,78 @@ pub fn find_mains_during_setup(state: crate::state::AppState) {
     }
 }
 
+/// Main DJINNs announcing themselves right now, listened to for `wait`:
+/// (server id, "ip:port").
+fn announced_mains(wait: Duration) -> Vec<(String, String)> {
+    let Ok(daemon) = mdns_sd::ServiceDaemon::new() else {
+        return Vec::new();
+    };
+    let Ok(events) = daemon.browse(crate::go_announce::MAIN_SERVICE) else {
+        let _ = daemon.shutdown();
+        return Vec::new();
+    };
+    let until = std::time::Instant::now() + wait;
+    let mut found = Vec::new();
+    while let Some(left) = until.checked_duration_since(std::time::Instant::now()) {
+        match events.recv_timeout(left) {
+            Ok(mdns_sd::ServiceEvent::ServiceResolved(service)) => {
+                let addresses: Vec<std::net::Ipv4Addr> = service
+                    .get_addresses_v4()
+                    .into_iter()
+                    .filter_map(|ip| ip.to_string().parse().ok())
+                    .collect();
+                if let Some(ip) = best_address(&addresses) {
+                    let id = service
+                        .get_property_val_str("id")
+                        .unwrap_or_default()
+                        .to_owned();
+                    found.push((id, format!("{ip}:{}", service.get_port())));
+                }
+            }
+            Ok(_) => {}
+            Err(_) => break,
+        }
+    }
+    let _ = daemon.shutdown();
+    found
+}
+
+/// Where to look for Main, as URLs, most likely first and without the
+/// address that just failed: what announces itself with Main's id (any
+/// main DJINN when the id isn't known yet), then the addresses it had
+/// before, then its name on the network.
+fn search_order(
+    failed: &str,
+    id: &str,
+    heard: &[(String, String)],
+    past: &str,
+    host: &str,
+) -> Vec<String> {
+    let announced = heard
+        .iter()
+        .filter(|(heard_id, _)| id.is_empty() || heard_id == id)
+        .map(|(_, address)| address.as_str());
+    let named = (!host.is_empty()).then(|| format!("{host}.local"));
+    let mut order: Vec<String> = Vec::new();
+    for typed in announced.chain(past.lines()).chain(named.as_deref()) {
+        if let Some(url) = main_url(typed) {
+            if url != failed && !order.contains(&url) {
+                order.push(url);
+            }
+        }
+    }
+    order
+}
+
+/// The past addresses with `left` added at the front, newest first.
+fn remember_past(past: &str, left: &str) -> String {
+    std::iter::once(left)
+        .chain(past.lines().filter(|p| *p != left && !p.is_empty()))
+        .take(PAST_KEPT)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// The address a server is most likely reachable at: a home network's
 /// before a container's or VPN's.
 fn best_address(addresses: &[std::net::Ipv4Addr]) -> Option<std::net::Ipv4Addr> {
@@ -1592,6 +1768,141 @@ mod tests {
         assert_eq!(node.status().pairing, Pairing::Waiting);
         assert_eq!(main.store.nodes().await.unwrap().len(), 1);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn main_is_looked_for_where_it_is_most_likely() {
+        let heard = vec![
+            ("other".to_owned(), "192.168.1.50:8066".to_owned()),
+            ("abc".to_owned(), "192.168.1.23:8066".to_owned()),
+        ];
+        let past = "https://192.168.1.10:8066\nhttps://192.168.1.23:8066";
+        assert_eq!(
+            search_order("https://192.168.1.10:8066", "abc", &heard, past, "djinn"),
+            ["https://192.168.1.23:8066", "https://djinn.local:8066",],
+            "its own announcement first, the failed address and repeats left out"
+        );
+        assert_eq!(
+            search_order("https://x:8066", "", &heard, "", "")[..2],
+            ["https://192.168.1.50:8066", "https://192.168.1.23:8066"],
+            "any main DJINN while its id isn't known (the certificate decides)"
+        );
+    }
+
+    #[test]
+    fn past_addresses_keep_the_newest_few() {
+        let mut past = String::new();
+        for n in 0..8 {
+            past = remember_past(&past, &format!("https://10.0.0.{n}:8066"));
+        }
+        let kept: Vec<&str> = past.lines().collect();
+        assert_eq!(kept.len(), PAST_KEPT);
+        assert_eq!(kept[0], "https://10.0.0.7:8066");
+        assert_eq!(remember_past("a\nb", "b"), "b\na", "no repeats");
+    }
+
+    /// A Main of its own on 127.0.0.1, encrypted: (state, port). Each
+    /// `dir` gets its own certificate.
+    async fn running_main(dir: Option<&Path>) -> (AppState, u16) {
+        let main = match dir {
+            Some(dir) => AppState::for_tests_in(dir).await,
+            None => AppState::for_tests().await,
+        };
+        main.store
+            .set_setting(crate::nodes::NODES_JOIN, "1")
+            .await
+            .unwrap();
+        crate::go::apply_encryption(&main).await.unwrap();
+        let tcp = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = tcp.local_addr().unwrap().port();
+        let listener = crate::tls::listen(tcp, Arc::clone(&main.go.encryption)).unwrap();
+        let app = crate::app(main.clone());
+        tokio::spawn(async move {
+            axum::serve(
+                listener,
+                app.into_make_service_with_connect_info::<crate::tls::Peer>(),
+            )
+            .await
+        });
+        (main, port)
+    }
+
+    #[tokio::test]
+    async fn a_joined_node_finds_main_at_a_new_address_and_only_main() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let (main, port) = running_main(None).await;
+        let other = std::env::temp_dir().join(format!("djinn-impostor-{}", std::process::id()));
+        std::fs::create_dir_all(&other).unwrap();
+        let (impostor, impostor_port) = running_main(Some(&other)).await;
+        assert_ne!(
+            impostor.go.encryption.fingerprint(),
+            main.go.encryption.fingerprint()
+        );
+        let node = Node::new(Store::open_in_memory().await.unwrap(), std::env::temp_dir())
+            .await
+            .unwrap();
+        node.connect(&format!("127.0.0.1:{port}"), "Den")
+            .await
+            .unwrap();
+        node.check().await.unwrap();
+        let admin = main
+            .store
+            .create_user("boss", "h", djinn_store::Role::Admin)
+            .await
+            .unwrap();
+        let asked = main.store.nodes().await.unwrap();
+        main.store
+            .approve_node(asked[0].id, admin.id)
+            .await
+            .unwrap();
+        node.check().await.unwrap();
+        assert_eq!(node.status().pairing, Pairing::Joined);
+        assert_eq!(
+            node.store.get_setting(NODE_MAIN_ID).await.unwrap(),
+            Some(crate::go_announce::server_id(&main.store).await.unwrap()),
+            "learns who Main is"
+        );
+
+        // Main "moves": the node has an address nothing answers at, and
+        // knows two others, one of them another DJINN.
+        let gone = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let gone_port = gone.local_addr().unwrap().port();
+        drop(gone);
+        let dead = format!("https://127.0.0.1:{gone_port}");
+        node.store.set_setting(NODE_MAIN, &dead).await.unwrap();
+        node.update(|s| s.main = Some(dead.clone()));
+        node.store
+            .set_setting(
+                NODE_MAIN_PAST,
+                &format!("https://127.0.0.1:{impostor_port}\nhttps://127.0.0.1:{port}"),
+            )
+            .await
+            .unwrap();
+        // Not gone long enough yet: no search.
+        node.check().await.unwrap();
+        assert_eq!(node.status().main.as_deref(), Some(dead.as_str()));
+        if let Ok(mut lost) = node.lost_since.lock() {
+            *lost = Some(std::time::Instant::now() - SEARCH_AFTER);
+        }
+        node.check().await.unwrap();
+        let status = node.status();
+        assert_eq!(
+            status.main.as_deref(),
+            Some(format!("https://127.0.0.1:{port}").as_str()),
+            "found at the address with Main's certificate, not the other DJINN: {:?}",
+            status.problem
+        );
+        assert_eq!(status.pairing, Pairing::Joined);
+        assert!(node
+            .store
+            .get_setting(NODE_MAIN_PAST)
+            .await
+            .unwrap()
+            .unwrap_or_default()
+            .starts_with(&dead));
+        node.check().await.unwrap();
+        assert_eq!(node.status().problem, None, "checking in there again");
+        let _ = std::fs::remove_dir_all(&other);
     }
 
     #[tokio::test]

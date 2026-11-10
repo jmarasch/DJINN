@@ -386,6 +386,10 @@ struct MeAnswer {
     screen: Option<String>,
     /// A newer DJINN for the node to put in place, when it's behind.
     update: Option<crate::node_builds::NodeUpdate>,
+    /// Who Main is, to know it again in announcements after its address
+    /// changes, and its name on the network (`<host>.local`).
+    server_id: String,
+    host: String,
 }
 
 /// The header a node's check-in says its version in.
@@ -546,6 +550,8 @@ async fn me(
         name: node.name,
         room_id: node.room_id,
         server_name: crate::go_announce::server_name(&state.store).await?,
+        server_id: crate::go_announce::server_id(&state.store).await?,
+        host: crate::go_announce::host_label(&crate::go_announce::computer_name()),
     }))
 }
 
@@ -701,7 +707,17 @@ pub fn watch_joining(state: AppState, port: u16) {
             let name = crate::go_announce::server_name(&state.store)
                 .await
                 .unwrap_or_default();
-            let wanted = set_up && (joining || findable);
+            // A node that stopped checking in may be looking for this
+            // computer at a new address: be findable for a while, even when
+            // hidden otherwise.
+            let missing = match state.store.nodes().await {
+                Ok(nodes) => any_missing(
+                    nodes.iter().map(|n| (n.status.as_str(), n.last_seen)),
+                    djinn_store::now_ms(),
+                ),
+                Err(_) => false,
+            };
+            let wanted = set_up && (joining || findable || missing);
             let stale = announcing
                 .as_ref()
                 .is_some_and(|(now, said)| !wanted || *said != joining || now.name != name);
@@ -721,6 +737,23 @@ pub fn watch_joining(state: AppState, port: u16) {
             tokio::time::sleep(std::time::Duration::from_secs(3)).await;
         }
     });
+}
+
+/// A node counts as missing when it hasn't checked in for this long...
+const MISSING_AFTER_MS: i64 = 20_000;
+/// ...and Main stops announcing for it this long after its last check-in.
+const ANNOUNCE_FOR_MISSING_MS: i64 = 60 * 60 * 1000;
+
+/// Some accepted node has gone quiet lately (not long ago). Nodes are
+/// (status, last check-in).
+fn any_missing<'a>(nodes: impl IntoIterator<Item = (&'a str, Option<i64>)>, now: i64) -> bool {
+    nodes.into_iter().any(|(status, seen)| {
+        status == "approved"
+            && seen.is_some_and(|seen| {
+                let quiet = now - seen;
+                quiet > MISSING_AFTER_MS && quiet < ANNOUNCE_FOR_MISSING_MS
+            })
+    })
 }
 
 #[derive(Deserialize)]
@@ -851,6 +884,29 @@ async fn remove(
 mod tests {
     use super::*;
     use axum::body::Body;
+
+    #[test]
+    fn main_announces_itself_while_a_node_is_missing_for_a_while() {
+        let now = 10 * ANNOUNCE_FOR_MISSING_MS;
+        let seen = |ago: i64| Some(now - ago);
+        assert!(
+            !any_missing([("approved", seen(5_000))], now),
+            "checking in"
+        );
+        assert!(
+            any_missing([("approved", seen(60_000))], now),
+            "gone a minute"
+        );
+        assert!(
+            !any_missing([("approved", seen(2 * ANNOUNCE_FOR_MISSING_MS))], now),
+            "gone for hours: switched off, not lost"
+        );
+        assert!(
+            !any_missing([("pending", seen(60_000))], now),
+            "not accepted"
+        );
+        assert!(!any_missing([("approved", None)], now), "never checked in");
+    }
     use axum::http::{Method, Request};
     use tower::ServiceExt;
 

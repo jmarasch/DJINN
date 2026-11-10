@@ -95,7 +95,7 @@ pub async fn hello(State(state): State<AppState>) -> ApiResult<Json<Hello>> {
 }
 
 /// This computer's name as a DNS label, which is much fussier than a name.
-fn host_label(name: &str) -> String {
+pub fn host_label(name: &str) -> String {
     let label: String = name
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
