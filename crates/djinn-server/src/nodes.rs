@@ -402,7 +402,7 @@ fn screen_url(state: &AppState, node: &Node) -> Option<String> {
     };
     Some(format!(
         "{}/{page}?room={}&screen_for={}",
-        state.join_url.trim_end_matches('/'),
+        state.join_url.base(),
         node.room_id,
         node.id
     ))

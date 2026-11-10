@@ -103,6 +103,7 @@
     })
     on<{ position_ms: number }>('position', (data) => setPosition(data.position_ms))
     on<QueueItem[]>('queue_changed', (data) => (queue = data))
+    on<{ url: string }>('address', (data) => (joinUrl = data.url))
     on<PlayerState>('player_state', (data) => {
       setPosition(position)
       player = data
@@ -283,7 +284,7 @@
     </main>
 
       <div class="join">
-        <img src="/api/join/qr.svg" alt="QR code to join" />
+        <img src="/api/join/qr.svg?v={encodeURIComponent(joinUrl)}" alt="QR code to join" />
         <div>
           <div class="join-title">Add a song</div>
           <div class="join-steps">

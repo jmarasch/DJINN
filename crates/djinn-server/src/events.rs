@@ -34,6 +34,10 @@ pub enum ServerEvent {
     AiStatus(Box<crate::ai::AiStatus>),
     /// Identifying songs by fingerprint: progress.
     IdentifyStatus(crate::identify_api::IdentifyStatus),
+    /// This computer's address changed: join links and QR codes with it.
+    Address {
+        url: String,
+    },
 }
 
 impl ServerEvent {
@@ -52,6 +56,7 @@ impl ServerEvent {
             Self::CastStatus(_) => "cast_status",
             Self::AiStatus(_) => "ai_status",
             Self::IdentifyStatus(_) => "identify_status",
+            Self::Address { .. } => "address",
         }
     }
 }

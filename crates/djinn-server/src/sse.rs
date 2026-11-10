@@ -34,6 +34,7 @@ impl Audience {
             Self::Tv => matches!(
                 event,
                 ServerEvent::Hello { .. }
+                    | ServerEvent::Address { .. }
                     | ServerEvent::NowPlaying(_)
                     | ServerEvent::Position { .. }
                     | ServerEvent::QueueChanged(_)

@@ -14,6 +14,12 @@
   const roomQuery = app.rooms.length > 1 && app.room > 1 ? `?room=${app.room}` : ''
   const roomName = app.rooms.length > 1 ? app.rooms.find((r) => r.id === app.room)?.name : undefined
 
+  // A new address from the router: the code and link follow it.
+  const shown = $derived(
+    app.address ? (roomQuery ? `${app.address}/${roomQuery}` : app.address) : url,
+  )
+  const fresh = $derived(app.address ? `${roomQuery ? '&' : '?'}v=${encodeURIComponent(app.address)}` : '')
+
   onMount(async () => {
     const [join, mode] = await Promise.all([fetch(`/api/join${roomQuery}`), fetch('/api/auth/mode')])
     if (join.ok) url = (await join.json()).url
@@ -24,10 +30,10 @@
 <div class="join" class:big>
   <PublicNetworkNote />
   <div class="qr">
-    <img src="/api/join/qr.svg{roomQuery}" alt={t('join.qr_alt', { url })} />
+    <img src="/api/join/qr.svg{roomQuery}{fresh}" alt={t('join.qr_alt', { url: shown })} />
   </div>
   {#if roomName}<p class="muted small">{t('join.joins_room', { room: roomName })}</p>{/if}
-  {#if url}<p class="url">{url}</p>{/if}
+  {#if shown}<p class="url">{shown}</p>{/if}
   <ol>
     <li>{t('join.step_scan')}</li>
     {#if guestMode}

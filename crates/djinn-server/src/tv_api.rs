@@ -85,7 +85,7 @@ async fn snapshot(
         now_playing,
         player,
         queue: state.store.queue(room).await?,
-        join_url: state.join_url.to_string(),
+        join_url: state.join_url.get(),
         guest_mode: state.guest_mode(),
         stream_url: state
             .stream

@@ -90,8 +90,8 @@ struct JoinQuery {
 
 fn join_url_for(state: &AppState, room: Option<i64>) -> String {
     match room.filter(|r| *r != djinn_store::MAIN_ROOM) {
-        Some(room) => format!("{}/?room={room}", state.join_url.trim_end_matches('/')),
-        None => state.join_url.to_string(),
+        Some(room) => format!("{}/?room={room}", state.join_url.base()),
+        None => state.join_url.get(),
     }
 }
 

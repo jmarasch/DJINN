@@ -5,6 +5,7 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod accounts;
+mod address;
 mod ai;
 mod api;
 mod audio_api;
@@ -347,20 +348,26 @@ async fn run() -> anyhow::Result<()> {
     // A box without a screen of its own shows where to go on whatever
     // screen is plugged in.
     if let Some(banner) = &config.server.console_banner {
-        let text = match &setup_url {
-            Some(_) if config.server.open_setup => {
-                format!(
-                    "DJINN: set it up at {base_url}/setup (or http://{}.local:8066/setup)\n",
-                    go_announce::computer_name()
-                )
-            }
-            Some(url) => format!("DJINN: set it up at {url}\n"),
-            None => format!(
-                "DJINN is running: {base_url} (or http://{}.local:8066)\n",
-                go_announce::computer_name()
-            ),
-        };
+        let token = state.bootstrap_token.lock().ok().and_then(|t| t.clone());
+        let text = console_text(&base_url, token.as_deref(), config.server.open_setup);
         write_banner(banner, &text);
+    }
+    // A new address from the router reaches the join link, QR codes, casts
+    // and the plugged-in screen's banner.
+    {
+        let banner = config.server.console_banner.clone();
+        let open_setup = config.server.open_setup;
+        let bootstrap = std::sync::Arc::clone(&state.bootstrap_token);
+        address::watch(
+            state.clone(),
+            config.server.listen,
+            Box::new(move |url| {
+                if let Some(banner) = &banner {
+                    let token = bootstrap.lock().ok().and_then(|t| t.clone());
+                    write_banner(banner, &console_text(url, token.as_deref(), open_setup));
+                }
+            }),
+        );
     }
 
     let listener = match bind(config.server.listen).await {
@@ -515,6 +522,20 @@ async fn run() -> anyhow::Result<()> {
 }
 
 /// Writes the address to show on the box's own screen (a login banner).
+/// What the box's own screen says: where to set it up (with the setup
+/// link's secret unless the page is open anyway), or where it's running.
+fn console_text(base_url: &str, setup_token: Option<&str>, open_setup: bool) -> String {
+    let base_url = base_url.trim_end_matches('/');
+    let name = go_announce::computer_name();
+    match setup_token {
+        Some(_) if open_setup => {
+            format!("DJINN: set it up at {base_url}/setup (or http://{name}.local:8066/setup)\n")
+        }
+        Some(token) => format!("DJINN: set it up at {base_url}/setup?token={token}\n"),
+        None => format!("DJINN is running: {base_url} (or http://{name}.local:8066)\n"),
+    }
+}
+
 pub fn write_banner(path: &std::path::Path, text: &str) {
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);

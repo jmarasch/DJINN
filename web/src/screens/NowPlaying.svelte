@@ -324,7 +324,10 @@
     {/if}
 
     <div class="join-prompt">
-      <img src="/api/join/qr.svg" alt={t('playing.scan_alt')} />
+      <img
+        src={app.address ? `/api/join/qr.svg?v=${encodeURIComponent(app.address)}` : '/api/join/qr.svg'}
+        alt={t('playing.scan_alt')}
+      />
       <div>
         <strong>{t('playing.add_a_song')}</strong>
         <p class="small muted">{t('playing.scan_hint')}</p>

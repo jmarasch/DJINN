@@ -31,7 +31,7 @@ pub fn refresh(state: &AppState) {
     if !cfg!(windows) {
         return;
     }
-    let Some(ip) = join_ip(&state.join_url) else {
+    let Some(ip) = join_ip(&state.join_url.get()) else {
         return;
     };
     let watch = Arc::clone(&state.network);

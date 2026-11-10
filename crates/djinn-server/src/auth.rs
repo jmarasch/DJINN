@@ -918,7 +918,7 @@ async fn bootstrap_status(State(state): State<AppState>) -> ApiResult<Json<Boots
     Ok(Json(BootstrapStatus {
         needed,
         open,
-        address: open.then(|| state.join_url.to_string()),
+        address: open.then(|| state.join_url.get()),
         mains: if needed {
             state
                 .found_mains
@@ -937,7 +937,7 @@ async fn setup_qr(State(state): State<AppState>) -> ApiResult<axum::response::Re
     if !state.open_setup() || state.store.admin_exists().await? {
         return Err(ApiError::not_found());
     }
-    let url = format!("{}/setup", state.join_url.trim_end_matches('/'));
+    let url = format!("{}/setup", state.join_url.base());
     Ok((
         [(axum::http::header::CONTENT_TYPE, "image/svg+xml")],
         crate::api::qr_svg(&url)?,

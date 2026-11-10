@@ -29,6 +29,8 @@ export const app = $state({
   /** False until the first /api/me check finishes. */
   ready: false,
   connected: false,
+  /** This computer's address, once it changed while the page was open ('' until then). */
+  address: '',
   /** Every room, and the one this person is in (pickers show only with two or more). */
   rooms: [] as Room[],
   room: 1,
@@ -163,6 +165,7 @@ export function connect() {
     }
   })
   on<IdentifyStatus>('identify_status', (data) => (app.identify = data))
+  on<{ url: string }>('address', (data) => (app.address = data.url))
 
   void loadLibraryWork()
 
