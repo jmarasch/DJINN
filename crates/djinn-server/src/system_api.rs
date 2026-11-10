@@ -87,7 +87,7 @@ const RESET_MARKER: &str = "djinn.reset";
 /// Most log lines one request returns.
 const LOG_LINES: usize = 1000;
 /// Most of the log file a download sends, from its end.
-const LOG_DOWNLOAD_BYTES: u64 = 5_000_000;
+pub(crate) const LOG_DOWNLOAD_BYTES: u64 = 5_000_000;
 
 /// Facts known once at startup.
 struct Startup {
@@ -542,7 +542,7 @@ async fn log_file_for_day(
 }
 
 /// The last `bytes` of a file, from the start of a line.
-fn file_tail(path: &Path, bytes: u64) -> anyhow::Result<String> {
+pub(crate) fn file_tail(path: &Path, bytes: u64) -> anyhow::Result<String> {
     use std::io::{Read, Seek, SeekFrom};
     let mut file = std::fs::File::open(path)?;
     let len = file.metadata()?.len();

@@ -3,6 +3,7 @@
   // enter Main's address; then compare the codes and accept it on Main.
   // Once joined this page only shows status; leaving is Main's Kick.
   import { onMount } from 'svelte'
+  import NodeDiagnostics from '../lib/NodeDiagnostics.svelte'
   import NodeSpeakerSettings from '../lib/NodeSpeakerSettings.svelte'
   import type { NodeAudio, NodeSpeaker } from '../lib/types'
 
@@ -63,10 +64,15 @@
   async function checkManaging() {
     const params = new URLSearchParams(location.search)
     const token = params.get('manage')
-    if (token) {
+    const back = params.get('back')
+    if (back && /^https?:\/\//.test(back)) sessionStorage.setItem(BACK_KEY, back)
+    if (token || back) {
       params.delete('manage')
+      params.delete('back')
       const rest = params.toString()
       history.replaceState(null, '', location.pathname + (rest ? `?${rest}` : ''))
+    }
+    if (token) {
       const res = await fetch('/api/node/manage', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -76,6 +82,17 @@
     }
     const res = await fetch('/api/node/manage').catch(() => null)
     managing = !!res?.ok && !!(await res.json()).managing
+  }
+
+  /** Where Exit node management goes: the main DJINN's Admin > Nodes. */
+  const BACK_KEY = 'djinn-node-back'
+
+  async function exitManaging() {
+    await fetch('/api/node/manage', { method: 'DELETE' }).catch(() => null)
+    managing = false
+    const back = sessionStorage.getItem(BACK_KEY)
+    sessionStorage.removeItem(BACK_KEY)
+    if (back) location.href = back
   }
 
   async function load() {
@@ -133,7 +150,13 @@
   <div class="blank"></div>
 {/if}
 
-<main class="narrow">
+<main class="narrow" class:wide={managing}>
+  {#if managing}
+    <div class="managing">
+      <span>Managing {status?.name ?? 'this node'}</span>
+      <button class="primary" onclick={exitManaging}>Exit node management</button>
+    </div>
+  {/if}
   <div class="card">
     <h1>DJINN node</h1>
     {#if unreachable && !status}
@@ -273,6 +296,9 @@
       {/if}
     {/if}
   </div>
+  {#if managing && status?.pairing === 'joined'}
+    <NodeDiagnostics />
+  {/if}
 </main>
 
 <style>
@@ -295,6 +321,26 @@
     max-width: 460px;
     margin: 0 auto;
     padding: 10vh 16px 32px;
+  }
+
+  main.narrow.wide {
+    max-width: 820px;
+    padding-top: 16px;
+  }
+
+  .managing {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 12px;
+    padding: 8px 12px;
+    border-radius: 12px;
+    background: var(--surface-2);
   }
 
   form {

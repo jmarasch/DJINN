@@ -58,16 +58,14 @@
     }
   }
 
-  /** Opens the node's own page with a one-time link that lets this browser
-   * manage it. The tab opens first, so a popup blocker allows it. */
+  /** Goes to the node's own page with a one-time link that lets this
+   * browser manage it; its Exit node management button comes back here. */
   async function manage(node: HouseNode) {
-    const tab = window.open('', '_blank')
     try {
       const { url } = await api.nodeManageLink(node.id)
-      if (tab) tab.location.href = url
-      else location.href = url
+      const back = `${location.origin}${location.pathname}#/admin/nodes`
+      location.href = `${url}&back=${encodeURIComponent(back)}`
     } catch (e) {
-      tab?.close()
       toast(e instanceof Error ? e.message : 'Could not open it', true)
     }
   }

@@ -17,7 +17,7 @@ use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Redirect};
 use axum::routing::{get, post};
@@ -1509,7 +1509,14 @@ pub fn router(node: Node) -> Router {
         .route("/api/node/connect", post(connect))
         .route("/api/node/ask-again", post(ask_again))
         .route("/api/node/audio", get(get_audio).put(put_audio))
-        .route("/api/node/manage", get(manage_state).post(manage))
+        .route(
+            "/api/node/manage",
+            get(manage_state).post(manage).delete(stop_managing),
+        )
+        .route("/api/node/diagnostics", get(diagnostics))
+        .route("/api/node/log", get(log_lines))
+        .route("/api/node/log/file", get(log_file))
+        .route("/api/node/restart", post(restart))
         .fallback(crate::web::static_handler)
         .with_state(node)
 }
@@ -1588,6 +1595,187 @@ async fn manage(
         .into_response())
 }
 
+/// Exit node management: this browser isn't let in any more.
+async fn stop_managing(
+    State(node): State<Node>,
+    headers: axum::http::HeaderMap,
+) -> axum::response::Response {
+    if let Some(cookie) = cookie_value(&headers, MANAGE_COOKIE) {
+        if let Ok(mut managers) = node.managers.lock() {
+            managers.remove(&cookie);
+        }
+    }
+    let clear = format!("{MANAGE_COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0");
+    (
+        StatusCode::NO_CONTENT,
+        [(axum::http::header::SET_COOKIE, clear)],
+    )
+        .into_response()
+}
+
+/// Logs, diagnostics and restarting are for a browser managing the node.
+fn must_manage(node: &Node, headers: &axum::http::HeaderMap) -> ApiResult<()> {
+    if node.managing(headers) {
+        Ok(())
+    } else {
+        Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "open this page from the main DJINN's Admin > Nodes > Manage",
+        ))
+    }
+}
+
+/// When this node's program started, for its uptime.
+static STARTED: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+/// Where the node's page listens, for its addresses.
+static LISTEN: std::sync::OnceLock<std::net::SocketAddr> = std::sync::OnceLock::new();
+
+/// What a node can say about itself, for finding out what's wrong.
+#[derive(Serialize)]
+struct Diagnostics {
+    version: &'static str,
+    /// The start of this program's SHA-256 (test builds share a version).
+    build: String,
+    platform: String,
+    uptime_secs: u64,
+    addresses: Vec<String>,
+    threads: usize,
+    /// 0 to 1, over a moment.
+    cpu_busy: Option<f32>,
+    memory_total: Option<u64>,
+    memory_available: Option<u64>,
+    disk_total: Option<u64>,
+    disk_available: Option<u64>,
+    cached_songs: usize,
+    cached_bytes: u64,
+    /// The log's recording level.
+    log_level: &'static str,
+}
+
+async fn diagnostics(
+    State(node): State<Node>,
+    headers: axum::http::HeaderMap,
+) -> ApiResult<Json<Diagnostics>> {
+    must_manage(&node, &headers)?;
+    let build = own_build().await;
+    let cache_dir = node.cache_dir.as_ref().clone();
+    let listen = LISTEN.get().copied();
+    let found = tokio::task::spawn_blocking(move || {
+        let before = djinn_platform::system::cpu_times();
+        std::thread::sleep(Duration::from_millis(250));
+        let after = djinn_platform::system::cpu_times();
+        let cpu_busy = before.zip(after).and_then(|(b, a)| a.busy_since(&b));
+        let files: Vec<u64> = std::fs::read_dir(&cache_dir)
+            .map(|dir| {
+                dir.flatten()
+                    .filter_map(|e| e.metadata().ok())
+                    .filter(std::fs::Metadata::is_file)
+                    .map(|m| m.len())
+                    .collect()
+            })
+            .unwrap_or_default();
+        (
+            cpu_busy,
+            djinn_platform::system::memory(),
+            djinn_platform::system::disk(&cache_dir),
+            files,
+            listen.map(crate::banner::urls).unwrap_or_default(),
+        )
+    })
+    .await
+    .map_err(anyhow::Error::from)?;
+    let (cpu_busy, memory, disk, files, addresses) = found;
+    Ok(Json(Diagnostics {
+        version: env!("CARGO_PKG_VERSION"),
+        build: build.chars().take(12).collect(),
+        platform: format!("{} {}", std::env::consts::OS, std::env::consts::ARCH),
+        uptime_secs: STARTED.get().map_or(0, |s| s.elapsed().as_secs()),
+        addresses,
+        threads: std::thread::available_parallelism().map_or(1, std::num::NonZero::get),
+        cpu_busy,
+        memory_total: memory.map(|m| m.total),
+        memory_available: memory.map(|m| m.available),
+        disk_total: disk.map(|d| d.total),
+        disk_available: disk.map(|d| d.available),
+        cached_songs: files.len(),
+        cached_bytes: files.iter().sum(),
+        log_level: crate::logs::record_level(),
+    }))
+}
+
+#[derive(Deserialize)]
+struct LogQuery {
+    level: Option<String>,
+    search: Option<String>,
+}
+
+/// The node's latest log lines, newest last.
+async fn log_lines(
+    State(node): State<Node>,
+    headers: axum::http::HeaderMap,
+    Query(query): Query<LogQuery>,
+) -> ApiResult<Json<Vec<String>>> {
+    must_manage(&node, &headers)?;
+    Ok(Json(crate::logs::recent(
+        query.level.as_deref(),
+        query.search.as_deref(),
+        500,
+    )))
+}
+
+/// The node's log file (its last few megabytes) to save.
+async fn log_file(
+    State(node): State<Node>,
+    headers: axum::http::HeaderMap,
+) -> ApiResult<axum::response::Response> {
+    must_manage(&node, &headers)?;
+    let text = match crate::logs::file() {
+        Some(path) => tokio::task::spawn_blocking(move || {
+            crate::system_api::file_tail(&path, crate::system_api::LOG_DOWNLOAD_BYTES)
+        })
+        .await
+        .map_err(anyhow::Error::from)??,
+        None => crate::logs::all(),
+    };
+    let name = format!(
+        "attachment; filename=\"djinn-node-{}.log\"",
+        node.status()
+            .name
+            .chars()
+            .filter(char::is_ascii_alphanumeric)
+            .collect::<String>()
+    );
+    Ok((
+        [
+            (
+                axum::http::header::CONTENT_TYPE,
+                "text/plain; charset=utf-8".to_owned(),
+            ),
+            (axum::http::header::CONTENT_DISPOSITION, name),
+        ],
+        text,
+    )
+        .into_response())
+}
+
+/// Starts the node's program again.
+async fn restart(
+    State(node): State<Node>,
+    headers: axum::http::HeaderMap,
+) -> ApiResult<StatusCode> {
+    must_manage(&node, &headers)?;
+    let exe = std::env::current_exe().map_err(anyhow::Error::from)?;
+    tracing::info!("restarting, as asked on the node's page");
+    tokio::spawn(async move {
+        // Let the answer go out first.
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        if let Err(e) = crate::update::restart(&exe) {
+            tracing::warn!(error = %e, "couldn't restart");
+        }
+    });
+    Ok(StatusCode::ACCEPTED)
+}
+
 async fn put_audio(
     State(node): State<Node>,
     headers: axum::http::HeaderMap,
@@ -1640,6 +1828,8 @@ pub async fn serve(
         .parent()
         .map_or_else(|| PathBuf::from("node-cache"), |dir| dir.join("node-cache"));
     std::fs::create_dir_all(&cache_dir)?;
+    STARTED.get_or_init(std::time::Instant::now);
+    let _ = LISTEN.set(listen);
     let node = Node::new(store.clone(), cache_dir).await?;
     tokio::spawn(node.clone().run());
     tokio::spawn(node.clone().run_clock());
@@ -1968,5 +2158,62 @@ mod tests {
             "the first look is noted"
         );
         assert_eq!(node.status().pairing, Pairing::Setup);
+    }
+
+    #[tokio::test]
+    async fn only_a_managing_browser_sees_the_log_and_diagnostics_until_it_exits() {
+        use tower::ServiceExt;
+        let dir = std::env::temp_dir().join(format!("djinn-node-manage-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let node = Node::new(Store::open_in_memory().await.unwrap(), dir)
+            .await
+            .unwrap();
+        let app = router(node.clone());
+        let ask = |method: &str, path: &str, cookie: Option<&str>| {
+            let mut req = axum::http::Request::builder().method(method).uri(path);
+            if let Some(c) = cookie {
+                req = req.header(axum::http::header::COOKIE, format!("{MANAGE_COOKIE}={c}"));
+            }
+            app.clone()
+                .oneshot(req.body(axum::body::Body::empty()).unwrap())
+        };
+        for path in [
+            "/api/node/diagnostics",
+            "/api/node/log",
+            "/api/node/log/file",
+        ] {
+            let res = ask("GET", path, None).await.unwrap();
+            assert_eq!(res.status(), StatusCode::FORBIDDEN, "{path}");
+        }
+        let res = ask("POST", "/api/node/restart", Some("guess"))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::FORBIDDEN);
+
+        node.managers
+            .lock()
+            .unwrap()
+            .insert("let-in".to_owned(), std::time::Instant::now() + MANAGE_FOR);
+        for path in [
+            "/api/node/diagnostics",
+            "/api/node/log",
+            "/api/node/log/file",
+        ] {
+            let res = ask("GET", path, Some("let-in")).await.unwrap();
+            assert_eq!(res.status(), StatusCode::OK, "{path}");
+        }
+
+        let res = ask("DELETE", "/api/node/manage", Some("let-in"))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::NO_CONTENT);
+        let cleared = res.headers()[axum::http::header::SET_COOKIE]
+            .to_str()
+            .unwrap();
+        assert!(cleared.contains("Max-Age=0"), "{cleared}");
+        let res = ask("GET", "/api/node/diagnostics", Some("let-in"))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::FORBIDDEN, "out after exiting");
     }
 }
