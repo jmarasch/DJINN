@@ -169,6 +169,8 @@
   "player.full_screen": "Full screen",
   "player.cast": "Cast",
   "player.playing_on": "Playing on {device}",
+  "player.pick_music": "Pick some music to play.",
+  "player.find_music": "Find music",
   "player.open_artist": "Open artist",
   "player.open_album": "Open album",
   "player.shuffle": "Shuffle",

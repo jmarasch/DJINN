@@ -308,13 +308,21 @@ class PlaybackService : MediaLibraryService() {
             lastTick = if (player.isPlaying) now else 0L
         }
 
-        /** "Skip, play less": the song counts against itself, then the next one plays. */
+        /**
+         * "Skip, play less": the song counts against itself, then the next one
+         * plays. With nothing after it, the player empties: nothing playing.
+         */
         fun skipPlayLess() {
             count()
             // Counts as heard for a moment at least, so the report isn't dropped.
             if (heardMs <= 0) heardMs = 1
             report(playLess = true)
-            player.seekToNextMediaItem()
+            if (player.hasNextMediaItem()) {
+                player.seekToNextMediaItem()
+            } else {
+                player.stop()
+                player.clearMediaItems()
+            }
         }
 
         private fun report(playLess: Boolean = false) {
@@ -381,12 +389,15 @@ class PlaybackService : MediaLibraryService() {
                 session.isMediaNotificationController(controller) ||
                 mayBrowse(controller.packageName)
             if (controller.uid == Process.myUid()) {
-                val base = super.onConnect(session, controller)
+                // Not built from super.onConnect: that is a stand-in with empty
+                // lists, filled in by Media3 only when passed back unchanged.
+                // Copying its lists left the app's own screens unable to play.
                 return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
                     .setAvailableSessionCommands(
-                        base.availableSessionCommands.buildUpon().add(SKIP_PLAY_LESS).build(),
+                        MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS
+                            .buildUpon().add(SKIP_PLAY_LESS).build(),
                     )
-                    .setAvailablePlayerCommands(base.availablePlayerCommands)
+                    .setAvailablePlayerCommands(MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS)
                     .build()
             }
             if (full) return super.onConnect(session, controller)

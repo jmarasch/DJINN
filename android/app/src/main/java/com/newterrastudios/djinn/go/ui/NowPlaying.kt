@@ -123,13 +123,37 @@ private fun SongLink(name: CharSequence?, id: Long?, action: String, open: (Long
     )
 }
 
+/** The player with no song: say so, and offer the library. */
+@Composable
+private fun NothingPlaying(nav: Nav) {
+    Column(
+        Modifier.fillMaxSize().safeDrawingPadding().padding(24.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(t("playing.nothing"), style = MaterialTheme.typography.headlineSmall)
+        Text(
+            t("player.pick_music"),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(top = 8.dp, bottom = 24.dp),
+        )
+        androidx.compose.material3.Button(onClick = {
+            nav.stack.clear()
+            nav.tab = Tab.Library
+        }) {
+            Text(t("player.find_music"))
+        }
+    }
+}
+
 @UnstableApi
 @Composable
 fun NowPlayingScreen(nav: Nav) {
     val player = nav.player
     val item = player.current
     if (item == null) {
-        nav.pop()
+        NothingPlaying(nav)
         return
     }
     val id = item.mediaId.toLongOrNull()

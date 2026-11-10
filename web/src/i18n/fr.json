@@ -169,6 +169,8 @@
   "player.full_screen": "Plein écran",
   "player.cast": "Caster",
   "player.playing_on": "Lecture sur {device}",
+  "player.pick_music": "Choisissez de la musique à écouter.",
+  "player.find_music": "Trouver de la musique",
   "player.open_artist": "Ouvrir l'artiste",
   "player.open_album": "Ouvrir l'album",
   "player.shuffle": "Aléatoire",

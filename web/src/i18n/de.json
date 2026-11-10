@@ -169,6 +169,8 @@
   "player.full_screen": "Vollbild",
   "player.cast": "Streamen",
   "player.playing_on": "Läuft auf {device}",
+  "player.pick_music": "Such dir Musik zum Abspielen aus.",
+  "player.find_music": "Musik finden",
   "player.open_artist": "Künstler öffnen",
   "player.open_album": "Album öffnen",
   "player.shuffle": "Zufällig",

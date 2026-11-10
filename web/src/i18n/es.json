@@ -169,6 +169,8 @@
   "player.full_screen": "Pantalla completa",
   "player.cast": "Transmitir",
   "player.playing_on": "Sonando en {device}",
+  "player.pick_music": "Elige algo de música para escuchar.",
+  "player.find_music": "Buscar música",
   "player.open_artist": "Abrir artista",
   "player.open_album": "Abrir álbum",
   "player.shuffle": "Aleatorio",
