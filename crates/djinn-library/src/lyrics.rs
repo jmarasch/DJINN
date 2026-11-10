@@ -65,7 +65,7 @@ impl Found {
         } else {
             Found {
                 synced: None,
-                plain: Some(text.to_owned()),
+                plain: Some(clean(text)?),
                 instrumental: false,
                 source,
             }
@@ -76,6 +76,108 @@ impl Found {
     pub fn search_text(&self) -> Option<&str> {
         self.plain.as_deref().filter(|p| !p.trim().is_empty())
     }
+}
+
+/// Said by lyrics sites in place of the full words: the rest is only an excerpt.
+const EXCERPT_NOTICES: [&str; 1] = ["we are not licensed to display the full lyrics"];
+
+/// Plain lyrics as tagging tools copied them off web pages: scripts, HTML tags,
+/// wiki templates and entities taken out, `<br>` kept as a line break. An
+/// excerpt (a site saying it can't show the rest) counts as no lyrics, so the
+/// online lookup may find the whole song. None when nothing's left.
+pub fn clean(text: &str) -> Option<String> {
+    let lower = text.to_lowercase();
+    if EXCERPT_NOTICES.iter().any(|n| lower.contains(n)) {
+        return None;
+    }
+    if !text.contains(['<', '&', '{']) {
+        return Some(text.to_owned());
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find(['<', '&', '{']) {
+        out.push_str(&rest[..at]);
+        rest = &rest[at..];
+        if let Some(after) = skip_markup(rest, &mut out) {
+            rest = after;
+        } else {
+            let c = rest.chars().next().unwrap_or('<');
+            out.push(c);
+            rest = &rest[c.len_utf8()..];
+        }
+    }
+    out.push_str(rest);
+    // What tags leave behind: "[]" from "[<span>]", spaces before line ends,
+    // and runs of blank lines.
+    let out = out.replace("[]", "");
+    let mut lines: Vec<&str> = Vec::new();
+    for line in out.lines().map(str::trim_end) {
+        if line.is_empty() && lines.last().is_none_or(|l| l.is_empty()) {
+            continue;
+        }
+        lines.push(line);
+    }
+    while lines.last().is_some_and(|l| l.is_empty()) {
+        lines.pop();
+    }
+    let joined = lines.join("\n");
+    (!joined.trim().is_empty()).then_some(joined)
+}
+
+/// Markup at the start of `text`: what it leaves in `out` (a line break for
+/// `<br>`, the character for an entity), and the text after it. None when
+/// it isn't markup, so the character stays.
+fn skip_markup<'a>(text: &'a str, out: &mut String) -> Option<&'a str> {
+    if let Some(inner) = text.strip_prefix("{{") {
+        let end = inner.find("}}")?;
+        return Some(&inner[end + 2..]);
+    }
+    if let Some(entity) = text.strip_prefix('&') {
+        let end = entity.find(';').filter(|&e| e <= 8)?;
+        let name = &entity[..end];
+        let c = match name {
+            "amp" => '&',
+            "quot" => '"',
+            "apos" => '\'',
+            "lt" => '<',
+            "gt" => '>',
+            "nbsp" => ' ',
+            _ => {
+                let code = match name.strip_prefix("#x").or_else(|| name.strip_prefix("#X")) {
+                    Some(hex) => u32::from_str_radix(hex, 16).ok()?,
+                    None => name.strip_prefix('#')?.parse().ok()?,
+                };
+                char::from_u32(code)?
+            }
+        };
+        out.push(c);
+        return Some(&entity[end + 1..]);
+    }
+    let inner = text.strip_prefix('<')?;
+    let name: String = inner
+        .trim_start_matches('/')
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric())
+        .collect::<String>()
+        .to_ascii_lowercase();
+    // Not a tag ("<3", "< and >"): leave it.
+    if name.is_empty() && !inner.starts_with('!') {
+        return None;
+    }
+    let close = inner.find('>')?;
+    let after = &inner[close + 1..];
+    if name == "br" || name == "p" || name == "div" {
+        out.push('\n');
+    }
+    // Everything up to the closing tag goes for these.
+    if matches!(name.as_str(), "script" | "style" | "noscript") && !inner.starts_with('/') {
+        let closing = format!("</{name}");
+        let lower = after.to_ascii_lowercase();
+        let end = lower.find(&closing)?;
+        let tail = &after[end..];
+        return Some(tail.find('>').map_or("", |e| &tail[e + 1..]));
+    }
+    Some(after)
 }
 
 /// `[mm:ss]`, `[mm:ss.x]`, `[mm:ss.xx]` or `[mm:ss.xxx]` (also with `:` before
@@ -416,6 +518,33 @@ mod tests {
         assert_eq!(found.source, Source::Lrc);
         assert_eq!(found.plain.as_deref(), Some("Hello"));
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn web_page_leftovers_are_cleaned_from_plain_lyrics() {
+        let script = "<script>(function() {var s=document.getElementsByTagName(\"script\")[0];})();</script>Parlami\nIl tuo silenzio";
+        assert_eq!(clean(script).as_deref(), Some("Parlami\nIl tuo silenzio"));
+        assert_eq!(
+            clean("One<br>Two<br />Three &amp; four &#39;five&#x27;").as_deref(),
+            Some("One\nTwo\nThree & four 'five'"),
+        );
+        assert_eq!(
+            clean("{{Covered\n|a1 = Someone\n}}\n\n<noscript>.lyricbox{display:none}</noscript>\nWords").as_deref(),
+            Some("Words"),
+        );
+        // Not markup: kept as written.
+        assert_eq!(
+            clean("I <3 you, a < b & c {x}").as_deref(),
+            Some("I <3 you, a < b & c {x}")
+        );
+        assert_eq!(clean("<script>only()</script>"), None);
+    }
+
+    #[test]
+    fn a_site_excerpt_counts_as_no_lyrics() {
+        let excerpt = "Hide you[...]\n\nUnfortunately, we are not licensed to display the full lyrics for this song at the moment. Until then, how about a ?[<span style=\"font-size:80%;\">]";
+        assert_eq!(clean(excerpt), None);
+        assert_eq!(Found::from_text(excerpt, Source::File), None);
     }
 
     #[test]

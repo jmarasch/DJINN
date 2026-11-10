@@ -1225,8 +1225,8 @@ async fn compaction_runs_once() {
     assert_eq!(store.get_setting("compact_database").await.unwrap(), None);
 }
 
-/// The library lists' counts: party and GO plays (skipped ones too, as on
-/// the Stats page) and favorites, for songs, their album and their artist.
+/// The library lists' counts: party and GO plays (those that heard enough
+/// of the song) and favorites, for songs, their album and their artist.
 #[tokio::test]
 async fn plays_and_favorites_are_counted_per_song_album_and_artist() {
     let store = Store::open_in_memory().await.unwrap();
@@ -1281,15 +1281,35 @@ async fn plays_and_favorites_are_counted_per_song_album_and_artist() {
         .await
         .unwrap();
 
-    let songs = store.track_counts(&[one, two, 999]).await.unwrap();
+    let songs = store.track_counts(&[one, two, 999], 0).await.unwrap();
     assert_eq!(songs[&one], Counts { plays: 3, likes: 2 });
     assert_eq!(songs[&two], Counts { plays: 2, likes: 0 });
     assert_eq!(songs[&999], Counts::default());
-    let albums = store.album_counts(&[album]).await.unwrap();
+    let albums = store.album_counts(&[album], 0).await.unwrap();
     assert_eq!(albums[&album], Counts { plays: 5, likes: 1 });
-    let artists = store.artist_counts(&[artist]).await.unwrap();
+    let artists = store.artist_counts(&[artist], 0).await.unwrap();
     assert_eq!(artists[&artist], Counts { plays: 5, likes: 1 });
-    assert!(store.track_counts(&[]).await.unwrap().is_empty());
+    assert!(store.track_counts(&[], 0).await.unwrap().is_empty());
+
+    // Counting only plays that heard half the song: the GO plays above heard
+    // 30 s and a moment of 100 s songs, so they drop out; the party plays
+    // don't say how much was heard, so they stay.
+    sqlx::query("UPDATE tracks SET duration_ms = 100000")
+        .execute(&store.pool)
+        .await
+        .unwrap();
+    store.record_go_play(kim, two, 60_000).await.unwrap();
+    let songs = store.track_counts(&[one, two], 50).await.unwrap();
+    assert_eq!(songs[&one].plays, 2);
+    assert_eq!(songs[&two].plays, 2);
+    assert_eq!(
+        store.album_counts(&[album], 50).await.unwrap()[&album].plays,
+        4
+    );
+    assert_eq!(
+        store.artist_counts(&[artist], 50).await.unwrap()[&artist].plays,
+        4
+    );
 }
 
 /// Skipping a song you just heard all the way through isn't a skip; one

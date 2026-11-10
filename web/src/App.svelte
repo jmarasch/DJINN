@@ -13,6 +13,7 @@
   import Account from './screens/Account.svelte'
   import AlbumView from './screens/AlbumView.svelte'
   import ArtistView from './screens/ArtistView.svelte'
+  import ArtistSongs from './screens/ArtistSongs.svelte'
   import GuestJoin from './screens/GuestJoin.svelte'
   import Join from './screens/Join.svelte'
   import Login from './screens/Login.svelte'
@@ -70,11 +71,15 @@
   })
   const albumId = $derived(param('/album'))
   const artistId = $derived(param('/artist'))
+  const artistSongsId = $derived.by(() => {
+    const m = route.path.match(/^\/artist\/(\d+)\/songs$/)
+    return m ? Number(m[1]) : null
+  })
   const playlistId = $derived(param('/playlist'))
   const similarId = $derived(param('/similar'))
   const adminTab = $derived(adminTabFor(route.path))
   const tab = $derived(
-    route.path.startsWith('/search') || albumId || artistId || similarId || genreName
+    route.path.startsWith('/search') || albumId || artistId || artistSongsId || similarId || genreName
       ? 'search'
       : route.path.startsWith('/queue')
         ? 'queue'
@@ -154,6 +159,8 @@
       <AlbumView id={albumId} />
     {:else if artistId}
       <ArtistView id={artistId} />
+    {:else if artistSongsId}
+      <ArtistSongs id={artistSongsId} />
     {:else if playlistId && hasPlaylists()}
       <PlaylistView id={playlistId} />
     {:else if route.path === '/favorites' && hasPlaylists()}

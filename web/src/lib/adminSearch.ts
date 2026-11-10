@@ -114,6 +114,12 @@ export const adminEntries: AdminEntry[] = [
     keywords: 'genre refresh shuffle',
     key: 'genre_refresh_hours',
   },
+  {
+    label: 'A play counts once this much of the song is heard',
+    tab: 'library',
+    keywords: 'play count percent plays heard',
+    key: 'play_count_percent',
+  },
   { label: 'Names that should never be split', tab: 'library', keywords: 'artist split ampersand feat' },
   { label: 'Sound analysis', tab: 'library', keywords: 'analyze more like this radio fingerprint', key: 'sound_analysis' },
   { label: 'When heavy work runs', tab: 'library', keywords: 'background hours idle schedule' },

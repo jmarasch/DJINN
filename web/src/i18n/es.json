@@ -348,6 +348,7 @@
   "go.play_album": "Reproducir álbum",
   "go.radio": "Radio",
   "go.songs_total": "Canciones ({n})",
+  "go.songs_by": "Canciones de {name}",
   "go.show_all_songs": {
     "one": "Mostrar la canción",
     "other": "Mostrar las {n} canciones"

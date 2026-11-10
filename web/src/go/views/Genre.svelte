@@ -8,6 +8,7 @@
   import type { ArtistSummary, GenrePage, Track } from '../../lib/types'
   import { playList, setShuffle, tapSong } from '../player.svelte'
   import SongRow from '../SongRow.svelte'
+  import LikeButton from '../LikeButton.svelte'
 
   let { name }: { name: string } = $props()
   let page = $state<GenrePage | null>(null)
@@ -90,10 +91,13 @@
     <h2>Artists <span class="muted small">{page.artist_total}</span></h2>
     <ScrollRow gap={12} nearEnd={moreArtists}>
       {#each artists as artist (artist.id)}
-        <a class="artist" href="#/artist/{artist.id}">
-          <Art hash={artist.art_hash} size={88} round={999} letter={artist.name[0]} />
-          <span class="small">{artist.name}</span>
-        </a>
+        <div class="tile-wrap">
+          <a class="artist" href="#/artist/{artist.id}">
+            <Art hash={artist.art_hash} size={88} round={999} letter={artist.name[0]} />
+            <span class="small">{artist.name}</span>
+          </a>
+          <div class="corner"><LikeButton kind="artist" id={artist.id} name={artist.name} size={18} /></div>
+        </div>
       {/each}
     </ScrollRow>
   {/if}
@@ -139,5 +143,23 @@
     color: inherit;
     text-decoration: none;
     text-align: center;
+  }
+
+  .tile-wrap {
+    position: relative;
+    flex: none;
+  }
+
+  /* The heart sits on the picture's corner. */
+  .corner {
+    position: absolute;
+    top: 0;
+    right: 0;
+    border-radius: 999px;
+    background: rgb(0 0 0 / 0.45);
+  }
+
+  .corner :global(button:not(.liked)) {
+    color: #fff;
   }
 </style>

@@ -668,6 +668,8 @@ export interface Settings {
   genre_page_size: number
   /** Hours before a genre's shuffled order is made again; 0 for every visit. */
   genre_refresh_hours: number
+  /** How much of a song a play must hear to count in the library lists, in percent. */
+  play_count_percent: number
   /** The TV page (/tv) works without signing in. */
   tv_page: boolean
   /** The TV page can play the party without signing in. */

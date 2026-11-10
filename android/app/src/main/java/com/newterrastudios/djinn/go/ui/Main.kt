@@ -58,6 +58,8 @@ import kotlinx.coroutines.delay
 sealed interface Screen {
     data class Album(val id: Long) : Screen
     data class Artist(val id: Long) : Screen
+    /** Every song by an artist. */
+    data class ArtistSongs(val id: Long) : Screen
     data class Playlist(val id: Long) : Screen
     data class Genre(val name: String) : Screen
     data object NowPlaying : Screen
@@ -250,6 +252,7 @@ fun MainScreen(nav: Nav) {
             when (top) {
                 is Screen.Album -> AlbumScreen(top.id, nav)
                 is Screen.Artist -> ArtistScreen(top.id, nav)
+                is Screen.ArtistSongs -> ArtistSongsScreen(top.id, nav)
                 is Screen.Playlist -> PlaylistScreen(top.id, nav)
                 is Screen.Genre -> GenreScreen(top.name, nav)
                 Screen.Settings -> SettingsScreen(nav)

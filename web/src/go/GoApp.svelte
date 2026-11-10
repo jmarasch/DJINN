@@ -23,6 +23,7 @@
   import Album from './views/Album.svelte'
   import Genre from './views/Genre.svelte'
   import Artist from './views/Artist.svelte'
+  import ArtistSongs from './views/ArtistSongs.svelte'
   import Home from './views/Home.svelte'
   import Library from './views/Library.svelte'
   import Playlist from './views/Playlist.svelte'
@@ -97,6 +98,10 @@
 
   const albumId = $derived(param('/album'))
   const artistId = $derived(param('/artist'))
+  const artistSongsId = $derived.by(() => {
+    const m = route.path.match(/^\/artist\/(\d+)\/songs$/)
+    return m ? Number(m[1]) : null
+  })
   const playlistId = $derived(param('/playlist'))
   const genreName = $derived.by(() => {
     const m = route.path.match(/^\/genre\/(.+)$/)
@@ -111,7 +116,7 @@
         ? 'library'
         : route.path.startsWith('/account')
           ? 'account'
-          : albumId || artistId || genreName
+          : albumId || artistId || artistSongsId || genreName
             ? 'search'
             : 'home',
   )
@@ -183,6 +188,8 @@
       <Album id={albumId} />
     {:else if artistId}
       <Artist id={artistId} />
+    {:else if artistSongsId}
+      <ArtistSongs id={artistSongsId} />
     {:else if playlistId}
       <Playlist id={playlistId} />
     {:else if route.path === '/submit'}

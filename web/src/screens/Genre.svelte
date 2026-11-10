@@ -1,6 +1,7 @@
 <script lang="ts">
   import { api } from '../lib/api'
   import Art from '../lib/Art.svelte'
+  import Heart from '../lib/Heart.svelte'
   import Icon from '../lib/Icon.svelte'
   import InfiniteList from '../lib/InfiniteList.svelte'
   import RadioButton from '../lib/RadioButton.svelte'
@@ -72,10 +73,13 @@
     <h2>Artists <span class="muted small">{page.artist_total}</span></h2>
     <ScrollRow nearEnd={moreArtists}>
       {#each artists as artist (artist.id)}
-        <a class="artist" href="#/artist/{artist.id}">
-          <Art hash={artist.art_hash} size={96} round={999} letter={artist.name.charAt(0).toUpperCase()} />
-          <span class="ellipsis">{artist.name}</span>
-        </a>
+        <div class="artist-tile">
+          <a class="artist" href="#/artist/{artist.id}">
+            <Art hash={artist.art_hash} size={96} round={999} letter={artist.name.charAt(0).toUpperCase()} />
+            <span class="ellipsis">{artist.name}</span>
+          </a>
+          <div class="corner"><Heart kind="artist" id={artist.id} name={artist.name} size={18} /></div>
+        </div>
       {/each}
     </ScrollRow>
   {/if}
@@ -129,5 +133,23 @@
 
   .artist .ellipsis {
     max-width: 100%;
+  }
+
+  .artist-tile {
+    position: relative;
+    flex: none;
+  }
+
+  /* The heart sits on the picture's corner. */
+  .corner {
+    position: absolute;
+    top: 0;
+    right: 0;
+    border-radius: 999px;
+    background: rgb(0 0 0 / 0.45);
+  }
+
+  .corner :global(.heart:not(.liked)) {
+    color: #fff;
   }
 </style>

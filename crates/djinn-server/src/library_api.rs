@@ -218,7 +218,10 @@ async fn artists(
         .artists_page_filtered(query.sort, show, offset, limit)
         .await?;
     let ids: Vec<i64> = page.items.iter().map(|a| a.id).collect();
-    let counts = state.store.artist_counts(&ids).await?;
+    let counts = state
+        .store
+        .artist_counts(&ids, play_count_percent(&state).await?)
+        .await?;
     Ok(Json(counted(page, |a| a.id, counts)))
 }
 
@@ -250,7 +253,10 @@ async fn albums(
         .albums_page_filtered(query.sort, query.filter, offset, limit)
         .await?;
     let ids: Vec<i64> = page.items.iter().map(|a| a.id).collect();
-    let counts = state.store.album_counts(&ids).await?;
+    let counts = state
+        .store
+        .album_counts(&ids, play_count_percent(&state).await?)
+        .await?;
     Ok(Json(counted(page, |a| a.id, counts)))
 }
 
@@ -315,7 +321,10 @@ async fn tracks(
         .await?;
     let mut genres = crate::smart::list_genres(&state, found.items.iter().map(|t| t.id));
     let ids: Vec<i64> = found.items.iter().map(|t| t.id).collect();
-    let mut counts = state.store.track_counts(&ids).await?;
+    let mut counts = state
+        .store
+        .track_counts(&ids, play_count_percent(&state).await?)
+        .await?;
     Ok(Json(Page {
         total: found.total,
         items: found
@@ -812,6 +821,18 @@ pub fn lookup_status(state: &AppState) -> LookupStatus {
 /// Setting key: 1 to show slideshows of more artist pictures, from
 /// Wikimedia Commons (with artist photos and bios, and MusicBrainz).
 pub const ARTIST_PICTURES: &str = "artist_pictures";
+
+/// How much of a song a play must hear to count in the library lists, in percent.
+pub const PLAY_COUNT_PERCENT: &str = "play_count_percent";
+pub const PLAY_COUNT_PERCENT_DEFAULT: i64 = 50;
+
+async fn play_count_percent(state: &AppState) -> anyhow::Result<i64> {
+    Ok(
+        settings::number(&state.store, PLAY_COUNT_PERCENT, PLAY_COUNT_PERCENT_DEFAULT)
+            .await?
+            .clamp(0, 100),
+    )
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default)]

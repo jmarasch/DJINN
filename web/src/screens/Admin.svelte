@@ -349,6 +349,11 @@
           <span class="small muted">Genre pages show everything in a shuffled order, with what's been played most nearer the top. 0 shuffles on every visit.</span>
         </label>
         <label>
+          A play counts once this much of the song is heard: {settings.play_count_percent}%
+          <input type="range" min="0" max="100" step="5" bind:value={settings.play_count_percent} />
+          <span class="small muted">For the play counts in the library lists. A song started again for a moment isn't a play. 0 counts every play.</span>
+        </label>
+        <label>
           Names that should never be split, one per line
           <textarea rows="6" bind:value={settings.artist_keep_whole} spellcheck="false"></textarea>
           <span class="small muted">

@@ -86,6 +86,10 @@ pub const DEFAULTS: &[(&str, Default)] = &[
     (crate::lyrics::LYRICS_PAGE, Default::Flag(true)),
     (crate::nodes::NODES_JOIN, Default::Flag(false)),
     (crate::library_api::ARTIST_PICTURES, Default::Flag(false)),
+    (
+        crate::library_api::PLAY_COUNT_PERCENT,
+        Default::Number(crate::library_api::PLAY_COUNT_PERCENT_DEFAULT),
+    ),
     ("show_collaboration_artists", Default::Flag(true)),
     (djinn_library::ORIGINAL_YEARS_KEY, Default::Flag(true)),
     (djinn_store::ALBUM_FOLDERS_KEY, Default::Flag(true)),

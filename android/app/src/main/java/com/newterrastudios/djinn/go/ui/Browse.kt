@@ -48,6 +48,8 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.background
+import androidx.compose.ui.graphics.Color
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
@@ -1007,9 +1009,8 @@ fun AlbumScreen(id: Long, nav: Nav) {
 @UnstableApi
 @Composable
 fun ArtistScreen(id: Long, nav: Nav) {
-    // Every song by the artist: the top ones first, the rest on Show more.
+    // The top songs here; Show all opens every song on a screen of its own.
     var total by remember(id) { mutableStateOf(0L) }
-    var all by remember(id) { mutableStateOf<List<Track>?>(null) }
     LaunchedEffect(id) {
         total = try {
             nav.api.artistSongs(id, 0, 1).total
@@ -1019,7 +1020,7 @@ fun ArtistScreen(id: Long, nav: Nav) {
     }
     val scope = nav.scope
     Loaded(key = id, load = { nav.api.artist(id) }) { artist: ArtistDetail ->
-        val shown = all ?: artist.topTracks
+        val shown = artist.topTracks
         LazyColumn(Modifier.fillMaxSize()) {
             item {
                 Column(Modifier.padding(16.dp)) {
@@ -1066,19 +1067,9 @@ fun ArtistScreen(id: Long, nav: Nav) {
                 if (shown.size < total) {
                     item {
                         TextButton(
-                            onClick = {
-                                scope.launch {
-                                    try {
-                                        val page = nav.api.artistSongs(id, all?.size ?: 0, 100)
-                                        all = (all ?: emptyList()) + page.tracks
-                                        total = page.total
-                                    } catch (_: IOException) {
-                                        nav.message = t("common.no_server")
-                                    }
-                                }
-                            },
+                            onClick = { nav.push(Screen.ArtistSongs(id)) },
                             modifier = Modifier.fillMaxWidth(),
-                        ) { Text(if (all == null) t("go.show_all_songs", "n" to total) else t("common.show_more")) }
+                        ) { Text(t("go.show_all_songs", "n" to total)) }
                     }
                 }
             }
@@ -1089,6 +1080,77 @@ fun ArtistScreen(id: Long, nav: Nav) {
             if (artist.appearsOn.isNotEmpty()) {
                 item { Heading(t("go.appears_on")) }
                 items(artist.appearsOn) { AlbumRow(it, nav) }
+            }
+        }
+    }
+}
+
+/** Every song by an artist, loading more as you scroll. */
+@UnstableApi
+@Composable
+fun ArtistSongsScreen(id: Long, nav: Nav) {
+    val songs = remember(id) { mutableStateListOf<Track>() }
+    var total by remember(id) { mutableStateOf<Long?>(null) }
+    var name by remember(id) { mutableStateOf("") }
+    var failed by remember(id) { mutableStateOf(false) }
+    val list = rememberLazyListState()
+    val scope = nav.scope
+    LaunchedEffect(id) {
+        name = try {
+            nav.api.artist(id).name
+        } catch (_: IOException) {
+            ""
+        }
+    }
+    LaunchedEffect(id, failed) {
+        if (failed) return@LaunchedEffect
+        snapshotFlow { list.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0 }.collect { last ->
+            val known = total
+            if (known != null && (last < songs.size - GENRE_LOAD_AHEAD || songs.size >= known)) return@collect
+            try {
+                val page = nav.api.artistSongs(id, songs.size, 100)
+                val have = songs.mapTo(HashSet()) { it.id }
+                songs.addAll(page.tracks.filter { it.id !in have })
+                total = page.total
+                if (page.tracks.isEmpty()) total = songs.size.toLong()
+            } catch (_: IOException) {
+                failed = true
+            }
+        }
+    }
+    LazyColumn(Modifier.fillMaxSize(), state = list) {
+        item {
+            Column(Modifier.padding(16.dp)) {
+                Text(
+                    if (name.isEmpty()) t("library.songs") else t("go.songs_by", "name" to name),
+                    style = MaterialTheme.typography.headlineSmall,
+                )
+                total?.let { Text(t("go.songs_total", "n" to it), color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                FilledTonalButton(
+                    enabled = (total ?: 0) > 0,
+                    onClick = {
+                        scope.launch {
+                            try {
+                                val all = nav.api.artistSongs(id, 0, 5000).tracks
+                                if (all.isNotEmpty()) nav.player.play(all, 0)
+                            } catch (_: IOException) {
+                                nav.message = t("common.no_server")
+                            }
+                        }
+                    },
+                    modifier = Modifier.padding(top = 8.dp),
+                ) { Text(t("go.play_all")) }
+            }
+        }
+        itemsIndexed(songs, key = { _, song -> song.id }) { index, song ->
+            SongRow(song, nav) { nav.player.play(songs.toList(), index) }
+        }
+        if (failed) {
+            item {
+                Column(Modifier.padding(16.dp)) {
+                    Text(t("common.load_more_failed"), color = MaterialTheme.colorScheme.error)
+                    FilledTonalButton(onClick = { failed = false }) { Text(t("common.try_again")) }
+                }
             }
         }
     }
@@ -1211,7 +1273,19 @@ private fun GenreArtists(name: String, page: GenrePage, nav: Nav) {
                     .clickable { nav.push(Screen.Artist(artist.id)) },
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Art(nav.api.artUrl(artist.artHash), 80.dp, CircleShape)
+                Box {
+                    Art(nav.api.artUrl(artist.artHash), 80.dp, CircleShape)
+                    // The heart on the picture's corner, as on the web.
+                    Box(
+                        Modifier
+                            .align(Alignment.TopEnd)
+                            .size(36.dp)
+                            .background(Color.Black.copy(alpha = 0.45f), CircleShape),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        LikeHeart(artist.id, nav.likedArtists, artist.name, nav.api::setArtistLike, nav)
+                    }
+                }
                 Text(
                     artist.name,
                     style = MaterialTheme.typography.bodySmall,

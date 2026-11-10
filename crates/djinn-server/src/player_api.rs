@@ -358,6 +358,9 @@ struct Settings {
     /// Hours before a genre's shuffled order is made again.
     #[serde(default = "default_genre_refresh")]
     genre_refresh_hours: i64,
+    /// How much of a song a play must hear to count in the library lists, in percent.
+    #[serde(default = "default_play_count_percent")]
+    play_count_percent: i64,
     /// The TV page (/tv) works without signing in.
     #[serde(default = "default_true")]
     tv_page: bool,
@@ -381,6 +384,10 @@ fn default_genre_page() -> i64 {
 
 fn default_genre_refresh() -> i64 {
     crate::smart::GENRE_REFRESH_DEFAULT
+}
+
+fn default_play_count_percent() -> i64 {
+    crate::library_api::PLAY_COUNT_PERCENT_DEFAULT
 }
 
 fn default_true() -> bool {
@@ -438,6 +445,12 @@ async fn settings(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json
             store,
             crate::smart::GENRE_REFRESH_HOURS,
             crate::smart::GENRE_REFRESH_DEFAULT,
+        )
+        .await?,
+        play_count_percent: settings::number(
+            store,
+            crate::library_api::PLAY_COUNT_PERCENT,
+            crate::library_api::PLAY_COUNT_PERCENT_DEFAULT,
         )
         .await?,
         tv_page: crate::tv_api::enabled(&state).await?,
@@ -586,6 +599,12 @@ async fn update_settings(
         .set_setting(
             crate::smart::GENRE_REFRESH_HOURS,
             &body.genre_refresh_hours.clamp(0, 24 * 365).to_string(),
+        )
+        .await?;
+    store
+        .set_setting(
+            crate::library_api::PLAY_COUNT_PERCENT,
+            &body.play_count_percent.clamp(0, 100).to_string(),
         )
         .await?;
     let old_album_folders = settings::flag(store, djinn_store::ALBUM_FOLDERS_KEY, true).await?;
