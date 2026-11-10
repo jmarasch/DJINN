@@ -342,6 +342,22 @@ export interface Track {
   plays?: number
   /** In the library lists: how many people favorited it. */
   likes?: number
+  /** Lyrics found: 0 none (or not looked for yet), 1 words, 2 timed. */
+  lyrics?: number
+}
+
+export type LyricsFilter = 'all' | 'words' | 'timed'
+
+/** Finding lyrics, for the Library tab's progress box. */
+export interface LyricsProgress {
+  running: boolean
+  phase: '' | 'reading' | 'looking up'
+  held: Held | null
+  songs: number
+  words: number
+  timed: number
+  unread: number
+  to_ask: number
 }
 
 export interface Album {
@@ -952,6 +968,7 @@ export interface LibraryStatus {
   analysis: LoudnessStatus
   listening: Listening
   lookup_running: boolean
+  lyrics: LyricsProgress
 }
 
 export interface LoudnessStatus {

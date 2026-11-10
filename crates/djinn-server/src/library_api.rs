@@ -149,6 +149,9 @@ struct PageQuery {
     limit: Option<i64>,
     #[serde(default)]
     sort: TrackSort,
+    /// Only songs with lyrics (`words`) or timed lyrics (`timed`).
+    #[serde(default)]
+    lyrics: djinn_store::LyricsFilter,
 }
 
 impl PageQuery {
@@ -206,6 +209,7 @@ async fn artists(
         offset: query.offset,
         limit: query.limit,
         sort: TrackSort::default(),
+        lyrics: djinn_store::LyricsFilter::All,
     }
     .bounds();
     let show = settings::flag(&state.store, "show_collaboration_artists", true).await?;
@@ -238,6 +242,7 @@ async fn albums(
         offset: query.offset,
         limit: query.limit,
         sort: TrackSort::default(),
+        lyrics: djinn_store::LyricsFilter::All,
     };
     let (offset, limit) = page.bounds();
     let page = state
@@ -281,6 +286,10 @@ async fn track_jumps(
     State(state): State<AppState>,
     Query(page): Query<PageQuery>,
 ) -> ApiResult<Json<Vec<Jump>>> {
+    // A list picked by lyrics changes as they're found: no jumps for it.
+    if page.lyrics != djinn_store::LyricsFilter::All {
+        return Ok(Json(Vec::new()));
+    }
     Ok(Json(state.store.track_jumps(page.sort).await?))
 }
 
@@ -300,7 +309,10 @@ async fn tracks(
     Query(page): Query<PageQuery>,
 ) -> ApiResult<Json<Page<ListedTrack>>> {
     let (offset, limit) = page.bounds();
-    let found = state.store.tracks_page(page.sort, offset, limit).await?;
+    let found = state
+        .store
+        .tracks_page_filtered(page.sort, page.lyrics, offset, limit)
+        .await?;
     let mut genres = crate::smart::list_genres(&state, found.items.iter().map(|t| t.id));
     let ids: Vec<i64> = found.items.iter().map(|t| t.id).collect();
     let mut counts = state.store.track_counts(&ids).await?;
@@ -676,6 +688,8 @@ struct LibraryStatus {
     analysis: crate::events::LoudnessStatus,
     listening: crate::ai::Listening,
     lookup_running: bool,
+    /// Finding lyrics, alongside like the lookups.
+    lyrics: crate::lyrics::Progress,
     /// Where cover art and artist photos are cached.
     art_dir: String,
 }
@@ -688,6 +702,7 @@ async fn status(_: CurrentUser, State(state): State<AppState>) -> ApiResult<Json
         analysis: crate::audio_api::loudness_status(&state).await?,
         listening: crate::ai::listening(&state).await?,
         lookup_running: state.scan.lookup_running.load(Ordering::Acquire),
+        lyrics: crate::lyrics::progress(&state).await?,
         art_dir: state.art_dir.display().to_string(),
     }))
 }

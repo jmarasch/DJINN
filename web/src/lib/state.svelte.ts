@@ -7,6 +7,7 @@ import type {
   AiStatus,
   IdentifyStatus,
   Listening,
+  LyricsProgress,
   CastDevice,
   LoudnessStatus,
   LookupStatus,
@@ -57,6 +58,8 @@ export const app = $state({
   ai: null as AiStatus | null,
   /** AI listening's progress, for everyone's library progress bar. */
   listening: null as Listening | null,
+  /** Finding lyrics; kept current by SSE. */
+  lyrics: null as LyricsProgress | null,
   /** Cast devices; filled in on the Audio tab, kept current by SSE. */
   casts: null as CastDevice[] | null,
   /** Track ids with a request on its way to the server. */
@@ -166,6 +169,7 @@ export function connect() {
   })
   on<IdentifyStatus>('identify_status', (data) => (app.identify = data))
   on<{ url: string }>('address', (data) => (app.address = data.url))
+  on<LyricsProgress>('lyrics', (data) => (app.lyrics = data))
 
   void loadLibraryWork()
 
@@ -188,6 +192,7 @@ export async function loadLibraryWork() {
     app.loudness = status.analysis
     app.listening = status.listening
     app.lookup = { ...app.lookup, running: status.lookup_running }
+    app.lyrics = status.lyrics
   } catch {
     // Signed out, or the server restarting; events fill it in.
   }

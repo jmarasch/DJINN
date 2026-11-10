@@ -34,6 +34,8 @@ pub struct Track {
     pub genre: Option<String>,
     pub duration_ms: Option<i64>,
     pub art_hash: Option<String>,
+    /// Lyrics found: 0 none (or not looked for yet), 1 words, 2 timed.
+    pub lyrics: i64,
 }
 
 // Column lists are macros so queries stay `&'static str` (built with
@@ -48,7 +50,9 @@ macro_rules! track_columns {
                 JOIN artists a ON a.id = ta.artist_id \
                 WHERE ta.track_id = t.id ORDER BY ta.position) c) AS credits, \
          t.track_no, t.disc_no, t.year, t.genre, t.duration_ms, \
-         coalesce(t.art_hash, (SELECT fa.art_hash FROM albums fa WHERE fa.id = t.album_id)) AS art_hash"
+         coalesce(t.art_hash, (SELECT fa.art_hash FROM albums fa WHERE fa.id = t.album_id)) AS art_hash, \
+         coalesce((SELECT CASE WHEN tl.synced IS NOT NULL THEN 2 WHEN tl.plain IS NOT NULL THEN 1 ELSE 0 END \
+                   FROM lyrics tl WHERE tl.track_id = t.id), 0) AS lyrics"
     };
 }
 pub(crate) use track_columns;
@@ -245,6 +249,18 @@ impl AlbumFilter {
             Self::Soundtracks => "soundtracks",
         }
     }
+}
+
+/// Which songs the song list shows, by their lyrics.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LyricsFilter {
+    #[default]
+    All,
+    /// Any lyrics, timed or not.
+    Words,
+    /// Timed lyrics only.
+    Timed,
 }
 
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash, serde::Deserialize)]

@@ -24,10 +24,9 @@
       .then((s) => (settings = s))
       .catch(() => {})
     void refresh()
-    // While it works, show it moving.
-    const timer = setInterval(() => {
-      if (status?.running) void refresh()
-    }, 3000)
+    // Keep it current: the job can start while this is open (after a
+    // library check or a restart).
+    const timer = setInterval(() => void refresh(), 5000)
     return () => clearInterval(timer)
   })
 

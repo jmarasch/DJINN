@@ -105,6 +105,7 @@ import type {
   ServerPorts,
   TagChange,
   UploadedBackup,
+  LyricsFilter,
   Track,
   TrackSort,
   TrackEdit,
@@ -288,7 +289,8 @@ export const api = {
   /** Where each letter (or year) starts in a list, for the jump strip. */
   artistJumps: (sort: ArtistSort) => get<Jump[]>(`/artists/jumps?sort=${sort}`),
   albumJumps: (sort: AlbumSort, filter: AlbumFilter) => get<Jump[]>(`/albums/jumps?sort=${sort}&filter=${filter}`),
-  trackJumps: (sort: TrackSort) => get<Jump[]>(`/tracks/jumps?sort=${sort}`),
+  trackJumps: (sort: TrackSort, lyrics: LyricsFilter = 'all') =>
+    get<Jump[]>(`/tracks/jumps?sort=${sort}&lyrics=${lyrics}`),
   playWild: () => post<void>('/playlists/wild/play'),
   playRadio: (seed: RadioSeed) => post<void>('/playlists/radio/play', seed),
   trackTags: (id: number) => get<TrackTags>(`/tracks/${id}/tags`),
@@ -304,8 +306,8 @@ export const api = {
     get<GenreMap>(top && lines ? `/genres?top=${top}&lines=${lines}` : '/genres'),
   playlistFromSongs: (name: string, trackIds: number[]) =>
     post<PlaylistSummary>('/playlists/from-songs', { name, track_ids: trackIds }),
-  tracks: (sort: TrackSort, offset: number) =>
-    get<Page<Track>>(`/tracks?sort=${sort}&offset=${offset}`),
+  tracks: (sort: TrackSort, offset: number, lyrics: LyricsFilter = 'all') =>
+    get<Page<Track>>(`/tracks?sort=${sort}&offset=${offset}&lyrics=${lyrics}`),
   track: (id: number) => get<Track>(`/tracks/${id}`),
   similarTracks: (id: number) =>
     get<{ tracks: Track[]; analyzed: boolean; analysis_on: boolean }>(`/tracks/${id}/similar`),

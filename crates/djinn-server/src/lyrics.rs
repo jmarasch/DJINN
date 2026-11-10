@@ -64,6 +64,7 @@ pub fn start(state: &AppState) {
     }
     let state = state.clone();
     tokio::spawn(async move {
+        tell(&state, true).await;
         loop {
             AGAIN.store(false, Ordering::Release);
             if let Err(e) = read_files(&state).await {
@@ -83,12 +84,65 @@ pub fn start(state: &AppState) {
         }
         set_phase("");
         RUNNING.store(false, Ordering::Release);
+        tell(&state, true).await;
     });
 }
 
 fn set_phase(phase: &'static str) {
     if let Ok(mut p) = PHASE.lock() {
         *p = phase;
+    }
+}
+
+/// How finding lyrics is going, for the Library tab's progress box.
+#[derive(Clone, Debug, Serialize)]
+pub struct Progress {
+    pub running: bool,
+    /// "reading", "looking up", or "" (idle, or waiting its turn: `held`).
+    pub phase: &'static str,
+    pub held: Option<crate::background::Held>,
+    pub songs: i64,
+    /// Songs with lyrics, timed or not.
+    pub words: i64,
+    pub timed: i64,
+    /// Files still to read.
+    pub unread: i64,
+    /// Songs without lyrics still to ask LRCLIB about; 0 with lookups off.
+    pub to_ask: i64,
+}
+
+pub async fn progress(state: &AppState) -> ApiResult<Progress> {
+    let counts = state.store.lyrics_counts().await?;
+    let running = RUNNING.load(Ordering::Acquire);
+    let phase = PHASE.lock().map(|p| *p).unwrap_or("");
+    let lookups = settings::flag(&state.store, LYRICS_LOOKUP, true).await?;
+    Ok(Progress {
+        running,
+        phase,
+        held: (running && phase.is_empty())
+            .then(|| crate::background::waiting(state))
+            .flatten(),
+        songs: counts.songs,
+        words: counts.synced + counts.plain,
+        timed: counts.synced,
+        unread: counts.unread,
+        to_ask: if lookups { counts.not_looked_up } else { 0 },
+    })
+}
+
+/// When progress was last sent, so a quick batch doesn't flood pages.
+static SENT_AT: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+const SEND_EVERY_MS: i64 = 3_000;
+
+/// Tells open pages how it's going; `now` skips the pause between updates.
+async fn tell(state: &AppState, now: bool) {
+    let at = djinn_store::now_ms();
+    if !now && at - SENT_AT.load(Ordering::Relaxed) < SEND_EVERY_MS {
+        return;
+    }
+    SENT_AT.store(at, Ordering::Relaxed);
+    if let Ok(p) = progress(state).await {
+        let _ = state.events.send(crate::events::ServerEvent::Lyrics(p));
     }
 }
 
@@ -107,7 +161,15 @@ async fn read_files(state: &AppState) -> anyhow::Result<()> {
         if batch.is_empty() {
             return Ok(());
         }
-        let go_on = crate::background::wait_turn(state, || async { true }, || async {}).await;
+        let go_on = crate::background::wait_turn(
+            state,
+            || async { true },
+            || async {
+                set_phase("");
+                tell(state, true).await;
+            },
+        )
+        .await;
         if !go_on || *state.shutdown.borrow() {
             return Ok(());
         }
@@ -124,6 +186,7 @@ async fn read_files(state: &AppState) -> anyhow::Result<()> {
                 .save_read_lyrics(song.id, song.mtime, &new)
                 .await?;
         }
+        tell(state, false).await;
     }
 }
 
@@ -154,6 +217,7 @@ async fn look_up(state: &AppState) -> anyhow::Result<()> {
                 .store
                 .save_looked_up_lyrics(song.id, answer.as_ref().map(to_new).as_ref())
                 .await?;
+            tell(state, false).await;
             tokio::time::sleep(LOOKUP_PAUSE).await;
         }
     }

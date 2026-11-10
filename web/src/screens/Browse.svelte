@@ -16,7 +16,7 @@
   import { jumpCache } from '../lib/listCache'
   import TrackRow from '../lib/TrackRow.svelte'
   import TrackTile from '../lib/TrackTile.svelte'
-  import type { AlbumFilter, AlbumSort, ArtistSort, GenreMap, Jump, Track, TrackSort } from '../lib/types'
+  import type { AlbumFilter, AlbumSort, ArtistSort, GenreMap, Jump, LyricsFilter, Track, TrackSort } from '../lib/types'
 
   let {
     song,
@@ -53,6 +53,8 @@
   let sort = $state((sessionStorage.getItem('djinn-browse-sort') as TrackSort) || 'title')
   let albumSort = $state((sessionStorage.getItem('djinn-browse-album-sort') as AlbumSort) || 'name')
   let albumFilter = $state<AlbumFilter>('all')
+  let lyricsFilter = $state<LyricsFilter>((sessionStorage.getItem('djinn-browse-lyrics') as LyricsFilter) || 'all')
+  $effect(() => sessionStorage.setItem('djinn-browse-lyrics', lyricsFilter))
   let artistSort = $state((sessionStorage.getItem('djinn-browse-artist-sort') as ArtistSort) || 'name')
   let view = $state<View>(readView())
   let genreView = $state<GenreView>(readStored('djinn-genre-view') === 'cloud' ? 'cloud' : 'tags')
@@ -99,7 +101,7 @@
     tab === 'albums'
       ? `albums-${albumSort}-${albumFilter}`
       : tab === 'songs'
-        ? `songs-${sort}`
+        ? `songs-${sort}-${lyricsFilter}`
         : tab === 'artists'
           ? `artists-${artistSort}`
           : tab,
@@ -115,7 +117,7 @@
     jumps = cached ?? []
     if (cached || tab === 'genres') return
     const loading =
-      tab === 'artists' ? api.artistJumps(artistSort) : tab === 'albums' ? api.albumJumps(albumSort, albumFilter) : api.trackJumps(sort)
+      tab === 'artists' ? api.artistJumps(artistSort) : tab === 'albums' ? api.albumJumps(albumSort, albumFilter) : api.trackJumps(sort, lyricsFilter)
     loading
       .then((found) => {
         jumpCache.set(k, found)
@@ -236,6 +238,15 @@
         </label>
       </div>
   {:else if tab === 'songs'}
+    <div class="album-filters">
+      <label class="sort">
+        <span class="muted small">{t('library.show')}</span>
+        <select bind:value={lyricsFilter}>
+          <option value="all">{t('library.all_songs')}</option>
+          <option value="words">{t('library.with_lyrics')}</option>
+          <option value="timed">{t('library.with_timed_lyrics')}</option>
+        </select>
+      </label>
     <label class="sort">
         <span class="muted small">{t('library.sort_by')}</span>
         <select bind:value={sort}>
@@ -247,6 +258,7 @@
           <option value="oldest">{t('library.sort_oldest')}</option>
         </select>
       </label>
+    </div>
   {/if}
 </div>
 
@@ -371,8 +383,8 @@
         <InfiniteList
       bind:this={list}
       inset={stuckTop}
-      cacheKey="songs-{sort}"
-      load={(offset) => api.tracks(sort, offset)}
+      cacheKey="songs-{sort}-{lyricsFilter}"
+      load={(offset) => api.tracks(sort, offset, lyricsFilter)}
       key={(t) => t.id}
       count={(n) => plural(n, 'songs')}
       {grid}

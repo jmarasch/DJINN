@@ -1357,3 +1357,87 @@ async fn a_skip_right_after_hearing_the_song_doesnt_count() {
     store.record_go_play(sam, favorite, 1).await.unwrap();
     assert_eq!(skips(sam, favorite).await, 1);
 }
+
+#[tokio::test]
+async fn songs_show_their_lyrics_and_can_be_picked_by_them() {
+    let store = Store::open_in_memory().await.unwrap();
+    store
+        .save_scanned(&[
+            scanned("/m/1.flac", "A Timed", "Band", "Debut"),
+            scanned("/m/2.flac", "B Words", "Band", "Debut"),
+            scanned("/m/3.flac", "C None", "Band", "Debut"),
+            scanned("/m/4.flac", "D Unread", "Band", "Debut"),
+        ])
+        .await
+        .unwrap();
+    let id = |title: &str| {
+        let store = store.clone();
+        let title = title.to_owned();
+        async move {
+            let page = store.tracks_page(TrackSort::Title, 0, 10).await.unwrap();
+            page.items
+                .into_iter()
+                .find(|t| t.title == title)
+                .unwrap()
+                .id
+        }
+    };
+    let timed = crate::NewLyrics {
+        synced: Some("[00:01.00]la"),
+        plain: Some("la"),
+        instrumental: false,
+        source: "lrc",
+    };
+    let words = crate::NewLyrics {
+        synced: None,
+        plain: Some("la"),
+        instrumental: false,
+        source: "file",
+    };
+    store
+        .save_read_lyrics(id("A Timed").await, 1, &timed)
+        .await
+        .unwrap();
+    store
+        .save_read_lyrics(id("B Words").await, 1, &words)
+        .await
+        .unwrap();
+    store
+        .save_read_lyrics(id("C None").await, 1, &crate::NewLyrics::NONE)
+        .await
+        .unwrap();
+
+    let all = store.tracks_page(TrackSort::Title, 0, 10).await.unwrap();
+    let marks: Vec<i64> = all.items.iter().map(|t| t.lyrics).collect();
+    assert_eq!(marks, [2, 1, 0, 0]);
+
+    let shown = |filter: LyricsFilter, sort: TrackSort| {
+        let store = store.clone();
+        async move {
+            let page = store
+                .tracks_page_filtered(sort, filter, 0, 10)
+                .await
+                .unwrap();
+            (
+                page.total,
+                page.items.into_iter().map(|t| t.title).collect::<Vec<_>>(),
+            )
+        }
+    };
+    assert_eq!(
+        shown(LyricsFilter::Words, TrackSort::Title).await,
+        (2, vec!["A Timed".to_owned(), "B Words".to_owned()])
+    );
+    assert_eq!(
+        shown(LyricsFilter::Timed, TrackSort::Popular).await,
+        (1, vec!["A Timed".to_owned()])
+    );
+    let second = store
+        .tracks_page_filtered(TrackSort::Title, LyricsFilter::Words, 1, 1)
+        .await
+        .unwrap();
+    assert_eq!(
+        (second.total, second.items[0].title.as_str()),
+        (2, "B Words")
+    );
+}

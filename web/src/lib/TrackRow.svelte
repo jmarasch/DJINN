@@ -6,6 +6,7 @@
   import Credits from './Credits.svelte'
   import { duration } from './format'
   import Icon from './Icon.svelte'
+  import LyricsMark from './LyricsMark.svelte'
   import { tapTrack, toggleRequest, trackStatus } from './state.svelte'
   import TrackMenu from './TrackMenu.svelte'
   import Heart from './Heart.svelte'
@@ -38,7 +39,10 @@
     <span class="num">{number}</span>
   {/if}
   <div class="text">
-    <button class="title ellipsis" onclick={() => tapTrack(track)}>{track.title}</button>
+    <div class="title-line">
+      <button class="title ellipsis" onclick={() => tapTrack(track)}>{track.title}</button>
+      <LyricsMark lyrics={track.lyrics} />
+    </div>
     <div class="sub ellipsis">
       <Credits {track} />
       {#if showAlbum && track.album}
@@ -119,9 +123,16 @@
     min-width: 0;
   }
 
+  .title-line {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+  }
+
   .title {
     display: block;
-    width: 100%;
+    min-width: 0;
+    max-width: 100%;
     min-height: 0;
     padding: 0;
     background: transparent;

@@ -12,6 +12,16 @@
   const analyzing = $derived(!!app.loudness?.running)
   const listening = $derived(!!app.listening?.running)
   const lookingUp = $derived(!!app.lookup?.running)
+  const lyrics = $derived(app.lyrics?.running ? app.lyrics : null)
+  /** What finding lyrics is doing, in a line. */
+  const lyricsText = $derived.by(() => {
+    if (!lyrics) return ''
+    const found = `${n(lyrics.words)} of ${n(lyrics.songs)} songs have lyrics, ${n(lyrics.timed)} timed`
+    if (lyrics.held) return `Finding lyrics: ${heldText(lyrics.held).toLowerCase()} (${found})`
+    if (lyrics.phase === 'reading') return `Reading lyrics from your files: ${n(lyrics.unread)} to go (${found})`
+    if (lyrics.phase === 'looking up') return `Looking up lyrics online: ${n(lyrics.to_ask)} songs to go (${found})`
+    return `Finding lyrics (${found})`
+  })
 
   const steps = $derived<Step[]>([
     { key: 'finding', label: 'Find music' },
@@ -63,7 +73,7 @@
   })
 </script>
 
-{#if current || lookingUp}
+{#if current || lookingUp || lyrics}
   <section class="progress-card" aria-live="polite">
     {#if current && index >= 0}
       <div class="head">
@@ -93,6 +103,12 @@
       <p class="small muted lookup">
         {#if !current}<span class="spinner" aria-hidden="true"></span>{/if}
         Also looking up artists online
+      </p>
+    {/if}
+    {#if lyrics}
+      <p class="small muted lookup">
+        {#if !current && !lookingUp && !lyrics.held}<span class="spinner" aria-hidden="true"></span>{/if}
+        {lyricsText}
       </p>
     {/if}
   </section>
