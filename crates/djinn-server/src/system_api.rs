@@ -93,18 +93,35 @@ const LOG_DOWNLOAD_BYTES: u64 = 5_000_000;
 struct Startup {
     started_ms: i64,
     database: PathBuf,
-    addresses: Vec<String>,
     party_listen: SocketAddr,
 }
 
 static STARTUP: OnceLock<Startup> = OnceLock::new();
 
-/// Records when DJINN started, its database, and the addresses guests use.
-pub fn started(database: &Path, addresses: Vec<String>, party_listen: SocketAddr) {
+/// The addresses phones can open now (they change when the router hands out
+/// a new one): the join address first, the others, then this computer's
+/// name on the network.
+fn live_addresses(listen: SocketAddr, join: &str) -> Vec<String> {
+    let mut found = vec![join.trim_end_matches('/').to_owned()];
+    for url in crate::banner::urls(listen) {
+        if !found.contains(&url) {
+            found.push(url);
+        }
+    }
+    found.retain(|u| !u.is_empty());
+    found.push(format!(
+        "http://{}.local:{}",
+        crate::go_announce::host_label(&crate::go_announce::computer_name()).to_ascii_lowercase(),
+        listen.port()
+    ));
+    found
+}
+
+/// Records when DJINN started, its database, and the port guests use.
+pub fn started(database: &Path, party_listen: SocketAddr) {
     let _ = STARTUP.set(Startup {
         started_ms: djinn_store::now_ms(),
         database: database.to_path_buf(),
-        addresses,
         party_listen,
     });
 }
@@ -363,7 +380,10 @@ async fn status(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json<S
     Ok(Json(Status {
         version: env!("DJINN_RELEASE_VERSION"),
         started_ms: startup.map(|s| s.started_ms),
-        addresses: startup.map(|s| s.addresses.clone()).unwrap_or_default(),
+        addresses: match startup {
+            Some(s) => live_addresses(s.party_listen, &state.join_url.get()),
+            None => Vec::new(),
+        },
         public_network: state.network.public(),
         songs: state.store.track_count().await?,
         library_folders: folders::library_roots(&state).await?.len(),

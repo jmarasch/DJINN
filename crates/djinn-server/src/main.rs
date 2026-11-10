@@ -268,7 +268,7 @@ async fn run() -> anyhow::Result<()> {
     )
     .await?;
     let urls = banner::urls(config.server.listen);
-    system_api::started(&config.database.path, urls.clone(), config.server.listen);
+    system_api::started(&config.database.path, config.server.listen);
     let base_url = urls.first().cloned().unwrap_or_default();
     // Older cache files had no extension; give them one so the folder is
     // easy to browse. Once is enough.
