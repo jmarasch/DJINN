@@ -68,6 +68,12 @@ pub type Result<T, E = StoreError> = std::result::Result<T, E>;
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../../migrations");
 
+/// The newest database version this program knows: it can't open a
+/// database a newer program has moved past this.
+pub fn schema_version() -> i64 {
+    MIGRATOR.iter().map(|m| m.version).max().unwrap_or(0)
+}
+
 /// Set by a migration that leaves space worth giving back.
 const COMPACT_DATABASE: &str = "compact_database";
 /// Database page size, set at the next compaction.

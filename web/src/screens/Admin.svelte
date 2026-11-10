@@ -11,6 +11,7 @@
   import ScheduledCheck from '../lib/ScheduledCheck.svelte'
   import { clearListCache } from '../lib/listCache'
   import LogViewer from '../lib/LogViewer.svelte'
+  import SignInLog from '../lib/SignInLog.svelte'
   import ResetPanel from '../lib/ResetPanel.svelte'
   import SystemStatus from '../lib/SystemStatus.svelte'
   import UpdatePanel from '../lib/UpdatePanel.svelte'
@@ -481,6 +482,8 @@
   <ResetPanel />
 {:else if t === 'serverlog'}
   <LogViewer />
+{:else if t === 'signins'}
+  <SignInLog />
 {/if}
 {/snippet}
 

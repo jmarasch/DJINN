@@ -228,7 +228,8 @@ export const api = {
   goApp: () => get<GoAppRelease | null>('/go/app'),
   saveGoSettings: (settings: { encryption: boolean; keep: GoKeepRules; server_name: string; discoverable: boolean; enabled: boolean; allow_remote: boolean; allow_plain_remote: boolean; https_hostname: string; upnp: boolean; trusted_proxies: string; admin_two_step: boolean }) =>
     put<GoStatus>('/go/settings', settings),
-  signIns: (limit = 200) => get<SignIn[]>(`/go/sign-ins?limit=${limit}`),
+  signIns: (offset = 0, limit = 50) => get<{ items: SignIn[]; total: number }>(`/sign-ins?offset=${offset}&limit=${limit}`),
+  clearSignIns: (keepDays: number) => del<{ cleared: number }>(`/sign-ins?older_than_days=${keepDays}`),
   turnOffUserTwoStep: (id: number) => del<void>(`/users/${id}/two-step`),
   logout: () => post<void>('/auth/logout'),
   bootstrapStatus: () => get<{

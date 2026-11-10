@@ -407,6 +407,11 @@ impl Node {
                         crate::nodes::NODE_VERSION_HEADER,
                         env!("DJINN_RELEASE_VERSION"),
                     )
+                    .header(crate::node_builds::BUILD_HEADER, own_build().await)
+                    .header(
+                        crate::node_builds::SCHEMA_HEADER,
+                        djinn_store::schema_version().to_string(),
+                    )
                     .send()
                     .await,
             )
@@ -653,6 +658,15 @@ impl Node {
         let bytes = client
             .get(format!("{main}/api/nodes/me/build"))
             .header("authorization", format!("Node {id}:{secret}"))
+            .header(
+                crate::nodes::NODE_VERSION_HEADER,
+                env!("DJINN_RELEASE_VERSION"),
+            )
+            .header(crate::node_builds::BUILD_HEADER, own_build().await)
+            .header(
+                crate::node_builds::SCHEMA_HEADER,
+                djinn_store::schema_version().to_string(),
+            )
             .timeout(Duration::from_secs(600))
             .send()
             .await
@@ -1193,6 +1207,24 @@ pub fn find_mains_during_setup(state: crate::state::AppState) {
     if let Err(e) = spawned {
         tracing::warn!(error = %e, "can't listen for main DJINNs");
     }
+}
+
+/// The SHA-256 of this program's own file, worked out once: Main tells
+/// builds apart by it, since a test build keeps the version number.
+async fn own_build() -> String {
+    static OWN: tokio::sync::OnceCell<String> = tokio::sync::OnceCell::const_new();
+    OWN.get_or_init(|| async {
+        tokio::task::spawn_blocking(|| {
+            std::env::current_exe()
+                .and_then(std::fs::read)
+                .map(|bytes| crate::node_builds::hex(&Sha256::digest(&bytes)))
+                .unwrap_or_default()
+        })
+        .await
+        .unwrap_or_default()
+    })
+    .await
+    .clone()
 }
 
 /// Main DJINNs announcing themselves right now, listened to for `wait`:

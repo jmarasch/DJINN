@@ -3,15 +3,13 @@
   // who's listening, and the sign-in log.
   import { onDestroy, onMount } from 'svelte'
   import { api } from './api'
-  import { deviceName } from './format'
   import { app, toast } from './state.svelte'
   import ConvertPanel from './ConvertPanel.svelte'
   import SubmissionsPanel from './SubmissionsPanel.svelte'
-  import type { GoKeepRules, GoStatus, SignIn } from './types'
+  import type { GoKeepRules, GoStatus } from './types'
 
   let status = $state<GoStatus | null>(null)
   let form = $state({ encryption: true, keep: { sign_out: 'delete', away: 'lock', away_days: 30 } as GoKeepRules, server_name: '', discoverable: true, enabled: false, allow_remote: false, allow_plain_remote: false, https_hostname: '', upnp: false, trusted_proxies: '', admin_two_step: false })
-  let signIns = $state<SignIn[]>([])
   let busy = $state(false)
   let timer: ReturnType<typeof setInterval> | undefined
   let caddyfile = $derived(`${form.https_hostname} {
@@ -37,9 +35,8 @@
   onDestroy(() => clearInterval(timer))
 
   async function load() {
-    const [s, log] = await Promise.all([api.goStatus(), api.signIns()])
+    const s = await api.goStatus()
     status = s
-    signIns = log
     form = formFrom(s)
   }
 
@@ -61,18 +58,6 @@
     }
   }
 
-  const outcomes: Record<string, string> = {
-    ok: 'Signed in',
-    wrong_password: 'Wrong password',
-    locked_out: 'Locked out (too many tries)',
-    waiting: 'Waiting for approval',
-    turned_off: 'Account turned off',
-    wrong_code: 'Wrong two-step code',
-    no_go: "Role can't use GO",
-    not_home: 'Away from home, not allowed',
-  }
-  const when = (ms: number) =>
-    new Date(ms).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
   const ago = (s: number) => (s < 15 ? 'now' : `${s} s ago`)
 </script>
 
@@ -234,20 +219,7 @@
     <button class="small-button" onclick={save} disabled={busy}>Save proxies</button>
   </section>
 
-  <section class="card">
-    <h2>Sign-in log</h2>
-    <p class="small muted">Every sign-in to DJINN and DJINN GO, kept for 90 days. Five wrong passwords lock an account for 15 minutes.</p>
-    {#each signIns as s (s.id)}
-      <div class="row" class:bad={s.outcome !== 'ok'}>
-        <div class="grow">
-          <div><b>{s.username}</b> {outcomes[s.outcome] ?? s.outcome} <span class="muted small">{s.via === 'go' ? 'GO' : 'party'}</span></div>
-          <div class="muted small">{when(s.at)}, {s.ip ?? 'unknown address'}, {deviceName(s.user_agent)}</div>
-        </div>
-      </div>
-    {:else}
-      <p class="muted">No sign-ins yet.</p>
-    {/each}
-  </section>
+  <p class="small muted">Sign-ins to DJINN and GO are in <a href="#/admin/signins">Metrics and logs &gt; Sign-in log</a>.</p>
 {/if}
 
 <style>
@@ -262,10 +234,6 @@
     gap: 10px;
     padding: 6px 0;
     border-bottom: 1px solid var(--line);
-  }
-
-  .row.bad b {
-    color: var(--bad);
   }
 
   .grow {

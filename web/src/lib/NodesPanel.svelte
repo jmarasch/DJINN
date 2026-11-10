@@ -5,7 +5,7 @@
   import { onMount } from 'svelte'
   import { api } from './api'
   import { toast } from './state.svelte'
-  import type { HouseNode, NodeList } from './types'
+  import type { HouseNode, NodeAudio, NodeList } from './types'
 
   let list = $state<NodeList | null>(null)
   let failed = $state(false)
@@ -92,7 +92,27 @@
     if (hours < 48) return `${hours} h ago`
     return new Date(ms).toLocaleDateString()
   }
-  const online = (node: HouseNode) => !!node.last_seen && Date.now() - node.last_seen < 2 * 60_000
+  // Nodes check in every 5 seconds.
+  const online = (node: HouseNode) => !!node.last_seen && Date.now() - node.last_seen < 30_000
+
+  const screens: { value: NonNullable<NodeAudio['screen']>; label: string }[] = [
+    { value: 'tv', label: 'TV page' },
+    { value: 'lyrics', label: 'Lyrics' },
+    { value: 'status', label: "The node's status" },
+    { value: 'off', label: 'Nothing (blank)' },
+  ]
+
+  /** What a screen plugged into the node shows. Kept here on Main, so it
+   * can be set while the node is off; it changes within seconds once on. */
+  async function setScreen(node: HouseNode, screen: NonNullable<NodeAudio['screen']>) {
+    try {
+      await api.setNodeAudio(node.id, { ...node.audio, screen })
+      toast(`${node.name}'s screen: ${screens.find((s) => s.value === screen)?.label ?? screen}`)
+      await load()
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not save', true)
+    }
+  }
 </script>
 
 <section class="card">
@@ -157,6 +177,11 @@
     <h3>Joined</h3>
     {#if joined.length === 0}
       <p class="small muted">No nodes yet.</p>
+    {:else}
+      <p class="small muted">
+        To line a node's speaker up with the others, use <a href="#/admin/rooms">Rooms</a> &gt; Timing on its room: play
+        the timing sound, then move each speaker earlier or later until the tocks land together.
+      </p>
     {/if}
     {#each joined as node (node.id)}
       <div class="node">
@@ -169,7 +194,22 @@
               : ''}{node.version ? ` · ${node.version}` : ''}
           </span>
         </div>
-        <button title="Opens the node's own page, where its speaker, timing, screen and other settings are" onclick={() => manage(node)}>
+        <label class="screen small">
+          Screen
+          <select
+            value={node.audio.screen ?? 'tv'}
+            onchange={(e) => setScreen(node, e.currentTarget.value as NonNullable<NodeAudio['screen']>)}
+          >
+            {#each screens as s (s.value)}<option value={s.value}>{s.label}</option>{/each}
+          </select>
+        </label>
+        <button
+          title={online(node)
+            ? "Opens the node's own page, where its speaker, timing and other settings are"
+            : "The node isn't connected; it can be managed once it is"}
+          disabled={!online(node)}
+          onclick={() => manage(node)}
+        >
           Manage
         </button>
         {#if kicking?.id === node.id}
@@ -189,8 +229,15 @@
 {/if}
 
 <style>
+  .screen {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
   .node {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 10px;
     padding: 10px 0;

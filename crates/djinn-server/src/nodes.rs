@@ -530,6 +530,7 @@ async fn me(
         .store
         .node_seen(node.id, address.as_deref(), version.as_deref())
         .await?;
+    let running = crate::node_builds::Running::from_headers(&headers, node.version.as_deref());
     let node = Node {
         version: version.or(node.version),
         ..node
@@ -545,7 +546,7 @@ async fn me(
         upcoming,
         audio_room: state.rooms.audio_leader(node.room_id),
         screen: screen_url(&state, &node),
-        update: crate::node_builds::offer(&state, &node),
+        update: crate::node_builds::offer(&state, &node, &running),
         status: node.status,
         name: node.name,
         room_id: node.room_id,
@@ -1110,6 +1111,94 @@ mod tests {
             .await
             .unwrap();
         assert!(String::from_utf8_lossy(&bytes).contains(r#""update":null"#));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A node's request with the headers it describes its program with.
+    async fn as_node(
+        state: &AppState,
+        path: &str,
+        signed: &str,
+        build: &str,
+    ) -> (StatusCode, String) {
+        let mut req = axum::http::Request::builder()
+            .uri(path)
+            .header("authorization", signed)
+            .header(NODE_VERSION_HEADER, env!("DJINN_RELEASE_VERSION"))
+            .header(crate::node_builds::BUILD_HEADER, build)
+            .header(
+                crate::node_builds::SCHEMA_HEADER,
+                djinn_store::schema_version().to_string(),
+            )
+            .body(Body::empty())
+            .unwrap();
+        req.extensions_mut().insert(DirectTls);
+        let res = crate::app(state.clone()).oneshot(req).await.unwrap();
+        let status = res.status();
+        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        (status, String::from_utf8_lossy(&bytes).into_owned())
+    }
+
+    #[tokio::test]
+    async fn a_test_build_on_main_goes_to_nodes_running_another() {
+        let dir = std::env::temp_dir().join(format!("djinn-local-build-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let state = AppState::for_tests_in(&dir).await;
+        admin_with_password(&state).await;
+        settings::set_flag(&state.store, NODES_JOIN, true)
+            .await
+            .unwrap();
+        let join = format!(
+            r#"{{"node_id":"hall-0001","name":"Hall","secret":"{SECRET}","version":"{}","platform":"linux-x86_64"}}"#,
+            env!("DJINN_RELEASE_VERSION")
+        );
+        let (status, _) = send(
+            &state,
+            Method::POST,
+            "/api/nodes/join",
+            Some(&join),
+            None,
+            true,
+        )
+        .await;
+        assert_eq!(status, StatusCode::ACCEPTED);
+        let id = state
+            .store
+            .node_by_node_id("hall-0001")
+            .await
+            .unwrap()
+            .unwrap()
+            .id;
+        state.store.approve_node(id, 1).await.unwrap();
+        let signed = format!("Node hall-0001:{SECRET}");
+
+        // Same version number as Main, nothing built here: nothing to take.
+        let (_, body) = as_node(&state, "/api/nodes/me", &signed, "aaaa").await;
+        assert!(body.contains(r#""update":null"#), "{body}");
+
+        // The build script leaves a test build: offered, and served from here.
+        let local = dir.join("node-builds").join("local");
+        std::fs::create_dir_all(&local).unwrap();
+        std::fs::write(local.join("djinn-linux-x86_64"), b"test build").unwrap();
+        std::fs::write(
+            local.join("djinn-linux-x86_64.json"),
+            format!(
+                r#"{{"version":"{}","schema":{},"sha256":"bbbb"}}"#,
+                env!("DJINN_RELEASE_VERSION"),
+                djinn_store::schema_version()
+            ),
+        )
+        .unwrap();
+        let (_, body) = as_node(&state, "/api/nodes/me", &signed, "aaaa").await;
+        assert!(body.contains(r#""sha256":"bbbb""#), "{body}");
+        let (status, file) = as_node(&state, "/api/nodes/me/build", &signed, "aaaa").await;
+        assert_eq!((status, file.as_str()), (StatusCode::OK, "test build"));
+
+        // Running it now: nothing more.
+        let (_, body) = as_node(&state, "/api/nodes/me", &signed, "bbbb").await;
+        assert!(body.contains(r#""update":null"#), "{body}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

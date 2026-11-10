@@ -26,6 +26,7 @@ export const adminGroups = [
       { id: 'stats', label: 'Stats' },
       { id: 'log', label: 'Request log' },
       { id: 'serverlog', label: 'Server log' },
+      { id: 'signins', label: 'Sign-in log' },
       { id: 'problems', label: 'Library problems' },
     ],
   },

@@ -66,6 +66,31 @@ impl Store {
         Ok(())
     }
 
+    /// A page of sign-in attempts, newest first, and how many there are.
+    pub async fn sign_in_page(&self, offset: i64, limit: i64) -> Result<(Vec<SignIn>, i64)> {
+        let rows = sqlx::query_as(
+            "SELECT id, at, user_id, username, ip, user_agent, via, outcome
+             FROM sign_ins ORDER BY at DESC, id DESC LIMIT ? OFFSET ?",
+        )
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&self.pool)
+        .await?;
+        let total = sqlx::query_scalar("SELECT count(*) FROM sign_ins")
+            .fetch_one(&self.pool)
+            .await?;
+        Ok((rows, total))
+    }
+
+    /// Forgets sign-in attempts from before `before` (ms); how many went.
+    pub async fn clear_sign_ins_before(&self, before: i64) -> Result<u64> {
+        let done = sqlx::query("DELETE FROM sign_ins WHERE at < ?")
+            .bind(before)
+            .execute(&self.pool)
+            .await?;
+        Ok(done.rows_affected())
+    }
+
     /// The latest sign-in attempts, newest first.
     pub async fn sign_ins(&self, limit: i64) -> Result<Vec<SignIn>> {
         let rows = sqlx::query_as(
@@ -213,6 +238,42 @@ impl Store {
 mod tests {
     use super::*;
     use crate::Role;
+
+    #[tokio::test]
+    async fn the_sign_in_log_pages_and_clears_old_ones() {
+        let store = Store::open_in_memory().await.unwrap();
+        for n in 0..5 {
+            let name = format!("user{n}");
+            store
+                .log_sign_in(&NewSignIn {
+                    user_id: None,
+                    username: &name,
+                    ip: None,
+                    user_agent: None,
+                    via: "go",
+                    outcome: "ok",
+                })
+                .await
+                .unwrap();
+        }
+        sqlx::query(
+            "UPDATE sign_ins SET at = at - 30 * 86400000 WHERE username IN ('user0', 'user1')",
+        )
+        .execute(store.pool())
+        .await
+        .unwrap();
+        let (page, total) = store.sign_in_page(0, 2).await.unwrap();
+        assert_eq!(total, 5);
+        assert_eq!(page.len(), 2);
+        let (rest, _) = store.sign_in_page(4, 2).await.unwrap();
+        assert_eq!(rest.len(), 1);
+        let cleared = store
+            .clear_sign_ins_before(now_ms() - 7 * 86_400_000)
+            .await
+            .unwrap();
+        assert_eq!(cleared, 2, "only the old ones");
+        assert_eq!(store.sign_in_page(0, 10).await.unwrap().1, 3);
+    }
 
     #[tokio::test]
     async fn two_step_codes_and_sign_ins() {

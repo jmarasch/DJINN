@@ -371,7 +371,7 @@ pub fn api_router() -> Router<AppState> {
     Router::new()
         .route("/go/status", get(status))
         .route("/go/settings", put(save_settings))
-        .route("/go/sign-ins", get(sign_ins))
+        .route("/sign-ins", get(sign_ins).delete(clear_sign_ins))
         .route("/go/play/{id}", get(play))
         .route("/go/offline/{id}", get(offline_link))
         .route("/go/address", get(address))
@@ -1451,24 +1451,59 @@ async fn save_settings(
     Ok(Json(status_of(&state).await?))
 }
 
-#[derive(Deserialize)]
-struct LogQuery {
-    #[serde(default = "default_limit")]
-    limit: i64,
-}
-
 fn default_limit() -> i64 {
     200
 }
 
+#[derive(Deserialize)]
+struct PageQuery {
+    #[serde(default)]
+    offset: i64,
+    #[serde(default = "default_limit")]
+    limit: i64,
+}
+
+#[derive(Serialize)]
+struct SignInPage {
+    items: Vec<SignIn>,
+    total: i64,
+}
+
+/// Admin > Metrics and logs > Sign-in log, a page at a time.
 async fn sign_ins(
     _: AdminUser,
     State(state): State<AppState>,
-    Query(query): Query<LogQuery>,
-) -> ApiResult<Json<Vec<SignIn>>> {
-    Ok(Json(
-        state.store.sign_ins(query.limit.clamp(1, 1000)).await?,
-    ))
+    Query(query): Query<PageQuery>,
+) -> ApiResult<Json<SignInPage>> {
+    let (items, total) = state
+        .store
+        .sign_in_page(query.offset.max(0), query.limit.clamp(1, 500))
+        .await?;
+    Ok(Json(SignInPage { items, total }))
+}
+
+#[derive(Deserialize)]
+struct ClearQuery {
+    /// Keeps the last this many days; 0 clears everything.
+    #[serde(default)]
+    older_than_days: i64,
+}
+
+#[derive(Serialize)]
+struct Cleared {
+    cleared: u64,
+}
+
+async fn clear_sign_ins(
+    admin: AdminUser,
+    State(state): State<AppState>,
+    Query(query): Query<ClearQuery>,
+) -> ApiResult<Json<Cleared>> {
+    let days = query.older_than_days.clamp(0, 3650);
+    let before = djinn_store::now_ms() - days * 24 * 60 * 60 * 1000;
+    let cleared = state.store.clear_sign_ins_before(before).await?;
+    tracing::info!(by = %admin.0.username, days, cleared, "cleared the sign-in log");
+    Ok(Json(Cleared { cleared }))
 }
 
 #[cfg(test)]

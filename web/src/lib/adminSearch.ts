@@ -88,7 +88,7 @@ export const adminEntries: AdminEntry[] = [
   { label: 'Public hostname', tab: 'go', keywords: 'domain https hostname' },
   { label: 'Admins must use two-step sign-in for GO', tab: 'go', keywords: '2fa totp security', key: 'admin_two_step' },
   { label: 'Trusted proxies', tab: 'go', keywords: 'reverse proxy cloudflare' },
-  { label: 'Sign-in log', tab: 'go', keywords: 'logins security attempts' },
+  { label: 'Sign-in log', tab: 'signins', keywords: 'logins security attempts clear old' },
   { label: 'Converting', tab: 'go', keywords: 'convert mp3 transcode quality', key: 'convert_enabled' },
   { label: 'Submitted music', tab: 'go', keywords: 'uploads submissions approve', key: 'upload_max_mb' },
   // Library
