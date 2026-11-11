@@ -7,7 +7,15 @@
   // here fades back so the visual stands out. The admin can turn it off.
   import { onMount } from 'svelte'
   import { followNodeScreen } from '../lib/screenFollow'
-  import { announce, choose, order, pageUrl, type ScreenPage } from '../lib/screenOrder.svelte'
+  import {
+    announce,
+    choose,
+    onNodeScreen,
+    order,
+    pageUrl,
+    toggleFullscreen,
+    type ScreenPage,
+  } from '../lib/screenOrder.svelte'
   import LyricsView from '../lib/LyricsView.svelte'
   import { reloadIfUpdated } from '../lib/state.svelte'
   import type { Entry, Lyrics, NowPlaying, PlayerState, QueueItem, Track } from '../lib/types'
@@ -188,9 +196,8 @@
     idleTimer = setTimeout(() => (idle = true), 3000)
   }
 
-  function toggleFullscreen() {
-    if (document.fullscreenElement) document.exitFullscreen()
-    else document.documentElement.requestFullscreen?.().catch(() => {})
+  function goFullscreen() {
+    toggleFullscreen()
     keepAwake()
   }
 
@@ -268,7 +275,11 @@
       <span>{shift === 0 ? 'On time' : `${shift > 0 ? '+' : ''}${(shift / 1000).toFixed(2)} s`}</span>
       <button onclick={() => nudge(250)} title="Show words later">Later</button>
     {/if}
-    <button onclick={toggleFullscreen}>Full screen</button>
+    {#if !onNodeScreen}
+      <!-- The whole window, not just a visualizer's frame. -->
+      <a class="button" href="/#/" target="_top">Regular display</a>
+    {/if}
+    <button onclick={goFullscreen}>Full screen</button>
   </div>
 </div>
 
@@ -491,11 +502,19 @@
     pointer-events: none;
   }
 
-  .tools button {
+  .tools button,
+  .tools .button {
     min-height: 36px;
     padding: 6px 12px;
     background: var(--surface-2);
     color: var(--text);
+  }
+
+  .tools .button {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 8px;
+    text-decoration: none;
   }
 
   @media (max-width: 640px) {

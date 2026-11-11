@@ -13,6 +13,21 @@ export const order: ScreenPage[] = (params.get('order') ?? '')
   .filter((p): p is ScreenPage => p === 'lyrics' || p === 'visual' || p === 'tv')
 
 const framed = window.parent !== window
+/** Shown on a node's own screen, where there's nowhere else to go. */
+export const onNodeScreen = params.has('screen_for')
+
+/** Full screen for the whole page: the visualizer page around this one when
+ * it's in that frame, otherwise this page. */
+export function toggleFullscreen() {
+  let doc = document
+  try {
+    if (framed && window.top) doc = window.top.document
+  } catch {
+    // A node's page (another address): only this frame can go full screen.
+  }
+  if (doc.fullscreenElement) void doc.exitFullscreen()
+  else doc.documentElement.requestFullscreen?.().catch(() => {})
+}
 /** When the node last said its speaker is playing. */
 let readyAt = $state(0)
 let now = $state(performance.now())

@@ -2,7 +2,7 @@
   // Full-screen now playing for a TV or spare tablet: no sign-in, read only.
   import { onMount } from 'svelte'
   import { followNodeScreen } from '../lib/screenFollow'
-  import { announce, choose, order, pageUrl } from '../lib/screenOrder.svelte'
+  import { announce, choose, order, pageUrl, toggleFullscreen } from '../lib/screenOrder.svelte'
   import ArtistSlideshow from '../lib/ArtistSlideshow.svelte'
   import { duration } from '../lib/format'
   import { reloadIfUpdated } from '../lib/state.svelte'
@@ -162,9 +162,8 @@
     }
   }
 
-  function toggleFullscreen() {
-    if (document.fullscreenElement) document.exitFullscreen()
-    else document.documentElement.requestFullscreen?.().catch(() => {})
+  function goFullscreen() {
+    toggleFullscreen()
     keepAwake()
   }
 
@@ -358,11 +357,11 @@
   {/if}
 
   <div class="corner" class:hidden={casting}>
-    <a href="/#/" class="regular-display">Regular display</a>
+    <a href="/#/" target="_top" class="regular-display">Regular display</a>
     {#if streamUrl}
       <button class:on={soundOn} onclick={toggleSound}>{soundOn ? 'Sound on' : 'Play sound here'}</button>
     {/if}
-    <button onclick={toggleFullscreen}>Full screen</button>
+    <button onclick={goFullscreen}>Full screen</button>
   </div>
   <!-- svelte-ignore a11y_media_has_caption -->
   <audio

@@ -161,7 +161,7 @@
 <div class="stage">
   <canvas bind:this={canvas} class:shown={mode === 'visual' && !onChip}></canvas>
   <canvas bind:this={glCanvas} class:shown={mode === 'visual' && onChip}></canvas>
-  <iframe bind:this={frame} src={url} title="DJINN screen" onload={tell}></iframe>
+  <iframe bind:this={frame} src={url} title="DJINN screen" allow="fullscreen" onload={tell}></iframe>
 </div>
 
 <style>
