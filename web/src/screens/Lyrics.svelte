@@ -266,7 +266,7 @@
       </aside>
     {/if}
     {#if joinUrl}
-      <img class="qr faded" src="/api/join/qr.svg?v={encodeURIComponent(joinUrl)}" alt="QR code to join" />
+      <img class="qr" src="/api/join/qr.svg?v={encodeURIComponent(joinUrl)}" alt="QR code to join" />
     {/if}
   {/if}
   <div class="tools">
@@ -473,6 +473,7 @@
     color: rgb(255 255 255 / 0.7);
   }
 
+  /* Never faded: anything showing through can stop phones reading it. */
   .qr {
     position: absolute;
     left: var(--edge);
