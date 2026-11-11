@@ -59,6 +59,12 @@ export const STYLES: StyleInfo[] = [
     about: 'A checkerboard of glowing pillars: bass in the middle, treble at the edges, rolling into the distance.',
     chip: false,
   },
+  {
+    style: 'flyover',
+    name: 'Flyover',
+    about: 'A checkerboard of pillars seen from a helicopter circling slowly; the middle bounces with the bass, further out with higher sounds.',
+    chip: false,
+  },
   { style: 'warp', name: 'Warp', about: 'Swirling trails, each frame fed into the next.', chip: true },
   { style: 'tunnel', name: 'Tunnel', about: 'Flying down a tunnel that rings with the music.', chip: true },
   { style: 'plasma', name: 'Plasma', about: 'Flowing color that bends with bass and mids.', chip: true },

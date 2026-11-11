@@ -15,6 +15,7 @@ export type ShapeStyle =
   | 'circle'
   | 'particles'
   | 'terrain'
+  | 'flyover'
 export type GlStyle = 'warp' | 'tunnel' | 'plasma' | 'kaleidoscope' | 'nebula' | 'stars'
 export type VisualStyle = ShapeStyle | GlStyle
 
@@ -162,6 +163,12 @@ const TERRAIN_ROWS = 18
 const TERRAIN_ROW_SECS = 0.09
 const TERRAIN_HEIGHT = 4.5
 
+/** Flyover: pillars along each side of the board, the tallest a pillar
+ * grows (in pillar widths), and how long the camera takes to circle it. */
+const FLYOVER_SIZE = 22
+const FLYOVER_HEIGHT = 4
+const FLYOVER_TURN_SECS = 90
+
 /** How long rainbow colors take to go all the way around. */
 const RAINBOW_MS = 30_000
 
@@ -217,6 +224,10 @@ export class ShapeVisual {
   private rowSerial = 0
   private rowRoll = 0
   private ripples: number[] = []
+  /** Flyover: each pillar's height now and where the camera has got to (a
+   * turn). Beats' ripples are shared with Terrain. */
+  private pillars: number[] = []
+  private orbit = 0
 
   constructor(
     private ctx: CanvasRenderingContext2D,
@@ -248,6 +259,7 @@ export class ShapeVisual {
     if (this.style === 'vu') return this.vu(sound)
     if (this.style === 'circle') return this.circle(sound, now)
     if (this.style === 'terrain') return this.terrain(sound, elapsed)
+    if (this.style === 'flyover') return this.flyover(sound, elapsed)
     if (this.style === 'ring') return this.ring(sound)
     this.bars(sound)
   }
@@ -632,6 +644,110 @@ export class ShapeVisual {
           )
         }
       }
+    }
+  }
+
+  /** A checkerboard of pillars seen from a helicopter slowly circling
+   * it: the middle bounces with the bass, rings further out with higher
+   * sounds, each pillar a little its own way, and beats send a ring of light
+   * out from the middle. */
+  private flyover(sound: Smoother, elapsed: number) {
+    const ctx = this.ctx
+    const { width, height } = ctx.canvas
+    const bands = sound.bands
+    if (!bands.length) return
+    const size = FLYOVER_SIZE
+    const middle = (size - 1) / 2
+    const reach = Math.hypot(middle, middle)
+
+    // Heights: up quickly, down gently, from the band each pillar listens to.
+    const fall = 2.2 * elapsed
+    if (this.pillars.length !== size * size) this.pillars = new Array(size * size).fill(0)
+    for (let i = 0; i < size * size; i++) {
+      const x = (i % size) - middle
+      const z = Math.floor(i / size) - middle
+      const out = Math.hypot(x, z) / reach
+      // A little wobble per pillar, so areas move rather than whole rings.
+      const wobble = Math.sin(x * 1.7 + z * 0.9) * 0.08 + Math.cos(z * 1.3 - x * 0.6) * 0.06
+      const at = Math.min(1, Math.max(0, out + wobble))
+      const level = bands[Math.round(at * (bands.length - 1))] ?? 0
+      const lift = 0.75 + 0.25 * Math.sin(i * 12.9898)
+      const target = level * level * lift
+      const was = this.pillars[i]
+      this.pillars[i] = target > was ? was + (target - was) * 0.6 : Math.max(target, was - fall)
+    }
+    if (sound.beat > 0.95 && (this.ripples[0] ?? 1) > 0.15) this.ripples.unshift(0)
+    this.ripples = this.ripples.map((age) => age + elapsed).filter((age) => age < 1.6)
+
+    // The camera circles, a little higher with the bass.
+    this.orbit = (this.orbit + elapsed / FLYOVER_TURN_SECS) % 1
+    const angle = this.orbit * 2 * Math.PI
+    const distance = size * 0.95
+    const lift = size * (0.62 + 0.05 * sound.slowBass)
+    const pitch = Math.atan2(lift, distance)
+    const [sin, cos, sinP, cosP] = [Math.sin(angle), Math.cos(angle), Math.sin(pitch), Math.cos(pitch)]
+    const camera = { x: -distance * sin, y: lift, z: -distance * cos }
+    const focal = Math.min(width, height * 1.6) * 0.95
+    const point = (x: number, y: number, z: number): [number, number] => {
+      const xr = x * cos - z * sin
+      const zr = x * sin + z * cos + distance
+      const yr = y - lift
+      const yc = yr * cosP + zr * sinP
+      const zc = Math.max(0.1, -yr * sinP + zr * cosP)
+      return [width / 2 + (xr * focal) / zc, height * 0.52 - (yc * focal) / zc]
+    }
+
+    const sky = ctx.createLinearGradient(0, 0, 0, height)
+    sky.addColorStop(0, 'rgb(4 3 12)')
+    sky.addColorStop(0.5, this.hue(0.72, 9))
+    sky.addColorStop(1, 'rgb(4 3 10)')
+    ctx.fillStyle = sky
+    ctx.fillRect(0, 0, width, height)
+
+    const face = (corners: [number, number, number][], color: string) => {
+      ctx.beginPath()
+      corners.forEach(([x, y, z], i) => {
+        const [sx, sy] = point(x, y, z)
+        if (i === 0) ctx.moveTo(sx, sy)
+        else ctx.lineTo(sx, sy)
+      })
+      ctx.closePath()
+      ctx.fillStyle = color
+      ctx.fill()
+    }
+    // Farthest first, so nearer pillars cover them.
+    const far = Array.from({ length: size * size }, (_, i) => {
+      const x = (i % size) - middle
+      const z = Math.floor(i / size) - middle
+      return (x - camera.x) ** 2 + (z - camera.z) ** 2
+    })
+    const order = Array.from({ length: size * size }, (_, i) => i).sort((a, b) => far[b] - far[a])
+    const farthest = Math.sqrt(far[order[0]])
+    for (const i of order) {
+      const col = i % size
+      const row = Math.floor(i / size)
+      const x = col - middle
+      const z = row - middle
+      const v = this.pillars[i]
+      const h = 0.05 + v * FLYOVER_HEIGHT
+      const [x0, x1, z0, z1] = [x - 0.45, x + 0.45, z - 0.45, z + 0.45]
+      const out = Math.hypot(x, z)
+      const glow = this.ripples.reduce(
+        (sum, age) => sum + Math.exp(-((out - age * 12) ** 2) / 2.5) * (1 - age / 1.6),
+        0,
+      )
+      const fog = 1 - (0.55 * Math.sqrt(far[i])) / farthest
+      const checker = (col + row) % 2 === 0 ? 1 : 0.72
+      const light = Math.min(85, (12 + v * 55 + glow * 32) * fog * checker + 3)
+      const t = 0.76 - (out / reach) * 0.45
+      const side = this.hue(t, light * 0.6)
+      const front = this.hue(t, light * 0.8)
+      // Only the sides that face the camera, then the top.
+      if (camera.x > x1) face([[x1, 0, z0], [x1, 0, z1], [x1, h, z1], [x1, h, z0]], side)
+      if (camera.x < x0) face([[x0, 0, z0], [x0, 0, z1], [x0, h, z1], [x0, h, z0]], side)
+      if (camera.z > z1) face([[x0, 0, z1], [x1, 0, z1], [x1, h, z1], [x0, h, z1]], front)
+      if (camera.z < z0) face([[x0, 0, z0], [x1, 0, z0], [x1, h, z0], [x0, h, z0]], front)
+      if (camera.y > h) face([[x0, h, z0], [x1, h, z0], [x1, h, z1], [x0, h, z1]], this.hue(t, light))
     }
   }
 
