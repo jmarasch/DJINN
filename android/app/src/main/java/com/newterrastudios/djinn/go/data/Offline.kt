@@ -205,6 +205,11 @@ abstract class OfflineDb : RoomDatabase() {
 }
 
 /** The choices on the Settings screen, kept per device. */
+/** Where Prefs keeps the language choices; `Strings.load` reads them too. */
+const val SETTINGS_FILE = "settings"
+const val LANGUAGE_KEY = "language"
+const val HOUSE_LANGUAGE_KEY = "house_language"
+
 class Prefs(context: Context, private val scope: () -> String = { "" }) {
     /** A setting belonging to one account on one server, not to the phone. */
     private fun own(name: String) = "$name@${scope()}"
@@ -219,7 +224,7 @@ class Prefs(context: Context, private val scope: () -> String = { "" }) {
             ?.let { runCatching { lookJson.decodeFromString<KeepRules>(it) }.getOrNull() }
             ?: KeepRules()
 
-    private val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+    private val prefs = context.getSharedPreferences(SETTINGS_FILE, Context.MODE_PRIVATE)
 
     private val talkOverNow = MutableStateFlow(TalkOver.named(prefs.getString("talk_over", null)))
 
@@ -285,6 +290,14 @@ class Prefs(context: Context, private val scope: () -> String = { "" }) {
     var visualsAuto: Boolean
         get() = prefs.getBoolean("visuals_auto", false)
         set(value) = prefs.edit { putBoolean("visuals_auto", value) }
+    /** The language picked on this phone (Settings); empty to follow the server's default. */
+    var language: String
+        get() = prefs.getString(LANGUAGE_KEY, "").orEmpty()
+        set(value) = prefs.edit { putString(LANGUAGE_KEY, value) }
+    /** The server's default language as last heard; empty for the phone's own. */
+    var houseLanguage: String
+        get() = prefs.getString(HOUSE_LANGUAGE_KEY, "").orEmpty()
+        set(value) = prefs.edit { putString(HOUSE_LANGUAGE_KEY, value) }
     /** The admin's rules for kept songs, as last heard. */
     var keepRules: KeepRules
         get() = prefs.getString(own("keep_rules"), null)
@@ -553,6 +566,16 @@ class OfflineStore(
                 prefs.keepRules = api.keepRules()
             } catch (_: IOException) {
                 // An older server, or a role GO refuses: the rules stay as they were.
+            }
+            try {
+                val house = api.language().default
+                if (house != prefs.houseLanguage) {
+                    prefs.houseLanguage = house
+                    // Screens already shown change when they're next opened.
+                    com.newterrastudios.djinn.go.i18n.Strings.load(context)
+                }
+            } catch (_: IOException) {
+                // An older server: the language stays as it was.
             }
         } catch (_: IOException) {
             when (whenAway(prefs.lastContact, now, prefs.keepRules)) {

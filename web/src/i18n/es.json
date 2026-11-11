@@ -145,6 +145,7 @@
   "wish.failed": "No se pudo enviar",
   "language.label": "Idioma",
   "language.phone": "El del dispositivo",
+  "language.house": "El predeterminado de DJINN ({name})",
   "common.you": "tú",
   "count.plays": {
     "one": "{n} reproducción",

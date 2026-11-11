@@ -145,6 +145,7 @@
   "wish.failed": "Envoi impossible",
   "language.label": "Langue",
   "language.phone": "Celle de l'appareil",
+  "language.house": "Celle de DJINN par défaut ({name})",
   "common.you": "toi",
   "count.plays": {
     "one": "{n} écoute",

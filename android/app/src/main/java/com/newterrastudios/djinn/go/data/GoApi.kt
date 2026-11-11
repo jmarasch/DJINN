@@ -188,6 +188,8 @@ class GoApi(private val account: Account) {
 
     suspend fun keepRules(): KeepRules = get("/api/go/keep-rules")
 
+    suspend fun language(): HouseLanguage = get("/api/language")
+
     /** The app this server carries, if it does and says so. */
     suspend fun appRelease(): AppRelease? = try {
         get<AppRelease?>("/api/go/app")

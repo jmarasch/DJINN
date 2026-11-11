@@ -1,6 +1,7 @@
 <script lang="ts">
-  // The app's language: the phone's own by default, or one picked here.
-  import { languages, locale, setLanguage, t } from './i18n.svelte'
+  // The app's language on this device: the house's default (Admin >
+  // System) or the phone's own, or one picked here.
+  import { house, languages, locale, setLanguage, t } from './i18n.svelte'
 
   let chosen = $state(readChosen())
   function readChosen(): string {
@@ -21,7 +22,11 @@
       aria-label={t('language.label')}
       lang={locale.code}
     >
-      <option value="">{t('language.phone')}</option>
+      <option value=""
+        >{house.code
+          ? t('language.house', { name: languages.find((l) => l.code === house.code)?.name ?? house.code })
+          : t('language.phone')}</option
+      >
       {#each languages as language (language.code)}
         <option value={language.code} lang={language.code}>{language.name}</option>
       {/each}

@@ -7,6 +7,10 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class ServerHello(val name: String, val id: String, val encrypted: Boolean = false)
 
+/** The server's default language for every app (Admin > System); empty for the phone's own. */
+@Serializable
+data class HouseLanguage(val default: String = "")
+
 /** The admin's rules for songs kept here. Used as they were last heard while away. */
 @Serializable
 data class KeepRules(

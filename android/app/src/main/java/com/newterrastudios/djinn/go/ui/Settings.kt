@@ -171,6 +171,7 @@ fun SettingsScreen(nav: Nav) {
                 ) { Text(t("settings.delete_those")) }
             }
         }
+        item { LanguageSettings(nav) }
         item {
             UpdateOffer(nav)
             var askUpdates by remember { mutableStateOf(prefs.askAboutUpdates) }
@@ -494,3 +495,38 @@ private fun usage(context: Context, downloads: List<OfflineSong>, smart: List<Of
     )
 
 private fun songCount(n: Int) = t("count.songs", "n" to n)
+
+/** The app's language on this phone: the server's default (or the phone's own), or one picked here. */
+@Composable
+private fun LanguageSettings(nav: Nav) {
+    val context = LocalContext.current
+    val prefs = nav.prefs
+    val languages = remember { com.newterrastudios.djinn.go.i18n.Strings.available(context) }
+    if (languages.size < 2) return
+    var chosen by remember { mutableStateOf(prefs.language) }
+    val house = prefs.houseLanguage
+    val houseName = languages.firstOrNull { it.first == house }?.second
+    val options = listOf("" to if (houseName != null) t("language.house", "name" to houseName) else t("language.phone")) + languages
+    Heading(t("language.label"))
+    options.forEach { (code, name) ->
+        val pick = {
+            if (chosen != code) {
+                chosen = code
+                prefs.language = code
+                com.newterrastudios.djinn.go.i18n.Strings.load(context)
+                // Every screen's text comes again in the new language.
+                (context as? android.app.Activity)?.recreate()
+            }
+        }
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clickable(onClick = pick)
+                .padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            RadioButton(selected = chosen == code, onClick = pick)
+            Text(name)
+        }
+    }
+}

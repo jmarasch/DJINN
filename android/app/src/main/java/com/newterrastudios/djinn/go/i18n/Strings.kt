@@ -12,8 +12,9 @@ import kotlinx.serialization.json.jsonObject
 /**
  * Translations, shared with the web app: the same JSON files
  * (web/src/i18n/<lang>.json, copied into the app's assets at build time).
- * The phone's language when there's a file for it, English otherwise, and
- * the key itself as a last resort. `{name}` placeholders; an entry of
+ * The language picked in Settings, else the server's default (Admin >
+ * System), else the phone's, when there's a file for it; English otherwise,
+ * and the key itself as a last resort. `{name}` placeholders; an entry of
  * `{ "one": ..., "other": ... }` picks the plural form for `n`.
  */
 object Strings {
@@ -21,12 +22,30 @@ object Strings {
     private var english: JsonObject? = null
     private var locale: Locale = Locale.ENGLISH
 
-    /** Reads the files for the phone's language. Call when the app starts. */
+    /** Reads the files for the language to show. Call when the app starts and when the choice changes. */
     fun load(context: Context) {
-        locale = Locale.getDefault()
+        val prefs = context.getSharedPreferences(
+            com.newterrastudios.djinn.go.data.SETTINGS_FILE,
+            Context.MODE_PRIVATE,
+        )
+        val chosen = prefs.getString(com.newterrastudios.djinn.go.data.LANGUAGE_KEY, "").orEmpty()
+        val house = prefs.getString(com.newterrastudios.djinn.go.data.HOUSE_LANGUAGE_KEY, "").orEmpty()
         english = read(context, "en")
-        current = read(context, locale.language) ?: english
+        val phone = Locale.getDefault()
+        val wanted = listOf(chosen, house).firstOrNull { it.isNotEmpty() && read(context, it) != null }
+        locale = wanted?.let { Locale.forLanguageTag(it) } ?: phone
+        current = read(context, wanted ?: phone.language) ?: english
     }
+
+    /** The languages there are files for: code and the language's own name. */
+    fun available(context: Context): List<Pair<String, String>> =
+        context.assets.list("i18n").orEmpty()
+            .filter { it.endsWith(".json") }
+            .map { it.removeSuffix(".json") }
+            .sorted()
+            .map { code ->
+                code to ((read(context, code)?.get("language.name") as? JsonPrimitive)?.content ?: code)
+            }
 
     /** Uses one catalog's text as English (for tests, which have no assets). */
     fun useEnglish(text: String) {

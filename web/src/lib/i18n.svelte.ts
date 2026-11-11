@@ -1,7 +1,8 @@
 // Translations for the screens guests use. Each language is a JSON file in
 // src/i18n/ (en.json is the reference); a missing key falls back to English,
-// then to the key itself. The language follows the phone's (navigator
-// languages) unless someone picks another on their account page.
+// then to the key itself. The language is the one picked on this device
+// (Your account), else the house's default (Admin > System,
+// `/api/language`), else the phone's own (navigator languages).
 //
 // t('queue.title') or t('queue.count', { n: 3 }): placeholders are {name};
 // a key whose English entry is an object { one, other } picks the plural
@@ -33,10 +34,16 @@ function stored(): string | null {
   }
 }
 
-/** The best language for this browser: the first it asks for that we have. */
+/** The house's default language, once the server has said ('' for each
+ * device's own). */
+export const house = $state({ code: '' })
+
+/** The best language for this browser: its own pick, the house's default,
+ * or the first it asks for that we have. */
 function pick(): string {
   const chosen = stored()
   if (chosen && catalogs[chosen]) return chosen
+  if (house.code && catalogs[house.code]) return house.code
   const asked = typeof navigator === 'undefined' ? [] : (navigator.languages ?? [navigator.language])
   for (const tag of asked) {
     const lower = tag.toLowerCase()
@@ -62,6 +69,21 @@ export function setLanguage(code: string) {
 }
 
 if (typeof document !== 'undefined') document.documentElement.lang = locale.code
+
+/** Asks the server for the house's default and switches to it unless this
+ * device picked its own. */
+export async function loadHouseLanguage() {
+  try {
+    const res = await fetch('/api/language')
+    if (!res.ok) return
+    house.code = ((await res.json()) as { default: string }).default ?? ''
+    if (!stored()) setLanguage('')
+  } catch {
+    // Offline: the phone's own language stays.
+  }
+}
+
+if (typeof fetch !== 'undefined' && typeof location !== 'undefined') void loadHouseLanguage()
 
 function lookup(code: string, key: string): string | Record<string, string> | undefined {
   return catalogs[code]?.[key]

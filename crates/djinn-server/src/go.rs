@@ -395,6 +395,7 @@ enum Access {
 const ROUTES: &[(Method, &str, Access)] = &[
     (Method::GET, "/api/health", Access::Public),
     (Method::GET, "/api/go/hello", Access::Public),
+    (Method::GET, "/api/language", Access::Public),
     (Method::GET, "/api/go/app", Access::Public),
     (Method::GET, "/api/auth/mode", Access::Public),
     (Method::POST, "/api/auth/login", Access::Public),

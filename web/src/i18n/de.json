@@ -145,6 +145,7 @@
   "wish.failed": "Senden nicht möglich",
   "language.label": "Sprache",
   "language.phone": "Wie dieses Gerät",
+  "language.house": "DJINN-Standard ({name})",
   "common.you": "dich",
   "count.plays": {
     "one": "{n}-mal gespielt",

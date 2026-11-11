@@ -37,6 +37,7 @@ pub fn router() -> Router<AppState> {
         .merge(lyrics::router())
         .merge(nodes::router())
         .merge(crate::visuals::router())
+        .merge(crate::language::router())
         .merge(rooms_api::router())
         .merge(problems_api::router())
         .merge(duplicates::router())

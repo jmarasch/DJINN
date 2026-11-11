@@ -288,6 +288,9 @@ export const api = {
   /** What node screens draw, for the whole house. */
   visuals: () => get<Visuals>('/visuals'),
   setVisuals: (visuals: Visuals) => put<Visuals>('/visuals', visuals),
+  /** The house's default language ('' for each device's own). */
+  language: () => get<{ default: string }>('/language'),
+  setLanguage: (code: string) => put<{ default: string }>('/language', { default: code }),
   artists: (sort: ArtistSort, offset: number) => get<Page<ArtistSummary>>(`/artists?sort=${sort}&offset=${offset}`),
   albums: (sort: AlbumSort, filter: AlbumFilter, offset: number) => get<Page<Album>>(`/albums?sort=${sort}&filter=${filter}&offset=${offset}`),
   /** Where each letter (or year) starts in a list, for the jump strip. */

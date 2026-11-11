@@ -33,6 +33,7 @@ mod go_year;
 mod gpu;
 mod identify_api;
 mod jukebox;
+mod language;
 mod library_api;
 mod likes_api;
 mod logs;

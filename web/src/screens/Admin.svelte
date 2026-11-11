@@ -34,6 +34,7 @@
   import GoPanel from '../lib/GoPanel.svelte'
   import NodesPanel from '../lib/NodesPanel.svelte'
   import VisualsPanel from '../lib/VisualsPanel.svelte'
+  import HouseLanguage from '../lib/HouseLanguage.svelte'
   import RoomsPanel from '../lib/RoomsPanel.svelte'
   import { app, logout, toast } from '../lib/state.svelte'
   import type { LibraryRoot, RequestLogEntry, Settings } from '../lib/types'
@@ -485,6 +486,7 @@
     </form>
   </section>
 {:else if t === 'system'}
+  <HouseLanguage />
   <UpdatePanel />
   <BackupPanel />
   <ResetPanel />
