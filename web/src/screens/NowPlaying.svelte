@@ -21,7 +21,6 @@
   import { cycleTheme, theme } from '../lib/theme.svelte'
   import LyricsView from '../lib/LyricsView.svelte'
   import RoomPicker from '../lib/RoomPicker.svelte'
-  import LanguagePicker from '../lib/LanguagePicker.svelte'
   import type { Lyrics } from '../lib/types'
 
   const current = $derived(app.nowPlaying.current)
@@ -151,6 +150,11 @@
   <div class="display-actions">
     <RoomPicker />
     <a class="button" href={app.room > 1 ? `/tv?room=${app.room}` : '/tv'} title="Switch to TV display">TV display</a>
+    <a
+      class="button"
+      href={app.room > 1 ? `/visualizer?room=${app.room}` : '/visualizer'}
+      title="A visualizer in step with this room's speakers, with the song and what's coming up">Visualizer</a
+    >
     <button class="theme" onclick={cycleTheme} aria-label="Theme: {themeLabel}" title="Theme: {themeLabel}">
       <Icon name="theme" size={18} />
       {themeLabel}
@@ -346,7 +350,6 @@
       {/if}
     </p>
   {/if}
-  <p class="host-link"><LanguagePicker /></p>
 </div>
 
 <style>

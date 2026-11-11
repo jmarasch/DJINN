@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Visualizer from './screens/Visualizer.svelte'
   import { t } from './lib/i18n.svelte'
   import { onMount } from 'svelte'
   import { api } from './lib/api'
@@ -46,10 +47,11 @@
   const onTvPage = location.pathname === '/tv'
   const onLyricsPage = location.pathname === '/lyrics'
   const onNodePage = location.pathname === '/node'
+  const onVisualizerPage = location.pathname === '/visualizer'
   let showJoin = $state(false)
 
   onMount(async () => {
-    if (onJoinPage || onTvPage || onLyricsPage || onNodePage) return
+    if (onJoinPage || onTvPage || onLyricsPage || onNodePage || onVisualizerPage) return
     const me = await refreshMe()
     if (me) connect()
     else await refreshMode()
@@ -62,7 +64,7 @@
 
   // Signing out (or being signed out) re-checks how to get back in.
   $effect(() => {
-    if (app.ready && !app.me && !onJoinPage && !onTvPage && !onLyricsPage && !onNodePage) refreshMode()
+    if (app.ready && !app.me && !onJoinPage && !onTvPage && !onLyricsPage && !onNodePage && !onVisualizerPage) refreshMode()
   })
 
   const genreName = $derived.by(() => {
@@ -99,6 +101,8 @@
   <LyricsPage />
 {:else if onNodePage}
   <NodeScreen />
+{:else if onVisualizerPage}
+  <Visualizer />
 {:else if onJoinPage}
   <Join />
 {:else if !app.ready}

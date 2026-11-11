@@ -1530,46 +1530,14 @@ pub fn router(node: Node) -> Router {
         .with_state(node)
 }
 
-/// How often the screen gets the sound's levels.
-const LEVELS_EVERY: Duration = Duration::from_millis(33);
-
-/// The sound as this node's speaker plays it, for the screen's visualizer.
-/// Each event is `null` while no speaker is open, otherwise what's heard
-/// now, every number 0 to 255: `b` the 24 bands (deep to high), `f` 96
-/// finer rows for a spectrogram, `l` and `r` the wave (128 points each, 128
-/// is silence) and `v` each side's loudness. Nothing private, so no sign-in.
+/// The sound as this node's speaker plays it, for the screen's visualizer
+/// (`node_audio::levels_events`). Nothing private, so no sign-in.
 async fn levels(
     State(node): State<Node>,
 ) -> axum::response::sse::Sse<
     impl futures_util::Stream<Item = Result<axum::response::sse::Event, std::convert::Infallible>>,
 > {
-    use futures_util::StreamExt;
-    let mut ticks = tokio::time::interval(LEVELS_EVERY);
-    ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    let stream = tokio_stream::wrappers::IntervalStream::new(ticks).map(move |_| {
-        let data = if node.levels.live() {
-            levels_json(&node.levels.at(djinn_engine::clock::now_micros()))
-        } else {
-            "null".to_owned()
-        };
-        Ok(axum::response::sse::Event::default().data(data))
-    });
-    axum::response::sse::Sse::new(stream)
-}
-
-/// One measurement as the screen reads it (see `levels`).
-fn levels_json(frame: &djinn_engine::LevelFrame) -> String {
-    let level = |v: &f32| ((v * 255.0).round().clamp(0.0, 255.0) as u8).to_string();
-    let wave = |v: &f32| (((v * 0.5 + 0.5) * 255.0).round().clamp(0.0, 255.0) as u8).to_string();
-    let list = |parts: Vec<String>| format!("[{}]", parts.join(","));
-    format!(
-        r#"{{"b":{},"f":{},"l":{},"r":{},"v":{}}}"#,
-        list(frame.bands.iter().map(level).collect()),
-        list(frame.fine.iter().map(level).collect()),
-        list(frame.left.iter().map(wave).collect()),
-        list(frame.right.iter().map(wave).collect()),
-        list(frame.loudness.iter().map(level).collect()),
-    )
+    crate::node_audio::levels_events(node.levels.clone())
 }
 
 #[derive(Serialize)]

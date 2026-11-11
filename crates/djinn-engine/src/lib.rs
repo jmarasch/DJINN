@@ -42,7 +42,7 @@ pub use features::{
     FEATURES_VERSION, FEATURE_COUNT, PRINT_LEN, PRINT_VERSION,
 };
 pub use fingerprint::fingerprint;
-pub use levels::{Frame as LevelFrame, Levels};
+pub use levels::{Frame as LevelFrame, Levels, PieceMeter};
 pub use loudness::{measure_loudness, Loudness, REFERENCE_LUFS};
 pub use node_player::{NodePlayer, NodeSettings};
 pub use player::MAX_CROSSFADE_SECS;

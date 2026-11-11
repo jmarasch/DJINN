@@ -90,7 +90,7 @@ impl Levels {
     }
 
     /// Whether a screen has asked lately, so measuring is worth it.
-    fn watched(&self, now: i64) -> bool {
+    pub fn watched(&self, now: i64) -> bool {
         let asked = self.asked_at.load(Ordering::Acquire);
         asked != 0 && now - asked < WATCHED_FOR_US
     }
@@ -317,6 +317,45 @@ impl Meter {
     }
 }
 
+/// Measures Main's own timed stream (`timed_tap`'s pieces), for a screen
+/// showing what Main's speakers play.
+pub struct PieceMeter {
+    meter: Meter,
+    paused_at: Option<i64>,
+}
+
+impl PieceMeter {
+    pub fn new(rate: u32, levels: Levels) -> Self {
+        levels.set_live(true);
+        PieceMeter {
+            meter: Meter::new(rate, levels),
+            paused_at: None,
+        }
+    }
+
+    /// Takes one piece; `now` is the shared clock (µs).
+    pub fn take(&mut self, piece: &crate::Piece, now: i64) {
+        match piece.mark {
+            crate::Mark::Audio { play_at_us, .. } => self.meter.take(&piece.samples, play_at_us),
+            crate::Mark::Flush => self.meter.reset(),
+            crate::Mark::Pause => {
+                if self.paused_at.is_none() {
+                    self.paused_at = Some(now);
+                    self.meter.levels().pause();
+                }
+            }
+            crate::Mark::Resume => {
+                if let Some(at) = self.paused_at.take() {
+                    // Main's stamps after a pause already allow for it; only
+                    // what was measured before moves.
+                    self.meter.levels().resume(now - at);
+                }
+            }
+            crate::Mark::Volume(_) => {}
+        }
+    }
+}
+
 /// Bin edges for `rows` rows of an FFT of `size`, spaced by pitch from
 /// `lowest`. With `distinct`, each row gets a bin of its own (pushing the
 /// low ones up); otherwise rows may share one low down, where bins are wide.
@@ -422,6 +461,37 @@ mod tests {
         let mut meter = Meter::new(48_000, levels.clone());
         meter.take(&tone(200.0, 48_000, BLOCK * 2, 0.8), 0);
         assert!(levels.inner.lock().unwrap().frames.is_empty());
+    }
+
+    #[test]
+    fn mains_stream_is_measured_and_waits_out_a_pause() {
+        let levels = Levels::new();
+        levels.at(crate::clock::now_micros());
+        let mut meter = PieceMeter::new(48_000, levels.clone());
+        assert!(levels.live());
+        let piece = |mark| crate::Piece {
+            mark,
+            samples: Vec::new(),
+        };
+        meter.take(
+            &crate::Piece {
+                mark: crate::Mark::Audio {
+                    frames: BLOCK as u32,
+                    play_at_us: 1_000_000,
+                },
+                samples: tone(200.0, 48_000, BLOCK, 0.8),
+            },
+            900_000,
+        );
+        meter.take(&piece(crate::Mark::Pause), 950_000);
+        assert_eq!(
+            levels.at(1_000_000),
+            Frame::default(),
+            "nothing while paused"
+        );
+        // Half a second later it plays on: what was waiting is heard later.
+        meter.take(&piece(crate::Mark::Resume), 1_450_000);
+        assert!(levels.at(1_500_000).bands.iter().any(|&b| b > 0.5));
     }
 
     #[test]

@@ -129,6 +129,9 @@ pub struct Hub {
     /// The last volume and pause state seen, for nodes that join late.
     state: Arc<Mutex<(f32, bool)>>,
     rate: u32,
+    /// What its speakers play, measured while a screen shows a visualizer
+    /// (`/api/levels`).
+    levels: djinn_engine::Levels,
 }
 
 impl Default for Hub {
@@ -139,6 +142,7 @@ impl Default for Hub {
             listeners: Arc::default(),
             state: Arc::new(Mutex::new((1.0, false))),
             rate: 48_000,
+            levels: djinn_engine::Levels::new(),
         }
     }
 }
@@ -157,7 +161,7 @@ impl Drop for Listening {
 
 impl Hub {
     /// Starts draining `reader` (the engine's timed tap) whenever a node
-    /// listens.
+    /// listens or a screen shows the visualizer.
     pub fn start(mut reader: TimedReader, rate: u32) -> anyhow::Result<Hub> {
         let hub = Hub {
             rate,
@@ -168,10 +172,13 @@ impl Hub {
             Arc::clone(&hub.listeners),
             Arc::clone(&hub.state),
         );
+        let levels = hub.levels.clone();
+        let mut meter = djinn_engine::PieceMeter::new(rate, levels.clone());
         std::thread::Builder::new()
             .name("djinn-node-audio".to_owned())
             .spawn(move || loop {
-                let wanted = listeners.load(Ordering::Acquire) > 0;
+                let now = djinn_engine::clock::now_micros();
+                let wanted = listeners.load(Ordering::Acquire) > 0 || levels.watched(now);
                 if reader.is_active() != wanted {
                     reader.set_active(wanted);
                 }
@@ -185,6 +192,7 @@ impl Hub {
                                 _ => {}
                             }
                         }
+                        meter.take(&piece, now);
                         let _ = tx.send(encode(&piece));
                     }
                 }
@@ -195,6 +203,10 @@ impl Hub {
 
     pub fn rate(&self) -> u32 {
         self.rate
+    }
+
+    pub fn levels(&self) -> &djinn_engine::Levels {
+        &self.levels
     }
 
     /// Starts listening: the current volume and pause state, then the live
@@ -302,6 +314,48 @@ fn frames_for(
         }
     });
     futures_util::StreamExt::chain(first, live)
+}
+
+/// How often a screen gets the sound's levels.
+const LEVELS_EVERY: std::time::Duration = std::time::Duration::from_millis(33);
+
+/// The sound as some speakers play it, for a screen's visualizer. Each
+/// event is `null` while nothing is measuring, otherwise what's heard now,
+/// every number 0 to 255: `b` the 24 bands (deep to high), `f` 96 finer rows
+/// for a spectrogram, `l` and `r` the wave (128 points each, 128 is silence)
+/// and `v` each side's loudness.
+pub fn levels_events(
+    levels: djinn_engine::Levels,
+) -> axum::response::sse::Sse<
+    impl futures_util::Stream<Item = Result<axum::response::sse::Event, std::convert::Infallible>>,
+> {
+    use futures_util::StreamExt;
+    let mut ticks = tokio::time::interval(LEVELS_EVERY);
+    ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let stream = tokio_stream::wrappers::IntervalStream::new(ticks).map(move |_| {
+        let data = if levels.live() {
+            levels_json(&levels.at(djinn_engine::clock::now_micros()))
+        } else {
+            "null".to_owned()
+        };
+        Ok(axum::response::sse::Event::default().data(data))
+    });
+    axum::response::sse::Sse::new(stream)
+}
+
+/// One measurement as a screen reads it (see `levels_events`).
+fn levels_json(frame: &djinn_engine::LevelFrame) -> String {
+    let level = |v: &f32| ((v * 255.0).round().clamp(0.0, 255.0) as u8).to_string();
+    let wave = |v: &f32| (((v * 0.5 + 0.5) * 255.0).round().clamp(0.0, 255.0) as u8).to_string();
+    let list = |parts: Vec<String>| format!("[{}]", parts.join(","));
+    format!(
+        r#"{{"b":{},"f":{},"l":{},"r":{},"v":{}}}"#,
+        list(frame.bands.iter().map(level).collect()),
+        list(frame.fine.iter().map(level).collect()),
+        list(frame.left.iter().map(wave).collect()),
+        list(frame.right.iter().map(wave).collect()),
+        list(frame.loudness.iter().map(level).collect()),
+    )
 }
 
 #[cfg(test)]

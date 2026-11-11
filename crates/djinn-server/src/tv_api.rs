@@ -27,6 +27,30 @@ pub fn router() -> Router<AppState> {
         .route("/tv/events", get(crate::sse::tv_events))
         .route("/tv/art/{hash}", get(art))
         .route("/tv/pictures", get(pictures))
+        .route("/tv/levels", get(levels))
+        .route("/tv/visuals", get(visuals))
+}
+
+#[derive(Deserialize)]
+struct RoomQuery {
+    room: Option<i64>,
+}
+
+/// The sound as a room's speakers play it here, for the visualizer page
+/// (`/visualizer`), in step with them. Public like the TV page.
+async fn levels(
+    State(state): State<AppState>,
+    Query(query): Query<RoomQuery>,
+) -> ApiResult<impl IntoResponse> {
+    check_enabled(&state).await?;
+    let hub = state.hub_for(query.room.unwrap_or(djinn_store::MAIN_ROOM));
+    Ok(crate::node_audio::levels_events(hub.levels().clone()))
+}
+
+/// The house's visualizers, for the visualizer page.
+async fn visuals(State(state): State<AppState>) -> ApiResult<Json<crate::visuals::Visuals>> {
+    check_enabled(&state).await?;
+    Ok(Json(crate::visuals::house(&state).await?))
 }
 
 pub async fn enabled(state: &AppState) -> ApiResult<bool> {
@@ -135,6 +159,8 @@ mod tests {
         let state = AppState::for_tests().await;
         let (status, _) = call(&state, Method::GET, "/api/tv", None, None).await;
         assert_eq!(status, StatusCode::OK, "no sign-in needed");
+        let (status, _) = call(&state, Method::GET, "/api/tv/visuals", None, None).await;
+        assert_eq!(status, StatusCode::OK);
         // The member feed still needs a session.
         let (status, _) = call(&state, Method::GET, "/api/events", None, None).await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
@@ -144,5 +170,9 @@ mod tests {
         assert_eq!(status, StatusCode::FORBIDDEN);
         let (status, _) = call(&state, Method::GET, "/api/tv/events", None, None).await;
         assert_eq!(status, StatusCode::FORBIDDEN);
+        for path in ["/api/tv/levels", "/api/tv/visuals"] {
+            let (status, _) = call(&state, Method::GET, path, None, None).await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{path}");
+        }
     }
 }

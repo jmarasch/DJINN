@@ -1,5 +1,6 @@
 <script lang="ts">
-  // A node's own screen once joined: Main's page for its room in a frame,
+  // A node's own screen once joined (or Main's visualizer page, with Main's
+  // own measurements): Main's page for its room in a frame,
   // with the node's visualizer drawn underneath. The node measures what its
   // speaker plays (`/api/node/levels`) and draws it here, taking turns
   // through the styles Main's settings give (`visuals`, the node's own or
@@ -11,7 +12,17 @@
   import { isGlStyle, ShapeVisual, Smoother, type ShapeStyle, type SoundFrame, type VisualStyle } from './nodeVisual'
   import { DEFAULT_VISUALS, lookOf, type Visuals } from './visuals'
 
-  let { url, visuals }: { url: string; visuals: Visuals | null } = $props()
+  let {
+    url,
+    visuals,
+    levels = '/api/node/levels',
+  }: {
+    url: string
+    visuals: Visuals | null
+    /** Where the measurements come from: this node's speaker, or Main's
+     * own (the visualizer page). */
+    levels?: string
+  } = $props()
 
   let frame = $state<HTMLIFrameElement | null>(null)
   let canvas = $state<HTMLCanvasElement | null>(null)
@@ -99,7 +110,7 @@
   })
 
   onMount(() => {
-    const events = new EventSource('/api/node/levels')
+    const events = new EventSource(levels)
     events.onmessage = (e) => {
       latest = JSON.parse(e.data)
       heardAt = performance.now()
