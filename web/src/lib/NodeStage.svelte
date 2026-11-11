@@ -5,12 +5,16 @@
   // when it wants the visual (going see-through over it) and is told
   // whether there's sound to draw.
   import { onMount } from 'svelte'
-  import { draw, Smoother, type VisualStyle } from './nodeVisual'
+  import { GlVisual } from './nodeGlVisual'
+  import { draw, isGlStyle, Smoother, type ShapeStyle } from './nodeVisual'
 
   let { url }: { url: string } = $props()
 
   let frame = $state<HTMLIFrameElement | null>(null)
   let canvas = $state<HTMLCanvasElement | null>(null)
+  let glCanvas = $state<HTMLCanvasElement | null>(null)
+  /** A shader style is being drawn (on its own canvas, WebGL's). */
+  let onChip = $state(false)
   /** What Main's page shows now; the visual is only drawn when asked for. */
   let mode = $state('')
   /** The latest levels, or null while the speaker isn't open. */
@@ -18,7 +22,7 @@
   let heardAt = 0
 
   const origin = $derived(new URL(url).origin)
-  const style = $derived((new URL(url).searchParams.get('visual') ?? 'bars') as VisualStyle)
+  const style = $derived(new URL(url).searchParams.get('visual') ?? 'bars')
   /** Levels arriving and a speaker open: the visual has something to draw. */
   const ready = () => levels !== null && performance.now() - heardAt < 2000
 
@@ -43,12 +47,31 @@
     const timer = setInterval(tell, 500)
 
     const sound = new Smoother()
+    // A shader style, until this box shows it can't keep up (then Bars).
+    let chip: GlVisual | null = null
+    let shape: ShapeStyle = isGlStyle(style) ? 'bars' : (style as ShapeStyle)
+    if (isGlStyle(style) && glCanvas) {
+      try {
+        chip = new GlVisual(glCanvas, style)
+        onChip = true
+      } catch (e) {
+        console.warn('Visualizer falls back to bars:', e)
+      }
+    }
     let raf = 0
     const loop = (now: number) => {
       raf = requestAnimationFrame(loop)
-      if (mode !== 'visual' || !canvas) return
-      const ctx = canvas.getContext('2d')
-      if (!ctx) return
+      if (mode !== 'visual') return
+      sound.step(ready() ? levels : null, now)
+      if (chip) {
+        if (chip.draw(sound, now)) return
+        console.warn(`The ${style} visualizer is too much for this box; showing bars`)
+        chip = null
+        onChip = false
+        shape = 'bars'
+      }
+      const ctx = canvas?.getContext('2d')
+      if (!canvas || !ctx) return
       const scale = window.devicePixelRatio || 1
       const w = Math.round(canvas.clientWidth * scale)
       const h = Math.round(canvas.clientHeight * scale)
@@ -56,8 +79,7 @@
         canvas.width = w
         canvas.height = h
       }
-      sound.step(ready() ? levels : null, now)
-      draw(ctx, style, sound)
+      draw(ctx, shape, sound)
     }
     raf = requestAnimationFrame(loop)
     return () => {
@@ -70,7 +92,8 @@
 </script>
 
 <div class="stage">
-  <canvas bind:this={canvas} class:shown={mode === 'visual'}></canvas>
+  <canvas bind:this={canvas} class:shown={mode === 'visual' && !onChip}></canvas>
+  <canvas bind:this={glCanvas} class:shown={mode === 'visual' && onChip}></canvas>
   <iframe bind:this={frame} src={url} title="DJINN screen" onload={tell}></iframe>
 </div>
 

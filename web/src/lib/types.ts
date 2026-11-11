@@ -1373,7 +1373,7 @@ export interface NodeAudio {
   /** What a screen plugged into the node shows: 'status', 'off', or pages
    * to try in order ('lyrics', 'visual', 'tv') joined by commas. */
   screen?: string
-  /** How the node's visualizer draws: 'bars', 'ring' or 'mirror'. */
+  /** How the node's visualizer draws: a style from `nodeVisual.ts`. */
   visual?: string
   /** Songs, playing and coming up, the node keeps copies of. */
   cache_ahead?: number

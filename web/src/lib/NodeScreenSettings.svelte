@@ -9,7 +9,7 @@
   }: {
     /** 'status', 'off', or pages joined by commas. */
     screen: string
-    /** 'bars', 'ring' or 'mirror'. */
+    /** A style from `nodeVisual.ts`: a shape or a shader style. */
     visual: string
     onchange: (screen: string, visual: string) => void
   } = $props()
@@ -92,11 +92,24 @@
           value={visual}
           onchange={(e) => onchange(screen, e.currentTarget.value)}
         >
-          <option value="bars">Bars</option>
-          <option value="ring">Ring</option>
-          <option value="mirror">Mirror</option>
+          <optgroup label="Shapes (any box)">
+            <option value="bars">Bars</option>
+            <option value="ring">Ring</option>
+            <option value="mirror">Mirror</option>
+          </optgroup>
+          <optgroup label="Drawn on the graphics chip">
+            <option value="warp">Warp</option>
+            <option value="tunnel">Tunnel</option>
+            <option value="plasma">Plasma</option>
+            <option value="kaleidoscope">Kaleidoscope</option>
+            <option value="nebula">Nebula</option>
+            <option value="stars">Stars</option>
+          </optgroup>
         </select>
       </label>
+      <p class="small muted">
+        The graphics chip styles need a box that can keep up; one that can't switches to Bars on its own.
+      </p>
     {/if}
   {/if}
 </div>

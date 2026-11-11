@@ -257,7 +257,17 @@ fn default_cache_ahead() -> i64 {
 /// speaker is playing, and Main's TV page.
 const SCREEN_PAGES: &[&str] = &["lyrics", "visual", "tv"];
 /// The visualizer's looks.
-const VISUALS: &[&str] = &["bars", "ring", "mirror"];
+const VISUALS: &[&str] = &[
+    "bars",
+    "ring",
+    "mirror",
+    "warp",
+    "tunnel",
+    "plasma",
+    "kaleidoscope",
+    "nebula",
+    "stars",
+];
 
 fn default_screen() -> String {
     "tv".to_owned()
