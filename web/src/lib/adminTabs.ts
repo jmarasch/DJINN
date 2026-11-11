@@ -15,6 +15,7 @@ export const adminGroups = [
       { id: 'go', label: 'DJINN GO' },
       { id: 'rooms', label: 'Rooms' },
       { id: 'nodes', label: 'Nodes' },
+      { id: 'visuals', label: 'Visualizers' },
       { id: 'library', label: 'Library' },
       { id: 'ai', label: 'AI' },
       { id: 'system', label: 'System' },

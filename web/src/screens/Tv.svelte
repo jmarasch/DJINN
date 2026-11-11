@@ -195,7 +195,7 @@
   $effect(() => {
     if (!order.length || !settled) return
     const page = choose({ playing: !!current, timed: current?.track.lyrics === 2 })
-    if (page === 'tv') announce('tv')
+    if (page === 'tv') announce('tv', current?.track.id ?? null)
     else location.replace(pageUrl('lyrics'))
   })
 

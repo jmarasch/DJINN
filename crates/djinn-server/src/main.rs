@@ -68,6 +68,7 @@ mod tls;
 mod tv_api;
 mod two_step;
 mod update;
+mod visuals;
 mod watcher;
 mod web;
 mod wishes_api;

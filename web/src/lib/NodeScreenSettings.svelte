@@ -1,17 +1,24 @@
 <script lang="ts">
   // What a screen plugged into a node shows: its own status, nothing, or
   // pages tried in order (timed lyrics, the node's visualizer, the TV page),
-  // and how the visualizer looks. In Admin > Nodes and on the node's page.
+  // and its own visualizers if it shouldn't follow the house's. In Admin >
+  // Nodes and on the node's page.
+  import { DEFAULT_VISUALS, type Visuals } from './visuals'
+  import VisualsEditor from './VisualsEditor.svelte'
+
   let {
     screen,
     visual,
+    start,
     onchange,
   }: {
     /** 'status', 'off', or pages joined by commas. */
     screen: string
-    /** A style from `nodeVisual.ts`: a shape or a shader style. */
-    visual: string
-    onchange: (screen: string, visual: string) => void
+    /** The node's own visualizers, or null to follow the house's. */
+    visual: Visuals | null
+    /** Where its own start from when first made (the house's, if known). */
+    start?: Visuals | null
+    onchange: (screen: string, visual: Visuals | null) => void
   } = $props()
 
   type Page = 'lyrics' | 'visual' | 'tv'
@@ -86,30 +93,18 @@
       {/each}
     </ol>
     {#if order.includes('visual')}
-      <label>
-        Visualizer style
-        <select
-          value={visual}
-          onchange={(e) => onchange(screen, e.currentTarget.value)}
-        >
-          <optgroup label="Shapes (any box)">
-            <option value="bars">Bars</option>
-            <option value="ring">Ring</option>
-            <option value="mirror">Mirror</option>
-          </optgroup>
-          <optgroup label="Drawn on the graphics chip">
-            <option value="warp">Warp</option>
-            <option value="tunnel">Tunnel</option>
-            <option value="plasma">Plasma</option>
-            <option value="kaleidoscope">Kaleidoscope</option>
-            <option value="nebula">Nebula</option>
-            <option value="stars">Stars</option>
-          </optgroup>
-        </select>
+      <label class="check">
+        <input
+          type="checkbox"
+          checked={!visual}
+          onchange={(e) => onchange(screen, e.currentTarget.checked ? null : structuredClone(start ?? DEFAULT_VISUALS))}
+        />
+        Visualizers as set for the whole house (Admin &gt; Visualizers)
       </label>
-      <p class="small muted">
-        The graphics chip styles need a box that can keep up; one that can't switches to Bars on its own.
-      </p>
+      {#if visual}
+        <p class="small muted">This node's own visualizers:</p>
+        <VisualsEditor value={visual} onchange={(own) => onchange(screen, own)} />
+      {/if}
     {/if}
   {/if}
 </div>

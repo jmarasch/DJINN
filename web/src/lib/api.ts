@@ -1,3 +1,4 @@
+import type { Visuals } from './visuals'
 import type {
   RoomTiming,
   TimingSpeaker,
@@ -284,6 +285,9 @@ export const api = {
   renameNode: (id: number, name: string) => patch<void>(`/nodes/${id}`, { name }),
   removeNode: (id: number) => del<void>(`/nodes/${id}`),
   setNodeAudio: (id: number, audio: NodeAudio) => put<void>(`/nodes/${id}/audio`, audio),
+  /** What node screens draw, for the whole house. */
+  visuals: () => get<Visuals>('/visuals'),
+  setVisuals: (visuals: Visuals) => put<Visuals>('/visuals', visuals),
   artists: (sort: ArtistSort, offset: number) => get<Page<ArtistSummary>>(`/artists?sort=${sort}&offset=${offset}`),
   albums: (sort: AlbumSort, filter: AlbumFilter, offset: number) => get<Page<Album>>(`/albums?sort=${sort}&filter=${filter}&offset=${offset}`),
   /** Where each letter (or year) starts in a list, for the jump strip. */

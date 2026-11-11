@@ -42,9 +42,7 @@ pub struct Node {
     /// What a screen plugged into it shows: "status", "off", or the pages to
     /// try in order ("lyrics", "visual", "tv"), joined by commas.
     pub screen: String,
-    /// How its visualizer draws: a shape ("bars", "ring", "mirror") or a
-    /// shader style ("warp", "tunnel", "plasma", "kaleidoscope", "nebula",
-    /// "stars").
+    /// Its own visualizer settings as JSON, or empty to follow the house's.
     pub visual: String,
     /// How many songs, playing and coming up, it keeps copies of.
     pub cache_ahead: i64,

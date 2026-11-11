@@ -79,7 +79,7 @@
   </label>
   <NodeScreenSettings
     screen={draft.screen ?? 'tv'}
-    visual={draft.visual ?? 'bars'}
+    visual={draft.visual ?? null}
     onchange={(screen, visual) => {
       draft.screen = screen
       draft.visual = visual

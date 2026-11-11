@@ -75,7 +75,7 @@
   $effect(() => {
     if (!settled) return
     if (page === 'tv') location.replace(pageUrl('tv'))
-    else announce(page)
+    else announce(page, current?.id ?? null)
   })
 
   // The node draws under this page: see-through while the visual shows.

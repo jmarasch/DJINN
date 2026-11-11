@@ -240,9 +240,10 @@ pub struct AudioSettings {
     /// `SCREEN_PAGES` to try in order, joined by commas.
     #[serde(default = "default_screen")]
     pub screen: String,
-    /// How its visualizer draws: `VISUALS`.
-    #[serde(default = "default_visual")]
-    pub visual: String,
+    /// Its own visualizers instead of the house's (Admin > Visualizers);
+    /// None to follow the house.
+    #[serde(default)]
+    pub visual: Option<crate::visuals::Visuals>,
     /// Songs, playing and coming up, it keeps copies of (1 to 50).
     #[serde(default = "default_cache_ahead")]
     pub cache_ahead: i64,
@@ -256,25 +257,9 @@ fn default_cache_ahead() -> i64 {
 /// timed lyrics while the song has them, the visualizer while the node's
 /// speaker is playing, and Main's TV page.
 const SCREEN_PAGES: &[&str] = &["lyrics", "visual", "tv"];
-/// The visualizer's looks.
-const VISUALS: &[&str] = &[
-    "bars",
-    "ring",
-    "mirror",
-    "warp",
-    "tunnel",
-    "plasma",
-    "kaleidoscope",
-    "nebula",
-    "stars",
-];
 
 fn default_screen() -> String {
     "tv".to_owned()
-}
-
-fn default_visual() -> String {
-    "bars".to_owned()
 }
 
 /// The pages a screen setting tries, in order; None for the node's own page
@@ -312,7 +297,9 @@ impl AudioSettings {
             offline: node.offline.clone(),
             free_run: node.free_run,
             screen: node.screen.clone(),
-            visual: node.visual.clone(),
+            visual: Some(node.visual.as_str())
+                .filter(|v| !v.is_empty())
+                .and_then(|v| serde_json::from_str(v).ok()),
             cache_ahead: node.cache_ahead,
         }
     }
@@ -327,7 +314,10 @@ async fn save_audio(state: &AppState, id: i64, audio: &AudioSettings) -> ApiResu
             "those speaker settings are out of range",
         ));
     }
-    if !valid_screen(&audio.screen) || !VISUALS.contains(&audio.visual.as_str()) {
+    if let Some(visual) = &audio.visual {
+        visual.check()?;
+    }
+    if !valid_screen(&audio.screen) {
         return Err(ApiError::bad_request(
             "that's not something a screen can show",
         ));
@@ -336,6 +326,10 @@ async fn save_audio(state: &AppState, id: i64, audio: &AudioSettings) -> ApiResu
         return Err(ApiError::bad_request("offline must be stop or cached"));
     }
     let equalizer = serde_json::to_string(&audio.equalizer)?;
+    let visual = match &audio.visual {
+        Some(visual) => serde_json::to_string(visual)?,
+        None => String::new(),
+    };
     let device = audio.device.as_deref().filter(|d| !d.is_empty());
     state
         .store
@@ -349,7 +343,7 @@ async fn save_audio(state: &AppState, id: i64, audio: &AudioSettings) -> ApiResu
                 offline: &audio.offline,
                 free_run: audio.free_run,
                 screen: &audio.screen,
-                visual: &audio.visual,
+                visual: &visual,
                 cache_ahead: audio.cache_ahead,
             },
         )
@@ -431,10 +425,17 @@ struct MeAnswer {
     screen: Option<String>,
     /// A newer DJINN for the node to put in place, when it's behind.
     update: Option<crate::node_builds::NodeUpdate>,
+    /// The visualizers its screen draws: its own, or else the house's.
+    visuals: crate::visuals::Visuals,
     /// Who Main is, to know it again in announcements after its address
     /// changes, and its name on the network (`<host>.local`).
     server_id: String,
     host: String,
+}
+
+/// A node's own visualizers, if it has them.
+fn audio_visual(node: &Node) -> Option<crate::visuals::Visuals> {
+    AudioSettings::of(node).visual
 }
 
 /// The header a node's check-in says its version in.
@@ -444,7 +445,8 @@ pub const NODE_VERSION_HEADER: &str = "x-djinn-version";
 /// node's own page. Pages opened this way check back (`screen_of`), so a
 /// change of setting reaches a screen already showing one.
 /// With more than one page to try, or the visualizer, the page carries the
-/// order (and the visualizer's looks) and switches between them itself.
+/// order and switches between them itself. The visualizer's settings come
+/// in check-ins (`MeAnswer::visuals`), since the node draws it.
 fn screen_url(state: &AppState, node: &Node) -> Option<String> {
     let order = screen_order(&node.screen)?;
     let page = if order.first() == Some(&"tv") {
@@ -460,9 +462,6 @@ fn screen_url(state: &AppState, node: &Node) -> Option<String> {
     );
     if order.len() > 1 || order.contains(&"visual") {
         url.push_str(&format!("&order={}", order.join(",")));
-    }
-    if order.contains(&"visual") {
-        url.push_str(&format!("&visual={}", node.visual));
     }
     Some(url)
 }
@@ -602,6 +601,10 @@ async fn me(
         audio_room: state.rooms.audio_leader(node.room_id),
         screen: screen_url(&state, &node),
         update: crate::node_builds::offer(&state, &node, &running),
+        visuals: match audio_visual(&node) {
+            Some(own) => own,
+            None => crate::visuals::house(&state).await?,
+        },
         status: node.status,
         name: node.name,
         room_id: node.room_id,
@@ -1048,9 +1051,7 @@ mod tests {
         // An order: the first page that isn't the TV, which switches itself.
         assert_eq!(
             screen_url(&state, &with("lyrics,visual,tv")).unwrap(),
-            format!(
-                "http://main:8066/lyrics?room=1&screen_for={id}&order=lyrics,visual,tv&visual=bars"
-            )
+            format!("http://main:8066/lyrics?room=1&screen_for={id}&order=lyrics,visual,tv")
         );
         assert!(screen_url(&state, &with("tv,lyrics"))
             .unwrap()
@@ -1194,6 +1195,71 @@ mod tests {
             .unwrap();
         assert!(String::from_utf8_lossy(&bytes).contains(r#""update":null"#));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn a_node_draws_the_house_visualizers_until_it_has_its_own() {
+        let state = AppState::for_tests().await;
+        admin_with_password(&state).await;
+        settings::set_flag(&state.store, NODES_JOIN, true)
+            .await
+            .unwrap();
+        let (status, _) = send(
+            &state,
+            Method::POST,
+            "/api/nodes/join",
+            Some(JOIN),
+            None,
+            true,
+        )
+        .await;
+        assert_eq!(status, StatusCode::ACCEPTED);
+        let id = state
+            .store
+            .node_by_node_id("kitchen-0001")
+            .await
+            .unwrap()
+            .unwrap()
+            .id;
+        state.store.approve_node(id, 1).await.unwrap();
+        let signed = format!("Node kitchen-0001:{SECRET}");
+        let node = Some(("authorization", signed.as_str()));
+        let visuals = |body: &str| -> crate::visuals::Visuals {
+            let answer: serde_json::Value = serde_json::from_str(body).unwrap();
+            serde_json::from_value(answer["visuals"].clone()).unwrap()
+        };
+        // The house's, as an admin set them.
+        let house = crate::visuals::Visuals {
+            styles: vec!["spectrogram".into()],
+            ..crate::visuals::Visuals::default()
+        };
+        state
+            .store
+            .set_setting(
+                crate::visuals::VISUALS,
+                &serde_json::to_string(&house).unwrap(),
+            )
+            .await
+            .unwrap();
+        let (_, body) = send(&state, Method::GET, "/api/nodes/me", None, node, true).await;
+        assert_eq!(visuals(&body), house);
+        // Its own, once it has them.
+        let node_row = state.store.node(id).await.unwrap().unwrap();
+        let mut audio = AudioSettings::of(&node_row);
+        let own = crate::visuals::Visuals {
+            styles: vec!["vu".into(), "stars".into()],
+            change: "never".into(),
+            ..crate::visuals::Visuals::default()
+        };
+        audio.visual = Some(own.clone());
+        save_audio(&state, id, &audio).await.unwrap();
+        let (_, body) = send(&state, Method::GET, "/api/nodes/me", None, node, true).await;
+        assert_eq!(visuals(&body), own);
+        // Back to the house's.
+        audio.visual = None;
+        save_audio(&state, id, &audio).await.unwrap();
+        let (_, body) = send(&state, Method::GET, "/api/nodes/me", None, node, true).await;
+        assert_eq!(visuals(&body), house);
     }
 
     /// A node's request with the headers it describes its program with.

@@ -145,6 +145,8 @@ pub struct Status {
     /// The page a plugged-in screen shows once joined (Main's TV page for
     /// this node's room).
     pub screen: Option<String>,
+    /// The visualizers Main says its screen draws (its own or the house's).
+    pub visuals: Option<crate::visuals::Visuals>,
     /// Main DJINNs heard on the network letting nodes join, while this node
     /// hasn't got one. Other nodes don't announce this.
     pub mains: Vec<FoundMain>,
@@ -236,6 +238,7 @@ impl Node {
                 cached: 0,
                 audio_room: None,
                 screen: None,
+                visuals: None,
                 mains: Vec::new(),
             })),
             wake: Arc::new(Notify::new()),
@@ -531,6 +534,7 @@ impl Node {
             }
             s.audio_room = answer["audio_room"].as_i64();
             s.screen = answer["screen"].as_str().map(str::to_owned);
+            s.visuals = serde_json::from_value(answer["visuals"].clone()).ok();
         });
         if let Ok(upcoming) =
             serde_json::from_value::<Vec<crate::nodes::Upcoming>>(answer["upcoming"].clone())
@@ -1529,9 +1533,11 @@ pub fn router(node: Node) -> Router {
 /// How often the screen gets the sound's levels.
 const LEVELS_EVERY: Duration = Duration::from_millis(33);
 
-/// The sound as this node's speaker plays it, for the screen's visualizer:
-/// each event is the bands heard now (0 to 255, deep to high), or `null`
-/// while no speaker is open. Nothing private, so no sign-in.
+/// The sound as this node's speaker plays it, for the screen's visualizer.
+/// Each event is `null` while no speaker is open, otherwise what's heard
+/// now, every number 0 to 255: `b` the 24 bands (deep to high), `f` 96
+/// finer rows for a spectrogram, `l` and `r` the wave (128 points each, 128
+/// is silence) and `v` each side's loudness. Nothing private, so no sign-in.
 async fn levels(
     State(node): State<Node>,
 ) -> axum::response::sse::Sse<
@@ -1542,18 +1548,28 @@ async fn levels(
     ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let stream = tokio_stream::wrappers::IntervalStream::new(ticks).map(move |_| {
         let data = if node.levels.live() {
-            let bands = node.levels.at(djinn_engine::clock::now_micros());
-            let parts: Vec<String> = bands
-                .iter()
-                .map(|b| ((b * 255.0).round() as u8).to_string())
-                .collect();
-            format!("[{}]", parts.join(","))
+            levels_json(&node.levels.at(djinn_engine::clock::now_micros()))
         } else {
             "null".to_owned()
         };
         Ok(axum::response::sse::Event::default().data(data))
     });
     axum::response::sse::Sse::new(stream)
+}
+
+/// One measurement as the screen reads it (see `levels`).
+fn levels_json(frame: &djinn_engine::LevelFrame) -> String {
+    let level = |v: &f32| ((v * 255.0).round().clamp(0.0, 255.0) as u8).to_string();
+    let wave = |v: &f32| (((v * 0.5 + 0.5) * 255.0).round().clamp(0.0, 255.0) as u8).to_string();
+    let list = |parts: Vec<String>| format!("[{}]", parts.join(","));
+    format!(
+        r#"{{"b":{},"f":{},"l":{},"r":{},"v":{}}}"#,
+        list(frame.bands.iter().map(level).collect()),
+        list(frame.fine.iter().map(level).collect()),
+        list(frame.left.iter().map(wave).collect()),
+        list(frame.right.iter().map(wave).collect()),
+        list(frame.loudness.iter().map(level).collect()),
+    )
 }
 
 #[derive(Serialize)]

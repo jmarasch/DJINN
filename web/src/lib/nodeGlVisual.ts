@@ -32,12 +32,13 @@ uniform float uSlowBass;
 uniform float uSlowMid;
 uniform float uSlowTreble;
 uniform float uTravel;
+uniform float uHue;
 uniform sampler2D uBands;
 uniform sampler2D uPrev;
 const float TAU = 6.2831853;
 
 vec3 palette(float t) {
-    return 0.5 + 0.5 * cos(TAU * (t + vec3(0.72, 0.52, 0.20)));
+    return 0.5 + 0.5 * cos(TAU * (t + uHue + vec3(0.72, 0.52, 0.20)));
 }
 float band(float x) { return texture2D(uBands, vec2(clamp(x, 0.0, 1.0), 0.5)).r; }
 float hash(vec2 p) {
@@ -232,6 +233,7 @@ const UNIFORMS = [
   'uSlowMid',
   'uSlowTreble',
   'uTravel',
+  'uHue',
   'uBands',
   'uPrev',
 ] as const
@@ -246,6 +248,8 @@ interface Program {
  * has shown it can't keep up, or if the style won't build; the caller then
  * falls back to a shape style. */
 export class GlVisual {
+  /** Colors turn slowly (a look's "rainbow"). */
+  rainbow = false
   private gl: WebGLRenderingContext
   private program: Program
   private show: Program
@@ -359,6 +363,7 @@ export class GlVisual {
     gl.uniform1f(u.uSlowBass, sound.slowBass)
     gl.uniform1f(u.uSlowMid, sound.slowMid)
     gl.uniform1f(u.uSlowTreble, sound.slowTreble)
+    gl.uniform1f(u.uHue, this.rainbow ? ((performance.now() - this.started) / 30_000) % 1 : 0)
     gl.uniform1f(u.uTravel, this.style === 'tunnel' ? sound.tunnel : this.style === 'stars' ? sound.stars : 0)
     gl.activeTexture(gl.TEXTURE0)
     gl.bindTexture(gl.TEXTURE_2D, previous)
@@ -395,6 +400,28 @@ export class GlVisual {
     return true
   }
 
+  /** Frees what it put on the graphics chip, keeping the canvas usable for
+   * the next style. */
+  dispose() {
+    const gl = this.gl
+    for (const frame of this.frames) {
+      gl.deleteFramebuffer(frame.buffer)
+      gl.deleteTexture(frame.texture)
+    }
+    this.frames = []
+    gl.deleteTexture(this.bands)
+    gl.deleteBuffer(this.quad)
+    gl.deleteProgram(this.program.id)
+    gl.deleteProgram(this.show.id)
+  }
+
+  /** Lets go of the graphics chip altogether (a page only gets a few at
+   * once); the canvas can't draw again after. */
+  close() {
+    this.dispose()
+    this.gl.getExtension('WEBGL_lose_context')?.loseContext()
+  }
+
   /** Draws a frame. False when it's too much for this box. */
   draw(sound: Smoother, now: number): boolean {
     if (this.gaveUp) return false
@@ -404,8 +431,10 @@ export class GlVisual {
     }
     const gl = this.gl
     const scale = window.devicePixelRatio || 1
-    const width = Math.max(1, Math.round(this.canvas.clientWidth * scale))
-    const height = Math.max(1, Math.round(this.canvas.clientHeight * scale))
+    // On screen it fills its box; off screen (thumbnails) it keeps its size.
+    const shown = this.canvas.isConnected && this.canvas.clientWidth > 0
+    const width = shown ? Math.max(1, Math.round(this.canvas.clientWidth * scale)) : this.canvas.width
+    const height = shown ? Math.max(1, Math.round(this.canvas.clientHeight * scale)) : this.canvas.height
     if (this.canvas.width !== width || this.canvas.height !== height) {
       this.canvas.width = width
       this.canvas.height = height

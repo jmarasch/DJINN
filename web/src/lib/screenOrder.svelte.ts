@@ -42,9 +42,10 @@ export function choose(song: { playing: boolean; timed: boolean }): ScreenPage {
 }
 
 /** Tells the node's page what this one shows, so it draws the visual only
- * when it's wanted. */
-export function announce(page: ScreenPage) {
-  if (framed) window.parent.postMessage({ djinn: 'screen-mode', mode: page }, '*')
+ * when it's wanted, and the song playing, so its visualizers can take turns
+ * with each song. */
+export function announce(page: ScreenPage, song: number | null) {
+  if (framed) window.parent.postMessage({ djinn: 'screen-mode', mode: page, song }, '*')
 }
 
 /** The same screen as another page (`/tv` or `/lyrics`), keeping its settings. */

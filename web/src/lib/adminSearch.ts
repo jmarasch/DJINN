@@ -125,6 +125,7 @@ export const adminEntries: AdminEntry[] = [
   { label: 'When heavy work runs', tab: 'library', keywords: 'background hours idle schedule' },
   { label: 'Artist photos and bios', tab: 'library', keywords: 'pictures wikipedia deezer online', key: 'online_artist_info' },
   { label: 'Rooms', tab: 'rooms', keywords: 'room area zone link speakers party patio kitchen sync timing earlier later delay test sound' },
+  { label: 'Visualizers', tab: 'visuals', keywords: 'visualizer visuals spectrogram node screen rotation cycle' },
   { label: 'Allow nodes to ask to join', tab: 'nodes', keywords: 'node pi raspberry room speaker box join pair', key: 'nodes_join' },
   { label: 'Look up missing lyrics on LRCLIB', tab: 'library', keywords: 'lyrics words lrclib online synced', key: 'lyrics_lookup' },
   { label: 'Lyrics page', tab: 'library', keywords: 'lyrics tv screen /lyrics karaoke', key: 'lyrics_page' },

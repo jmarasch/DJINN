@@ -7,6 +7,7 @@
   import NodeScreenSettings from './NodeScreenSettings.svelte'
   import { toast } from './state.svelte'
   import type { HouseNode, NodeList } from './types'
+  import type { Visuals } from './visuals'
 
   let list = $state<NodeList | null>(null)
   let failed = $state(false)
@@ -16,6 +17,11 @@
   let kicking = $state<HouseNode | null>(null)
   /** The node whose screen settings are open. */
   let screenFor = $state<number | null>(null)
+  /** The house's visualizers, where a node's own start from. */
+  let house = $state<Visuals | null>(null)
+  $effect(() => {
+    if (screenFor !== null && !house) api.visuals().then((v) => (house = v)).catch(() => {})
+  })
 
   async function load() {
     try {
@@ -108,7 +114,7 @@
 
   /** What a screen plugged into the node shows. Kept here on Main, so it
    * can be set while the node is off; it changes within seconds once on. */
-  async function setScreen(node: HouseNode, screen: string, visual: string) {
+  async function setScreen(node: HouseNode, screen: string, visual: Visuals | null) {
     node.audio = { ...node.audio, screen, visual }
     try {
       await api.setNodeAudio(node.id, node.audio)
@@ -225,7 +231,8 @@
         <div class="screen">
           <NodeScreenSettings
             screen={node.audio.screen ?? 'tv'}
-            visual={node.audio.visual ?? 'bars'}
+            visual={node.audio.visual ?? null}
+            start={house}
             onchange={(screen, visual) => setScreen(node, screen, visual)}
           />
         </div>

@@ -7,6 +7,7 @@
   import NodeSpeakerSettings from '../lib/NodeSpeakerSettings.svelte'
   import NodeStage from '../lib/NodeStage.svelte'
   import type { NodeAudio, NodeSpeaker } from '../lib/types'
+  import type { Visuals } from '../lib/visuals'
 
   interface NodeStatus {
     pairing: 'setup' | 'waiting' | 'joined' | 'declined' | 'kicked' | 'changed'
@@ -15,6 +16,8 @@
     main_name: string | null
     /** Main's page for this node's screen (TV or lyrics), once joined. */
     screen?: string | null
+    /** The visualizers Main says this screen draws. */
+    visuals?: Visuals | null
     /** Main DJINNs heard on this network letting nodes join. */
     mains?: { name: string; address: string; joining: boolean }[]
     audio?: { screen?: string } | null
@@ -152,7 +155,7 @@
 {#if onScreen && status?.pairing === 'joined' && status.audio?.screen === 'off'}
   <div class="blank"></div>
 {:else if stageUrl}
-  {#key stageUrl}<NodeStage url={stageUrl} />{/key}
+  {#key stageUrl}<NodeStage url={stageUrl} visuals={status?.visuals ?? null} />{/key}
 {/if}
 
 <main class="narrow" class:wide={managing}>
