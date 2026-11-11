@@ -129,6 +129,8 @@ pub(crate) struct Schedule {
     /// aren't fixed with a skip or a pad (those click); this goes into the
     /// error the speed is eased by instead.
     lag_us: i64,
+    /// Measures what's played, for a screen's visualizer.
+    meter: Option<crate::levels::Meter>,
 }
 
 impl Schedule {
@@ -146,6 +148,18 @@ impl Schedule {
             equalizer: Equalizer::new(rate),
             free_run: false,
             lag_us: 0,
+            meter: None,
+        }
+    }
+
+    /// Measures what's played into `levels`.
+    pub fn measure(&mut self, levels: crate::levels::Levels) {
+        self.meter = Some(crate::levels::Meter::new(self.rate, levels));
+    }
+
+    fn reset_meter(&mut self) {
+        if let Some(meter) = self.meter.as_mut() {
+            meter.reset();
         }
     }
 
@@ -212,11 +226,15 @@ impl Schedule {
                 self.queue.clear();
                 self.next_due = None;
                 self.drift.restart();
+                self.reset_meter();
             }
             Mark::Pause => {
                 if self.paused_at.is_none() {
                     self.paused_at = Some(now);
                     speaker.set_paused(true);
+                    if let Some(meter) = &self.meter {
+                        meter.levels().pause();
+                    }
                 }
             }
             Mark::Resume => {
@@ -229,6 +247,9 @@ impl Schedule {
                         *due += held;
                     }
                     speaker.set_paused(false);
+                    if let Some(meter) = &self.meter {
+                        meter.levels().resume(held);
+                    }
                     self.drift.restart();
                     self.last_measure = None;
                 }
@@ -309,6 +330,7 @@ impl Schedule {
             speaker.insert_silence((due - heard) as f64 / 1e6);
         }
         self.next_due = Some(due);
+        self.reset_meter();
         self.lag_us = 0;
         self.drift.restart();
         self.last_measure = None;
@@ -349,7 +371,11 @@ impl Schedule {
             }
             let n = (chunk.frames() - chunk.pos).min(free).min(room);
             let start = chunk.pos * 2;
-            speaker.write(&chunk.samples[start..start + n * 2]);
+            let samples = &chunk.samples[start..start + n * 2];
+            speaker.write(samples);
+            if let Some(meter) = self.meter.as_mut() {
+                meter.take(samples, due);
+            }
             chunk.pos += n;
             let done = chunk.pos >= chunk.frames();
             self.next_due = Some(due + (n as i64 * 1_000_000) / i64::from(rate));
@@ -384,6 +410,7 @@ impl NodePlayer {
         rate: u32,
         settings: NodeSettings,
         offset: Arc<AtomicI64>,
+        levels: crate::levels::Levels,
     ) -> Result<NodePlayer, EngineError> {
         let (tx, rx) = mpsc::channel();
         let (ready_tx, ready_rx) = mpsc::channel();
@@ -406,6 +433,16 @@ impl NodePlayer {
                 };
                 let mut schedule = Schedule::new(rate, settings.delay_ms, settings.trim);
                 schedule.set(settings, &mut output);
+                levels.set_live(true);
+                // However the thread ends, the screen hears nothing more.
+                struct Quiet(crate::levels::Levels);
+                impl Drop for Quiet {
+                    fn drop(&mut self) {
+                        self.0.set_live(false);
+                    }
+                }
+                schedule.measure(levels.clone());
+                let _quiet = Quiet(levels);
                 loop {
                     loop {
                         match rx.try_recv() {

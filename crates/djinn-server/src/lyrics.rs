@@ -454,6 +454,10 @@ struct PageSnapshot {
     now_playing: NowPlaying,
     player: PlayerState,
     lyrics: Option<LyricsView>,
+    /// Requests waiting, for the page's Coming up.
+    queue: Vec<djinn_store::QueueItem>,
+    /// The join link, for the page's QR code.
+    join_url: String,
 }
 
 #[derive(Deserialize)]
@@ -469,7 +473,9 @@ async fn page(
     Query(query): Query<PageQuery>,
 ) -> ApiResult<Response> {
     check_page(&state).await?;
-    let room = query.room.unwrap_or(djinn_store::MAIN_ROOM);
+    let room = state
+        .rooms
+        .leader(query.room.unwrap_or(djinn_store::MAIN_ROOM));
     let (now_playing, player) = {
         let jukebox = state.sound_jukebox_for(room);
         let jukebox = jukebox.lock().await;
@@ -491,6 +497,8 @@ async fn page(
         now_playing,
         player,
         lyrics,
+        queue: state.store.queue(room).await?,
+        join_url: state.join_url.get(),
     })
     .into_response())
 }

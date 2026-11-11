@@ -634,8 +634,16 @@ async fn party_headers(State(state): State<AppState>, request: Request, next: Ne
         request.headers(),
         &state.go.proxies(),
     );
+    let screen = security::SCREEN_PAGES.contains(&request.uri().path());
     let mut response = next.run(request).await;
-    security::set_headers(response.headers_mut(), security::PARTY_CSP, origin.https);
+    if screen {
+        security::set_headers(response.headers_mut(), security::SCREEN_CSP, origin.https);
+        response
+            .headers_mut()
+            .remove(axum::http::header::X_FRAME_OPTIONS);
+    } else {
+        security::set_headers(response.headers_mut(), security::PARTY_CSP, origin.https);
+    }
     response
 }
 
@@ -726,6 +734,28 @@ mod tests {
             assert!(response.headers().contains_key(name), "{name}");
         }
         assert!(!response.headers().contains_key("strict-transport-security"));
+    }
+
+    #[tokio::test]
+    async fn only_screen_pages_may_be_framed_and_only_by_a_node_page() {
+        let headers = |path: &'static str| async move {
+            app(AppState::for_tests().await)
+                .oneshot(Request::get(path).body(Body::empty()).unwrap())
+                .await
+                .unwrap()
+                .headers()
+                .clone()
+        };
+        let tv = headers("/tv").await;
+        assert!(!tv.contains_key("x-frame-options"));
+        let csp = tv["content-security-policy"].to_str().unwrap().to_owned();
+        assert!(csp.contains("frame-ancestors 'self' http://localhost:8066"));
+        let home = headers("/").await;
+        assert_eq!(home["x-frame-options"], "DENY");
+        assert!(home["content-security-policy"]
+            .to_str()
+            .unwrap()
+            .contains("frame-ancestors 'none'"));
     }
 
     #[tokio::test]

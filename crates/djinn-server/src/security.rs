@@ -130,6 +130,16 @@ pub const PARTY_CSP: HeaderValue = HeaderValue::from_static(
      connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; \
      frame-ancestors 'none'",
 );
+/// The TV and lyrics pages: the same, but a node's own page (on the box
+/// itself) may show them in a frame, over its visualizer.
+pub const SCREEN_CSP: HeaderValue = HeaderValue::from_static(
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; \
+     img-src 'self' data: blob: https://images.unsplash.com; media-src 'self' blob:; \
+     connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; \
+     frame-ancestors 'self' http://localhost:8066 http://127.0.0.1:8066",
+);
+/// Pages a node's screen shows in a frame.
+pub const SCREEN_PAGES: [&str; 2] = ["/tv", "/lyrics"];
 /// The same for DJINN GO's page.
 pub const GO_CSP: HeaderValue = HeaderValue::from_static(
     "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; \

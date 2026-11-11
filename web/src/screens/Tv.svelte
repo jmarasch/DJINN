@@ -2,6 +2,7 @@
   // Full-screen now playing for a TV or spare tablet: no sign-in, read only.
   import { onMount } from 'svelte'
   import { followNodeScreen } from '../lib/screenFollow'
+  import { announce, choose, order, pageUrl } from '../lib/screenOrder.svelte'
   import ArtistSlideshow from '../lib/ArtistSlideshow.svelte'
   import { duration } from '../lib/format'
   import { reloadIfUpdated } from '../lib/state.svelte'
@@ -72,6 +73,7 @@
       streamUrl = data.stream_url
       error = null
       listen()
+      setTimeout(() => (settled = true), 2500)
       if (casting && !soundOn) setTimeout(toggleSound, 0)
     } catch {
       error = 'Cannot reach the jukebox. Retrying...'
@@ -186,6 +188,16 @@
   })
 
   const current = $derived(nowPlaying.current)
+
+  /** On a node's screen with an order (`screenOrder`): the feed has answered
+   * and the node has had a moment to say whether it has sound. */
+  let settled = $state(false)
+  $effect(() => {
+    if (!order.length || !settled) return
+    const page = choose({ playing: !!current, timed: current?.track.lyrics === 2 })
+    if (page === 'tv') announce('tv')
+    else location.replace(pageUrl('lyrics'))
+  })
 
   // Pictures of the artist playing, when the host has slideshows on.
   let pictures = $state<ArtistPicture[]>([])

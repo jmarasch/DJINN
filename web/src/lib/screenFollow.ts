@@ -4,10 +4,11 @@
 
 const NODE_PAGE = 'http://localhost:8066/node?screen=1'
 
-/** Starts checking if this page is on a node's screen; returns how to stop. */
+/** Starts checking if this page is on a node's screen; returns how to stop.
+ * In a frame on the node's own page, that page follows the setting itself. */
 export function followNodeScreen(): () => void {
   const node = new URLSearchParams(location.search).get('screen_for')
-  if (!node) return () => {}
+  if (!node || window.parent !== window) return () => {}
   const timer = setInterval(async () => {
     try {
       const res = await fetch(`/api/nodes/${encodeURIComponent(node)}/screen`)
@@ -15,8 +16,14 @@ export function followNodeScreen(): () => void {
       if (res.status === 404) return location.replace(NODE_PAGE)
       if (!res.ok) return
       const { url } = (await res.json()) as { url: string | null }
-      if (!url) location.replace(NODE_PAGE)
-      else if (url !== location.href) location.replace(url)
+      if (!url) return location.replace(NODE_PAGE)
+      // A page with an order switches between the TV and lyrics pages
+      // itself, so only a change of setting (the query) counts.
+      const to = new URL(url)
+      const same = to.searchParams.has('order')
+        ? to.search === location.search
+        : to.pathname + to.search === location.pathname + location.search
+      if (!same) location.replace(url)
     } catch {
       // Main is away; the page's own retry shows that.
     }

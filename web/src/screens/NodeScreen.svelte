@@ -5,6 +5,7 @@
   import { onMount } from 'svelte'
   import NodeDiagnostics from '../lib/NodeDiagnostics.svelte'
   import NodeSpeakerSettings from '../lib/NodeSpeakerSettings.svelte'
+  import NodeStage from '../lib/NodeStage.svelte'
   import type { NodeAudio, NodeSpeaker } from '../lib/types'
 
   interface NodeStatus {
@@ -12,7 +13,7 @@
     name: string
     main: string | null
     main_name: string | null
-    /** Main's TV page for this node's room, once joined. */
+    /** Main's page for this node's screen (TV or lyrics), once joined. */
     screen?: string | null
     /** Main DJINNs heard on this network letting nodes join. */
     mains?: { name: string; address: string; joining: boolean }[]
@@ -30,6 +31,8 @@
   }
 
   let status = $state<NodeStatus | null>(null)
+  /** Main's page this screen shows, once joined. */
+  let stageUrl = $state<string | null>(null)
   let unreachable = $state(false)
   let address = $state('')
   let name = $state('')
@@ -101,9 +104,9 @@
       if (!res.ok) throw new Error()
       status = await res.json()
       unreachable = false
-      // On the box's own screen (the kiosk opens /screen): show Main's TV
-      // page once joined.
-      if (onScreen && status?.pairing === 'joined' && status.screen) location.replace(status.screen)
+      // On the box's own screen (the kiosk opens /screen): Main's page for
+      // it once joined, in a frame over this node's visualizer (`NodeStage`).
+      stageUrl = onScreen && status?.pairing === 'joined' && status.screen ? status.screen : null
       if (!name && status) name = status.name
     } catch {
       unreachable = true
@@ -148,6 +151,8 @@
 
 {#if onScreen && status?.pairing === 'joined' && status.audio?.screen === 'off'}
   <div class="blank"></div>
+{:else if stageUrl}
+  {#key stageUrl}<NodeStage url={stageUrl} />{/key}
 {/if}
 
 <main class="narrow" class:wide={managing}>

@@ -187,6 +187,8 @@ pub struct Node {
     /// Since when Main hasn't answered check-ins, and the last search for it.
     lost_since: Arc<Mutex<Option<std::time::Instant>>>,
     searched_at: Arc<Mutex<Option<std::time::Instant>>>,
+    /// What the speaker plays, measured for the screen's visualizer.
+    levels: djinn_engine::Levels,
 }
 
 /// After a failed update, how long before trying again.
@@ -251,6 +253,7 @@ impl Node {
             update_failed: Arc::default(),
             lost_since: Arc::default(),
             searched_at: Arc::default(),
+            levels: djinn_engine::Levels::new(),
         })
     }
 
@@ -965,8 +968,9 @@ impl Node {
             let offset = Arc::clone(&self.offset);
             let settings = node_settings(audio.as_ref());
             let wanted = device.clone();
+            let levels = self.levels.clone();
             let started = tokio::task::spawn_blocking(move || {
-                djinn_engine::NodePlayer::start(wanted, rate, settings, offset)
+                djinn_engine::NodePlayer::start(wanted, rate, settings, offset, levels)
             })
             .await?;
             self.report_speakers(main, pin).await;
@@ -1517,8 +1521,39 @@ pub fn router(node: Node) -> Router {
         .route("/api/node/log", get(log_lines))
         .route("/api/node/log/file", get(log_file))
         .route("/api/node/restart", post(restart))
+        .route("/api/node/levels", get(levels))
         .fallback(crate::web::static_handler)
         .with_state(node)
+}
+
+/// How often the screen gets the sound's levels.
+const LEVELS_EVERY: Duration = Duration::from_millis(33);
+
+/// The sound as this node's speaker plays it, for the screen's visualizer:
+/// each event is the bands heard now (0 to 255, deep to high), or `null`
+/// while no speaker is open. Nothing private, so no sign-in.
+async fn levels(
+    State(node): State<Node>,
+) -> axum::response::sse::Sse<
+    impl futures_util::Stream<Item = Result<axum::response::sse::Event, std::convert::Infallible>>,
+> {
+    use futures_util::StreamExt;
+    let mut ticks = tokio::time::interval(LEVELS_EVERY);
+    ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let stream = tokio_stream::wrappers::IntervalStream::new(ticks).map(move |_| {
+        let data = if node.levels.live() {
+            let bands = node.levels.at(djinn_engine::clock::now_micros());
+            let parts: Vec<String> = bands
+                .iter()
+                .map(|b| ((b * 255.0).round() as u8).to_string())
+                .collect();
+            format!("[{}]", parts.join(","))
+        } else {
+            "null".to_owned()
+        };
+        Ok(axum::response::sse::Event::default().data(data))
+    });
+    axum::response::sse::Sse::new(stream)
 }
 
 #[derive(Serialize)]

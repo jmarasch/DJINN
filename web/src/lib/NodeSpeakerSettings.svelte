@@ -3,6 +3,7 @@
   // do when Main is gone. Used in Admin > Nodes and on the node's own page;
   // both save to Main, which keeps them.
   import EqualizerPanel from './EqualizerPanel.svelte'
+  import NodeScreenSettings from './NodeScreenSettings.svelte'
   import type { EqualizerSettings, NodeAudio, NodeSpeaker } from './types'
 
   let {
@@ -35,6 +36,7 @@
   }
 
   const deviceId = $derived(draft.device ?? '')
+
 </script>
 
 <div class="speaker">
@@ -75,21 +77,15 @@
       <option value="cached">Play what's loaded, then keep playing cached songs</option>
     </select>
   </label>
-  <label>
-    On a screen plugged into this box
-    <select
-      value={draft.screen ?? 'tv'}
-      onchange={(e) => {
-        draft.screen = e.currentTarget.value as NodeAudio['screen']
-        changed(0)
-      }}
-    >
-      <option value="tv">TV page (what's playing and the queue)</option>
-      <option value="lyrics">Lyrics</option>
-      <option value="status">This node's status</option>
-      <option value="off">Nothing (blank screen)</option>
-    </select>
-  </label>
+  <NodeScreenSettings
+    screen={draft.screen ?? 'tv'}
+    visual={draft.visual ?? 'bars'}
+    onchange={(screen, visual) => {
+      draft.screen = screen
+      draft.visual = visual
+      changed(0)
+    }}
+  />
   <p class="small muted">Only for a box installed with a screen. A screen already on changes within a few seconds.</p>
   <label class="check">
     <input

@@ -17,6 +17,7 @@ mod equalizer;
 mod error;
 mod features;
 mod fingerprint;
+mod levels;
 mod loudness;
 mod mixdown;
 mod node_player;
@@ -41,6 +42,7 @@ pub use features::{
     FEATURES_VERSION, FEATURE_COUNT, PRINT_LEN, PRINT_VERSION,
 };
 pub use fingerprint::fingerprint;
+pub use levels::{Levels, BANDS as LEVEL_BANDS};
 pub use loudness::{measure_loudness, Loudness, REFERENCE_LUFS};
 pub use node_player::{NodePlayer, NodeSettings};
 pub use player::MAX_CROSSFADE_SECS;

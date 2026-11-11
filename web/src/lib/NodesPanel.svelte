@@ -4,8 +4,9 @@
   // admin's password after checking its code matches the node's screen.
   import { onMount } from 'svelte'
   import { api } from './api'
+  import NodeScreenSettings from './NodeScreenSettings.svelte'
   import { toast } from './state.svelte'
-  import type { HouseNode, NodeAudio, NodeList } from './types'
+  import type { HouseNode, NodeList } from './types'
 
   let list = $state<NodeList | null>(null)
   let failed = $state(false)
@@ -13,7 +14,8 @@
   let accepting = $state<HouseNode | null>(null)
   let password = $state('')
   let kicking = $state<HouseNode | null>(null)
-  /** The node whose speaker settings are open. */
+  /** The node whose screen settings are open. */
+  let screenFor = $state<number | null>(null)
 
   async function load() {
     try {
@@ -93,22 +95,27 @@
   // Nodes check in every 5 seconds.
   const online = (node: HouseNode) => !!node.last_seen && Date.now() - node.last_seen < 30_000
 
-  const screens: { value: NonNullable<NodeAudio['screen']>; label: string }[] = [
-    { value: 'tv', label: 'TV page' },
-    { value: 'lyrics', label: 'Lyrics' },
-    { value: 'status', label: "The node's status" },
-    { value: 'off', label: 'Nothing (blank)' },
-  ]
+  const PAGE_NAMES: Record<string, string> = { lyrics: 'Timed lyrics', visual: 'Visualizer', tv: 'TV page' }
+  /** A screen setting in a few words. */
+  function screenName(screen: string | undefined): string {
+    if (screen === 'status') return "The node's status"
+    if (screen === 'off') return 'Nothing (blank)'
+    return (screen ?? 'tv')
+      .split(',')
+      .map((p) => PAGE_NAMES[p] ?? p)
+      .join(', then ')
+  }
 
   /** What a screen plugged into the node shows. Kept here on Main, so it
    * can be set while the node is off; it changes within seconds once on. */
-  async function setScreen(node: HouseNode, screen: NonNullable<NodeAudio['screen']>) {
+  async function setScreen(node: HouseNode, screen: string, visual: string) {
+    node.audio = { ...node.audio, screen, visual }
     try {
-      await api.setNodeAudio(node.id, { ...node.audio, screen })
-      toast(`${node.name}'s screen: ${screens.find((s) => s.value === screen)?.label ?? screen}`)
+      await api.setNodeAudio(node.id, node.audio)
       await load()
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Could not save', true)
+      await load()
     }
   }
 </script>
@@ -192,15 +199,12 @@
               : ''}{node.version ? ` · ${node.version}` : ''}
           </span>
         </div>
-        <label class="screen small">
-          Screen
-          <select
-            value={node.audio.screen ?? 'tv'}
-            onchange={(e) => setScreen(node, e.currentTarget.value as NonNullable<NodeAudio['screen']>)}
-          >
-            {#each screens as s (s.value)}<option value={s.value}>{s.label}</option>{/each}
-          </select>
-        </label>
+        <button
+          title="What a screen plugged into this node shows"
+          onclick={() => (screenFor = screenFor === node.id ? null : node.id)}
+        >
+          Screen: {screenName(node.audio.screen)}
+        </button>
         <button
           title={online(node)
             ? "Opens the node's own page, where its speaker, timing and other settings are"
@@ -217,6 +221,15 @@
           <button onclick={() => (kicking = node)}>Kick</button>
         {/if}
       </div>
+      {#if screenFor === node.id}
+        <div class="screen">
+          <NodeScreenSettings
+            screen={node.audio.screen ?? 'tv'}
+            visual={node.audio.visual ?? 'bars'}
+            onchange={(screen, visual) => setScreen(node, screen, visual)}
+          />
+        </div>
+      {/if}
       {#if kicking?.id === node.id}
         <p class="small muted">
           {node.name} is shut out at once and wipes every cached song, now if it's connected or when it next starts.
@@ -228,9 +241,7 @@
 
 <style>
   .screen {
-    display: flex;
-    align-items: center;
-    gap: 6px;
+    margin: 4px 0 12px;
   }
 
   .node {

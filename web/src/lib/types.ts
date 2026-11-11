@@ -1370,8 +1370,11 @@ export interface NodeAudio {
   offline: 'stop' | 'cached'
   /** Plays straight through instead of correcting itself against Main. */
   free_run?: boolean
-  /** What a screen plugged into the node shows. */
-  screen?: 'tv' | 'lyrics' | 'status' | 'off'
+  /** What a screen plugged into the node shows: 'status', 'off', or pages
+   * to try in order ('lyrics', 'visual', 'tv') joined by commas. */
+  screen?: string
+  /** How the node's visualizer draws: 'bars', 'ring' or 'mirror'. */
+  visual?: string
   /** Songs, playing and coming up, the node keeps copies of. */
   cache_ahead?: number
 }

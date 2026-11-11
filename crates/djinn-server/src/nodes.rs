@@ -236,9 +236,13 @@ pub struct AudioSettings {
     /// Plays straight through instead of correcting itself against Main.
     #[serde(default)]
     pub free_run: bool,
-    /// What a screen plugged into it shows: `SCREENS`.
+    /// What a screen plugged into it shows: "status", "off", or pages from
+    /// `SCREEN_PAGES` to try in order, joined by commas.
     #[serde(default = "default_screen")]
     pub screen: String,
+    /// How its visualizer draws: `VISUALS`.
+    #[serde(default = "default_visual")]
+    pub visual: String,
     /// Songs, playing and coming up, it keeps copies of (1 to 50).
     #[serde(default = "default_cache_ahead")]
     pub cache_ahead: i64,
@@ -248,11 +252,40 @@ fn default_cache_ahead() -> i64 {
     12
 }
 
-/// What a node's screen can show.
-const SCREENS: &[&str] = &["tv", "lyrics", "status", "off"];
+/// Pages a node's screen can show, tried in the order its setting gives:
+/// timed lyrics while the song has them, the visualizer while the node's
+/// speaker is playing, and Main's TV page.
+const SCREEN_PAGES: &[&str] = &["lyrics", "visual", "tv"];
+/// The visualizer's looks.
+const VISUALS: &[&str] = &["bars", "ring", "mirror"];
 
 fn default_screen() -> String {
     "tv".to_owned()
+}
+
+fn default_visual() -> String {
+    "bars".to_owned()
+}
+
+/// The pages a screen setting tries, in order; None for the node's own page
+/// ("status") or a blank screen ("off").
+fn screen_order(screen: &str) -> Option<Vec<&str>> {
+    if matches!(screen, "status" | "off") {
+        return None;
+    }
+    Some(screen.split(',').map(str::trim).collect())
+}
+
+fn valid_screen(screen: &str) -> bool {
+    let Some(order) = screen_order(screen) else {
+        return true;
+    };
+    !order.is_empty()
+        && order.iter().all(|page| SCREEN_PAGES.contains(page))
+        && order
+            .iter()
+            .enumerate()
+            .all(|(i, page)| !order[..i].contains(page))
 }
 
 impl AudioSettings {
@@ -269,6 +302,7 @@ impl AudioSettings {
             offline: node.offline.clone(),
             free_run: node.free_run,
             screen: node.screen.clone(),
+            visual: node.visual.clone(),
             cache_ahead: node.cache_ahead,
         }
     }
@@ -283,7 +317,7 @@ async fn save_audio(state: &AppState, id: i64, audio: &AudioSettings) -> ApiResu
             "those speaker settings are out of range",
         ));
     }
-    if !SCREENS.contains(&audio.screen.as_str()) {
+    if !valid_screen(&audio.screen) || !VISUALS.contains(&audio.visual.as_str()) {
         return Err(ApiError::bad_request(
             "that's not something a screen can show",
         ));
@@ -305,6 +339,7 @@ async fn save_audio(state: &AppState, id: i64, audio: &AudioSettings) -> ApiResu
                 offline: &audio.offline,
                 free_run: audio.free_run,
                 screen: &audio.screen,
+                visual: &audio.visual,
                 cache_ahead: audio.cache_ahead,
             },
         )
@@ -398,18 +433,28 @@ pub const NODE_VERSION_HEADER: &str = "x-djinn-version";
 /// The page on Main that a node's screen should show, or None for the
 /// node's own page. Pages opened this way check back (`screen_of`), so a
 /// change of setting reaches a screen already showing one.
+/// With more than one page to try, or the visualizer, the page carries the
+/// order (and the visualizer's looks) and switches between them itself.
 fn screen_url(state: &AppState, node: &Node) -> Option<String> {
-    let page = match node.screen.as_str() {
-        "tv" => "tv",
-        "lyrics" => "lyrics",
-        _ => return None,
+    let order = screen_order(&node.screen)?;
+    let page = if order.first() == Some(&"tv") {
+        "tv"
+    } else {
+        "lyrics"
     };
-    Some(format!(
+    let mut url = format!(
         "{}/{page}?room={}&screen_for={}",
         state.join_url.base(),
         node.room_id,
         node.id
-    ))
+    );
+    if order.len() > 1 || order.contains(&"visual") {
+        url.push_str(&format!("&order={}", order.join(",")));
+    }
+    if order.contains(&"visual") {
+        url.push_str(&format!("&visual={}", node.visual));
+    }
+    Some(url)
 }
 
 #[derive(Serialize)]
@@ -990,6 +1035,33 @@ mod tests {
             .contains("/lyrics?room=1"));
         assert_eq!(screen_url(&state, &with("status")), None);
         assert_eq!(screen_url(&state, &with("off")), None);
+        // An order: the first page that isn't the TV, which switches itself.
+        assert_eq!(
+            screen_url(&state, &with("lyrics,visual,tv")).unwrap(),
+            format!(
+                "http://main:8066/lyrics?room=1&screen_for={id}&order=lyrics,visual,tv&visual=bars"
+            )
+        );
+        assert!(screen_url(&state, &with("tv,lyrics"))
+            .unwrap()
+            .contains("/tv?room=1&screen_for=1&order=tv,lyrics"));
+    }
+
+    #[test]
+    fn screen_settings_are_checked() {
+        for good in [
+            "tv",
+            "lyrics",
+            "status",
+            "off",
+            "lyrics,visual,tv",
+            "visual",
+        ] {
+            assert!(valid_screen(good), "{good}");
+        }
+        for bad in ["", "lyrics,lyrics", "status,tv", "radio", "tv,"] {
+            assert!(!valid_screen(bad), "{bad}");
+        }
     }
 
     #[tokio::test]
