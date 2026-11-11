@@ -53,6 +53,12 @@ export const STYLES: StyleInfo[] = [
   { style: 'vu', name: 'VU meters', about: 'Two needle meters, left and right, like an old amplifier.', chip: false },
   { style: 'circle', name: 'Circle', about: 'The wave wrapped around a ring that swells with the bass.', chip: false },
   { style: 'particles', name: 'Particles', about: 'Sparks thrown out from the middle, a burst on every beat.', chip: false },
+  {
+    style: 'terrain',
+    name: 'Terrain',
+    about: 'A checkerboard of glowing pillars: bass in the middle, treble at the edges, rolling into the distance.',
+    chip: false,
+  },
   { style: 'warp', name: 'Warp', about: 'Swirling trails, each frame fed into the next.', chip: true },
   { style: 'tunnel', name: 'Tunnel', about: 'Flying down a tunnel that rings with the music.', chip: true },
   { style: 'plasma', name: 'Plasma', about: 'Flowing color that bends with bass and mids.', chip: true },

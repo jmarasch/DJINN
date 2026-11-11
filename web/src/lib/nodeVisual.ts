@@ -14,6 +14,7 @@ export type ShapeStyle =
   | 'vu'
   | 'circle'
   | 'particles'
+  | 'terrain'
 export type GlStyle = 'warp' | 'tunnel' | 'plasma' | 'kaleidoscope' | 'nebula' | 'stars'
 export type VisualStyle = ShapeStyle | GlStyle
 
@@ -152,6 +153,15 @@ function hslToRgb(turn: number): number[] {
   return [r, g, b].map((v) => Math.round(70 + v * 185))
 }
 
+/** Terrain: pillars across and rows deep, seconds between rows, and the
+ * tallest a pillar grows (in pillar widths). */
+const TERRAIN_COLS = 37
+/** Pillars across the front row that fit the screen; the rest show further back. */
+const TERRAIN_SEEN = 21
+const TERRAIN_ROWS = 18
+const TERRAIN_ROW_SECS = 0.09
+const TERRAIN_HEIGHT = 4.5
+
 /** How long rainbow colors take to go all the way around. */
 const RAINBOW_MS = 30_000
 
@@ -200,6 +210,13 @@ export class ShapeVisual {
   private sparks: Spark[] = []
   private lastDraw = 0
   private scrolled = 0
+  /** Terrain: past moments' heights, newest first, and how many rows have
+   * gone by (for the checkerboard), the part of a row it has rolled, and
+   * the beats' ripples (their ages in seconds). */
+  private rows: number[][] = []
+  private rowSerial = 0
+  private rowRoll = 0
+  private ripples: number[] = []
 
   constructor(
     private ctx: CanvasRenderingContext2D,
@@ -230,6 +247,7 @@ export class ShapeVisual {
     if (this.style === 'mountain') return this.mountain(sound)
     if (this.style === 'vu') return this.vu(sound)
     if (this.style === 'circle') return this.circle(sound, now)
+    if (this.style === 'terrain') return this.terrain(sound, elapsed)
     if (this.style === 'ring') return this.ring(sound)
     this.bars(sound)
   }
@@ -495,6 +513,125 @@ export class ShapeVisual {
       ctx.lineWidth = Math.max(2, height / 220) * (1 + sound.bass)
       ctx.strokeStyle = this.hue(turn * 0.2 + scale * 0.3, 65, alpha)
       ctx.stroke()
+    }
+  }
+
+  /** A checkerboard of pillars seen in perspective: bass rises in the
+   * middle, treble towards the edges, each moment starts in the front row
+   * and rolls away into the distance, and beats send a ripple of light out
+   * across it. */
+  private terrain(sound: Smoother, elapsed: number) {
+    const ctx = this.ctx
+    const { width, height } = ctx.canvas
+    const cols = TERRAIN_COLS
+    const center = (cols - 1) / 2
+    const bands = sound.bands
+    if (!bands.length) return
+    // A new row every so often; the rest roll back smoothly in between.
+    this.rowRoll += elapsed / TERRAIN_ROW_SECS
+    while (this.rowRoll >= 1 || !this.rows.length) {
+      this.rowRoll = this.rows.length ? this.rowRoll - 1 : 0
+      const row = Array.from({ length: cols }, (_, c) => {
+        const band = Math.round((Math.abs(c - center) / center) * (bands.length - 1))
+        const v = bands[band] ?? 0
+        return v * v
+      })
+      this.rows.unshift(row)
+      this.rowSerial++
+      if (this.rows.length > TERRAIN_ROWS) this.rows.pop()
+    }
+    // The front row follows the sound as it is now.
+    this.rows[0] = this.rows[0].map((was, c) => {
+      const band = Math.round((Math.abs(c - center) / center) * (bands.length - 1))
+      const v = bands[band] ?? 0
+      return Math.max(was * 0.6, v * v)
+    })
+    if (sound.beat > 0.95 && (this.ripples[0] ?? 1) > 0.15) this.ripples.unshift(0)
+    this.ripples = this.ripples.map((age) => age + elapsed).filter((age) => age < 1.6)
+
+    const sky = ctx.createLinearGradient(0, 0, 0, height)
+    sky.addColorStop(0, 'rgb(6 4 14)')
+    sky.addColorStop(0.32, this.hue(0.72, 14))
+    sky.addColorStop(1, 'rgb(4 3 10)')
+    ctx.fillStyle = sky
+    ctx.fillRect(0, 0, width, height)
+
+    // The front row spans the width at the bottom of the screen; the camera
+    // is set high enough for that, looking down into the field.
+    const horizon = height * 0.34
+    const near = 3
+    const focal = (width * 0.52 * near) / (TERRAIN_SEEN / 2)
+    const camera = ((height * 0.97 - horizon) * (near - 0.44)) / focal
+    const point = (x: number, y: number, z: number): [number, number] => [
+      width / 2 + (x * focal) / z,
+      horizon + ((camera - y) * focal) / z,
+    ]
+    const face = (corners: [number, number, number][], color: string) => {
+      ctx.beginPath()
+      corners.forEach(([x, y, z], i) => {
+        const [sx, sy] = point(x, y, z)
+        if (i === 0) ctx.moveTo(sx, sy)
+        else ctx.lineTo(sx, sy)
+      })
+      ctx.closePath()
+      ctx.fillStyle = color
+      ctx.fill()
+    }
+    // Far rows first; in each row, the outside in, so nearer sides cover.
+    const order = Array.from({ length: cols }, (_, c) => c).sort(
+      (a, b) => Math.abs(b - center) - Math.abs(a - center),
+    )
+    for (let r = this.rows.length - 1; r >= 0; r--) {
+      const z = near + r + this.rowRoll
+      const fog = 1 - (r + this.rowRoll) / (TERRAIN_ROWS + 1)
+      const row = this.rows[r]
+      for (const c of order) {
+        const v = row[c]
+        const x = c - center
+        const h = 0.06 + v * TERRAIN_HEIGHT
+        const [x0, x1, zf, zb] = [x - 0.44, x + 0.44, z - 0.44, z + 0.44]
+        const distance = Math.hypot(x, r + this.rowRoll + 1)
+        const glow = this.ripples.reduce(
+          (sum, age) => sum + Math.exp(-((distance - age * 14) ** 2) / 3) * (1 - age / 1.6),
+          0,
+        )
+        const checker = (c + this.rowSerial - r) % 2 === 0 ? 1 : 0.7
+        const light = Math.min(85, (14 + v * 52 + glow * 30) * fog * checker + 4)
+        const t = 0.74 - (Math.abs(x) / center) * 0.42
+        // The side that faces the middle, then the front, then the top.
+        if (x !== 0) {
+          const side = x < 0 ? x1 : x0
+          face(
+            [
+              [side, 0, zf],
+              [side, 0, zb],
+              [side, h, zb],
+              [side, h, zf],
+            ],
+            this.hue(t, light * 0.55),
+          )
+        }
+        face(
+          [
+            [x0, 0, zf],
+            [x1, 0, zf],
+            [x1, h, zf],
+            [x0, h, zf],
+          ],
+          this.hue(t, light * 0.8),
+        )
+        if (h < camera) {
+          face(
+            [
+              [x0, h, zf],
+              [x1, h, zf],
+              [x1, h, zb],
+              [x0, h, zb],
+            ],
+            this.hue(t, light),
+          )
+        }
+      }
     }
   }
 

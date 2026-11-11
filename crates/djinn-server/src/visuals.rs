@@ -31,6 +31,7 @@ pub const STYLES: &[&str] = &[
     "vu",
     "circle",
     "particles",
+    "terrain",
     "warp",
     "tunnel",
     "plasma",
