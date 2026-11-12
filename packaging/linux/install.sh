@@ -135,7 +135,7 @@ fi
 install -Dm755 "$built" "$bin"
 install -Dm644 "$png" "$icon"
 mkdir -p "$(dirname "$desktop")"
-sed -e "s|@BIN@|$bin|" -e "s|@LOG@|$conf/djinn/djinn.log|" \
+sed -e "s|@BIN@|$bin|" -e "s|@LOG@|$conf/djinn/djinn.log|" -e "s|@ICON@|$icon|" \
     "$template" > "$desktop"
 echo "Installed $("$bin" --version 2>/dev/null || echo DJINN) to $bin and added DJINN to the app menu."
 

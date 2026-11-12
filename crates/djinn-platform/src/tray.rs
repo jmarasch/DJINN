@@ -291,15 +291,76 @@ mod session {
 
 const ICON_SIZE: u32 = 64;
 
-/// The DJINN icon on a dark rounded square, as 64 x 64 RGBA
-/// (the same picture as `web/public/icon-512.png`), stored as raw pixels so
-/// no image decoder is needed. Made with ImageMagick:
-/// `convert icon.png -depth 8 rgba:tray-icon-64.rgba`.
-static ICON_PIXELS: &[u8; 64 * 64 * 4] = include_bytes!("tray-icon-64.rgba");
-
+/// The DJINN mark as RGBA (the web app's small favicon: two grooves of a
+/// record opening into a waveform, on a dark rounded square), drawn here so
+/// no image decoder is needed. Shapes are distances in the favicon's 80-unit
+/// box (-8..72), so edges are antialiased at any size.
 fn icon_rgba(size: u32) -> Vec<u8> {
-    debug_assert_eq!(size, ICON_SIZE);
-    ICON_PIXELS.to_vec()
+    const BG: [u8; 3] = [0x14, 0x11, 0x1f];
+    const RING: [u8; 3] = [0xb4, 0x8c, 0xff];
+    const BAR: [u8; 3] = [0x3f, 0xe0, 0xcf];
+    const CENTER: (f32, f32) = (25.0, 32.0);
+    /// Groove radius and the half-angle (degrees) left open on the right.
+    const GROOVES: [(f32, f32); 2] = [(12.0, 58.0), (20.0, 40.0)];
+    const GROOVE_HALF: f32 = 2.5;
+    const HUB: f32 = 5.5;
+    /// Bar x and height, centered on y = 32.
+    const BARS: [(f32, f32); 4] = [(34.0, 30.0), (42.0, 46.0), (50.0, 26.0), (58.0, 12.0)];
+    const BAR_HALF: f32 = 2.75;
+    /// Space kept clear around the bars, so they stand apart from the grooves.
+    const PARTING: f32 = 1.5;
+
+    let unit = size as f32 / 80.0;
+    // Coverage of a shape whose edge is `d` units away (negative inside).
+    let coverage = |d: f32| (0.5 - d * unit).clamp(0.0, 1.0);
+    let groove = |x: f32, y: f32, (r, open): (f32, f32)| {
+        let (dx, dy) = (x - CENTER.0, CENTER.1 - y);
+        let open = open.to_radians();
+        if dy.atan2(dx).abs() <= open {
+            // In the opening: distance to the nearer end of the arc.
+            let ex = CENTER.0 + r * open.cos();
+            let ey = r * open.sin();
+            ((x - ex).powi(2) + (dy.abs() - ey).powi(2)).sqrt() - GROOVE_HALF
+        } else {
+            ((dx * dx + dy * dy).sqrt() - r).abs() - GROOVE_HALF
+        }
+    };
+    let bars = |x: f32, y: f32| {
+        BARS.iter()
+            .map(|&(bx, h)| {
+                let dy = ((y - 32.0).abs() - h / 2.0).max(0.0);
+                ((x - bx).powi(2) + dy * dy).sqrt() - BAR_HALF
+            })
+            .fold(f32::MAX, f32::min)
+    };
+    let blend = |under: [u8; 3], over: [u8; 3], amount: f32| {
+        let mut out = [0u8; 3];
+        for c in 0..3 {
+            let v = f32::from(under[c]) * (1.0 - amount) + f32::from(over[c]) * amount;
+            out[c] = v.round() as u8;
+        }
+        out
+    };
+
+    let mut rgba = Vec::with_capacity((size * size * 4) as usize);
+    for py in 0..size {
+        for px in 0..size {
+            let x = (px as f32 + 0.5) / unit - 8.0;
+            let y = (py as f32 + 0.5) / unit - 8.0;
+            // Rounded square, 18 units at the corners.
+            let qx = ((x - 32.0).abs() - 22.0).max(0.0);
+            let qy = ((y - 32.0).abs() - 22.0).max(0.0);
+            let square = coverage((qx * qx + qy * qy).sqrt() - 18.0);
+            let to_bars = bars(x, y);
+            let hub = ((x - CENTER.0).powi(2) + (y - CENTER.1).powi(2)).sqrt() - HUB;
+            let rings = GROOVES.iter().map(|&g| groove(x, y, g)).fold(hub, f32::min);
+            let ring = coverage(rings) * (1.0 - coverage(to_bars - PARTING));
+            let color = blend(blend(BG, RING, ring), BAR, coverage(to_bars));
+            rgba.extend_from_slice(&color);
+            rgba.push((square * 255.0).round() as u8);
+        }
+    }
+    rgba
 }
 
 #[cfg(test)]
@@ -307,12 +368,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn icon_is_square_with_transparent_corners_and_a_solid_middle() {
-        let size = ICON_SIZE;
+    fn icon_has_hub_grooves_bars_and_transparent_corners() {
+        let size = 64;
         let px = icon_rgba(size);
         assert_eq!(px.len(), (size * size * 4) as usize);
-        let alpha = |x: u32, y: u32| px[((y * size + x) * 4 + 3) as usize];
-        assert_eq!(alpha(0, 0), 0, "corner is transparent");
-        assert_eq!(alpha(size / 2, size / 2), 255, "middle is solid");
+        let at = |x: u32, y: u32| {
+            let i = ((y * size + x) * 4) as usize;
+            [px[i], px[i + 1], px[i + 2], px[i + 3]]
+        };
+        // Units map to pixels as (u + 8) * 0.8.
+        assert_eq!(at(0, 0)[3], 0, "corner is transparent");
+        assert_eq!(at(26, 32), [0xb4, 0x8c, 0xff, 255], "hub");
+        assert_eq!(at(20, 32), [0x14, 0x11, 0x1f, 255], "gap around the hub");
+        assert_eq!(at(16, 32), [0xb4, 0x8c, 0xff, 255], "first groove");
+        assert_eq!(at(39, 32), [0x3f, 0xe0, 0xcf, 255], "tallest bar");
     }
 }
