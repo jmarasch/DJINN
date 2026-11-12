@@ -46,3 +46,10 @@ export function deviceName(agent: string | null): string {
   if (browser && system) return `${browser} on ${system}`
   return browser ?? system ?? agent.slice(0, 60)
 }
+
+/** A search as a playlist's name: spaces tidied, first letter capital,
+ * short enough for any playlist. */
+export function playlistName(search: string): string {
+  const name = search.trim().replace(/\s+/g, ' ').slice(0, 60)
+  return name.charAt(0).toLocaleUpperCase() + name.slice(1)
+}

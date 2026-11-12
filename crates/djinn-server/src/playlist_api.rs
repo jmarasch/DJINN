@@ -54,7 +54,7 @@ impl FromRequestParts<AppState> for Member {
         if user.role == Role::Guest {
             return Err(ApiError::new(
                 StatusCode::FORBIDDEN,
-                "guests can't have playlists",
+                "guests can't have playlists or favorites",
             ));
         }
         Ok(Self(user))
@@ -110,7 +110,12 @@ async fn list(
     Member(user): Member,
     State(state): State<AppState>,
 ) -> ApiResult<Json<Vec<ListItem>>> {
-    let active = state.jukebox.lock().await.active_playlist();
+    let active = state
+        .jukebox_of(user.id)
+        .await
+        .lock()
+        .await
+        .active_playlist();
     let playlists = state.store.playlists_for(user.id).await?;
     let problems: HashMap<i64, i64> = state
         .store
@@ -200,9 +205,11 @@ async fn remove(
     if !state.store.delete_playlist(id).await? {
         return Err(ApiError::not_found());
     }
-    let mut jukebox = state.jukebox.lock().await;
-    if jukebox.active_playlist() == Some(id) {
-        jukebox.stop_auto_mix().await?;
+    for jukebox in state.all_jukeboxes() {
+        let mut jukebox = jukebox.lock().await;
+        if jukebox.active_playlist() == Some(id) {
+            jukebox.stop_auto_mix().await?;
+        }
     }
     Ok(StatusCode::NO_CONTENT)
 }
@@ -221,11 +228,11 @@ async fn play(
     Json(body): Json<Play>,
 ) -> ApiResult<StatusCode> {
     must_start_auto_mix(&state, &user).await?;
+    let room_jukebox = state.jukebox_of(user.id).await;
     if state.store.playlist_for(user.id, id).await?.is_none() {
         return Err(ApiError::not_found());
     }
-    state
-        .jukebox
+    room_jukebox
         .lock()
         .await
         .play_playlist(id, body.from_track_id)
@@ -268,9 +275,13 @@ async fn from_songs(
 
 /// Wild play: random songs from the whole library when the requests run
 /// out.
-async fn play_wild(_: AdminUser, State(state): State<AppState>) -> ApiResult<StatusCode> {
+async fn play_wild(
+    AdminUser(admin): AdminUser,
+    State(state): State<AppState>,
+) -> ApiResult<StatusCode> {
     state
-        .jukebox
+        .jukebox_of(admin.id)
+        .await
         .lock()
         .await
         .play_playlist(crate::jukebox::WILD_PLAY, None)
@@ -281,7 +292,7 @@ async fn play_wild(_: AdminUser, State(state): State<AppState>) -> ApiResult<Sta
 /// Radio from a song, an artist, or a genre: songs like it when the
 /// requests run out, steered by what the party plays and skips.
 async fn play_radio(
-    _: AdminUser,
+    AdminUser(admin): AdminUser,
     State(state): State<AppState>,
     Json(seed): Json<crate::jukebox::RadioSeed>,
 ) -> ApiResult<StatusCode> {
@@ -294,14 +305,26 @@ async fn play_radio(
         }
     }
     .ok_or_else(ApiError::not_found)?;
-    state.jukebox.lock().await.start_radio(seed, name).await?;
+    state
+        .jukebox_of(admin.id)
+        .await
+        .lock()
+        .await
+        .start_radio(seed, name)
+        .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
 /// No playlist plays when the requests run out.
 async fn stop(Member(user): Member, State(state): State<AppState>) -> ApiResult<StatusCode> {
     must_start_auto_mix(&state, &user).await?;
-    state.jukebox.lock().await.stop_auto_mix().await?;
+    state
+        .jukebox_of(user.id)
+        .await
+        .lock()
+        .await
+        .stop_auto_mix()
+        .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -414,9 +437,11 @@ async fn remove_share(
 /// The jukebox lines up its next song from the active playlist, so it
 /// needs to hear about changes to it.
 async fn refresh_if_active(state: &AppState, id: i64) -> ApiResult<()> {
-    let mut jukebox = state.jukebox.lock().await;
-    if jukebox.active_playlist() == Some(id) {
-        jukebox.auto_mix_changed().await?;
+    for jukebox in state.all_jukeboxes() {
+        let mut jukebox = jukebox.lock().await;
+        if jukebox.active_playlist() == Some(id) {
+            jukebox.auto_mix_changed().await?;
+        }
     }
     Ok(())
 }

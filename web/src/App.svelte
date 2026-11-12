@@ -1,9 +1,13 @@
 <script lang="ts">
+  import Visualizer from './screens/Visualizer.svelte'
+  import { t } from './lib/i18n.svelte'
   import { onMount } from 'svelte'
+  import { api } from './lib/api'
   import Icon from './lib/Icon.svelte'
   import JoinCard from './lib/JoinCard.svelte'
   import { goBack, navigation, param, route } from './lib/router.svelte'
   import Sheet from './lib/Sheet.svelte'
+  import LanguagePicker from './lib/LanguagePicker.svelte'
   import { app, connect, hasPlaylists, isAdmin, refreshMe, refreshMode } from './lib/state.svelte'
   import Toasts from './lib/Toasts.svelte'
   import Admin from './screens/Admin.svelte'
@@ -11,43 +15,57 @@
   import Account from './screens/Account.svelte'
   import AlbumView from './screens/AlbumView.svelte'
   import ArtistView from './screens/ArtistView.svelte'
+  import ArtistSongs from './screens/ArtistSongs.svelte'
   import GuestJoin from './screens/GuestJoin.svelte'
   import Join from './screens/Join.svelte'
   import Login from './screens/Login.svelte'
   import NowPlaying from './screens/NowPlaying.svelte'
   import Playlists from './screens/Playlists.svelte'
+  import Favorites from './screens/Favorites.svelte'
   import PlaylistView from './screens/PlaylistView.svelte'
   import Queue from './screens/Queue.svelte'
   import Search from './screens/Search.svelte'
+  import NotSetUp from './lib/NotSetUp.svelte'
   import Setup from './screens/Setup.svelte'
   import Signup from './screens/Signup.svelte'
   import Genre from './screens/Genre.svelte'
   import Similar from './screens/Similar.svelte'
   import Tv from './screens/Tv.svelte'
+  import LyricsPage from './screens/Lyrics.svelte'
+  import NodeScreen from './screens/NodeScreen.svelte'
   import SetupLibrary from './screens/SetupLibrary.svelte'
 
   /** So what sticks to the top of a page can stick just below this. */
   let navHeight = $state(0)
 
   const onSetupPage = $state(location.pathname === '/setup')
+  let notSetUp = $state<Awaited<ReturnType<typeof api.bootstrapStatus>> | null>(null)
   // Invite links open /signup; the sign-in screen can switch to it too.
   let signingUp = $state(location.pathname === '/signup')
   // The join page is for guests who haven't signed in yet; the TV page is
   // public and read only.
   const onJoinPage = location.pathname === '/join'
   const onTvPage = location.pathname === '/tv'
+  const onLyricsPage = location.pathname === '/lyrics'
+  const onNodePage = location.pathname === '/node'
+  const onVisualizerPage = location.pathname === '/visualizer'
   let showJoin = $state(false)
 
   onMount(async () => {
-    if (onJoinPage || onTvPage) return
+    if (onJoinPage || onTvPage || onLyricsPage || onNodePage || onVisualizerPage) return
     const me = await refreshMe()
     if (me) connect()
     else await refreshMode()
+    // A box nobody has set up: there's no account to sign in with yet.
+    if (!me && !onSetupPage) {
+      const status = await api.bootstrapStatus().catch(() => null)
+      if (status?.needed) notSetUp = status
+    }
   })
 
   // Signing out (or being signed out) re-checks how to get back in.
   $effect(() => {
-    if (app.ready && !app.me && !onJoinPage && !onTvPage) refreshMode()
+    if (app.ready && !app.me && !onJoinPage && !onTvPage && !onLyricsPage && !onNodePage && !onVisualizerPage) refreshMode()
   })
 
   const genreName = $derived.by(() => {
@@ -56,16 +74,22 @@
   })
   const albumId = $derived(param('/album'))
   const artistId = $derived(param('/artist'))
+  const artistSongsId = $derived.by(() => {
+    const m = route.path.match(/^\/artist\/(\d+)\/songs$/)
+    return m ? Number(m[1]) : null
+  })
   const playlistId = $derived(param('/playlist'))
   const similarId = $derived(param('/similar'))
   const adminTab = $derived(adminTabFor(route.path))
   const tab = $derived(
-    route.path.startsWith('/search') || albumId || artistId || similarId || genreName
+    route.path.startsWith('/search') || albumId || artistId || artistSongsId || similarId || genreName
       ? 'search'
       : route.path.startsWith('/queue')
         ? 'queue'
-        : route.path.startsWith('/playlist')
-          ? 'playlists'
+        : route.path === '/favorites'
+          ? 'favorites'
+          : route.path.startsWith('/playlist')
+            ? 'playlists'
           : route.path.startsWith('/admin')
             ? 'admin'
             : 'now',
@@ -74,6 +98,12 @@
 
 {#if onTvPage}
   <Tv />
+{:else if onLyricsPage}
+  <LyricsPage />
+{:else if onNodePage}
+  <NodeScreen />
+{:else if onVisualizerPage}
+  <Visualizer />
 {:else if onJoinPage}
   <Join />
 {:else if !app.ready}
@@ -84,6 +114,8 @@
   <main class="narrow">
     {#if onSetupPage}
       <Setup />
+    {:else if notSetUp}
+      <NotSetUp status={notSetUp} />
     {:else if signingUp}
       <Signup onback={() => (signingUp = false)} />
     {:else if app.mode?.guest_mode && !app.hostLogin}
@@ -101,26 +133,29 @@
 {:else}
   <nav class:admin={isAdmin()} aria-label="Main navigation" bind:offsetHeight={navHeight}>
     <button class="back" disabled={!navigation.canGoBack} onclick={goBack} aria-label="Back" title="Back">
-      <Icon name="back" size={28} /><span>Back</span>
+      <Icon name="back" size={28} /><span>{t('nav.back')}</span>
     </button>
-    <a href="#/" class:active={tab === 'now'}><Icon name="disc" /><span>Playing</span></a>
-    <a href="#/search" class:active={tab === 'search'}><Icon name="search" /><span>Library</span></a>
+    <a href="#/" class:active={tab === 'now'}><Icon name="disc" /><span>{t('nav.playing')}</span></a>
+    <a href="#/search" class:active={tab === 'search'}><Icon name="search" /><span>{t('nav.library')}</span></a>
+    {#if hasPlaylists()}
+      <a href="#/favorites" class:active={tab === 'favorites'}><Icon name="heart" /><span>{t('nav.favorites')}</span></a>
+    {/if}
     <a href="#/queue" class:active={tab === 'queue'}>
       <Icon name="queue" />
-      <span>Queue{app.queue.length ? ` (${app.queue.length})` : ''}</span>
+      <span>{t('nav.queue')}{app.queue.length ? ` (${app.queue.length})` : ''}</span>
     </a>
-    <button class:active={showJoin} onclick={() => (showJoin = true)}><Icon name="qr" /><span>Join</span></button>
+    <button class:active={showJoin} onclick={() => (showJoin = true)}><Icon name="qr" /><span>{t('nav.join')}</span></button>
     {#if hasPlaylists()}
-      <a href="#/playlists" class:active={tab === 'playlists'}><Icon name="playlist" /><span>Playlists</span></a>
+      <a href="#/playlists" class:active={tab === 'playlists'}><Icon name="playlist" /><span>{t('nav.playlists')}</span></a>
     {/if}
     {#if isAdmin()}
       <a href="#/admin" class:active={tab === 'admin'}><Icon name="settings" /><span>Admin</span></a>
     {/if}
   </nav>
   {#if !app.connected}
-    <div class="offline">Reconnecting to the jukebox...</div>
+    <div class="offline">{t('app.reconnecting')}</div>
   {/if}
-  <main class:playing={route.path === '/'} style:--nav-height="{navHeight}px">
+  <main class:playing={route.path === '/'} class:wide={tab === 'admin'} style:--nav-height="{navHeight}px">
     {#if similarId}
       <Similar id={similarId} />
     {:else if genreName}
@@ -129,8 +164,12 @@
       <AlbumView id={albumId} />
     {:else if artistId}
       <ArtistView id={artistId} />
+    {:else if artistSongsId}
+      <ArtistSongs id={artistSongsId} />
     {:else if playlistId && hasPlaylists()}
       <PlaylistView id={playlistId} />
+    {:else if route.path === '/favorites' && hasPlaylists()}
+      <Favorites />
     {:else if tab === 'search'}
       <Search />
     {:else if tab === 'queue'}
@@ -147,8 +186,11 @@
   </main>
 
   {#if showJoin}
-    <Sheet title="Help a friend join" onclose={() => (showJoin = false)}>
+    <Sheet title={t('join.help_friend')} onclose={() => (showJoin = false)}>
       <JoinCard />
+      {#if app.me?.role === 'guest'}
+        <div class="join-language"><LanguagePicker /></div>
+      {/if}
     </Sheet>
   {/if}
 {/if}
@@ -156,6 +198,12 @@
 <Toasts />
 
 <style>
+  .join-language {
+    display: flex;
+    justify-content: center;
+    margin-top: 16px;
+  }
+
   main {
     max-width: 640px;
     margin: 0 auto;
@@ -169,6 +217,11 @@
 
   main.playing {
     max-width: 1300px;
+  }
+
+  /* Admin's side menu needs room next to the page. */
+  main.wide {
+    max-width: 920px;
   }
 
   nav {

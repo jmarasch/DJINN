@@ -655,11 +655,17 @@ async fn sorting_skips_leading_articles_and_albums_sort_by_year() {
         .id;
     let origin = crate::RequestOrigin::default();
     store
-        .add_request(ids[2], user, crate::RequestLimits::default(), &origin)
+        .add_request(
+            crate::MAIN_ROOM,
+            ids[2],
+            user,
+            crate::RequestLimits::default(),
+            &origin,
+        )
         .await
         .unwrap();
     store
-        .start_play_event(ids[3], crate::PlaySource::Pool, None)
+        .start_play_event(crate::MAIN_ROOM, ids[3], crate::PlaySource::Pool, None)
         .await
         .unwrap();
     let popular = store.tracks_page(TrackSort::Popular, 0, 10).await.unwrap();
@@ -1176,11 +1182,18 @@ async fn a_changed_file_is_analyzed_and_heard_again() {
         .items[0]
         .id;
     store
-        .save_analysis(id, 1, Some((-14.0, 0.9)), Some((&[1.0, 2.0], 120.0)))
+        .save_analysis(
+            id,
+            1,
+            1,
+            Some((-14.0, 0.9)),
+            Some((&[1.0, 2.0], 120.0)),
+            None,
+        )
         .await
         .unwrap();
     store.save_heard(id, 1, Some(&[3.0])).await.unwrap();
-    assert!(store.tracks_to_analyze(1, 10).await.unwrap().is_empty());
+    assert!(store.tracks_to_analyze(1, 1, 10).await.unwrap().is_empty());
     assert!(store.tracks_to_hear(1, 10).await.unwrap().is_empty());
     assert_eq!(store.heard_progress(1).await.unwrap(), (1, 0));
     assert_eq!(store.sound_rows(1).await.unwrap().len(), 1);
@@ -1191,12 +1204,12 @@ async fn a_changed_file_is_analyzed_and_heard_again() {
         .save_scanned(std::slice::from_ref(&song))
         .await
         .unwrap();
-    assert!(store.tracks_to_analyze(1, 10).await.unwrap().is_empty());
+    assert!(store.tracks_to_analyze(1, 1, 10).await.unwrap().is_empty());
 
     let mut changed = song;
     changed.mtime = 2;
     store.save_scanned(&[changed]).await.unwrap();
-    assert_eq!(store.tracks_to_analyze(1, 10).await.unwrap().len(), 1);
+    assert_eq!(store.tracks_to_analyze(1, 1, 10).await.unwrap().len(), 1);
     assert_eq!(store.tracks_to_hear(1, 10).await.unwrap().len(), 1);
     assert_eq!(store.heard_progress(1).await.unwrap(), (0, 1));
 
@@ -1210,4 +1223,241 @@ async fn a_changed_file_is_analyzed_and_heard_again() {
 async fn compaction_runs_once() {
     let store = Store::open_in_memory().await.unwrap();
     assert_eq!(store.get_setting("compact_database").await.unwrap(), None);
+}
+
+/// The library lists' counts: party and GO plays (those that heard enough
+/// of the song) and favorites, for songs, their album and their artist.
+#[tokio::test]
+async fn plays_and_favorites_are_counted_per_song_album_and_artist() {
+    let store = Store::open_in_memory().await.unwrap();
+    store
+        .save_scanned(&[
+            scanned("/m/a.flac", "One", "Band", "Album"),
+            scanned("/m/b.flac", "Two", "Band", "Album"),
+        ])
+        .await
+        .unwrap();
+    let (one, two, album, artist): (i64, i64, i64, i64) = sqlx::query_as(
+        "SELECT a.id, b.id, a.album_id, a.artist_id FROM tracks a, tracks b
+         WHERE a.title = 'One' AND b.title = 'Two'",
+    )
+    .fetch_one(&store.pool)
+    .await
+    .unwrap();
+    let sam = store
+        .create_user("sam", "h", crate::Role::User)
+        .await
+        .unwrap()
+        .id;
+    let kim = store
+        .create_user("kim", "h", crate::Role::User)
+        .await
+        .unwrap()
+        .id;
+    for track in [one, one, two] {
+        sqlx::query("INSERT INTO play_events (track_id, source, started_at) VALUES (?, 'pool', 1)")
+            .bind(track)
+            .execute(&store.pool)
+            .await
+            .unwrap();
+    }
+    store
+        .record_go_play(sam, one, crate::SKIP_BEFORE_MS)
+        .await
+        .unwrap();
+    store.record_go_play(sam, two, 1).await.unwrap();
+    for user in [sam, kim] {
+        store
+            .set_like(user, crate::LikeKind::Track, one, true)
+            .await
+            .unwrap();
+    }
+    store
+        .set_like(kim, crate::LikeKind::Album, album, true)
+        .await
+        .unwrap();
+    store
+        .set_like(sam, crate::LikeKind::Artist, artist, true)
+        .await
+        .unwrap();
+
+    let songs = store.track_counts(&[one, two, 999], 0).await.unwrap();
+    assert_eq!(songs[&one], Counts { plays: 3, likes: 2 });
+    assert_eq!(songs[&two], Counts { plays: 2, likes: 0 });
+    assert_eq!(songs[&999], Counts::default());
+    let albums = store.album_counts(&[album], 0).await.unwrap();
+    assert_eq!(albums[&album], Counts { plays: 5, likes: 1 });
+    let artists = store.artist_counts(&[artist], 0).await.unwrap();
+    assert_eq!(artists[&artist], Counts { plays: 5, likes: 1 });
+    assert!(store.track_counts(&[], 0).await.unwrap().is_empty());
+
+    // Counting only plays that heard half the song: the GO plays above heard
+    // 30 s and a moment of 100 s songs, so they drop out; the party plays
+    // don't say how much was heard, so they stay.
+    sqlx::query("UPDATE tracks SET duration_ms = 100000")
+        .execute(&store.pool)
+        .await
+        .unwrap();
+    store.record_go_play(kim, two, 60_000).await.unwrap();
+    let songs = store.track_counts(&[one, two], 50).await.unwrap();
+    assert_eq!(songs[&one].plays, 2);
+    assert_eq!(songs[&two].plays, 2);
+    assert_eq!(
+        store.album_counts(&[album], 50).await.unwrap()[&album].plays,
+        4
+    );
+    assert_eq!(
+        store.artist_counts(&[artist], 50).await.unwrap()[&artist].plays,
+        4
+    );
+}
+
+/// Skipping a song you just heard all the way through isn't a skip; one
+/// you haven't heard lately, or only skipped before, still is.
+#[tokio::test]
+async fn a_skip_right_after_hearing_the_song_doesnt_count() {
+    let store = Store::open_in_memory().await.unwrap();
+    store
+        .save_scanned(&[
+            scanned("/m/a.flac", "Favorite", "Band", "Album"),
+            scanned("/m/b.flac", "Other", "Band", "Album"),
+        ])
+        .await
+        .unwrap();
+    let (favorite, other): (i64, i64) = sqlx::query_as(
+        "SELECT a.id, b.id FROM tracks a, tracks b WHERE a.title = 'Favorite' AND b.title = 'Other'",
+    )
+    .fetch_one(&store.pool)
+    .await
+    .unwrap();
+    let sam = store
+        .create_user("sam", "h", crate::Role::User)
+        .await
+        .unwrap()
+        .id;
+    let kim = store
+        .create_user("kim", "h", crate::Role::User)
+        .await
+        .unwrap()
+        .id;
+    let full = crate::SKIP_BEFORE_MS;
+    let now = crate::now_ms();
+    store
+        .record_go_play_at(sam, favorite, full, Some(now - 60_000), false)
+        .await
+        .unwrap();
+    store.record_go_play(sam, favorite, 1).await.unwrap();
+    store.record_go_play(kim, favorite, 1).await.unwrap();
+    store.record_go_play(sam, other, 1).await.unwrap();
+    store.record_go_play(sam, other, 1).await.unwrap();
+    let skips = |user: i64, track: i64| {
+        let store = &store;
+        async move {
+            sqlx::query_scalar::<_, i64>(
+                "SELECT count(*) FROM go_plays WHERE user_id = ? AND track_id = ? AND skipped = 1",
+            )
+            .bind(user)
+            .bind(track)
+            .fetch_one(&store.pool)
+            .await
+            .unwrap()
+        }
+    };
+    assert_eq!(skips(sam, favorite).await, 0);
+    assert_eq!(skips(kim, favorite).await, 1);
+    assert_eq!(skips(sam, other).await, 2);
+    // Long after, a skip counts again.
+    let later = now + crate::HEARD_RECENTLY_MS + 60_000;
+    sqlx::query("UPDATE go_plays SET at = at - ? WHERE user_id = ?")
+        .bind(later - now)
+        .bind(sam)
+        .execute(&store.pool)
+        .await
+        .unwrap();
+    store.record_go_play(sam, favorite, 1).await.unwrap();
+    assert_eq!(skips(sam, favorite).await, 1);
+}
+
+#[tokio::test]
+async fn songs_show_their_lyrics_and_can_be_picked_by_them() {
+    let store = Store::open_in_memory().await.unwrap();
+    store
+        .save_scanned(&[
+            scanned("/m/1.flac", "A Timed", "Band", "Debut"),
+            scanned("/m/2.flac", "B Words", "Band", "Debut"),
+            scanned("/m/3.flac", "C None", "Band", "Debut"),
+            scanned("/m/4.flac", "D Unread", "Band", "Debut"),
+        ])
+        .await
+        .unwrap();
+    let id = |title: &str| {
+        let store = store.clone();
+        let title = title.to_owned();
+        async move {
+            let page = store.tracks_page(TrackSort::Title, 0, 10).await.unwrap();
+            page.items
+                .into_iter()
+                .find(|t| t.title == title)
+                .unwrap()
+                .id
+        }
+    };
+    let timed = crate::NewLyrics {
+        synced: Some("[00:01.00]la"),
+        plain: Some("la"),
+        instrumental: false,
+        source: "lrc",
+    };
+    let words = crate::NewLyrics {
+        synced: None,
+        plain: Some("la"),
+        instrumental: false,
+        source: "file",
+    };
+    store
+        .save_read_lyrics(id("A Timed").await, 1, &timed)
+        .await
+        .unwrap();
+    store
+        .save_read_lyrics(id("B Words").await, 1, &words)
+        .await
+        .unwrap();
+    store
+        .save_read_lyrics(id("C None").await, 1, &crate::NewLyrics::NONE)
+        .await
+        .unwrap();
+
+    let all = store.tracks_page(TrackSort::Title, 0, 10).await.unwrap();
+    let marks: Vec<i64> = all.items.iter().map(|t| t.lyrics).collect();
+    assert_eq!(marks, [2, 1, 0, 0]);
+
+    let shown = |filter: LyricsFilter, sort: TrackSort| {
+        let store = store.clone();
+        async move {
+            let page = store
+                .tracks_page_filtered(sort, filter, 0, 10)
+                .await
+                .unwrap();
+            (
+                page.total,
+                page.items.into_iter().map(|t| t.title).collect::<Vec<_>>(),
+            )
+        }
+    };
+    assert_eq!(
+        shown(LyricsFilter::Words, TrackSort::Title).await,
+        (2, vec!["A Timed".to_owned(), "B Words".to_owned()])
+    );
+    assert_eq!(
+        shown(LyricsFilter::Timed, TrackSort::Popular).await,
+        (1, vec!["A Timed".to_owned()])
+    );
+    let second = store
+        .tracks_page_filtered(TrackSort::Title, LyricsFilter::Words, 1, 1)
+        .await
+        .unwrap();
+    assert_eq!(
+        (second.total, second.items[0].title.as_str()),
+        (2, "B Words")
+    );
 }

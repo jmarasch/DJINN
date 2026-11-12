@@ -39,6 +39,7 @@ import com.newterrastudios.djinn.go.player.COLORS_CUSTOM
 import com.newterrastudios.djinn.go.player.COLORS_ROTATE
 import com.newterrastudios.djinn.go.player.Spectrum
 import com.newterrastudios.djinn.go.player.VisualLook
+import com.newterrastudios.djinn.go.i18n.t
 
 /**
  * Whether to offer visuals at all. Only the plain facts can be asked up front;
@@ -54,9 +55,9 @@ private val SWATCHES = listOf(
 )
 
 private val MODES = listOf(
-    COLORS_APP to "App colors",
-    COLORS_CUSTOM to "Your colors",
-    COLORS_ROTATE to "RGB rotation",
+    COLORS_APP to "visual.app_colors",
+    COLORS_CUSTOM to "visual.your_colors",
+    COLORS_ROTATE to "visual.rgb_rotation",
 )
 
 /** Picks a style, its colors and its setup, with the result showing above them. */
@@ -83,7 +84,7 @@ fun VisualLookSettings(nav: Nav) {
             onBlack = true,
         )
         Text(
-            "It moves while a song plays.",
+            t("visual.moves_note"),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -104,40 +105,40 @@ fun VisualLookSettings(nav: Nav) {
         }
         if (nav.slowStyles.isNotEmpty()) {
             TextButton(onClick = nav::retrySlowStyles) {
-                Text("Left out as too slow here: ${nav.slowStyles.size}. Try them again")
+                Text(t("visual.too_slow", "n" to nav.slowStyles.size))
             }
         }
 
-        Text("Colors", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 12.dp))
+        Text(t("visual.colors"), style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             MODES.forEach { (mode, label) ->
                 FilterChip(
                     selected = look.colors == mode,
                     onClick = { change(look.copy(colors = mode)) },
-                    label = { Text(label) },
+                    label = { Text(t(label)) },
                 )
             }
         }
         when (look.colors) {
             COLORS_CUSTOM -> {
-                ColorChoice("Quiet", look.quiet) { change(look.copy(quiet = it)) }
-                ColorChoice("Loud", look.loud) { change(look.copy(loud = it)) }
+                ColorChoice(t("visual.quiet"), look.quiet) { change(look.copy(quiet = it)) }
+                ColorChoice(t("visual.loud"), look.loud) { change(look.copy(loud = it)) }
             }
             COLORS_ROTATE -> Level(
-                "All the way around every ${look.rotateSeconds.toInt()} seconds",
+                t("visual.rotate_every", "n" to look.rotateSeconds.toInt()),
                 look.rotateSeconds,
                 3f..60f,
             ) { change(look.copy(rotateSeconds = it)) }
         }
 
-        Text("Bars and lines", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 12.dp))
-        Level("Bars: ${look.bars}", look.bars.toFloat(), 8f..BANDS.toFloat()) {
+        Text(t("visual.bars_lines"), style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 12.dp))
+        Level(t("visual.bar_count", "n" to look.bars), look.bars.toFloat(), 8f..BANDS.toFloat()) {
             change(look.copy(bars = it.toInt()))
         }
         Level("Space between bars: ${(look.gap * 100).toInt()}%", look.gap, 0f..0.7f) {
             change(look.copy(gap = it))
         }
-        Level("Line thickness: ${look.lineWidth.toInt()}", look.lineWidth, 1f..16f) {
+        Level(t("visual.line_width", "n" to look.lineWidth.toInt()), look.lineWidth, 1f..16f) {
             change(look.copy(lineWidth = it))
         }
         Level("Smoothing: ${(look.calm * 100).toInt()}%", look.calm, 0f..1f) {
@@ -150,13 +151,13 @@ fun VisualLookSettings(nav: Nav) {
                 .padding(vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("Rounded bars", modifier = Modifier.weight(1f))
+            Text(t("visual.rounded"), modifier = Modifier.weight(1f))
             androidx.compose.material3.Switch(
                 checked = look.rounded,
                 onCheckedChange = { change(look.copy(rounded = it)) },
             )
         }
-        OutlinedButton(onClick = { change(VisualLook()) }) { Text("Back to the defaults") }
+        OutlinedButton(onClick = { change(VisualLook()) }) { Text(t("visual.defaults")) }
     }
 }
 
@@ -183,7 +184,7 @@ private fun ColorChoice(label: String, rgb: Int, change: (Int) -> Unit) {
                 .clip(CircleShape)
                 .background(color(rgb)),
         )
-        TextButton(onClick = { exact = !exact }) { Text(if (exact) "Done" else "Exact color") }
+        TextButton(onClick = { exact = !exact }) { Text(if (exact) t("common.done") else t("visual.exact")) }
     }
     Row(
         Modifier.horizontalScroll(rememberScrollState()),
@@ -205,9 +206,9 @@ private fun ColorChoice(label: String, rgb: Int, change: (Int) -> Unit) {
         }
     }
     if (exact) {
-        listOf("Red" to 16, "Green" to 8, "Blue" to 0).forEach { (name, shift) ->
+        listOf("visual.red" to 16, "visual.green" to 8, "visual.blue" to 0).forEach { (key, shift) ->
             val amount = (rgb shr shift) and 0xFF
-            Level("$name: $amount", amount.toFloat(), 0f..255f) {
+            Level("${t(key)}: $amount", amount.toFloat(), 0f..255f) {
                 change((rgb and (0xFF shl shift).inv()) or (it.toInt() shl shift))
             }
         }

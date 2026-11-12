@@ -1,5 +1,51 @@
 # Changelog
 
+## Unreleased
+
+### DJINN GO
+
+- **Artist pages show every song.** **Show more** under an artist's songs lists the rest, and **Play all** plays every song by the artist, shown or not (it used to miss most songs on their own albums). Album pages get a **Radio** button.
+- **The Android app is laid out like DJINN GO in the browser:** Home, Library (search, with the artist, album, song and genre lists below it while nothing's typed), Your music (Liked, Playlists, History, Your year, On phone) and Account. Liked is its own place instead of a filter, and every song, album and artist row has a heart.
+- **Your year.** See how long you listened, your top songs and artists, your busiest month and your first song of the year, under Library > Your year in the browser, or from Home in the Android app. Pick earlier years too.
+- The Android app has **Not in the library?** under search results, like the browser, when the admin allows it.
+
+### Party app
+
+- **Favorites.** Heart songs, albums and artists in the party app too; they're the same favorites as on DJINN GO. Find them under Playlists > Favorites. Guests don't have favorites or playlists, and don't see hearts.
+- **Show more** under an artist's songs lists every song by them.
+
+### Admin
+
+- **A new Admin page.** Sections are grouped in a side menu (Party, People, Library, System), which sits at the top on phones. **Find a setting** searches every setting by name or a word like "skip" or "backup", opens its section and highlights it. A dot marks sections with settings changed from the default, and a list shows them all.
+- **One page or sections.** A switch at the top of the Admin menu shows every section on one long page, with the menu listing each section's cards and jumping straight to them, or one section at a time as before. Your browser remembers which.
+- **Admin Home** shows how DJINN is doing at a glance: what's playing and on which speakers, whether extra speakers and casts are in time, library problems, the nightly check, the computer's processor, memory and disk, when you last saved a backup, and whether an update is waiting. Each line links to where to fix it.
+- Library problems, possible duplicates and the nightly check have their own **Problems** section, with a count in the menu.
+- **Stats.** Admin > Stats shows the songs played and asked for most, top artists, who asked most, songs skipped most, and the busiest hours and days, for the last party, today, 7 or 30 days, this year or all time, for everyone or one person, at the party, on DJINN GO or both. Download the lists as a spreadsheet, or clear just that stretch of history (it says how much first).
+- **Party recap.** "Last party" covers everything since the first song after a break of six hours or more.
+- **Search history.** See what people searched for, and especially what found nothing: a shopping list for the library. Typing one search counts once. Turn it off in Stats.
+- **The TV page shows Requests, then Coming up.** Requests are listed first; below them, the next few songs the auto mix will play, in the room the requests leave. The auto mix now plans a few songs ahead, so they play in the order shown, and a request that cuts in puts the next auto mix song back first in line.
+- **Wishlist.** "Not in the library?" under search results lets people ask for a song. Admins see every ask with how many people want it, and a library check that adds the song marks it Got. Only admins see the button until you let everyone use it.
+
+### Library
+
+- **Library problems.** Admin > Library has a **Problems** list: files a library check couldn't add (formats DJINN doesn't play, folders it isn't allowed to open, names it can't read, music folders that aren't there), songs that won't play or whose tags couldn't be read, and gaps such as songs with no artist or albums with no cover. Each kind says what to do about it. Hide kinds you already know about, or download the whole list as a spreadsheet. The first library check after updating reads every file once.
+- **Possible duplicates.** Admin > Library lists songs you have more than one copy of: the same title and artist at about the same length (notes like "Remastered" are ignored, "Live" is not), songs identified as the same recording, and, with sound analysis on, copies that sound the same even when named differently. The best copy (lossless, then the higher bit rate) is marked to keep. DJINN never deletes files; mark a group **Not duplicates** if it's wrong. With sound analysis on, each song is analyzed once more after updating to take its fingerprint.
+- **The auto mix won't play another copy of a song that just played.** A copy counts as played, the same as the song itself. Turn this off in Admin > Rules.
+- **Report a problem with a song.** Everyone, guests included, can flag a song from its menu (in the party app, DJINN GO and the Android app): wrong title or artist, wrong cover, sounds bad, plays a different song, or something else, with an optional note. Reports show under Problems until you mark them **Done**.
+- **Nightly check.** Admin > Library can check the library every night at an hour you pick (or when DJINN starts, if it was off then) and sums up what changed: songs added and gone, problems, songs with copies, and listener reports. Useful for network folders that don't say when they change.
+- A library check could fail with "database is locked" when sound analysis was saving at the same moment. Writes now wait their turn, and analysis and AI listening wait while a library check runs.
+- A file that crashed the tag reader used to take the files read alongside it out of the library. Now only that file is affected, and it's listed under its name.
+
+### Updates
+
+- **Choose Stable or Nightly** in Admin > System > Updates. Stable gets a tested release about once a week. Nightly gets the newest work every morning there's something new, and may have rough edges.
+
+### DJINN GO for Android
+
+- **Favorites:** Artists, Albums and Songs in the Library have a **Favorites** filter.
+- **Hearts on album and artist pages.**
+- **The app asks when your server has a new version,** once per version. You can turn this off in Settings.
+
 ## 2026.11.05 (November 5, 2026)
 
 ### Fixes

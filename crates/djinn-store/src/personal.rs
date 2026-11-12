@@ -123,6 +123,12 @@ impl From<PlaylistDetail> for GoPlaylistDetail {
 /// A play counts as skipped when less than this much was heard.
 pub const SKIP_BEFORE_MS: i64 = 30_000;
 
+/// Skipping a song you heard all the way through this recently says you
+/// just heard it, not that you don't like it, so it isn't recorded (radio
+/// from a song that just ended starts with it, for one). Migration 43
+/// cleared earlier skips like that with the same window.
+pub const HEARD_RECENTLY_MS: i64 = 6 * 60 * 60 * 1000;
+
 /// What tapping a song in GO does.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
 #[serde(rename_all = "lowercase")]
@@ -206,7 +212,7 @@ impl Store {
 
     /// Records a song played in GO.
     pub async fn record_go_play(&self, user_id: i64, track_id: i64, ms_played: i64) -> Result<()> {
-        self.record_go_play_at(user_id, track_id, ms_played, None)
+        self.record_go_play_at(user_id, track_id, ms_played, None, false)
             .await
     }
 
@@ -218,19 +224,37 @@ impl Store {
         track_id: i64,
         ms_played: i64,
         at: Option<i64>,
+        play_less: bool,
     ) -> Result<()> {
         let now = now_ms();
         let at = at
             .filter(|at| (now - OLDEST_REPORT_MS..=now).contains(at))
             .unwrap_or(now);
+        let skipped = ms_played < SKIP_BEFORE_MS;
+        if skipped && !play_less {
+            let heard: bool = sqlx::query_scalar(
+                "SELECT EXISTS (SELECT 1 FROM go_plays WHERE user_id = ? AND track_id = ?
+                                AND skipped = 0 AND at BETWEEN ? AND ?)",
+            )
+            .bind(user_id)
+            .bind(track_id)
+            .bind(at - HEARD_RECENTLY_MS)
+            .bind(at)
+            .fetch_one(&self.pool)
+            .await?;
+            if heard {
+                return Ok(());
+            }
+        }
         sqlx::query(
-            "INSERT INTO go_plays (user_id, track_id, at, ms_played, skipped)
-             SELECT ?, id, ?, ?, ? FROM tracks WHERE id = ?",
+            "INSERT INTO go_plays (user_id, track_id, at, ms_played, skipped, play_less)
+             SELECT ?, id, ?, ?, ?, ? FROM tracks WHERE id = ?",
         )
         .bind(user_id)
         .bind(at)
         .bind(ms_played.max(0))
-        .bind(ms_played < SKIP_BEFORE_MS)
+        .bind(skipped || play_less)
+        .bind(play_less)
         .bind(track_id)
         .execute(&self.pool)
         .await?;
@@ -315,6 +339,17 @@ impl Store {
             played.into_iter().map(|(id, _)| id).collect(),
             skipped.into_iter().map(|(id, _)| id).collect(),
         ))
+    }
+
+    /// Songs someone marked "play less" since `since`.
+    pub async fn go_play_less_since(&self, user_id: i64, since: i64) -> Result<Vec<i64>> {
+        Ok(sqlx::query_scalar(
+            "SELECT DISTINCT track_id FROM go_plays WHERE user_id = ? AND at >= ? AND play_less = 1",
+        )
+        .bind(user_id)
+        .bind(since)
+        .fetch_all(&self.pool)
+        .await?)
     }
 
     pub async fn save_resume(&self, user_id: i64, resume: &Resume) -> Result<()> {

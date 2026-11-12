@@ -11,10 +11,10 @@ use djinn_engine::Command;
 use djinn_store::PlaySource;
 
 use super::bag::ShuffleBag;
-use super::mix::{self, Learned, Mixer, Radio, RadioSeed, SongLinks};
+use super::mix::{self, Copies, Learned, Mixer, Radio, RadioSeed, SongLinks};
 use super::{
-    Jukebox, Pending, ACTIVE_PLAYLIST, DEFAULT_HISTORY_WINDOW, HISTORY_WINDOW, PLAYLIST_CURSOR,
-    RADIO, WILD_PLAY,
+    Jukebox, Pending, ACTIVE_PLAYLIST, AVOID_COPIES, DEFAULT_HISTORY_WINDOW, HISTORY_WINDOW,
+    PLAYLIST_CURSOR, RADIO, WILD_PLAY,
 };
 use crate::events::{PlaylistRef, ServerEvent};
 use crate::settings;
@@ -49,9 +49,15 @@ impl Jukebox {
     /// is not cut off.
     pub async fn play_playlist(&mut self, id: i64, from_track: Option<i64>) -> anyhow::Result<()> {
         self.store
-            .set_setting(ACTIVE_PLAYLIST, &id.to_string())
+            .set_setting(
+                &super::room_key(self.room, ACTIVE_PLAYLIST),
+                &id.to_string(),
+            )
             .await?;
-        self.store.set_setting(PLAYLIST_CURSOR, "0").await?;
+        self.store
+            .set_setting(&super::room_key(self.room, PLAYLIST_CURSOR), "0")
+            .await?;
+        self.planned.clear();
         self.bag = ShuffleBag::default();
         self.cursor = None;
         self.start_at = from_track;
@@ -79,6 +85,10 @@ impl Jukebox {
         self.mixer = Some(mixer);
     }
 
+    pub fn set_copies(&mut self, copies: Arc<dyn Copies>) {
+        self.copies = Some(copies);
+    }
+
     /// Starts a radio from `seed` (named `name`), like a playlist: a song
     /// seed plays first, then songs like it.
     pub async fn start_radio(&mut self, seed: RadioSeed, name: String) -> anyhow::Result<()> {
@@ -92,26 +102,33 @@ impl Jukebox {
             started_at: djinn_store::now_ms(),
         };
         self.store
-            .set_setting(RADIO_SETTING, &serde_json::to_string(&radio)?)
+            .set_setting(
+                &super::room_key(self.room, RADIO_SETTING),
+                &serde_json::to_string(&radio)?,
+            )
             .await?;
         self.play_playlist(RADIO, first).await
     }
 
     /// No playlist plays when the requests run out.
     pub async fn stop_auto_mix(&mut self) -> anyhow::Result<()> {
-        self.store.set_setting(ACTIVE_PLAYLIST, "0").await?;
+        self.store
+            .set_setting(&super::room_key(self.room, ACTIVE_PLAYLIST), "0")
+            .await?;
         self.auto_mix_changed().await
     }
 
     pub(super) async fn load_active(&mut self) -> anyhow::Result<()> {
-        let id = settings::number(&self.store, ACTIVE_PLAYLIST, 0).await?;
+        self.clear_plan();
+        let id =
+            settings::number(&self.store, &super::room_key(self.room, ACTIVE_PLAYLIST), 0).await?;
         self.radio = None;
         self.active = match id {
             0 => None,
             RADIO => {
                 let radio: Option<Radio> = self
                     .store
-                    .get_setting(RADIO_SETTING)
+                    .get_setting(&super::room_key(self.room, RADIO_SETTING))
                     .await?
                     .and_then(|json| serde_json::from_str(&json).ok());
                 self.radio = radio;
@@ -157,8 +174,10 @@ impl Jukebox {
             .started_at
             .max(djinn_store::now_ms() - RADIO_MEMORY_MS);
         let plays = self.store.plays_since(since).await?;
+        // Played through pulls the mix along; "play less" pushes it away; a
+        // plain skip does neither (it may only mean not now).
         let played: Vec<i64> = plays.iter().filter(|p| !p.1).map(|p| p.0).collect();
-        let skipped: Vec<i64> = plays.iter().filter(|p| p.1).map(|p| p.0).collect();
+        let skipped: Vec<i64> = plays.iter().filter(|p| p.2).map(|p| p.0).collect();
         let mut pool = mixer.radio(&radio.seed, &played, &skipped);
         pool.truncate(RADIO_POOL);
         tracing::debug!(
@@ -219,17 +238,35 @@ impl Jukebox {
     /// The active playlist's next song: shuffled through the bag, or the
     /// one after the last it played.
     pub(super) async fn draw(&mut self, pool: &[(i64, f32)]) -> anyhow::Result<Option<Pending>> {
+        self.draw_after(pool, &[]).await
+    }
+
+    /// The song after `ahead` (songs already lined up, oldest first): they
+    /// count as played, and an in-order playlist carries on from the last.
+    async fn draw_after(
+        &mut self,
+        pool: &[(i64, f32)],
+        ahead: &[i64],
+    ) -> anyhow::Result<Option<Pending>> {
         let ids: Vec<i64> = pool.iter().map(|(id, _)| *id).collect();
         // A radio's first song needn't be in its pool.
         let radio = self.active.as_ref().is_some_and(|p| p.id == RADIO);
-        let id = match self.start_at.take().filter(|id| radio || ids.contains(id)) {
+        let start = if ahead.is_empty() {
+            self.start_at.take()
+        } else {
+            None
+        };
+        let id = match start.filter(|id| radio || ids.contains(id)) {
             Some(id) => Some(id),
-            None if self.weighted() => self.weighted_draw(pool).await?,
+            None if self.weighted() => self.weighted_draw(pool, ahead).await?,
             None if self.active.as_ref().is_some_and(|p| !p.shuffle) => {
-                let anchor = self.playable_anchor(&ids).await?;
+                let anchor = match ahead.last() {
+                    Some(&last) => Some(last),
+                    None => self.playable_anchor(&ids).await?,
+                };
                 next_in_order(&ids, anchor)
             }
-            None => self.shuffle_draw(&ids).await?,
+            None => self.shuffle_draw(&ids, ahead).await?,
         };
         let Some(id) = id else { return Ok(None) };
         Ok(self.store.track(id).await?.map(|track| Pending {
@@ -271,43 +308,148 @@ impl Jukebox {
         Ok(previous_playable(&order, playable, anchor_id))
     }
 
-    async fn shuffle_draw(&mut self, pool: &[i64]) -> anyhow::Result<Option<i64>> {
-        let (recent, window) = self.recent().await?;
+    /// The planned song to play next, if it still belongs to the auto mix.
+    /// Ones that don't any more are dropped.
+    pub(super) fn take_planned(&mut self, pool: &[(i64, f32)]) -> Option<Pending> {
+        let radio = self.active.as_ref().is_some_and(|p| p.id == RADIO);
+        while let Some(next) = self.planned.pop_front() {
+            if radio || pool.iter().any(|(id, _)| *id == next.track.id) {
+                return Some(next);
+            }
+            self.bag.put_back(next.track.id);
+        }
+        None
+    }
+
+    /// Forgets the plan; its songs go back in the shuffle bag.
+    pub(super) fn clear_plan(&mut self) {
+        while let Some(old) = self.planned.pop_front() {
+            self.bag.put_back(old.track.id);
+        }
+    }
+
+    /// Plans the auto mix's next few songs after the one lined up.
+    pub(super) async fn top_up_plan(&mut self) -> anyhow::Result<()> {
+        if self.active.is_none() || self.start_at.is_some() {
+            return Ok(());
+        }
+        let want = self.plan_len();
+        if self.planned.len() >= want {
+            return Ok(());
+        }
+        let pool = self.auto_mix().await?;
+        if pool.is_empty() {
+            return Ok(());
+        }
+        let mut ahead: Vec<i64> = self
+            .queued
+            .iter()
+            .filter(|q| q.source == PlaySource::Pool)
+            .chain(self.planned.iter())
+            .map(|p| p.track.id)
+            .collect();
+        while self.planned.len() < want {
+            let Some(next) = self.draw_after(&pool, &ahead).await? else {
+                break;
+            };
+            // A playlist shorter than the plan comes round again: stop there.
+            if ahead.contains(&next.track.id) {
+                self.bag.put_back(next.track.id);
+                break;
+            }
+            ahead.push(next.track.id);
+            self.planned.push_back(next);
+        }
+        Ok(())
+    }
+
+    async fn shuffle_draw(&mut self, pool: &[i64], ahead: &[i64]) -> anyhow::Result<Option<i64>> {
+        let (recent, window) = self.recent(ahead).await?;
         let weights = if settings::flag(&self.store, SMART_PLAYLISTS, false).await? {
             self.party_weights().await?
         } else {
             HashMap::new()
         };
         self.bag.set_weights(weights);
-        Ok(self.bag.draw(pool, &recent, window, &mut self.rng))
+        // The mood dial picks among the next few songs of the cycle.
+        let lean = self.mood_lean().await?;
+        let weigh = lean.map(|(mood, strength, links)| {
+            move |id: i64| mix::mood_weight(links.energy.get(&id).copied(), mood, strength)
+        });
+        let weigh = weigh.as_ref().map(|f| f as &dyn Fn(i64) -> f32);
+        Ok(self
+            .bag
+            .draw_leaning(pool, &recent, window, weigh, &mut self.rng))
     }
 
     /// Wild play and radio: by weight, after the party's history, never a
     /// song that played recently.
-    async fn weighted_draw(&mut self, pool: &[(i64, f32)]) -> anyhow::Result<Option<i64>> {
-        let (recent, window) = self.recent().await?;
+    async fn weighted_draw(
+        &mut self,
+        pool: &[(i64, f32)],
+        ahead: &[i64],
+    ) -> anyhow::Result<Option<i64>> {
+        let (recent, window) = self.recent(ahead).await?;
         let recent: HashSet<i64> = recent.into_iter().take(window).collect();
-        let party = self.party_weights().await?;
-        Ok(mix::weighted_draw(pool, &recent, &party, &mut self.rng))
+        let mut weights = self.party_weights().await?;
+        if let Some((mood, strength, links)) = self.mood_lean().await? {
+            for &(id, _) in pool {
+                let fit = mix::mood_weight(links.energy.get(&id).copied(), mood, strength);
+                *weights.entry(id).or_insert(1.0) *= fit;
+            }
+        }
+        Ok(mix::weighted_draw(pool, &recent, &weights, &mut self.rng))
     }
 
     /// Songs played recently, newest first, and how many of them count:
-    /// those on their way, on top of the configured window of history.
-    async fn recent(&self) -> anyhow::Result<(Vec<i64>, usize)> {
-        let window = settings::number(&self.store, HISTORY_WINDOW, DEFAULT_HISTORY_WINDOW)
-            .await?
-            .max(0);
-        let mut recent: Vec<i64> = self
-            .in_flight
+    /// those lined up (`ahead`) and on their way, on top of the configured
+    /// window of history.
+    async fn recent(&self, ahead: &[i64]) -> anyhow::Result<(Vec<i64>, usize)> {
+        let window = super::room_number(
+            &self.store,
+            self.room,
+            HISTORY_WINDOW,
+            DEFAULT_HISTORY_WINDOW,
+        )
+        .await?
+        .max(0);
+        // Newest first: what's lined up (latest first), then on its way,
+        // then playing.
+        let mut recent: Vec<i64> = ahead
             .iter()
             .rev()
-            .map(|p| p.track.id)
+            .copied()
+            .chain(self.in_flight.iter().rev().map(|p| p.track.id))
             .chain(self.playing.iter().map(|p| p.pending.track.id))
             .collect();
         let upcoming = recent.len();
-        recent.extend(self.store.recent_track_ids(window).await?);
-        Ok((recent, usize::try_from(window).unwrap_or(0) + upcoming))
+        recent.extend(self.store.recent_track_ids(self.room, window).await?);
+        let counted = usize::try_from(window).unwrap_or(0) + upcoming;
+        match &self.copies {
+            Some(copies) if settings::flag(&self.store, AVOID_COPIES, true).await? => {
+                Ok(with_copies(&recent, counted, copies.as_ref()))
+            }
+            _ => Ok((recent, counted)),
+        }
     }
+}
+
+/// `recent` with each counted song's copies right after it, so they count
+/// as played too, and how many now count.
+pub(super) fn with_copies(
+    recent: &[i64],
+    counted: usize,
+    copies: &dyn Copies,
+) -> (Vec<i64>, usize) {
+    let counted = counted.min(recent.len());
+    let mut out = Vec::with_capacity(recent.len());
+    for &id in &recent[..counted] {
+        out.push(id);
+        out.extend(copies.copies_of(id));
+    }
+    let now_counted = out.len();
+    out.extend_from_slice(&recent[counted..]);
+    (out, now_counted)
 }
 
 /// The closest song before `anchor` in `order` that's in `playable`.

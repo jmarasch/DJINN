@@ -34,6 +34,7 @@ impl Audience {
             Self::Tv => matches!(
                 event,
                 ServerEvent::Hello { .. }
+                    | ServerEvent::Address { .. }
                     | ServerEvent::NowPlaying(_)
                     | ServerEvent::Position { .. }
                     | ServerEvent::QueueChanged(_)
@@ -43,39 +44,129 @@ impl Audience {
     }
 }
 
+/// What a room's player says (the rest is about the whole house).
+fn from_a_room(event: &ServerEvent) -> bool {
+    matches!(
+        event,
+        ServerEvent::NowPlaying(_)
+            | ServerEvent::Position { .. }
+            | ServerEvent::QueueChanged(_)
+            | ServerEvent::PlayerState(_)
+            | ServerEvent::Mood(_)
+            | ServerEvent::OutputStatus(_)
+    )
+}
+
+/// Whether a room's page gets an event: house-wide news from the house
+/// channel; the queue and speakers from the room's own; the song and
+/// playback from the room's own, or Main's (the house channel) while the
+/// room follows Main. Main's pages get everything on the house channel.
+fn wanted(event: &ServerEvent, has_own: bool, from_own: bool, follows: bool) -> bool {
+    if !has_own {
+        return true;
+    }
+    if !from_a_room(event) {
+        return !from_own;
+    }
+    match event {
+        // The room's own dial steers its own auto mix, even while it
+        // follows Main's sound.
+        ServerEvent::QueueChanged(_) | ServerEvent::OutputStatus(_) | ServerEvent::Mood(_) => {
+            from_own
+        }
+        _ => from_own != follows,
+    }
+}
+
+/// A page's room, from `?room=` (Main when missing).
+#[derive(serde::Deserialize)]
+pub struct RoomQuery {
+    pub room: Option<i64>,
+}
+
 pub async fn events(
-    _: CurrentUser,
+    CurrentUser(user): CurrentUser,
     State(state): State<AppState>,
 ) -> ApiResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {
-    live(state, Audience::Member).await
+    let room = state.room_of(user.id).await;
+    live(state, Audience::Member, room).await
 }
 
 /// The TV page's feed. Public while the TV page is on.
 pub async fn tv_events(
     State(state): State<AppState>,
+    axum::extract::Query(query): axum::extract::Query<RoomQuery>,
 ) -> ApiResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {
     crate::tv_api::check_enabled(&state).await?;
-    live(state, Audience::Tv).await
+    live(
+        state,
+        Audience::Tv,
+        query.room.unwrap_or(djinn_store::MAIN_ROOM),
+    )
+    .await
+}
+
+pub async fn lyrics_events(
+    State(state): State<AppState>,
+    axum::extract::Query(query): axum::extract::Query<RoomQuery>,
+) -> ApiResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {
+    crate::lyrics::check_page(&state).await?;
+    live(
+        state,
+        Audience::Tv,
+        query.room.unwrap_or(djinn_store::MAIN_ROOM),
+    )
+    .await
 }
 
 async fn live(
     state: AppState,
     audience: Audience,
+    room: i64,
 ) -> ApiResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {
-    // Subscribe before taking the snapshot so nothing falls in between.
-    let updates = BroadcastStream::new(state.events.subscribe());
-    let initial = snapshot(&state).await?;
+    let room = state.rooms.leader(room);
+    // Subscribe before taking the snapshot so nothing falls in between. A
+    // room other than Main has its own channel for what its player says;
+    // the house-wide channel brings the rest, and Main's song while the
+    // room is quiet and follows Main. Items are (from the room's own
+    // channel, event).
+    let own = state.room_events(room);
+    let has_own = own.is_some();
+    let house = BroadcastStream::new(state.events.subscribe()).map(|item| (false, item));
+    let updates: std::pin::Pin<Box<dyn Stream<Item = _> + Send>> = match own {
+        Some(own) => Box::pin(stream::select(
+            house,
+            BroadcastStream::new(own.subscribe()).map(|item| (true, item)),
+        )),
+        None => Box::pin(house),
+    };
+    let initial = snapshot(&state, room).await?;
 
     let resync_state = state.clone();
-    let updates = updates.then(move |item| {
+    let following =
+        std::sync::Arc::new(std::sync::atomic::AtomicBool::new(state.follows_main(room)));
+    let updates = updates.then(move |(from_own, item)| {
         let state = resync_state.clone();
+        let following = std::sync::Arc::clone(&following);
         async move {
             match item {
-                Ok(event) => vec![event],
+                Ok(event) => {
+                    let follows = state.follows_main(room);
+                    if following.swap(follows, std::sync::atomic::Ordering::Relaxed) != follows {
+                        // Started or stopped following Main: show what the
+                        // room hears now.
+                        return snapshot(&state, room).await.unwrap_or_default();
+                    }
+                    if wanted(&event, has_own, from_own, follows) {
+                        vec![event]
+                    } else {
+                        Vec::new()
+                    }
+                }
                 // This client fell behind; send current state instead of
                 // the events it missed.
                 Err(BroadcastStreamRecvError::Lagged(_)) => {
-                    snapshot(&state).await.unwrap_or_default()
+                    snapshot(&state, room).await.unwrap_or_default()
                 }
             }
         }
@@ -92,19 +183,28 @@ async fn live(
     Ok(Sse::new(stream).keep_alive(KeepAlive::new().interval(Duration::from_secs(15))))
 }
 
-async fn snapshot(state: &AppState) -> anyhow::Result<Vec<ServerEvent>> {
+async fn snapshot(state: &AppState, room: i64) -> anyhow::Result<Vec<ServerEvent>> {
     let mut events = {
-        let jukebox = state.jukebox.lock().await;
+        // The song from whichever jukebox the room hears; the speakers are
+        // the room's own.
+        let sound = state.sound_jukebox_for(room);
+        let sound = sound.lock().await;
         vec![
             ServerEvent::Hello {
                 web_build: crate::web::build_id(),
             },
-            ServerEvent::NowPlaying(Box::new(jukebox.now_playing())),
-            ServerEvent::PlayerState(jukebox.player_state()),
-            ServerEvent::OutputStatus(jukebox.output_status()),
+            ServerEvent::NowPlaying(Box::new(sound.now_playing())),
+            ServerEvent::PlayerState(sound.player_state()),
         ]
     };
-    events.push(ServerEvent::QueueChanged(state.store.queue().await?));
+    let (output, mood) = {
+        let own = state.jukebox_for(room);
+        let own = own.lock().await;
+        (own.output_status(), own.mood_state())
+    };
+    events.push(ServerEvent::OutputStatus(output));
+    events.push(ServerEvent::Mood(mood));
+    events.push(ServerEvent::QueueChanged(state.store.queue(room).await?));
     events.push(ServerEvent::ArtistLookup(
         crate::library_api::lookup_status(state),
     ));
@@ -120,4 +220,33 @@ fn to_sse(event: &ServerEvent) -> Event {
         .map(|mut v| v["data"].take())
         .unwrap_or_default();
     Event::default().event(event.name()).data(data.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_room_following_main_shows_mains_song_but_keeps_its_queue() {
+        let song = ServerEvent::Position {
+            track_id: 1,
+            position_ms: 0,
+        };
+        let queue = ServerEvent::QueueChanged(Vec::new());
+        let news = ServerEvent::LibraryChanged;
+        // Main's own pages: everything from the house channel.
+        assert!(wanted(&song, false, false, false));
+        // Another room playing its own music.
+        assert!(wanted(&song, true, true, false));
+        assert!(!wanted(&song, true, false, false), "not Main's song");
+        // Following Main: Main's song, not its own (idle) player's.
+        assert!(wanted(&song, true, false, true));
+        assert!(!wanted(&song, true, true, true));
+        // Its own queue either way; never Main's.
+        assert!(wanted(&queue, true, true, true));
+        assert!(!wanted(&queue, true, false, true));
+        // House news only once, from the house channel.
+        assert!(wanted(&news, true, false, false));
+        assert!(!wanted(&news, true, true, false));
+    }
 }

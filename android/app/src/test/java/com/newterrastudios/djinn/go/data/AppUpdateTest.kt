@@ -1,6 +1,8 @@
 package com.newterrastudios.djinn.go.data
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Assert.assertNull
 import org.junit.Test
 import java.io.File
@@ -36,5 +38,14 @@ class AppUpdateTest {
         } finally {
             file.delete()
         }
+    }
+
+    @Test
+    fun `it asks once a version unless turned off`() {
+        assertTrue(shouldAskAboutUpdate(release, asking = true, declined = 0))
+        assertFalse(shouldAskAboutUpdate(release, asking = true, declined = 20261102))
+        assertTrue("a newer one asks again", shouldAskAboutUpdate(release, asking = true, declined = 20261101))
+        assertFalse(shouldAskAboutUpdate(release, asking = false, declined = 0))
+        assertFalse(shouldAskAboutUpdate(null, asking = true, declined = 0))
     }
 }

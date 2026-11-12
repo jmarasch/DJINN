@@ -1,6 +1,7 @@
 package com.newterrastudios.djinn.go.ui
 
 import android.annotation.SuppressLint
+import com.newterrastudios.djinn.go.i18n.t
 import android.view.ViewGroup
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
@@ -125,11 +126,11 @@ fun ScanScreen(onFound: (String) -> Unit, onCancel: () -> Unit) {
                 .padding(24.dp),
         ) {
             Text(
-                "Point the camera at the QR code. In GO on a computer: Account > Open on your phone.",
+                t("scan.hint"),
                 color = MaterialTheme.colorScheme.onPrimary,
                 modifier = Modifier.align(Alignment.TopCenter),
             )
-            Button(onClick = onCancel, modifier = Modifier.align(Alignment.BottomCenter)) { Text("Cancel") }
+            Button(onClick = onCancel, modifier = Modifier.align(Alignment.BottomCenter)) { Text(t("common.cancel")) }
         }
     }
 }

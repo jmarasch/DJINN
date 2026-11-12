@@ -45,12 +45,7 @@ impl CheckedFile {
     pub async fn finish(mut self, size: u64, sha256: &str, name: &str) -> Result<(), String> {
         self.out.flush().await.map_err(|e| e.to_string())?;
         drop(self.out);
-        let sum: String = self
-            .hasher
-            .finalize()
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect();
+        let sum = crate::security::hex(&self.hasher.finalize());
         if self.written != size || sum != sha256 {
             let _ = tokio::fs::remove_file(&self.path).await;
             return Err(format!("{name} came down damaged; try again"));

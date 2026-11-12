@@ -1,6 +1,8 @@
 package com.newterrastudios.djinn.go
 
 import com.newterrastudios.djinn.go.data.offeredUpdate
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import com.newterrastudios.djinn.go.data.securityCode
 import android.Manifest
 import android.app.SearchManager
@@ -41,6 +43,7 @@ import com.newterrastudios.djinn.go.ui.DjinnTheme
 import com.newterrastudios.djinn.go.ui.MainScreen
 import com.newterrastudios.djinn.go.ui.Nav
 import com.newterrastudios.djinn.go.ui.SignInScreen
+import com.newterrastudios.djinn.go.i18n.t
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filter
@@ -79,6 +82,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // The phone's language may have changed since the app started.
+        com.newterrastudios.djinn.go.i18n.Strings.load(this)
         enableEdgeToEdge()
         Spectrum.leadMs = app.prefs.visualsLeadMs
         Spectrum.intensity = app.prefs.visualsIntensity
@@ -167,8 +172,11 @@ class MainActivity : ComponentActivity() {
         LaunchedEffect(Unit) {
             app.account.signedIn.drop(1).filter { !it }.collect { cast.stop() }
         }
+        // Each time the app comes to the front, since it can stay open for days.
         LaunchedEffect(Unit) {
-            nav.update = offeredUpdate(api.appRelease(), BuildConfig.VERSION_CODE.toLong())
+            lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                nav.update = offeredUpdate(api.appRelease(), BuildConfig.VERSION_CODE.toLong())
+            }
         }
         LaunchedEffect(Unit) {
             // The admin may have renamed it since.
@@ -180,10 +188,15 @@ class MainActivity : ComponentActivity() {
         LaunchedEffect(Unit) {
             nav.liked.addAll(app.prefs.likedIds)
             try {
-                val liked = api.likedIds().tracks
+                val ids = api.likedIds()
+                val liked = ids.tracks
                 nav.liked.clear()
                 nav.liked.addAll(liked)
                 app.prefs.likedIds = liked.toSet()
+                nav.likedAlbums.clear()
+                nav.likedAlbums.addAll(ids.albums)
+                nav.likedArtists.clear()
+                nav.likedArtists.addAll(ids.artists)
             } catch (_: IOException) {
                 // Hearts stay as they were last seen.
             }
@@ -226,7 +239,7 @@ class MainActivity : ComponentActivity() {
                 } catch (_: IOException) {
                     app.offline.searchPlayable(nav.server, query).map { it.toTrack() }
                 }
-                if (found.isEmpty()) nav.message = "Nothing found for \"$query\"." else player.play(found)
+                if (found.isEmpty()) nav.message = t("search.no_matches", "query" to query) else player.play(found)
             }
         }
         LaunchedEffect(Unit) {
@@ -236,7 +249,7 @@ class MainActivity : ComponentActivity() {
                 try {
                     player.queueRadio(seed.id, api.radio(seed.id))
                 } catch (_: IOException) {
-                    player.error = "Couldn't start radio."
+                    player.error = t("player.radio_failed")
                 }
             }
         }

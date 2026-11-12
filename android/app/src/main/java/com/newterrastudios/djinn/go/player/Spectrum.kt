@@ -33,6 +33,12 @@ class SoundFrame {
     var atUs = -1L
     val bands = FloatArray(BANDS)
     val wave = FloatArray(WAVE_POINTS)
+    /** Each side's wave, for the styles that show stereo (Scope). */
+    val left = FloatArray(WAVE_POINTS)
+    val right = FloatArray(WAVE_POINTS)
+    /** Each side's loudness, 0 (quiet) to 1 (full scale), for the VU meters. */
+    var loudLeft = 0f
+    var loudRight = 0f
     var bass = 0f
     var mid = 0f
     var treble = 0f
@@ -51,6 +57,8 @@ class SpectrumAnalyzer {
     private val real = FloatArray(FFT_SIZE)
     private val imag = FloatArray(FFT_SIZE)
     private val samples = FloatArray(FFT_SIZE)
+    private val leftSamples = FloatArray(FFT_SIZE)
+    private val rightSamples = FloatArray(FFT_SIZE)
     private var filled = 0
     private val frames = Array(FRAMES) { SoundFrame() }
 
@@ -93,8 +101,13 @@ class SpectrumAnalyzer {
     }
 
     /** One mono sample, from -1 to 1. Analyzes when a full window arrives. */
-    fun add(sample: Float, sampleRate: Int) {
-        samples[filled++] = sample
+    fun add(sample: Float, sampleRate: Int) = add(sample, sample, sampleRate)
+
+    /** One stereo sample, each side from -1 to 1. */
+    fun add(left: Float, right: Float, sampleRate: Int) {
+        leftSamples[filled] = left
+        rightSamples[filled] = right
+        samples[filled++] = (left + right) / 2
         samplesSeen++
         if (filled == FFT_SIZE) {
             filled = 0
@@ -153,7 +166,13 @@ class SpectrumAnalyzer {
         frame.mid = if (midCount > 0) mid / midCount else 0f
         frame.treble = if (trebleCount > 0) treble / trebleCount else 0f
         val step = FFT_SIZE / WAVE_POINTS
-        for (i in 0 until WAVE_POINTS) frame.wave[i] = samples[i * step]
+        for (i in 0 until WAVE_POINTS) {
+            frame.wave[i] = samples[i * step]
+            frame.left[i] = leftSamples[i * step]
+            frame.right[i] = rightSamples[i * step]
+        }
+        frame.loudLeft = loudness(leftSamples)
+        frame.loudRight = loudness(rightSamples)
 
         val now = samplesSeen * 1_000_000L / sampleRate
         frame.beat = frame.bass > bassAverage + BEAT_RISE && frame.bass > BEAT_FLOOR && now - lastBeatUs > BEAT_GAP_US
@@ -161,6 +180,15 @@ class SpectrumAnalyzer {
         bassAverage += (frame.bass - bassAverage) * BASS_FOLLOW
         frame.atUs = now
         written += 1
+    }
+
+    /** How loud a window is, as a VU meter reads it: -40 dB to full scale as 0 to 1. */
+    private fun loudness(side: FloatArray): Float {
+        var sum = 0f
+        for (v in side) sum += v * v
+        val rms = sqrt(sum / side.size)
+        val decibels = 20f * ln(rms.coerceAtLeast(1e-5f)) / LN_10
+        return ((decibels + VU_FLOOR_DB) / VU_FLOOR_DB).coerceIn(0f, 1f)
     }
 
     /** In place, radix 2. */
@@ -208,6 +236,7 @@ class SpectrumAnalyzer {
 
     private companion object {
         const val FLOOR_DB = 70f
+        const val VU_FLOOR_DB = 40f
         const val BASS_TOP_HZ = 250f
         const val MID_TOP_HZ = 2000f
         /** A beat is bass this far over what it has been lately. */
@@ -230,6 +259,17 @@ class SpectrumAnalyzer {
 class SoundReader(private val analyzer: SpectrumAnalyzer) {
     val bands = FloatArray(BANDS)
     val wave = FloatArray(WAVE_POINTS)
+    val left = FloatArray(WAVE_POINTS)
+    val right = FloatArray(WAVE_POINTS)
+
+    /** Each side's VU needle, 0 to 1, swinging as real ones do. */
+    val needles = FloatArray(2)
+
+    /** Bass and mid followed slowly, for colors that drift with the song. */
+    var slowBass = 0f
+        private set
+    var slowMid = 0f
+        private set
     var bass = 0f
         private set
     var mid = 0f
@@ -278,12 +318,22 @@ class SoundReader(private val analyzer: SpectrumAnalyzer) {
             val level = ((frame?.bands?.get(i) ?: 0f) * gain).coerceIn(0f, 1f)
             bands[i] = follow(bands[i], level)
         }
+        val waveFollow = WAVE_FOLLOW * (1f - calm * WAVE_CALM)
         for (i in 0 until WAVE_POINTS) {
             val point = (frame?.wave?.get(i) ?: 0f) * gain
-            wave[i] += (point - wave[i]) * WAVE_FOLLOW * (1f - calm * WAVE_CALM)
+            wave[i] += (point - wave[i]) * waveFollow
+            left[i] += (((frame?.left?.get(i) ?: 0f) * gain).coerceIn(-1f, 1f) - left[i]) * waveFollow
+            right[i] += (((frame?.right?.get(i) ?: 0f) * gain).coerceIn(-1f, 1f) - right[i]) * waveFollow
         }
+        val seconds = elapsedUs / 1_000_000f
+        val swing = 1f - exp(-seconds / NEEDLE_SECONDS)
+        needles[0] += (((frame?.loudLeft ?: 0f) * gain).coerceIn(0f, 1f) - needles[0]) * swing
+        needles[1] += (((frame?.loudRight ?: 0f) * gain).coerceIn(0f, 1f) - needles[1]) * swing
         bass = follow(bass, ((frame?.bass ?: 0f) * gain).coerceIn(0f, 1f))
         mid = follow(mid, ((frame?.mid ?: 0f) * gain).coerceIn(0f, 1f))
+        val slow = 1f - exp(-seconds.coerceAtMost(MAX_STEP_SECONDS) / SLOW_SECONDS)
+        slowBass += (bass - slowBass) * slow
+        slowMid += (mid - slowMid) * slow
         treble = follow(treble, ((frame?.treble ?: 0f) * gain).coerceIn(0f, 1f))
         val since = frame?.atUs ?: -1L
         val fresh = since != lastFrameAt
@@ -300,6 +350,9 @@ class SoundReader(private val analyzer: SpectrumAnalyzer) {
         const val WAVE_FOLLOW = 0.6f
         const val WAVE_CALM = 0.8f
         const val CALMEST_SECONDS = 0.25f
+        const val NEEDLE_SECONDS = 0.3f
+        const val SLOW_SECONDS = 0.25f
+        const val MAX_STEP_SECONDS = 0.1f
     }
 }
 
@@ -354,14 +407,16 @@ object Spectrum : TeeAudioProcessor.AudioBufferSink {
         val data = buffer.asReadOnlyBuffer().order(ByteOrder.nativeOrder())
         when (encoding) {
             C.ENCODING_PCM_16BIT -> while (data.remaining() >= channels * 2) {
-                var sum = 0f
-                repeat(channels) { sum += data.short / 32768f }
-                analyzer.add(sum / channels, sampleRate)
+                val left = data.short / 32768f
+                val right = if (channels > 1) data.short / 32768f else left
+                repeat(channels - minOf(channels, 2)) { data.short }
+                analyzer.add(left, right, sampleRate)
             }
             C.ENCODING_PCM_FLOAT -> while (data.remaining() >= channels * 4) {
-                var sum = 0f
-                repeat(channels) { sum += data.float }
-                analyzer.add(sum / channels, sampleRate)
+                val left = data.float
+                val right = if (channels > 1) data.float else left
+                repeat(channels - minOf(channels, 2)) { data.float }
+                analyzer.add(left, right, sampleRate)
             }
         }
     }

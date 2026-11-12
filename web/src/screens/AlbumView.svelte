@@ -5,6 +5,7 @@
   import AddToPlaylist from '../lib/AddToPlaylist.svelte'
   import GenreChips from '../lib/GenreChips.svelte'
   import QueueAll from '../lib/QueueAll.svelte'
+  import Heart from '../lib/Heart.svelte'
   import SortChoice from '../lib/SortChoice.svelte'
   import TagEditor from '../lib/TagEditor.svelte'
   import TrackRow from '../lib/TrackRow.svelte'
@@ -69,6 +70,7 @@
           <div class="genres"><GenreChips genres={album.genres.split(',').map((g) => g.trim())} /></div>
         {/if}
         <div class="admin-actions">
+          <Heart kind="album" id={album.id} name={album.title} />
           <QueueAll kind="album" refId={album.id} />
           <AddToPlaylist kind="album" refId={album.id} label={album.title} />
           {#if isAdmin()}

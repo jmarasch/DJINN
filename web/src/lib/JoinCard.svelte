@@ -1,15 +1,27 @@
 <script lang="ts">
+  import { t } from './i18n.svelte'
   // The join QR code with steps for guests. Used by the /join page and the
   // Join button in the app.
   import { onMount } from 'svelte'
   import PublicNetworkNote from './PublicNetworkNote.svelte'
+  import { app } from './state.svelte'
 
   let { big = false }: { big?: boolean } = $props()
   let url = $state('')
   let guestMode = $state(false)
 
+  // From inside the app, the code walks guests into the room you're in.
+  const roomQuery = app.rooms.length > 1 && app.room > 1 ? `?room=${app.room}` : ''
+  const roomName = app.rooms.length > 1 ? app.rooms.find((r) => r.id === app.room)?.name : undefined
+
+  // A new address from the router: the code and link follow it.
+  const shown = $derived(
+    app.address ? (roomQuery ? `${app.address}/${roomQuery}` : app.address) : url,
+  )
+  const fresh = $derived(app.address ? `${roomQuery ? '&' : '?'}v=${encodeURIComponent(app.address)}` : '')
+
   onMount(async () => {
-    const [join, mode] = await Promise.all([fetch('/api/join'), fetch('/api/auth/mode')])
+    const [join, mode] = await Promise.all([fetch(`/api/join${roomQuery}`), fetch('/api/auth/mode')])
     if (join.ok) url = (await join.json()).url
     if (mode.ok) guestMode = (await mode.json()).guest_mode
   })
@@ -18,22 +30,21 @@
 <div class="join" class:big>
   <PublicNetworkNote />
   <div class="qr">
-    <img src="/api/join/qr.svg" alt="QR code for {url}" />
+    <img src="/api/join/qr.svg{roomQuery}{fresh}" alt={t('join.qr_alt', { url: shown })} />
   </div>
-  {#if url}<p class="url">{url}</p>{/if}
+  {#if roomName}<p class="muted small">{t('join.joins_room', { room: roomName })}</p>{/if}
+  {#if shown}<p class="url">{shown}</p>{/if}
   <ol>
-    <li>Scan the code with your phone camera, or type the address above.</li>
+    <li>{t('join.step_scan')}</li>
     {#if guestMode}
-      <li>Type your name. No account needed.</li>
+      <li>{t('join.step_name')}</li>
     {:else}
-      <li>Sign in. No account yet? Ask the host for one.</li>
+      <li>{t('join.step_sign_in')}</li>
     {/if}
-    <li>Search for a song or browse the library, then tap it to add it to the party queue.</li>
+    <li>{t('join.step_request')}</li>
   </ol>
-  <p class="muted small">Requests play in order. When the queue is empty, the party mix keeps going.</p>
-  <p class="muted small">
-    Android: if Chrome won't open the page, allow Chrome's Nearby devices permission in the phone's settings.
-  </p>
+  <p class="muted small">{t('join.order_note')}</p>
+  <p class="muted small">{t('join.android_note')}</p>
 </div>
 
 <style>

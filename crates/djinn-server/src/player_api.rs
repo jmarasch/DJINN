@@ -53,8 +53,12 @@ pub(crate) fn queue_error(err: QueueError) -> ApiError {
     }
 }
 
-async fn queue(_: CurrentUser, State(state): State<AppState>) -> ApiResult<Json<Vec<QueueItem>>> {
-    Ok(Json(state.store.queue().await?))
+async fn queue(
+    CurrentUser(user): CurrentUser,
+    State(state): State<AppState>,
+) -> ApiResult<Json<Vec<QueueItem>>> {
+    let room = state.rooms.leader(state.room_of(user.id).await);
+    Ok(Json(state.store.queue(room).await?))
 }
 
 #[derive(Deserialize)]
@@ -82,12 +86,16 @@ async fn add_request(
         ip: ip.map(|ip| ip.to_string()),
     };
     let (item, outcome) = state
-        .jukebox
+        .jukebox_of(user.id)
+        .await
         .lock()
         .await
         .add_request(&user, body.track_id, &origin)
         .await
         .map_err(queue_error)?;
+    if let Err(e) = state.store.note_request_after_search(user.id).await {
+        tracing::debug!(error = %e, "noting the search behind a request failed");
+    }
     let status = match outcome {
         RequestOutcome::Added => StatusCode::CREATED,
         RequestOutcome::Backed => StatusCode::OK,
@@ -123,7 +131,8 @@ async fn add_all(
         ip: ip.map(|ip| ip.to_string()),
     };
     let added = state
-        .jukebox
+        .jukebox_of(admin.id)
+        .await
         .lock()
         .await
         .add_requests(&admin, &ids, &origin)
@@ -138,7 +147,8 @@ async fn remove_request(
     Path(id): Path<i64>,
 ) -> ApiResult<StatusCode> {
     state
-        .jukebox
+        .jukebox_of(user.id)
+        .await
         .lock()
         .await
         .remove_request(&user, id)
@@ -154,13 +164,14 @@ struct MoveRequest {
 }
 
 async fn move_request(
-    _: AdminUser,
+    AdminUser(admin): AdminUser,
     State(state): State<AppState>,
     Path(id): Path<i64>,
     Json(body): Json<MoveRequest>,
 ) -> ApiResult<StatusCode> {
     state
-        .jukebox
+        .jukebox_of(admin.id)
+        .await
         .lock()
         .await
         .move_request(id, body.position)
@@ -177,8 +188,13 @@ struct NowPlayingResponse {
     output: OutputStatus,
 }
 
-async fn now_playing(_: CurrentUser, State(state): State<AppState>) -> Json<NowPlayingResponse> {
-    let jukebox = state.jukebox.lock().await;
+async fn now_playing(
+    CurrentUser(user): CurrentUser,
+    State(state): State<AppState>,
+) -> Json<NowPlayingResponse> {
+    let room = state.room_of(user.id).await;
+    let jukebox = state.sound_jukebox_for(room);
+    let jukebox = jukebox.lock().await;
     Json(NowPlayingResponse {
         now_playing: jukebox.now_playing(),
         player: jukebox.player_state(),
@@ -186,18 +202,35 @@ async fn now_playing(_: CurrentUser, State(state): State<AppState>) -> Json<NowP
     })
 }
 
-async fn play(_: AdminUser, State(state): State<AppState>) -> StatusCode {
-    state.jukebox.lock().await.play();
+async fn play(AdminUser(admin): AdminUser, State(state): State<AppState>) -> StatusCode {
+    state.jukebox_of(admin.id).await.lock().await.play();
     StatusCode::NO_CONTENT
 }
 
-async fn pause(_: AdminUser, State(state): State<AppState>) -> StatusCode {
-    state.jukebox.lock().await.pause();
+async fn pause(AdminUser(admin): AdminUser, State(state): State<AppState>) -> StatusCode {
+    state.jukebox_of(admin.id).await.lock().await.pause();
     StatusCode::NO_CONTENT
 }
 
-async fn skip(AdminUser(admin): AdminUser, State(state): State<AppState>) -> StatusCode {
-    state.jukebox.lock().await.skip(&admin);
+#[derive(serde::Deserialize)]
+struct SkipQuery {
+    /// Also play it less (`?less=1`).
+    #[serde(default)]
+    less: u8,
+}
+
+async fn skip(
+    AdminUser(admin): AdminUser,
+    State(state): State<AppState>,
+    axum::extract::Query(query): axum::extract::Query<SkipQuery>,
+) -> StatusCode {
+    let jukebox = state.jukebox_of(admin.id).await;
+    let mut jukebox = jukebox.lock().await;
+    if query.less == 1 {
+        jukebox.skip_play_less(&admin);
+    } else {
+        jukebox.skip(&admin);
+    }
     StatusCode::NO_CONTENT
 }
 
@@ -212,7 +245,8 @@ async fn skip_vote(
     State(state): State<AppState>,
 ) -> ApiResult<Json<SkipVote>> {
     let skipped = state
-        .jukebox
+        .jukebox_of(user.id)
+        .await
         .lock()
         .await
         .vote_skip(&user)
@@ -227,14 +261,20 @@ struct Volume {
 }
 
 async fn set_volume(
-    _: AdminUser,
+    AdminUser(admin): AdminUser,
     State(state): State<AppState>,
     Json(body): Json<Volume>,
 ) -> ApiResult<StatusCode> {
     if body.volume > 100 {
         return Err(ApiError::bad_request("volume must be 0 to 100"));
     }
-    state.jukebox.lock().await.set_volume(body.volume).await?;
+    state
+        .jukebox_of(admin.id)
+        .await
+        .lock()
+        .await
+        .set_volume(body.volume)
+        .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -245,20 +285,35 @@ struct Crossfade {
 }
 
 async fn set_crossfade(
-    _: AdminUser,
+    AdminUser(admin): AdminUser,
     State(state): State<AppState>,
     Json(body): Json<Crossfade>,
 ) -> ApiResult<StatusCode> {
     if u32::from(body.secs) > djinn_engine::MAX_CROSSFADE_SECS {
         return Err(ApiError::bad_request("crossfade must be 0 to 12 seconds"));
     }
-    state.jukebox.lock().await.set_crossfade(body.secs).await?;
+    state
+        .jukebox_of(admin.id)
+        .await
+        .lock()
+        .await
+        .set_crossfade(body.secs)
+        .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(Serialize, Deserialize)]
 struct Settings {
     history_window: i64,
+    /// A copy of a song that played recently counts as played.
+    #[serde(default = "default_true")]
+    avoid_copies: bool,
+    /// Keep a history of searches for Admin > Stats.
+    #[serde(default = "default_true")]
+    search_history: bool,
+    /// Everyone gets "Not in the library?", not just admins.
+    #[serde(default)]
+    wishlist_everyone: bool,
     per_user_limit: i64,
     /// Most songs the whole queue may hold; 0 means no cap.
     max_queue: i64,
@@ -303,6 +358,9 @@ struct Settings {
     /// Hours before a genre's shuffled order is made again.
     #[serde(default = "default_genre_refresh")]
     genre_refresh_hours: i64,
+    /// How much of a song a play must hear to count in the library lists, in percent.
+    #[serde(default = "default_play_count_percent")]
+    play_count_percent: i64,
     /// The TV page (/tv) works without signing in.
     #[serde(default = "default_true")]
     tv_page: bool,
@@ -328,6 +386,10 @@ fn default_genre_refresh() -> i64 {
     crate::smart::GENRE_REFRESH_DEFAULT
 }
 
+fn default_play_count_percent() -> i64 {
+    crate::library_api::PLAY_COUNT_PERCENT_DEFAULT
+}
+
 fn default_true() -> bool {
     true
 }
@@ -341,6 +403,10 @@ async fn settings(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json
             jukebox::DEFAULT_HISTORY_WINDOW,
         )
         .await?,
+        avoid_copies: settings::flag(store, jukebox::AVOID_COPIES, true).await?,
+        search_history: settings::flag(store, crate::wishes_api::SEARCH_HISTORY, true).await?,
+        wishlist_everyone: settings::flag(store, crate::wishes_api::WISHLIST_EVERYONE, false)
+            .await?,
         per_user_limit: settings::number(
             store,
             jukebox::PER_USER_LIMIT,
@@ -379,6 +445,12 @@ async fn settings(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json
             store,
             crate::smart::GENRE_REFRESH_HOURS,
             crate::smart::GENRE_REFRESH_DEFAULT,
+        )
+        .await?,
+        play_count_percent: settings::number(
+            store,
+            crate::library_api::PLAY_COUNT_PERCENT,
+            crate::library_api::PLAY_COUNT_PERCENT_DEFAULT,
         )
         .await?,
         tv_page: crate::tv_api::enabled(&state).await?,
@@ -465,6 +537,19 @@ async fn update_settings(
     store
         .set_setting(jukebox::HISTORY_WINDOW, &body.history_window.to_string())
         .await?;
+    settings::set_flag(store, jukebox::AVOID_COPIES, body.avoid_copies).await?;
+    settings::set_flag(
+        store,
+        crate::wishes_api::SEARCH_HISTORY,
+        body.search_history,
+    )
+    .await?;
+    settings::set_flag(
+        store,
+        crate::wishes_api::WISHLIST_EVERYONE,
+        body.wishlist_everyone,
+    )
+    .await?;
     store
         .set_setting(jukebox::PER_USER_LIMIT, &body.per_user_limit.to_string())
         .await?;
@@ -514,6 +599,12 @@ async fn update_settings(
         .set_setting(
             crate::smart::GENRE_REFRESH_HOURS,
             &body.genre_refresh_hours.clamp(0, 24 * 365).to_string(),
+        )
+        .await?;
+    store
+        .set_setting(
+            crate::library_api::PLAY_COUNT_PERCENT,
+            &body.play_count_percent.clamp(0, 100).to_string(),
         )
         .await?;
     let old_album_folders = settings::flag(store, djinn_store::ALBUM_FOLDERS_KEY, true).await?;
@@ -699,7 +790,7 @@ mod tests {
 
         // Bob backs the first song, so he may step back from it, but the
         // second is Alice's alone.
-        let queue = state.store.queue().await.unwrap();
+        let queue = state.store.queue(djinn_store::MAIN_ROOM).await.unwrap();
         let path = format!("/api/queue/{}", queue[1].id);
         let (status, _) = call(&state, Method::DELETE, &path, None, Some(&bob)).await;
         assert_eq!(status, StatusCode::FORBIDDEN, "not bob's request");

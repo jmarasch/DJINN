@@ -22,6 +22,7 @@ import androidx.media3.session.SessionToken
 import com.newterrastudios.djinn.go.data.GoApi
 import com.newterrastudios.djinn.go.data.GoResume
 import com.newterrastudios.djinn.go.data.Track
+import com.newterrastudios.djinn.go.i18n.t
 import java.io.IOException
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.delay
@@ -131,8 +132,8 @@ class PlayerState(private val api: GoApi) {
 
         override fun onPlayerError(e: PlaybackException) {
             error = e.cause?.message?.takeIf { "429" in it }
-                ?.let { "You're already listening on as many devices as your role allows." }
-                ?: "Couldn't play this song (${e.errorCodeName})."
+                ?.let { t("player.too_many_streams") }
+                ?: t("player.play_failed", "error" to e.errorCodeName)
         }
     }
 
@@ -150,6 +151,9 @@ class PlayerState(private val api: GoApi) {
         controller?.release()
         controller = null
     }
+
+    /** Milliseconds into the song, read now (lyrics need more than [positionMs]'s two updates a second). */
+    fun livePositionMs(): Long = controller?.currentPosition?.coerceAtLeast(0) ?: positionMs
 
     /** Follows the position while something's on screen to show it. */
     suspend fun followPosition() {
@@ -312,6 +316,11 @@ class PlayerState(private val api: GoApi) {
         controller?.seekToNextMediaItem()
     }
 
+    /** Skips the song, and has it (and songs like it) play less in radio and the mix. */
+    fun skipPlayLess() {
+        controller?.sendCustomCommand(SKIP_PLAY_LESS, android.os.Bundle.EMPTY)
+    }
+
     /** To the song's start, or the song before if just begun. */
     fun previous() {
         controller?.seekToPrevious()
@@ -322,8 +331,20 @@ class PlayerState(private val api: GoApi) {
         positionMs = ms
     }
 
+    /**
+     * Plays a song from Up next now. The songs that were ahead of it stay
+     * coming up, after it; the one playing stays behind it for Previous.
+     */
     fun jumpTo(index: Int) {
-        controller?.seekToDefaultPosition(index)
+        val player = controller ?: return
+        val next = player.currentMediaItemIndex + 1
+        // Shuffled, the list's order isn't the playing order: just jump.
+        if (!player.shuffleModeEnabled && index > next) {
+            player.moveMediaItem(index, next)
+            player.seekToDefaultPosition(next)
+        } else {
+            player.seekToDefaultPosition(index)
+        }
     }
 
     fun remove(index: Int) {

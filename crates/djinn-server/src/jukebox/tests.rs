@@ -226,7 +226,7 @@ async fn requester_can_skip_their_own_song_alone() {
 async fn replay_gain_reaches_the_engine() {
     let mut h = Harness::new(1).await;
     h.store
-        .save_analysis(h.tracks[0], 1, Some((-8.0, 0.5)), None)
+        .save_analysis(h.tracks[0], 1, 1, Some((-8.0, 0.5)), None, None)
         .await
         .unwrap();
     let gain_sent = |h: &Harness| {
@@ -307,6 +307,8 @@ async fn radio_plays_the_seed_then_songs_like_it() {
     h.finish(first).await;
     let second = h.play_next().await;
     assert!(pool.iter().any(|(id, _)| *id == second));
+    let admin = h.admin.clone();
+    h.jukebox.skip_play_less(&admin);
     h.event(EngineEvent::TrackEnded {
         id: TrackId(second),
         played_ms: 500,
@@ -318,7 +320,11 @@ async fn radio_plays_the_seed_then_songs_like_it() {
     assert_ne!(third, second, "the skipped song played recently");
     let (played, skipped) = heard.lock().unwrap().last().cloned().unwrap();
     assert_eq!(played, [seed], "what played through steers the radio");
-    assert_eq!(skipped, [second], "and what was skipped steers it away");
+    assert_eq!(
+        skipped,
+        [second],
+        "and what was marked play less steers it away"
+    );
 
     // It's still on after a restart.
     let (events, _) = broadcast::channel(4);
@@ -329,13 +335,46 @@ async fn radio_plays_the_seed_then_songs_like_it() {
 }
 
 #[tokio::test]
+async fn a_plain_skip_does_not_steer_radio_away() {
+    let mut h = Harness::new(0).await;
+    let heard: Heard = Arc::default();
+    h.jukebox.set_mixer(Arc::new(FixedMixer {
+        pool: vec![(h.tracks[1], 1.0), (h.tracks[2], 1.0)],
+        heard: Arc::clone(&heard),
+    }));
+    h.jukebox
+        .start_radio(RadioSeed::Track { id: h.tracks[0] }, "Song 0".into())
+        .await
+        .unwrap();
+    let first = h.play_next().await;
+    h.finish(first).await;
+    let second = h.play_next().await;
+    // Skipped, but only because the next song was wanted more.
+    h.event(EngineEvent::TrackEnded {
+        id: TrackId(second),
+        played_ms: 500,
+        reason: EndReason::Skipped,
+    })
+    .await;
+    h.play_next().await;
+    let (_, skipped) = heard.lock().unwrap().last().cloned().unwrap();
+    assert!(skipped.is_empty(), "nothing is steered away from");
+}
+
+#[tokio::test]
 async fn plays_from_pool_when_queue_empty() {
     let mut h = Harness::new(5).await;
     h.event(EngineEvent::NextNeeded { after: None }).await;
     let first = h.play_next().await;
     assert!(h.tracks[..5].contains(&first));
     assert_eq!(h.jukebox.now_playing().current.unwrap().track.id, first);
-    assert_eq!(h.store.recent_track_ids(5).await.unwrap(), [first]);
+    assert_eq!(
+        h.store
+            .recent_track_ids(djinn_store::MAIN_ROOM, 5)
+            .await
+            .unwrap(),
+        [first]
+    );
 
     // The engine already has the next pool track lined up.
     let second = h.last_next().unwrap();
@@ -359,7 +398,12 @@ async fn request_preempts_queued_pool_track_and_leaves_queue_when_audible() {
 
     let started = h.play_next().await;
     assert_eq!(started, requested);
-    assert!(h.store.queue().await.unwrap().is_empty());
+    assert!(h
+        .store
+        .queue(djinn_store::MAIN_ROOM)
+        .await
+        .unwrap()
+        .is_empty());
     let now = h.jukebox.now_playing().current.unwrap();
     assert_eq!(now.requested_by.as_deref(), Some("guest"));
 
@@ -397,13 +441,18 @@ async fn request_replacing_a_track_the_engine_already_took() {
         pool_track
     );
     assert_eq!(
-        h.store.queue().await.unwrap().len(),
+        h.store.queue(djinn_store::MAIN_ROOM).await.unwrap().len(),
         1,
         "request still waiting"
     );
     h.finish(pool_track).await;
     assert_eq!(h.play_next().await, requested);
-    assert!(h.store.queue().await.unwrap().is_empty());
+    assert!(h
+        .store
+        .queue(djinn_store::MAIN_ROOM)
+        .await
+        .unwrap()
+        .is_empty());
 }
 
 #[tokio::test]
@@ -475,7 +524,57 @@ async fn only_owner_or_admin_removes_requests() {
         .unwrap();
     h.jukebox.remove_request(&user, mine.id).await.unwrap();
     h.jukebox.remove_request(&admin, item.id).await.unwrap();
-    assert!(h.store.queue().await.unwrap().is_empty());
+    assert!(h
+        .store
+        .queue(djinn_store::MAIN_ROOM)
+        .await
+        .unwrap()
+        .is_empty());
+}
+
+/// What "play less" level each play was recorded with, oldest first.
+async fn play_less_levels(h: &Harness) -> Vec<i64> {
+    djinn_store::sqlx::query_scalar("SELECT play_less FROM play_events ORDER BY id")
+        .fetch_all(h.store.pool())
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn only_chosen_skips_count_against_a_song_and_votes_count_most() {
+    async fn end(h: &mut Harness, id: i64) {
+        h.event(EngineEvent::TrackEnded {
+            id: TrackId(id),
+            played_ms: 3000,
+            reason: EndReason::Skipped,
+        })
+        .await;
+    }
+
+    let mut h = Harness::new(4).await;
+    let (admin, user) = (h.admin.clone(), h.user.clone());
+    let other = h.store.create_user("other", "h", Role::User).await.unwrap();
+    h.jukebox.set_skip_votes_needed(2);
+    h.event(EngineEvent::NextNeeded { after: None }).await;
+    // A plain skip: not now, but nothing against the song.
+    let first = h.play_next().await;
+    h.jukebox.skip(&admin);
+    end(&mut h, first).await;
+    // "Skip and play less" from one person.
+    let second = h.play_next().await;
+    h.jukebox.skip_play_less(&admin);
+    end(&mut h, second).await;
+    // The room's votes.
+    let third = h.play_next().await;
+    assert!(!h.jukebox.vote_skip(&user).unwrap());
+    assert!(h.jukebox.vote_skip(&other).unwrap());
+    end(&mut h, third).await;
+    // An admin using the vote button skips at once: that's a plain skip.
+    let fourth = h.play_next().await;
+    assert!(h.jukebox.vote_skip(&admin).unwrap());
+    end(&mut h, fourth).await;
+
+    assert_eq!(play_less_levels(&h).await, [0, 1, 2, 0]);
 }
 
 #[tokio::test]
@@ -516,7 +615,12 @@ async fn broken_request_is_dropped() {
     })
     .await;
     h.event(EngineEvent::NextNeeded { after: None }).await;
-    assert!(h.store.queue().await.unwrap().is_empty());
+    assert!(h
+        .store
+        .queue(djinn_store::MAIN_ROOM)
+        .await
+        .unwrap()
+        .is_empty());
     assert!(h.tracks[..2].contains(&h.last_next().unwrap()));
 }
 
@@ -717,6 +821,7 @@ fn next_song_on_the_album_joins_gaplessly() {
         genre: None,
         duration_ms: None,
         art_hash: None,
+        lyrics: 0,
     };
     assert!(follows_on_album(
         &track(Some(1), None, Some(3)),
@@ -824,7 +929,159 @@ async fn a_restart_carries_on_with_the_song_playing() {
         .unwrap();
     assert_eq!(
         h.store.plays_since(0).await.unwrap(),
-        [(first, false)],
+        [(first, false, false)],
         "one play, finished"
     );
+}
+
+/// Songs 0 and 1 are copies of each other.
+struct PairCopies(i64, i64);
+
+impl Copies for PairCopies {
+    fn copies_of(&self, id: i64) -> Vec<i64> {
+        if id == self.0 {
+            vec![self.1]
+        } else if id == self.1 {
+            vec![self.0]
+        } else {
+            Vec::new()
+        }
+    }
+}
+
+#[tokio::test]
+async fn the_auto_mix_skips_copies_of_songs_just_played() {
+    for round in 0..8 {
+        let mut h = Harness::new(4).await;
+        h.jukebox
+            .set_copies(Arc::new(PairCopies(h.tracks[0], h.tracks[1])));
+        h.jukebox.load_active().await.unwrap();
+        h.event(EngineEvent::NextNeeded { after: None }).await;
+        let mut played = Vec::new();
+        for _ in 0..3 {
+            let id = h.play_next().await;
+            played.push(id);
+            h.finish(id).await;
+        }
+        let copies = played
+            .iter()
+            .filter(|&&id| id == h.tracks[0] || id == h.tracks[1])
+            .count();
+        assert_eq!(copies, 1, "round {round}: {played:?}");
+    }
+}
+
+#[test]
+fn copies_count_right_after_their_song() {
+    let (recent, counted) = auto::with_copies(&[5, 0, 9], 2, &PairCopies(0, 1));
+    assert_eq!(recent, [5, 0, 1, 9]);
+    assert_eq!(counted, 3);
+    let (recent, counted) = auto::with_copies(&[0], 5, &PairCopies(0, 1));
+    assert_eq!((recent, counted), (vec![0, 1], 2));
+}
+
+/// What screens show as coming: the next song, then the plan.
+fn coming(h: &Harness) -> Vec<i64> {
+    let now = h.jukebox.now_playing();
+    now.up_next
+        .iter()
+        .chain(now.later.iter())
+        .map(|e| e.track.id)
+        .collect()
+}
+
+#[tokio::test]
+async fn planned_songs_play_in_the_order_shown() {
+    let mut h = Harness::new(8).await;
+    h.event(EngineEvent::NextNeeded { after: None }).await;
+    let shown = coming(&h);
+    assert_eq!(shown.len(), 1 + PLAN_AHEAD, "the next song and the plan");
+    let unique: std::collections::HashSet<_> = shown.iter().collect();
+    assert_eq!(unique.len(), shown.len(), "no repeats in the plan");
+    let mut played = Vec::new();
+    for _ in 0..shown.len() {
+        let id = h.play_next().await;
+        played.push(id);
+        h.finish(id).await;
+    }
+    assert_eq!(played, shown);
+}
+
+#[tokio::test]
+async fn nodes_asking_for_more_get_a_longer_plan_played_in_order() {
+    let mut h = Harness::new(30).await;
+    h.event(EngineEvent::NextNeeded { after: None }).await;
+    let planned = h.jukebox.plan_for_nodes(12).await.unwrap();
+    assert_eq!(planned.len(), 12, "planned as far as asked");
+    let unique: std::collections::HashSet<_> = planned.iter().collect();
+    assert_eq!(unique.len(), planned.len(), "no repeats in the plan");
+    assert_eq!(
+        h.jukebox.now_playing().later.len(),
+        PLAN_AHEAD,
+        "screens still get the usual few"
+    );
+    let first = h.play_next().await;
+    h.finish(first).await;
+    let mut played = Vec::new();
+    for _ in 0..planned.len() {
+        let id = h.play_next().await;
+        played.push(id);
+        h.finish(id).await;
+    }
+    assert_eq!(played, planned);
+}
+
+#[tokio::test]
+async fn a_short_playlist_plans_no_further_than_itself() {
+    let mut h = Harness::new(5).await;
+    h.event(EngineEvent::NextNeeded { after: None }).await;
+    let planned = h.jukebox.plan_for_nodes(20).await.unwrap();
+    assert!(
+        planned.len() < 5,
+        "the plan stops where the playlist comes round"
+    );
+}
+
+#[tokio::test]
+async fn a_request_pushes_the_auto_mix_back_without_skipping_any() {
+    let mut h = Harness::new(6).await;
+    let list = h.jukebox.active_playlist().unwrap();
+    h.store
+        .update_playlist(list, None, Some(false))
+        .await
+        .unwrap();
+    h.jukebox.auto_mix_changed().await.unwrap();
+    h.event(EngineEvent::NextNeeded { after: None }).await;
+    let first = h.play_next().await;
+    assert_eq!(first, h.tracks[0]);
+    assert_eq!(coming(&h)[0], h.tracks[1]);
+
+    // A song outside the playlist, asked for.
+    let requested = h.tracks[7];
+    let user = h.user.clone();
+    h.jukebox
+        .add_request(&user, requested, &origin())
+        .await
+        .unwrap();
+    let shown = coming(&h);
+    assert_eq!(shown[0], requested);
+    assert_eq!(shown[1], h.tracks[1], "the bumped song comes right after");
+
+    h.finish(first).await;
+    let mut played = Vec::new();
+    for _ in 0..4 {
+        let id = h.play_next().await;
+        played.push(id);
+        h.finish(id).await;
+    }
+    assert_eq!(played, [requested, h.tracks[1], h.tracks[2], h.tracks[3]]);
+}
+
+#[tokio::test]
+async fn a_short_playlist_plans_no_repeats() {
+    let mut h = Harness::new(2).await;
+    h.event(EngineEvent::NextNeeded { after: None }).await;
+    let shown = coming(&h);
+    let unique: std::collections::HashSet<_> = shown.iter().collect();
+    assert_eq!(unique.len(), shown.len(), "{shown:?}");
 }

@@ -1,22 +1,24 @@
 // App-wide state, kept current by Server-Sent Events.
 
 import { api, ApiError } from './api'
+import { locale, t } from './i18n.svelte'
 import { clearListCache } from './listCache'
 import type {
   AiStatus,
   IdentifyStatus,
   Listening,
+  LyricsProgress,
   CastDevice,
   LoudnessStatus,
   LookupStatus,
   Mode,
+  MoodState,
   NowPlaying,
   OutputStatus,
   PlayerState,
   QueueItem,
   ScanProgress,
-  User,
-} from './types'
+  User, Room } from './types'
 
 export const app = $state({
   me: null as User | null,
@@ -29,6 +31,11 @@ export const app = $state({
   /** False until the first /api/me check finishes. */
   ready: false,
   connected: false,
+  /** This computer's address, once it changed while the page was open ('' until then). */
+  address: '',
+  /** Every room, and the one this person is in (pickers show only with two or more). */
+  rooms: [] as Room[],
+  room: 1,
   nowPlaying: { current: null, position_ms: 0, up_next: null } as NowPlaying,
   player: {
     state: 'idle',
@@ -41,6 +48,8 @@ export const app = $state({
     skip_resting: [],
   } as PlayerState,
   output: { device: null, sample_rate: null, error: null, outputs: [] } as OutputStatus,
+  /** The mood dial in this room. */
+  mood: null as MoodState | null,
   queue: [] as QueueItem[],
   scan: null as ScanProgress | null,
   lookup: { running: false, last: null, finished_at: null } as LookupStatus,
@@ -52,6 +61,8 @@ export const app = $state({
   ai: null as AiStatus | null,
   /** AI listening's progress, for everyone's library progress bar. */
   listening: null as Listening | null,
+  /** Finding lyrics; kept current by SSE. */
+  lyrics: null as LyricsProgress | null,
   /** Cast devices; filled in on the Audio tab, kept current by SSE. */
   casts: null as CastDevice[] | null,
   /** Track ids with a request on its way to the server. */
@@ -81,8 +92,39 @@ export function reloadIfUpdated(serverBuild: string | null) {
   if (serverBuild && mine && !mine.endsWith(serverBuild)) location.reload()
 }
 
+/** Loads the rooms, first moving to the room a join link named (?room=). */
+async function loadRooms() {
+  const params = new URLSearchParams(location.search)
+  const asked = Number(params.get('room'))
+  if (asked > 0) {
+    params.delete('room')
+    const rest = params.toString()
+    history.replaceState(null, '', location.pathname + (rest ? `?${rest}` : '') + location.hash)
+    try {
+      await api.chooseRoom(asked)
+    } catch {
+      // A room that's gone: stay where they were.
+    }
+  }
+  try {
+    const list = await api.rooms()
+    app.rooms = list.rooms
+    app.room = list.mine
+  } catch {
+    // Rooms just don't show.
+  }
+}
+
+/** Moves to another room: its queue, its music, its live updates. */
+export async function switchRoom(id: number) {
+  await api.chooseRoom(id)
+  app.room = id
+  connect()
+}
+
 export function connect() {
   events?.close()
+  void loadRooms()
   events = new EventSource('/api/events')
   events.onopen = () => (app.connected = true)
   const on = <T>(name: string, handle: (data: T) => void) =>
@@ -107,6 +149,7 @@ export function connect() {
     app.player = data
   })
   on<OutputStatus>('output_status', (data) => (app.output = data))
+  on<MoodState>('mood', (data) => (app.mood = data))
   on<ScanProgress>('scan_progress', (data) => {
     app.scan = data
     if (data.done) {
@@ -129,6 +172,8 @@ export function connect() {
     }
   })
   on<IdentifyStatus>('identify_status', (data) => (app.identify = data))
+  on<{ url: string }>('address', (data) => (app.address = data.url))
+  on<LyricsProgress>('lyrics', (data) => (app.lyrics = data))
 
   void loadLibraryWork()
 
@@ -151,6 +196,7 @@ export async function loadLibraryWork() {
     app.loudness = status.analysis
     app.listening = status.listening
     app.lookup = { ...app.lookup, running: status.lookup_running }
+    app.lyrics = status.lyrics
   } catch {
     // Signed out, or the server restarting; events fill it in.
   }
@@ -266,11 +312,13 @@ export function involvement(item: QueueItem): 'owner' | 'backer' | null {
 /** Everyone who asked for a song: "you, Sam & Jo". */
 export function askedBy(item: QueueItem): string {
   const me = app.me?.id
+  const you = t('common.you')
   const names = [
-    item.user_id === me ? 'you' : item.username,
-    ...item.backers.map((b) => (b.user_id === me ? 'you' : b.name)),
+    item.user_id === me ? you : item.username,
+    ...item.backers.map((b) => (b.user_id === me ? you : b.name)),
   ]
-  return names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} & ${names[names.length - 1]}`
+  // "you, Sam and Jo" in the reader's language.
+  return new Intl.ListFormat(locale.code, { type: 'conjunction' }).format(names)
 }
 
 /** Takes you off a request: as a backer you step back; as the requester

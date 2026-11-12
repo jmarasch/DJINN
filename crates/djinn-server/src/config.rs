@@ -46,6 +46,13 @@ pub struct ServerConfig {
     pub listen: SocketAddr,
     /// Show a system tray icon when a desktop session is available.
     pub tray: bool,
+    /// A box without a screen (the install images): until the admin account
+    /// exists, the first-start page works without the setup link from the
+    /// log, as routers do.
+    pub open_setup: bool,
+    /// Where to write the setup address for the box's own screen (a login
+    /// banner), when set.
+    pub console_banner: Option<std::path::PathBuf>,
 }
 
 impl Default for ServerConfig {
@@ -53,6 +60,8 @@ impl Default for ServerConfig {
         Self {
             listen: SocketAddr::from(([0, 0, 0, 0], 8066)),
             tray: true,
+            open_setup: false,
+            console_banner: None,
         }
     }
 }

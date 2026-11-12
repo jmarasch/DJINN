@@ -1,8 +1,11 @@
 <script lang="ts">
+  import { t } from '../lib/i18n.svelte'
   // DJINN GO: your own listening, apart from the party. The song files
   // come as they are and this device plays them.
   import { onMount } from 'svelte'
   import AccountPanels from '../lib/AccountPanels.svelte'
+  import EqualizerPanel from '../lib/EqualizerPanel.svelte'
+  import { loadEqualizer, saveEqualizer } from './equalizer.svelte'
   import { api, ApiError, onUnauthorized } from '../lib/api'
   import Icon from '../lib/Icon.svelte'
   import { goBack, navigation, param, route } from '../lib/router.svelte'
@@ -22,6 +25,7 @@
   import Album from './views/Album.svelte'
   import Genre from './views/Genre.svelte'
   import Artist from './views/Artist.svelte'
+  import ArtistSongs from './views/ArtistSongs.svelte'
   import Home from './views/Home.svelte'
   import Library from './views/Library.svelte'
   import Playlist from './views/Playlist.svelte'
@@ -96,6 +100,10 @@
 
   const albumId = $derived(param('/album'))
   const artistId = $derived(param('/artist'))
+  const artistSongsId = $derived.by(() => {
+    const m = route.path.match(/^\/artist\/(\d+)\/songs$/)
+    return m ? Number(m[1]) : null
+  })
   const playlistId = $derived(param('/playlist'))
   const genreName = $derived.by(() => {
     const m = route.path.match(/^\/genre\/(.+)$/)
@@ -110,7 +118,7 @@
         ? 'library'
         : route.path.startsWith('/account')
           ? 'account'
-          : albumId || artistId || genreName
+          : albumId || artistId || artistSongsId || genreName
             ? 'search'
             : 'home',
   )
@@ -121,7 +129,9 @@
         ? 'genres'
         : route.path === '/library/history'
           ? 'history'
-          : 'liked',
+          : route.path === '/library/year'
+            ? 'year'
+            : 'liked',
   )
 </script>
 
@@ -160,15 +170,15 @@
   <header bind:offsetHeight={headerHeight}>
     <a class="brand" href="#/">DJINN GO</a>
     <nav aria-label="Main navigation">
-      <button class="back" disabled={!navigation.canGoBack} onclick={goBack} aria-label="Back" title="Back">
-        <Icon name="back" size={28} /><span>Back</span>
+      <button class="back" disabled={!navigation.canGoBack} onclick={goBack} aria-label={t('nav.back')} title={t('nav.back')}>
+        <Icon name="back" size={28} /><span>{t('nav.back')}</span>
       </button>
-      <a href="#/" class:active={section === 'home'} aria-label="Home"><Icon name="home" /><span>Home</span></a>
-      <a href="#/search" class:active={section === 'search'} aria-label="Library"><Icon name="search" /><span>Library</span></a>
-      <a href="#/library" class:active={section === 'library'} aria-label="Your music">
-        <Icon name="heart-outline" /><span>Your music</span>
+      <a href="#/" class:active={section === 'home'} aria-label={t('go.home')}><Icon name="home" /><span>{t('go.home')}</span></a>
+      <a href="#/search" class:active={section === 'search'} aria-label={t('nav.library')}><Icon name="search" /><span>{t('nav.library')}</span></a>
+      <a href="#/library" class:active={section === 'library'} aria-label={t('go.your_music')}>
+        <Icon name="heart-outline" /><span>{t('go.your_music')}</span>
       </a>
-      <a href="#/account" class:active={section === 'account'} aria-label="Account"><Icon name="settings" /><span>Account</span></a>
+      <a href="#/account" class:active={section === 'account'} aria-label={t('go.account')}><Icon name="settings" /><span>{t('go.account')}</span></a>
     </nav>
   </header>
   <main class="go" class:playing={player.index >= 0 && route.path !== '/playing'} style:--nav-height="{headerHeight}px">
@@ -180,6 +190,8 @@
       <Album id={albumId} />
     {:else if artistId}
       <Artist id={artistId} />
+    {:else if artistSongsId}
+      <ArtistSongs id={artistSongsId} />
     {:else if playlistId}
       <Playlist id={playlistId} />
     {:else if route.path === '/submit'}
@@ -222,6 +234,7 @@
           </label>
         </section>
       {/if}
+      <EqualizerPanel load={loadEqualizer} store={saveEqualizer} note={t('eq.yours_note')} />
       <GetApp />
       <OpenOnPhone />
       <AccountPanels />
@@ -293,8 +306,8 @@
     opacity: 0.5;
   }
 
-  /* Icons only on narrow phones. */
-  @media (max-width: 520px) {
+  /* Icons only on phones; tablets keep the words (Android's app does the same). */
+  @media (max-width: 599px) {
     nav a span,
     nav button span {
       display: none;

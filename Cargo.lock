@@ -1454,6 +1454,7 @@ version = "2026.11.5"
 dependencies = [
  "ed25519-dalek",
  "getrandom 0.4.3",
+ "libc",
  "thiserror 2.0.21",
  "tray-icon",
  "windows-sys 0.61.2",
@@ -1520,6 +1521,7 @@ dependencies = [
 name = "djinn-store"
 version = "2026.11.5"
 dependencies = [
+ "half",
  "serde",
  "sqlx",
  "thiserror 2.0.21",

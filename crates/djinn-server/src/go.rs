@@ -228,7 +228,10 @@ pub async fn apply(state: &AppState) -> anyhow::Result<()> {
 /// connection, on both ports, so nothing has to restart.
 pub async fn apply_encryption(state: &AppState) -> anyhow::Result<()> {
     let encryption = &state.go.encryption;
-    if !settings::flag(&state.store, ENCRYPTION, true).await? {
+    // Nodes always connect encrypted, so it stays on while they can join.
+    if !settings::flag(&state.store, ENCRYPTION, true).await?
+        && !crate::nodes::wants_encryption(state).await?
+    {
         encryption.set(None);
     } else if !encryption.is_on() {
         let dir = state
@@ -250,7 +253,8 @@ async fn announce(state: &AppState, on: bool) -> anyhow::Result<()> {
     let go = &state.go;
     let wanted = on
         && go.running.lock().is_ok_and(|r| r.is_some())
-        && settings::flag(&state.store, GO_DISCOVERABLE, true).await?;
+        && (settings::flag(&state.store, GO_DISCOVERABLE, true).await?
+            || state.join_url.moved_lately());
     let name = go_announce::server_name(&state.store).await?;
     let fingerprint = go.encryption.fingerprint();
     let stale = go
@@ -367,7 +371,7 @@ pub fn api_router() -> Router<AppState> {
     Router::new()
         .route("/go/status", get(status))
         .route("/go/settings", put(save_settings))
-        .route("/go/sign-ins", get(sign_ins))
+        .route("/sign-ins", get(sign_ins).delete(clear_sign_ins))
         .route("/go/play/{id}", get(play))
         .route("/go/offline/{id}", get(offline_link))
         .route("/go/address", get(address))
@@ -391,6 +395,7 @@ enum Access {
 const ROUTES: &[(Method, &str, Access)] = &[
     (Method::GET, "/api/health", Access::Public),
     (Method::GET, "/api/go/hello", Access::Public),
+    (Method::GET, "/api/language", Access::Public),
     (Method::GET, "/api/go/app", Access::Public),
     (Method::GET, "/api/auth/mode", Access::Public),
     (Method::POST, "/api/auth/login", Access::Public),
@@ -418,12 +423,17 @@ const ROUTES: &[(Method, &str, Access)] = &[
     (Method::GET, "/api/tracks/*", Access::Listener),
     (Method::GET, "/api/tracks/*/similar", Access::Listener),
     (Method::GET, "/api/tracks/*/tags", Access::Listener),
+    (Method::GET, "/api/tracks/*/lyrics", Access::Listener),
+    (Method::POST, "/api/tracks/*/report", Access::Listener),
+    (Method::GET, "/api/wishes/enabled", Access::Listener),
+    (Method::POST, "/api/wishes", Access::Listener),
     (Method::GET, "/api/albums", Access::Listener),
     (Method::GET, "/api/albums/jumps", Access::Listener),
     (Method::GET, "/api/albums/*", Access::Listener),
     (Method::GET, "/api/artists", Access::Listener),
     (Method::GET, "/api/artists/jumps", Access::Listener),
     (Method::GET, "/api/artists/*", Access::Listener),
+    (Method::GET, "/api/artists/*/songs", Access::Listener),
     (Method::GET, "/api/artists/*/similar", Access::Listener),
     (Method::GET, "/api/art/*", Access::Listener),
     (Method::GET, "/api/genres", Access::Listener),
@@ -443,6 +453,7 @@ const ROUTES: &[(Method, &str, Access)] = &[
     (Method::DELETE, "/api/go/likes/*/*", Access::Listener),
     (Method::POST, "/api/go/plays", Access::Listener),
     (Method::GET, "/api/go/history", Access::Listener),
+    (Method::GET, "/api/go/year", Access::Listener),
     (Method::GET, "/api/go/resume", Access::Listener),
     (Method::PUT, "/api/go/resume", Access::Listener),
     (Method::GET, "/api/go/prefs", Access::Listener),
@@ -1441,24 +1452,59 @@ async fn save_settings(
     Ok(Json(status_of(&state).await?))
 }
 
-#[derive(Deserialize)]
-struct LogQuery {
-    #[serde(default = "default_limit")]
-    limit: i64,
-}
-
 fn default_limit() -> i64 {
     200
 }
 
+#[derive(Deserialize)]
+struct PageQuery {
+    #[serde(default)]
+    offset: i64,
+    #[serde(default = "default_limit")]
+    limit: i64,
+}
+
+#[derive(Serialize)]
+struct SignInPage {
+    items: Vec<SignIn>,
+    total: i64,
+}
+
+/// Admin > Metrics and logs > Sign-in log, a page at a time.
 async fn sign_ins(
     _: AdminUser,
     State(state): State<AppState>,
-    Query(query): Query<LogQuery>,
-) -> ApiResult<Json<Vec<SignIn>>> {
-    Ok(Json(
-        state.store.sign_ins(query.limit.clamp(1, 1000)).await?,
-    ))
+    Query(query): Query<PageQuery>,
+) -> ApiResult<Json<SignInPage>> {
+    let (items, total) = state
+        .store
+        .sign_in_page(query.offset.max(0), query.limit.clamp(1, 500))
+        .await?;
+    Ok(Json(SignInPage { items, total }))
+}
+
+#[derive(Deserialize)]
+struct ClearQuery {
+    /// Keeps the last this many days; 0 clears everything.
+    #[serde(default)]
+    older_than_days: i64,
+}
+
+#[derive(Serialize)]
+struct Cleared {
+    cleared: u64,
+}
+
+async fn clear_sign_ins(
+    admin: AdminUser,
+    State(state): State<AppState>,
+    Query(query): Query<ClearQuery>,
+) -> ApiResult<Json<Cleared>> {
+    let days = query.older_than_days.clamp(0, 3650);
+    let before = djinn_store::now_ms() - days * 24 * 60 * 60 * 1000;
+    let cleared = state.store.clear_sign_ins_before(before).await?;
+    tracing::info!(by = %admin.0.username, days, cleared, "cleared the sign-in log");
+    Ok(Json(Cleared { cleared }))
 }
 
 #[cfg(test)]
@@ -1552,7 +1598,7 @@ mod tests {
             },
             KeepRules {
                 away_days: MAX_AWAY_DAYS + 1,
-                ..good.clone()
+                ..good
             },
         ] {
             assert!(rules.check().is_err(), "{rules:?}");
@@ -2529,6 +2575,21 @@ mod tests {
         assert_eq!(status, StatusCode::NO_CONTENT);
         let (_, text, _) = call(Method::GET, "/api/go/likes/ids".into(), None).await;
         assert_eq!(field(&text, "tracks"), serde_json::json!([ids[1]]));
+
+        // A song played now counts in this year's review.
+        let report = format!(
+            r#"{{"track_id":{},"ms_played":180000,"at":{}}}"#,
+            ids[0],
+            djinn_store::now_ms()
+        );
+        let (status, _, _) = call(Method::POST, "/api/go/plays".into(), Some(report)).await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        let (status, text, _) = call(Method::GET, "/api/go/year".into(), None).await;
+        assert_eq!(status, StatusCode::OK, "{text}");
+        assert_eq!(field(&text, "plays"), 1);
+        assert_eq!(field(&text, "minutes"), 3);
+        assert_eq!(field(&text, "first")["id"], ids[0]);
+        assert_eq!(field(&text, "months").as_array().map(Vec::len), Some(12));
 
         // What tapping a song does: play it now until changed.
         let (_, text, _) = call(Method::GET, "/api/go/prefs".into(), None).await;

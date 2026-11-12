@@ -21,6 +21,8 @@ const SERVER_ID: &str = "server_id";
 /// 1 to announce GO on the network, which is the default.
 pub const GO_DISCOVERABLE: &str = "go_discoverable";
 const SERVICE: &str = "_djinn-go._tcp.local.";
+/// What nodes being set up look for: main DJINNs letting nodes join.
+pub const MAIN_SERVICE: &str = "_djinn-main._tcp.local.";
 const MAX_NAME: usize = 40;
 
 /// This computer's own name, or something readable when it has none.
@@ -61,15 +63,13 @@ pub async fn server_name(store: &Store) -> anyhow::Result<String> {
     })
 }
 
-async fn server_id(store: &Store) -> anyhow::Result<String> {
+pub async fn server_id(store: &Store) -> anyhow::Result<String> {
     if let Some(id) = store.get_setting(SERVER_ID).await? {
         if !id.is_empty() {
             return Ok(id);
         }
     }
-    let mut bytes = [0u8; 8];
-    getrandom::fill(&mut bytes).map_err(|e| anyhow::anyhow!("no system randomness: {e}"))?;
-    let id: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+    let id = crate::security::random_hex(8)?;
     store.set_setting(SERVER_ID, &id).await?;
     Ok(id)
 }
@@ -93,7 +93,7 @@ pub async fn hello(State(state): State<AppState>) -> ApiResult<Json<Hello>> {
 }
 
 /// This computer's name as a DNS label, which is much fussier than a name.
-fn host_label(name: &str) -> String {
+pub fn host_label(name: &str) -> String {
     let label: String = name
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
@@ -122,6 +122,23 @@ impl Announcer {
         port: u16,
         fingerprint: Option<String>,
     ) -> anyhow::Result<Self> {
+        Self::start_as(SERVICE, store, port, fingerprint, None).await
+    }
+
+    /// Announces this main DJINN to boxes being set up, saying whether nodes
+    /// can ask to join right now.
+    pub async fn start_main(store: &Store, port: u16, joining: bool) -> anyhow::Result<Self> {
+        let join = if joining { "1" } else { "0" };
+        Self::start_as(MAIN_SERVICE, store, port, None, Some(join)).await
+    }
+
+    async fn start_as(
+        service: &str,
+        store: &Store,
+        port: u16,
+        fingerprint: Option<String>,
+        join: Option<&str>,
+    ) -> anyhow::Result<Self> {
         let name = server_name(store).await?;
         let id = server_id(store).await?;
         let host = format!("{}.local.", host_label(&computer_name()));
@@ -129,12 +146,15 @@ impl Announcer {
             ("name".to_owned(), name.clone()),
             ("id".to_owned(), id.clone()),
         ]);
+        if let Some(join) = join {
+            properties.insert("join".to_owned(), join.to_owned());
+        }
         if let Some(fingerprint) = &fingerprint {
             properties.insert("fp".to_owned(), fingerprint.clone());
         }
         // Named by id, since two servers may share a name and names can have
         // characters that don't survive every phone's mDNS.
-        let info = ServiceInfo::new(SERVICE, &format!("djinn-{id}"), &host, (), port, properties)?
+        let info = ServiceInfo::new(service, &format!("djinn-{id}"), &host, (), port, properties)?
             .enable_addr_auto();
         let fullname = info.get_fullname().to_owned();
         let daemon = ServiceDaemon::new()?;

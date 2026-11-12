@@ -8,6 +8,7 @@
 //! whenever the slot after the track being decoded is empty, and the owner
 //! answers with [`Command::SetNext`].
 
+pub mod clock;
 mod decoder;
 mod devices;
 mod drift;
@@ -16,13 +17,16 @@ mod equalizer;
 mod error;
 mod features;
 mod fingerprint;
+mod levels;
 mod loudness;
 mod mixdown;
+mod node_player;
 mod output;
 mod outputs;
 mod player;
 mod resample;
 mod tap;
+mod timed;
 mod verify;
 
 use std::path::PathBuf;
@@ -34,13 +38,16 @@ pub use equalizer::{
 };
 pub use error::EngineError;
 pub use features::{
-    analyze, decode_mono, decode_stereo, describe, Analysis, Features, FEATURES_VERSION,
-    FEATURE_COUNT,
+    analyze, decode_mono, decode_stereo, describe, print_similarity, Analysis, Features,
+    FEATURES_VERSION, FEATURE_COUNT, PRINT_LEN, PRINT_VERSION,
 };
 pub use fingerprint::fingerprint;
+pub use levels::{Frame as LevelFrame, Levels, PieceMeter};
 pub use loudness::{measure_loudness, Loudness, REFERENCE_LUFS};
+pub use node_player::{NodePlayer, NodeSettings};
 pub use player::MAX_CROSSFADE_SECS;
 pub use tap::{stream_tap, StreamTap, TapReader};
+pub use timed::{timed_tap, Mark, Piece, TimedReader, TimedTap};
 pub use verify::verify;
 
 /// Opaque track identifier chosen by the engine's owner.

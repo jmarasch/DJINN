@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '../lib/i18n.svelte'
   // The library by artist, album, song or genre. The party app's songs
   // queue at the party; DJINN GO passes its own `song` and `songTile`.
   import type { Snippet } from 'svelte'
@@ -9,12 +10,13 @@
   import GenreTags from '../lib/GenreTags.svelte'
   import Icon from '../lib/Icon.svelte'
   import InfiniteList from '../lib/InfiniteList.svelte'
+  import Counts from '../lib/Counts.svelte'
   import JumpStrip from '../lib/JumpStrip.svelte'
   import { watchScroll } from '../lib/scrollWatch.svelte'
   import { jumpCache } from '../lib/listCache'
   import TrackRow from '../lib/TrackRow.svelte'
   import TrackTile from '../lib/TrackTile.svelte'
-  import type { AlbumFilter, AlbumSort, ArtistSort, GenreMap, Jump, Track, TrackSort } from '../lib/types'
+  import type { AlbumFilter, AlbumSort, ArtistSort, GenreMap, Jump, LyricsFilter, Track, TrackSort } from '../lib/types'
 
   let {
     song,
@@ -39,10 +41,10 @@
   type View = 'list' | 'grid'
   type GenreView = 'tags' | 'cloud'
   const tabs: { id: Tab; label: string }[] = [
-    { id: 'artists', label: 'Artists' },
-    { id: 'albums', label: 'Albums' },
-    { id: 'songs', label: 'Songs' },
-    { id: 'genres', label: 'Genres' },
+    { id: 'artists', label: 'library.artists' },
+    { id: 'albums', label: 'library.albums' },
+    { id: 'songs', label: 'library.songs' },
+    { id: 'genres', label: 'library.genres' },
   ]
 
   // Tab and sort last for the session; the list/grid choice is kept on
@@ -51,6 +53,8 @@
   let sort = $state((sessionStorage.getItem('djinn-browse-sort') as TrackSort) || 'title')
   let albumSort = $state((sessionStorage.getItem('djinn-browse-album-sort') as AlbumSort) || 'name')
   let albumFilter = $state<AlbumFilter>('all')
+  let lyricsFilter = $state<LyricsFilter>((sessionStorage.getItem('djinn-browse-lyrics') as LyricsFilter) || 'all')
+  $effect(() => sessionStorage.setItem('djinn-browse-lyrics', lyricsFilter))
   let artistSort = $state((sessionStorage.getItem('djinn-browse-artist-sort') as ArtistSort) || 'name')
   let view = $state<View>(readView())
   let genreView = $state<GenreView>(readStored('djinn-genre-view') === 'cloud' ? 'cloud' : 'tags')
@@ -97,7 +101,7 @@
     tab === 'albums'
       ? `albums-${albumSort}-${albumFilter}`
       : tab === 'songs'
-        ? `songs-${sort}`
+        ? `songs-${sort}-${lyricsFilter}`
         : tab === 'artists'
           ? `artists-${artistSort}`
           : tab,
@@ -113,7 +117,7 @@
     jumps = cached ?? []
     if (cached || tab === 'genres') return
     const loading =
-      tab === 'artists' ? api.artistJumps(artistSort) : tab === 'albums' ? api.albumJumps(albumSort, albumFilter) : api.trackJumps(sort)
+      tab === 'artists' ? api.artistJumps(artistSort) : tab === 'albums' ? api.albumJumps(albumSort, albumFilter) : api.trackJumps(sort, lyricsFilter)
     loading
       .then((found) => {
         jumpCache.set(k, found)
@@ -157,7 +161,8 @@
   }
 
   const grid = $derived(view === 'grid')
-  const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
+  /** "12 songs" in the reader's language: `kind` is a count key. */
+  const plural = (n: number, kind: string) => t(`count.${kind}`, { n })
   const initial = (name: string) => name.charAt(0).toUpperCase()
 </script>
 
@@ -170,9 +175,9 @@
 >
   <div class="bar">
     <div class="tabs" role="tablist">
-      {#each tabs as t (t.id)}
-        <button role="tab" aria-selected={tab === t.id} class:active={tab === t.id} onclick={() => (tab = t.id)}>
-          {t.label}
+      {#each tabs as item (item.id)}
+        <button role="tab" aria-selected={tab === item.id} class:active={tab === item.id} onclick={() => (tab = item.id)}>
+          {t(item.label)}
         </button>
       {/each}
     </div>
@@ -206,44 +211,54 @@
   </div>
   {#if tab === 'artists'}
     <label class="sort">
-        <span class="muted small">Sort by</span>
+        <span class="muted small">{t('library.sort_by')}</span>
         <select bind:value={artistSort}>
-          <option value="name">Name</option>
-          <option value="added">Recently added</option>
+          <option value="name">{t('library.sort_name')}</option>
+          <option value="added">{t('library.sort_added')}</option>
         </select>
       </label>
   {:else if tab === 'albums'}
     <div class="album-filters">
         <label class="sort">
-          <span class="muted small">Show</span>
+          <span class="muted small">{t('library.show')}</span>
           <select bind:value={albumFilter}>
-            <option value="all">All albums</option>
-            <option value="various">Various Artists</option>
-            <option value="soundtracks">Soundtracks</option>
+            <option value="all">{t('library.all_albums')}</option>
+            <option value="various">{t('library.various')}</option>
+            <option value="soundtracks">{t('library.soundtracks')}</option>
           </select>
         </label>
         <label class="sort">
-          <span class="muted small">Sort by</span>
+          <span class="muted small">{t('library.sort_by')}</span>
           <select bind:value={albumSort}>
-            <option value="name">Name</option>
-            <option value="added">Recently added</option>
-            <option value="year">Year (newest first)</option>
-            <option value="oldest">Year (oldest first)</option>
+            <option value="name">{t('library.sort_name')}</option>
+            <option value="added">{t('library.sort_added')}</option>
+            <option value="year">{t('library.sort_newest')}</option>
+            <option value="oldest">{t('library.sort_oldest')}</option>
           </select>
         </label>
       </div>
   {:else if tab === 'songs'}
-    <label class="sort">
-        <span class="muted small">Sort by</span>
-        <select bind:value={sort}>
-          <option value="title">Title</option>
-          <option value="artist">Artist</option>
-          <option value="added">Recently added</option>
-          <option value="popular">Most popular</option>
-          <option value="year">Year (newest first)</option>
-          <option value="oldest">Year (oldest first)</option>
+    <div class="album-filters">
+      <label class="sort">
+        <span class="muted small">{t('library.show')}</span>
+        <select bind:value={lyricsFilter}>
+          <option value="all">{t('library.all_songs')}</option>
+          <option value="words">{t('library.with_lyrics')}</option>
+          <option value="timed">{t('library.with_timed_lyrics')}</option>
         </select>
       </label>
+    <label class="sort">
+        <span class="muted small">{t('library.sort_by')}</span>
+        <select bind:value={sort}>
+          <option value="title">{t('library.sort_title')}</option>
+          <option value="artist">{t('library.sort_artist')}</option>
+          <option value="added">{t('library.sort_added')}</option>
+          <option value="popular">{t('library.sort_popular')}</option>
+          <option value="year">{t('library.sort_newest')}</option>
+          <option value="oldest">{t('library.sort_oldest')}</option>
+        </select>
+      </label>
+    </div>
   {/if}
 </div>
 
@@ -276,7 +291,7 @@
       cacheKey="artists-{artistSort}"
       load={(offset) => api.artists(artistSort, offset)}
       key={(a) => a.id}
-      count={(n) => plural(n, 'artist', 'artists')}
+      count={(n) => plural(n, 'artists')}
       {grid}
       empty="No artists yet. Rescan the library from Admin after adding music."
     >
@@ -286,7 +301,9 @@
             <a class="tile" href="#/artist/{artist.id}">
               <div class="cover"><Art hash={artist.art_hash} size={160} round={999} letter={initial(artist.name)} /></div>
               <span class="ellipsis center-text">{artist.name}</span>
-              <span class="muted small center-text">{plural(artist.track_count, 'song', 'songs')}</span>
+              <span class="muted small center-text"
+                >{plural(artist.track_count, 'songs')}<Counts plays={artist.plays} likes={artist.likes} /></span
+              >
             </a>
             {#if like}<div class="tile-like">{@render like('artist', artist.id, artist.name)}</div>{/if}
           </div>
@@ -295,7 +312,9 @@
             <a class="row" href="#/artist/{artist.id}">
               <Art hash={artist.art_hash} size={44} round={999} letter={initial(artist.name)} />
               <span class="name ellipsis">{artist.name}</span>
-              <span class="muted small">{plural(artist.track_count, 'song', 'songs')}</span>
+              <span class="muted small counts"
+                >{plural(artist.track_count, 'songs')}<Counts plays={artist.plays} likes={artist.likes} /></span
+              >
             </a>
             {#if like}{@render like('artist', artist.id, artist.name)}{/if}
           </div>
@@ -304,7 +323,7 @@
     </InfiniteList>
   {:else if tab === 'genres'}
     {#if genres === null}
-      <p class="muted small">{genresFailed ? 'Could not load the genres.' : 'Loading genres...'}</p>
+      <p class="muted small">{genresFailed ? t('library.genres_failed') : t('library.genres_loading')}</p>
     {:else if genres.genres.length === 0}
       <p class="muted">
         No genres yet. They come from your songs' tags, MusicBrainz lookups (Admin > Rules), and AI listening (Admin >
@@ -314,7 +333,7 @@
       {#if genreView === 'cloud'}
         <GenreCloud />
       {:else}
-        <p class="muted small">{plural(genres.genres.length, 'genre', 'genres')}</p>
+        <p class="muted small">{plural(genres.genres.length, 'genres')}</p>
         <GenreTags map={genres} />
       {/if}
     {/if}
@@ -325,7 +344,7 @@
       cacheKey="albums-{albumSort}-{albumFilter}"
       load={(offset) => api.albums(albumSort, albumFilter, offset)}
       key={(a) => a.id}
-      count={(n) => plural(n, 'album', 'albums')}
+      count={(n) => plural(n, 'albums')}
       {grid}
       empty="No albums. Songs without an album tag are under Artists and Songs."
     >
@@ -335,7 +354,12 @@
             <a class="tile" href="#/album/{album.id}">
               <div class="cover"><Art hash={album.art_hash} size={160} round={10} /></div>
               <span class="ellipsis">{album.title}</span>
-              <span class="muted small ellipsis">{album.artist}{byYear && album.year ? ` · ${album.year}` : ''}</span>
+              <span class="muted small ellipsis"
+                >{album.artist}{byYear && album.year ? ` · ${album.year}` : ''}<Counts
+                  plays={album.plays}
+                  likes={album.likes}
+                /></span
+              >
             </a>
             {#if like}<div class="tile-like">{@render like('album', album.id, album.title)}</div>{/if}
           </div>
@@ -346,7 +370,7 @@
               <span class="name">
                 <span class="ellipsis block">{album.title}</span>
                 <span class="muted small ellipsis block">
-                  {album.artist}{album.year ? ` · ${album.year}` : ''}
+                  {album.artist}{album.year ? ` · ${album.year}` : ''}<Counts plays={album.plays} likes={album.likes} />
                 </span>
               </span>
             </a>
@@ -359,10 +383,10 @@
         <InfiniteList
       bind:this={list}
       inset={stuckTop}
-      cacheKey="songs-{sort}"
-      load={(offset) => api.tracks(sort, offset)}
+      cacheKey="songs-{sort}-{lyricsFilter}"
+      load={(offset) => api.tracks(sort, offset, lyricsFilter)}
       key={(t) => t.id}
-      count={(n) => plural(n, 'song', 'songs')}
+      count={(n) => plural(n, 'songs')}
       {grid}
     >
       {#snippet item(track)}
@@ -429,6 +453,12 @@
     background: var(--surface-3);
     color: var(--text);
     font-weight: 600;
+  }
+
+  /* An artist's song and play counts stay on one line beside the name. */
+  .counts {
+    flex: none;
+    white-space: nowrap;
   }
 
   .row {

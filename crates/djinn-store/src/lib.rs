@@ -1,31 +1,45 @@
 //! DJINN storage: SQLite access, migrations, and models.
 
+mod duplicates;
 mod identify;
 mod library;
 mod loudness;
+mod lyrics;
 mod maintenance;
+mod nodes;
 mod outputs;
 mod party;
 mod personal;
 mod playlists;
+mod problems;
 mod queue;
 mod roles;
+mod rooms;
+mod searches;
 mod security;
+mod stats;
 mod submissions;
 mod subsonic;
 mod tag_edits;
 mod users;
 
+pub use duplicates::*;
 pub use identify::*;
 pub use library::*;
 pub use loudness::*;
+pub use lyrics::*;
+pub use nodes::*;
 pub use outputs::*;
 pub use party::*;
 pub use personal::*;
 pub use playlists::*;
+pub use problems::*;
 pub use queue::*;
 pub use roles::*;
+pub use rooms::*;
+pub use searches::*;
 pub use security::*;
+pub use stats::*;
 pub use submissions::*;
 pub use subsonic::*;
 pub use tag_edits::*;
@@ -54,8 +68,22 @@ pub type Result<T, E = StoreError> = std::result::Result<T, E>;
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../../migrations");
 
+/// The newest database version this program knows: it can't open a
+/// database a newer program has moved past this.
+pub fn schema_version() -> i64 {
+    MIGRATOR.iter().map(|m| m.version).max().unwrap_or(0)
+}
+
 /// Set by a migration that leaves space worth giving back.
 const COMPACT_DATABASE: &str = "compact_database";
+/// Database page size, set at the next compaction.
+const PAGE_SIZE: i64 = 16384;
+const _: () = assert!(
+    PAGE_SIZE == 16384,
+    "change the PRAGMA in vacuum_with_big_pages too"
+);
+/// Set by migration 52 while what the AI heard is still at full precision.
+const HEARD_TO_HALF: &str = "heard_to_half";
 
 /// Handle to the database. Cheap to clone.
 #[derive(Clone, Debug)]
@@ -79,9 +107,52 @@ impl Store {
             .synchronous(SqliteSynchronous::Normal);
         let pool = SqlitePoolOptions::new()
             .max_connections(8)
+            .connect_with(common(options.clone()))
+            .await?;
+        MIGRATOR.run(&pool).await?;
+        let store = Self {
+            pool,
+            browse: Arc::default(),
+        };
+        store.halve_heard().await?;
+        if store.get_setting(COMPACT_DATABASE).await?.is_none() {
+            return Ok(store);
+        }
+        // Compacting changes the page size, which needs the file to itself.
+        store.pool.close().await;
+        // If it fails (not enough disk for the copy, say), everything still
+        // works and the next start tries again.
+        let _ = Self::compact_file(path).await;
+        let pool = SqlitePoolOptions::new()
+            .max_connections(8)
             .connect_with(common(options))
             .await?;
-        Self::init(pool).await
+        Ok(Self {
+            pool,
+            browse: Arc::default(),
+        })
+    }
+
+    /// Gives back space when a migration asked for it, on a connection of
+    /// its own with nothing else open.
+    async fn compact_file(path: &Path) -> Result<()> {
+        use sqlx::Connection;
+        // No journal mode here: the file keeps its own (WAL).
+        let options = common(SqliteConnectOptions::new().filename(path));
+        let mut conn = sqlx::SqliteConnection::connect_with(&options).await?;
+        let result = Self::vacuum_with_big_pages(&mut conn).await;
+        if result.is_ok() {
+            sqlx::query("DELETE FROM settings WHERE key = ?")
+                .bind(COMPACT_DATABASE)
+                .execute(&mut conn)
+                .await?;
+            // The copy went through the write-ahead log; don't keep it twice.
+            sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
+                .execute(&mut conn)
+                .await?;
+        }
+        conn.close().await?;
+        result
     }
 
     /// Opens a separate pool for the jukebox after the main store has run
@@ -121,13 +192,45 @@ impl Store {
             pool,
             browse: Arc::default(),
         };
+        store.halve_heard().await?;
         store.compact_if_due().await?;
         Ok(store)
     }
 
-    /// Gives back space when a migration asked for it. If that fails (not
-    /// enough disk for the copy it makes), everything still works and the
-    /// next start tries again.
+    /// After migration 52: what the AI heard, from full to half precision,
+    /// all at once so a stop part way can't leave some rows read wrongly.
+    async fn halve_heard(&self) -> Result<()> {
+        if self.get_setting(HEARD_TO_HALF).await?.is_none() {
+            return Ok(());
+        }
+        let mut tx = self.pool.begin().await?;
+        let rows: Vec<(i64, Vec<u8>)> =
+            sqlx::query_as("SELECT track_id, heard FROM track_heard WHERE heard IS NOT NULL")
+                .fetch_all(&mut *tx)
+                .await?;
+        for (id, blob) in rows {
+            let full: Vec<f32> = blob
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|b| f32::from_le_bytes(*b))
+                .collect();
+            sqlx::query("UPDATE track_heard SET heard = ? WHERE track_id = ?")
+                .bind(loudness::to_half(&full))
+                .bind(id)
+                .execute(&mut *tx)
+                .await?;
+        }
+        sqlx::query("DELETE FROM settings WHERE key = ?")
+            .bind(HEARD_TO_HALF)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// The in-memory database's VACUUM when a migration asked for one (a
+    /// file's is `compact_file`).
     async fn compact_if_due(&self) -> Result<()> {
         if self.get_setting(COMPACT_DATABASE).await?.is_none() {
             return Ok(());
@@ -137,11 +240,43 @@ impl Store {
                 .bind(COMPACT_DATABASE)
                 .execute(&self.pool)
                 .await?;
-            // The copy went through the write-ahead log; don't keep it twice.
-            sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
-                .execute(&self.pool)
+        }
+        Ok(())
+    }
+
+    /// VACUUM, moving to PAGE_SIZE pages on the way. Songs' sound data rows
+    /// are 1 to 2 KB, so on small pages a good part of each stays empty. The
+    /// page size can only change outside WAL mode, so it leaves WAL for the
+    /// copy and goes back after, whatever happened.
+    async fn vacuum_with_big_pages(conn: &mut sqlx::SqliteConnection) -> Result<()> {
+        let size: i64 = sqlx::query_scalar("PRAGMA page_size")
+            .fetch_one(&mut *conn)
+            .await?;
+        let mode: String = sqlx::query_scalar("PRAGMA journal_mode")
+            .fetch_one(&mut *conn)
+            .await?;
+        let wal = mode.eq_ignore_ascii_case("wal");
+        let mut resize = size < PAGE_SIZE;
+        if resize && wal {
+            let now: String = sqlx::query_scalar("PRAGMA journal_mode = DELETE")
+                .fetch_one(&mut *conn)
+                .await?;
+            // Another connection in use keeps it in WAL: same size, then.
+            resize = !now.eq_ignore_ascii_case("wal");
+        }
+        if resize {
+            // PAGE_SIZE; SQL here must be a fixed string.
+            sqlx::query("PRAGMA page_size = 16384")
+                .execute(&mut *conn)
                 .await?;
         }
+        let result = sqlx::query("VACUUM").execute(&mut *conn).await;
+        if wal {
+            sqlx::query("PRAGMA journal_mode = WAL")
+                .execute(&mut *conn)
+                .await?;
+        }
+        result?;
         Ok(())
     }
 
@@ -204,10 +339,20 @@ impl Store {
     }
 }
 
+impl Store {
+    /// A transaction that takes the write lock at once (BEGIN IMMEDIATE).
+    /// A plain transaction that reads first and writes later can't wait for
+    /// another writer: SQLite fails it straight away with "database is
+    /// locked". Taking the lock up front waits its turn instead.
+    pub(crate) async fn write(&self) -> Result<sqlx::Transaction<'static, sqlx::Sqlite>> {
+        Ok(self.pool.begin_with("BEGIN IMMEDIATE").await?)
+    }
+}
+
 fn common(options: SqliteConnectOptions) -> SqliteConnectOptions {
     options
         .foreign_keys(true)
-        .busy_timeout(Duration::from_secs(5))
+        .busy_timeout(Duration::from_secs(15))
 }
 
 /// Current time as Unix epoch milliseconds, the timestamp format in the schema.
@@ -220,6 +365,54 @@ pub fn now_ms() -> i64 {
 #[cfg(test)]
 mod playback_pool_tests {
     use super::*;
+
+    /// A library check and sound analysis writing at once: each waits for
+    /// the other instead of failing with "database is locked".
+    #[tokio::test]
+    async fn a_library_check_and_analysis_can_write_at_once() {
+        let dir = std::env::temp_dir().join(format!(
+            "djinn-write-race-{}-{}",
+            std::process::id(),
+            now_ms()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = Store::open(&dir.join("djinn.db")).await.unwrap();
+        let song = |i: usize| crate::ScannedTrack {
+            path: format!("/m/{i}.flac"),
+            title: format!("Song {i}"),
+            artist: Some("Band".into()),
+            album: Some("Album".into()),
+            ..Default::default()
+        };
+        store
+            .save_scanned(&(0..200).map(song).collect::<Vec<_>>())
+            .await
+            .unwrap();
+        let ids = store.library_track_ids().await.unwrap();
+        let analysis = {
+            let store = store.clone();
+            tokio::spawn(async move {
+                for round in 0..4 {
+                    for &id in &ids {
+                        store
+                            .save_analysis(id, 1, round, Some((-10.0, 0.9)), None, Some(&[1, 2]))
+                            .await
+                            .unwrap();
+                    }
+                }
+            })
+        };
+        for _ in 0..10 {
+            store
+                .save_scanned(&(0..200).map(song).collect::<Vec<_>>())
+                .await
+                .unwrap();
+        }
+        analysis.await.unwrap();
+        // Windows won't delete files that are still open.
+        store.close().await;
+        let _ = std::fs::remove_dir_all(dir);
+    }
 
     #[tokio::test]
     async fn playback_pool_works_when_browse_pool_is_full() {

@@ -6,6 +6,7 @@
   import { api } from './api'
   import { clock, heldText } from './background'
   import IdentifyPanel from './IdentifyPanel.svelte'
+  import LyricsPanel from './LyricsPanel.svelte'
   import { app, toast } from './state.svelte'
   import type { ArtCacheStatus, Settings } from './types'
 
@@ -280,6 +281,8 @@
     </div>
   </section>
 {/if}
+
+<LyricsPanel />
 
 <section class="card">
   <h3>Identify songs by sound</h3>

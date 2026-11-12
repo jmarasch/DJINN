@@ -1,5 +1,10 @@
 package com.newterrastudios.djinn.go.data
 
+import com.newterrastudios.djinn.go.player.EQ_BAND_HZ
+import com.newterrastudios.djinn.go.player.EQ_MAX_BAND_DB
+import com.newterrastudios.djinn.go.player.EQ_MAX_OUTPUT_DB
+import com.newterrastudios.djinn.go.player.EQ_MIN_OUTPUT_DB
+import com.newterrastudios.djinn.go.player.EqSettings
 import com.newterrastudios.djinn.go.player.VisualLook
 import kotlinx.serialization.encodeToString
 import android.content.ContentValues
@@ -32,6 +37,7 @@ import java.io.IOException
 import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 import com.newterrastudios.djinn.go.player.TalkOver
+import com.newterrastudios.djinn.go.i18n.t
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -84,6 +90,8 @@ data class PendingPlay(
     @ColumnInfo(name = "track_id") val trackId: Long,
     @ColumnInfo(name = "ms_played") val msPlayed: Long,
     val at: Long,
+    /** Skipped with "Skip, play less". */
+    @ColumnInfo(name = "play_less", defaultValue = "0") val playLess: Boolean = false,
 )
 
 /** A like changed while the server couldn't be reached. */
@@ -171,7 +179,7 @@ interface OfflineDao {
 
 @Database(
     entities = [OfflineSong::class, SavedSound::class, PendingPlay::class, PendingLike::class, PendingAdd::class],
-    version = 2,
+    version = 3,
     exportSchema = false,
 )
 abstract class OfflineDb : RoomDatabase() {
@@ -188,14 +196,25 @@ abstract class OfflineDb : RoomDatabase() {
             }
         }
 
+        private val ADD_PLAY_LESS = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE pending_plays ADD COLUMN play_less INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         fun open(context: Context) =
             Room.databaseBuilder(context, OfflineDb::class.java, "offline.db")
-                .addMigrations(ADD_PENDING_ADDS)
+                .addMigrations(ADD_PENDING_ADDS, ADD_PLAY_LESS)
                 .build()
     }
 }
 
 /** The choices on the Settings screen, kept per device. */
+/** Where Prefs keeps the language choices; `Strings.load` reads them too. */
+const val SETTINGS_FILE = "settings"
+const val LANGUAGE_KEY = "language"
+const val HOUSE_LANGUAGE_KEY = "house_language"
+
 class Prefs(context: Context, private val scope: () -> String = { "" }) {
     /** A setting belonging to one account on one server, not to the phone. */
     private fun own(name: String) = "$name@${scope()}"
@@ -210,7 +229,7 @@ class Prefs(context: Context, private val scope: () -> String = { "" }) {
             ?.let { runCatching { lookJson.decodeFromString<KeepRules>(it) }.getOrNull() }
             ?: KeepRules()
 
-    private val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+    private val prefs = context.getSharedPreferences(SETTINGS_FILE, Context.MODE_PRIVATE)
 
     private val talkOverNow = MutableStateFlow(TalkOver.named(prefs.getString("talk_over", null)))
 
@@ -221,6 +240,26 @@ class Prefs(context: Context, private val scope: () -> String = { "" }) {
         prefs.edit { putString("talk_over", choice.name) }
         talkOverNow.value = choice
     }
+
+    /** Your own equalizer, for this phone (not per server). */
+    var equalizer: EqSettings
+        get() = parseEqualizer(prefs.getString("equalizer", null))
+        set(value) = prefs.edit {
+            putString(
+                "equalizer",
+                listOf(if (value.enabled) "1" else "0", value.outputGainDb.toString(), value.bandsDb.joinToString(","))
+                    .joinToString(";"),
+            )
+        }
+
+    /** Ask when the server has a newer version of the app. */
+    var askAboutUpdates: Boolean
+        get() = prefs.getBoolean("ask_about_updates", true)
+        set(value) = prefs.edit { putBoolean("ask_about_updates", value) }
+    /** The version answered "Not now", which isn't asked about again. */
+    var updateDeclined: Long
+        get() = prefs.getLong("update_declined", 0)
+        set(value) = prefs.edit { putLong("update_declined", value) }
 
     /** Genres as a cloud rather than a list, and how much of it to show. */
     var genreCloud: Boolean
@@ -243,6 +282,10 @@ class Prefs(context: Context, private val scope: () -> String = { "" }) {
     var smartLimitMb: Int
         get() = prefs.getInt("smart_limit_mb", 2048)
         set(value) = prefs.edit { putInt("smart_limit_mb", value) }
+    /** Songs fetched ahead from the queue into the recent cache; 0 is off. */
+    var cacheAhead: Int
+        get() = prefs.getInt("cache_ahead", DEFAULT_CACHE_AHEAD)
+        set(value) = prefs.edit { putInt("cache_ahead", value) }
     var wifiOnly: Boolean
         get() = prefs.getBoolean("wifi_only", true)
         set(value) = prefs.edit { putBoolean("wifi_only", value) }
@@ -263,6 +306,14 @@ class Prefs(context: Context, private val scope: () -> String = { "" }) {
     var visualsAuto: Boolean
         get() = prefs.getBoolean("visuals_auto", false)
         set(value) = prefs.edit { putBoolean("visuals_auto", value) }
+    /** The language picked on this phone (Settings); empty to follow the server's default. */
+    var language: String
+        get() = prefs.getString(LANGUAGE_KEY, "").orEmpty()
+        set(value) = prefs.edit { putString(LANGUAGE_KEY, value) }
+    /** The server's default language as last heard; empty for the phone's own. */
+    var houseLanguage: String
+        get() = prefs.getString(HOUSE_LANGUAGE_KEY, "").orEmpty()
+        set(value) = prefs.edit { putString(HOUSE_LANGUAGE_KEY, value) }
     /** The admin's rules for kept songs, as last heard. */
     var keepRules: KeepRules
         get() = prefs.getString(own("keep_rules"), null)
@@ -277,6 +328,10 @@ class Prefs(context: Context, private val scope: () -> String = { "" }) {
     var visualsOn: Boolean
         get() = prefs.getBoolean("visuals_on", false)
         set(value) = prefs.edit { putBoolean("visuals_on", value) }
+    /** Lyrics open under the player's controls. */
+    var lyricsOn: Boolean
+        get() = prefs.getBoolean("lyrics_on", false)
+        set(value) = prefs.edit { putBoolean("lyrics_on", value) }
     /** Styles this device turned out not to keep up with. */
     var visualsTooSlow: Set<String>
         get() = prefs.getStringSet("visuals_too_slow", emptySet()).orEmpty()
@@ -298,6 +353,7 @@ class Prefs(context: Context, private val scope: () -> String = { "" }) {
     companion object {
         private val lookJson = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
         const val DEFAULT_KBPS = 128
+        const val DEFAULT_CACHE_AHEAD = 3
         const val DEFAULT_VISUALS_LEAD_MS = 250
     }
 }
@@ -315,10 +371,10 @@ fun largeDownloadWarning(bytes: Long, kbps: Int, canConvert: Boolean): String? {
     val size = if (bytes >= 1_000_000_000) "%.1f GB".format(bytes / 1e9) else "${bytes / 1_000_000} MB"
     return when {
         kbps > 0 && !canConvert && bytes >= LARGE_UNCONVERTED_BYTES ->
-            "Your server isn't converting songs for this account, so these stay at full size: $size."
+            t("download.not_converting", "size" to size)
         kbps > 0 && canConvert && bytes >= LARGE_DOWNLOAD_BYTES ->
-            "Up to $size. FLAC and WAV songs will take less once converted, but converting takes the server a while."
-        kbps == 0 && bytes >= LARGE_DOWNLOAD_BYTES -> "Full quality: $size."
+            t("download.up_to", "size" to size)
+        kbps == 0 && bytes >= LARGE_DOWNLOAD_BYTES -> t("download.full_quality", "size" to size)
         else -> null
     }
 }
@@ -527,6 +583,16 @@ class OfflineStore(
             } catch (_: IOException) {
                 // An older server, or a role GO refuses: the rules stay as they were.
             }
+            try {
+                val house = api.language().default
+                if (house != prefs.houseLanguage) {
+                    prefs.houseLanguage = house
+                    // Screens already shown change when they're next opened.
+                    com.newterrastudios.djinn.go.i18n.Strings.load(context)
+                }
+            } catch (_: IOException) {
+                // An older server: the language stays as it was.
+            }
         } catch (_: IOException) {
             when (whenAway(prefs.lastContact, now, prefs.keepRules)) {
                 WhenAway.Nothing -> prefs.awayLocked = false
@@ -541,7 +607,7 @@ class OfflineStore(
         val server = account.scope ?: return@withContext
         for (play in dao.plays().filter { it.server == server }) {
             try {
-                api.reportPlay(play.trackId, play.msPlayed, play.at)
+                api.reportPlay(play.trackId, play.msPlayed, play.at, play.playLess)
             } catch (e: ApiException) {
                 if (e.status == 401) return@withContext
             }
@@ -630,4 +696,17 @@ enum class SoundKind(val label: String, val folder: String) {
     Alarm("alarm", Environment.DIRECTORY_ALARMS),
     Ringtone("ringtone", Environment.DIRECTORY_RINGTONES),
     Notification("notification", Environment.DIRECTORY_NOTIFICATIONS),
+}
+
+/** "1;-2.0;4.0,5.0,..." (on, output level, bands) back to settings; flat if unreadable. */
+internal fun parseEqualizer(saved: String?): EqSettings {
+    val parts = saved?.split(";") ?: return EqSettings()
+    val bands = parts.getOrNull(2)?.split(",")?.mapNotNull { it.toFloatOrNull() }
+    val output = parts.getOrNull(1)?.toFloatOrNull()
+    if (parts.size != 3 || output == null || bands == null || bands.size != EQ_BAND_HZ.size) return EqSettings()
+    return EqSettings(
+        enabled = parts[0] == "1",
+        bandsDb = bands.map { it.coerceIn(-EQ_MAX_BAND_DB, EQ_MAX_BAND_DB) },
+        outputGainDb = output.coerceIn(EQ_MIN_OUTPUT_DB, EQ_MAX_OUTPUT_DB),
+    )
 }

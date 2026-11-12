@@ -160,6 +160,8 @@ pub fn router() -> Router<AppState> {
             "/auth/bootstrap",
             get(bootstrap_status).post(bootstrap).layer(small()),
         )
+        .route("/auth/bootstrap/node", post(bootstrap_node).layer(small()))
+        .route("/auth/bootstrap/qr.svg", get(setup_qr))
         .route("/auth/mode", get(mode))
         .route("/auth/guest", post(join_as_guest).layer(small()))
         .route("/auth/signup", post(sign_up).layer(small()))
@@ -901,12 +903,76 @@ async fn join_as_guest(
 #[derive(Serialize)]
 struct BootstrapStatus {
     needed: bool,
+    /// No setup link needed (a box without a screen, before the admin
+    /// account exists).
+    open: bool,
+    /// Where to open this from another device, while setup is open.
+    address: Option<String>,
+    /// Main DJINNs heard on the network, while nobody has set this one up.
+    mains: Vec<crate::node_mode::FoundMain>,
 }
 
 async fn bootstrap_status(State(state): State<AppState>) -> ApiResult<Json<BootstrapStatus>> {
+    let needed = !state.store.admin_exists().await?;
+    let open = needed && state.open_setup();
     Ok(Json(BootstrapStatus {
-        needed: !state.store.admin_exists().await?,
+        needed,
+        open,
+        address: open.then(|| state.join_url.get()),
+        mains: if needed {
+            state
+                .found_mains
+                .lock()
+                .map(|found| found.clone())
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        },
     }))
+}
+
+/// A QR code for the first-start page, only while setup is open (it needs no
+/// secret then; a setup link's token never goes in one).
+async fn setup_qr(State(state): State<AppState>) -> ApiResult<axum::response::Response> {
+    if !state.open_setup() || state.store.admin_exists().await? {
+        return Err(ApiError::not_found());
+    }
+    let url = format!("{}/setup", state.join_url.base());
+    Ok((
+        [(axum::http::header::CONTENT_TYPE, "image/svg+xml")],
+        crate::api::qr_svg(&url)?,
+    )
+        .into_response())
+}
+
+/// What a screen plugged into this box shows (the kiosk opens this): the
+/// first-start page until the box is set up, then the TV page.
+pub async fn screen(State(state): State<AppState>) -> ApiResult<axum::response::Redirect> {
+    let setup = state.open_setup() && !state.store.admin_exists().await?;
+    Ok(axum::response::Redirect::temporary(if setup {
+        "/?screen=1"
+    } else {
+        "/tv"
+    }))
+}
+
+/// True if `token` is the one-time setup token, or setup is open (a box
+/// without a screen) and nobody has set it up yet.
+async fn setup_allowed(state: &AppState, token: &str) -> ApiResult<bool> {
+    if state.store.admin_exists().await? {
+        return Ok(false);
+    }
+    if state.open_setup() {
+        return Ok(true);
+    }
+    let expected = state
+        .bootstrap_token
+        .lock()
+        .map_err(|_| anyhow::anyhow!("bootstrap lock poisoned"))?
+        .clone();
+    Ok(expected
+        .as_deref()
+        .is_some_and(|t| security::same_secret(t.as_bytes(), token.as_bytes())))
 }
 
 #[derive(Deserialize)]
@@ -922,15 +988,7 @@ async fn bootstrap(
     device: Device,
     Json(body): Json<BootstrapRequest>,
 ) -> ApiResult<impl IntoResponse> {
-    let expected = state
-        .bootstrap_token
-        .lock()
-        .map_err(|_| anyhow::anyhow!("bootstrap lock poisoned"))?
-        .clone();
-    let token_ok = expected
-        .as_deref()
-        .is_some_and(|t| constant_time_eq(t.as_bytes(), body.token.as_bytes()));
-    if !token_ok || state.store.admin_exists().await? {
+    if !setup_allowed(&state, &body.token).await? {
         return Err(ApiError::new(
             StatusCode::FORBIDDEN,
             "setup link is invalid or already used",
@@ -954,6 +1012,35 @@ async fn bootstrap(
         AppendHeaders([(SET_COOKIE, cookie)]),
         Json(me_for(&state, user).await?),
     ))
+}
+
+#[derive(Deserialize)]
+struct BootstrapNode {
+    token: String,
+}
+
+/// On a fresh install, makes this box a node instead of a main DJINN, with
+/// the same one-time token; DJINN starts again as a node.
+async fn bootstrap_node(
+    State(state): State<AppState>,
+    Json(body): Json<BootstrapNode>,
+) -> ApiResult<StatusCode> {
+    if !setup_allowed(&state, &body.token).await? {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "setup link is invalid or already used",
+        ));
+    }
+    state
+        .store
+        .set_setting(crate::node_mode::ROLE, "node")
+        .await?;
+    if let Ok(mut token) = state.bootstrap_token.lock() {
+        *token = None;
+    }
+    tracing::info!("set up as a node; starting again");
+    state.update.restart(&state.shutdown_request);
+    Ok(StatusCode::ACCEPTED)
 }
 
 async fn list_users(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json<Vec<User>>> {
@@ -1277,17 +1364,11 @@ fn session_token(headers: &HeaderMap) -> Option<String> {
 
 /// 32 random bytes, hex encoded.
 pub fn new_token() -> anyhow::Result<String> {
-    let mut bytes = [0u8; 32];
-    getrandom::fill(&mut bytes).map_err(|e| anyhow::anyhow!("no system randomness: {e}"))?;
-    Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
+    security::random_hex(32)
 }
 
 pub(crate) fn hash_token(token: &str) -> Vec<u8> {
     Sha256::digest(token.as_bytes()).to_vec()
-}
-
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
 /// Argon2 takes about 19 MB and a good part of a second each, so only a few
@@ -1376,6 +1457,36 @@ mod tests {
     use super::*;
     use crate::test_util::call;
     use axum::http::Method;
+
+    #[tokio::test]
+    async fn a_box_without_a_screen_sets_up_without_the_link_but_only_once() {
+        let state = AppState::for_tests().await.with_open_setup(true);
+        let (_, body) = crate::test_util::get_body(&state, "/api/auth/bootstrap", "").await;
+        assert!(body.contains(r#""open":true"#), "{body}");
+        let first = r#"{"token":"","username":"admin","password":"hunter22"}"#;
+        let (status, _) = call(
+            &state,
+            Method::POST,
+            "/api/auth/bootstrap",
+            Some(first),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+        // Set up: closed again, link or not.
+        let again = r#"{"token":"","username":"other","password":"hunter22"}"#;
+        let (status, _) = call(
+            &state,
+            Method::POST,
+            "/api/auth/bootstrap",
+            Some(again),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let (_, body) = crate::test_util::get_body(&state, "/api/auth/bootstrap", "").await;
+        assert!(body.contains(r#""open":false"#), "{body}");
+    }
 
     #[tokio::test]
     async fn bootstrap_login_and_admin_gate() {

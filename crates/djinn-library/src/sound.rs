@@ -33,6 +33,18 @@ const WEIGHTS: [f32; 37] = [
     0.15, 0.15, 0.15, 0.15, 0.15, 0.15, 0.15, 0.15, 0.15, 0.15, 0.15, 0.15,
 ];
 
+/// How much each feature says about a song's energy (chill to hype), in
+/// `djinn_engine::features` order: tempo and punch most, brightness,
+/// noisiness and loudness some; wide dynamics lean calm.
+const ENERGY: [(usize, f32); 6] = [
+    (0, 1.0),  // tempo
+    (1, 1.4),  // punch
+    (2, 0.6),  // brightness
+    (6, 0.4),  // noisiness
+    (10, 0.6), // loudness
+    (9, -0.3), // dynamics
+];
+
 /// Artists need this many analyzed songs to count as similar artists; a
 /// guest on one song is too little to go on.
 const MIN_ARTIST_SONGS: usize = 2;
@@ -67,6 +79,8 @@ pub struct SoundIndex {
     by_track: HashMap<i64, usize>,
     artists: HashMap<i64, Vec<f32>>,
     artist_songs: HashMap<i64, usize>,
+    /// Each song's energy, -1 (the calmest here) to 1 (the most hyped).
+    energy: HashMap<i64, f32>,
 }
 
 impl SoundIndex {
@@ -95,6 +109,7 @@ impl SoundIndex {
         for s in &mut spread {
             *s = s.sqrt().max(1e-6);
         }
+        let energy = energies(&rows, &mean, &spread);
         let entries: Vec<Entry> = rows
             .into_iter()
             .map(|row| Entry {
@@ -151,7 +166,14 @@ impl SoundIndex {
             by_track,
             artists,
             artist_songs,
+            energy,
         }
+    }
+
+    /// Each analyzed song's energy, -1 (the calmest in this library) to 1
+    /// (the most hyped), spread evenly by rank.
+    pub fn energy(&self) -> &HashMap<i64, f32> {
+        &self.energy
     }
 
     /// Songs analyzed.
@@ -355,6 +377,31 @@ fn distance(a: &[f32], b: &[f32]) -> f32 {
     a.iter().zip(b).map(|(x, y)| (x - y).powi(2)).sum::<f32>()
 }
 
+/// Energy by rank: songs ordered by a mix of z-scores ([`ENERGY`]), the
+/// calmest at -1 and the most hyped at 1, so the scale means the same in
+/// every library.
+fn energies(rows: &[SoundRow], mean: &[f32], spread: &[f32]) -> HashMap<i64, f32> {
+    let mut raw: Vec<(f32, i64)> = rows
+        .iter()
+        .map(|row| {
+            let score = ENERGY
+                .iter()
+                .filter_map(|&(i, weight)| {
+                    let v = row.features.get(i)?;
+                    Some((v - mean.get(i)?) / spread.get(i)? * weight)
+                })
+                .sum();
+            (score, row.track_id)
+        })
+        .collect();
+    raw.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let last = raw.len().saturating_sub(1).max(1) as f32;
+    raw.into_iter()
+        .enumerate()
+        .map(|(rank, (_, id))| (id, rank as f32 / last * 2.0 - 1.0))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -372,6 +419,21 @@ mod tests {
             title: format!("Song {track_id}"),
             features,
         }
+    }
+
+    #[test]
+    fn energy_runs_from_calm_to_hyped() {
+        let mut fast = row(1, 1, 1, 7.4, 0.5);
+        fast.features[1] = 3.0;
+        let mut slow = row(2, 2, 2, 6.2, 0.2);
+        slow.features[1] = 0.5;
+        let middle = row(3, 3, 3, 6.9, 0.3);
+        let index = SoundIndex::build(vec![fast, slow, middle]);
+        let energy = index.energy();
+        assert_eq!(energy.get(&1), Some(&1.0));
+        assert_eq!(energy.get(&2), Some(&-1.0));
+        assert_eq!(energy.get(&3), Some(&0.0));
+        assert!(SoundIndex::build(Vec::new()).energy().is_empty());
     }
 
     #[test]

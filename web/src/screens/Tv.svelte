@@ -1,6 +1,8 @@
 <script lang="ts">
   // Full-screen now playing for a TV or spare tablet: no sign-in, read only.
   import { onMount } from 'svelte'
+  import { followNodeScreen } from '../lib/screenFollow'
+  import { announce, choose, order, pageUrl, toggleFullscreen } from '../lib/screenOrder.svelte'
   import ArtistSlideshow from '../lib/ArtistSlideshow.svelte'
   import { duration } from '../lib/format'
   import { reloadIfUpdated } from '../lib/state.svelte'
@@ -13,6 +15,9 @@
   const casting = params.has('cast')
   /** What DJINN gave the cast, to get the stream with. */
   const castKey = params.get('cast')
+  /** Which room this screen shows (Main when missing). */
+  const room = params.get('room')
+  const roomQuery = room ? `room=${encodeURIComponent(room)}` : ''
 
   let nowPlaying = $state<NowPlaying>({ current: null, position_ms: 0, up_next: null })
   let player = $state<PlayerState | null>(null)
@@ -50,14 +55,16 @@
 
   async function load() {
     try {
-      const res = await fetch(castKey ? `/api/tv?key=${encodeURIComponent(castKey)}` : '/api/tv')
+      const query = [castKey ? `key=${encodeURIComponent(castKey)}` : '', roomQuery].filter(Boolean).join('&')
+      const res = await fetch(query ? `/api/tv?${query}` : '/api/tv')
       if (!res.ok) {
         error = (await res.json().catch(() => null))?.error ?? 'The TV page is not available.'
+        void becameNode()
         setTimeout(load, 10_000)
         return
       }
       const data = await res.json()
-      nowPlaying = { current: data.current, position_ms: data.position_ms, up_next: data.up_next }
+      nowPlaying = { current: data.current, position_ms: data.position_ms, up_next: data.up_next, later: data.later ?? [] }
       setPosition(data.position_ms)
       player = data.player
       queue = data.queue
@@ -66,16 +73,29 @@
       streamUrl = data.stream_url
       error = null
       listen()
+      setTimeout(() => (settled = true), 2500)
       if (casting && !soundOn) setTimeout(toggleSound, 0)
     } catch {
       error = 'Cannot reach the jukebox. Retrying...'
+      void becameNode()
       setTimeout(load, 5_000)
+    }
+  }
+
+  /** This box was just set up as a node (a kiosk screen opened this page
+   * before that): show the node's page, with its pairing codes. */
+  async function becameNode() {
+    try {
+      const res = await fetch('/api/node/status')
+      if (res.ok && res.headers.get('content-type')?.includes('json')) location.replace('/node?screen=1')
+    } catch {
+      // Still restarting; the next try asks again.
     }
   }
 
   function listen() {
     events?.close()
-    events = new EventSource('/api/tv/events')
+    events = new EventSource(roomQuery ? `/api/tv/events?${roomQuery}` : '/api/tv/events')
     const on = <T,>(name: string, handle: (data: T) => void) =>
       events?.addEventListener(name, (e) => handle(JSON.parse((e as MessageEvent).data)))
     on<{ web_build: string | null }>('hello', (data) => reloadIfUpdated(data.web_build))
@@ -85,6 +105,7 @@
     })
     on<{ position_ms: number }>('position', (data) => setPosition(data.position_ms))
     on<QueueItem[]>('queue_changed', (data) => (queue = data))
+    on<{ url: string }>('address', (data) => (joinUrl = data.url))
     on<PlayerState>('player_state', (data) => {
       setPosition(position)
       player = data
@@ -141,9 +162,8 @@
     }
   }
 
-  function toggleFullscreen() {
-    if (document.fullscreenElement) document.exitFullscreen()
-    else document.documentElement.requestFullscreen?.().catch(() => {})
+  function goFullscreen() {
+    toggleFullscreen()
     keepAwake()
   }
 
@@ -151,12 +171,14 @@
     load()
     keepAwake()
     showCursor()
+    const stopFollowing = followNodeScreen()
     const tick = setInterval(() => {
       if (player?.state === 'playing') position = basePosition + (performance.now() - baseAt)
     }, 250)
     const onVisible = () => keepAwake()
     document.addEventListener('visibilitychange', onVisible)
     return () => {
+      stopFollowing()
       clearInterval(tick)
       events?.close()
       wakeLock?.release()
@@ -165,6 +187,16 @@
   })
 
   const current = $derived(nowPlaying.current)
+
+  /** On a node's screen with an order (`screenOrder`): the feed has answered
+   * and the node has had a moment to say whether it has sound. */
+  let settled = $state(false)
+  $effect(() => {
+    if (!order.length || !settled) return
+    const page = choose({ playing: !!current, timed: current?.track.lyrics === 2 })
+    if (page === 'tv') announce('tv', current?.track.id ?? null)
+    else location.replace(pageUrl('lyrics'))
+  })
 
   // Pictures of the artist playing, when the host has slideshows on.
   let pictures = $state<ArtistPicture[]>([])
@@ -185,6 +217,17 @@
   const shown = $derived(Math.min(position, total || position))
   const upNext = $derived(queue.slice(0, UP_NEXT))
   const more = $derived(Math.max(0, queue.length - UP_NEXT))
+  /** Auto mix songs coming after the requests, in the room the requests leave. */
+  const autoNext = $derived(
+    [
+      ...(nowPlaying.up_next &&
+      nowPlaying.up_next.source !== 'request' &&
+      nowPlaying.up_next.track.id !== nowPlaying.current?.track.id
+        ? [nowPlaying.up_next]
+        : []),
+      ...(nowPlaying.later ?? []),
+    ].slice(0, Math.max(0, UP_NEXT - upNext.length)),
+  )
 </script>
 
 <svelte:head><title>DJINN TV</title></svelte:head>
@@ -211,6 +254,7 @@
       <p>{error}</p>
     </div>
   {:else}
+    <div class="left">
     <main class="now">
       {#if current}
         <div class="cover">
@@ -250,9 +294,21 @@
       {/if}
     </main>
 
+      <div class="join">
+        <img src="/api/join/qr.svg?v={encodeURIComponent(joinUrl)}" alt="QR code to join" />
+        <div>
+          <div class="join-title">Add a song</div>
+          <div class="join-steps">
+            Scan with your phone camera{guestMode ? ', type your name,' : ' and sign in,'} then pick a song.
+          </div>
+          {#if joinUrl}<div class="url">{joinUrl.replace(/^https?:\/\//, '')}</div>{/if}
+        </div>
+      </div>
+    </div>
+
     <aside class="side">
-      <h2>Up next</h2>
       {#if upNext.length}
+        <h2>Requests</h2>
         <ol class="queue">
           {#each upNext as item (item.id)}
             <li>
@@ -272,44 +328,40 @@
           {/each}
         </ol>
         {#if more}<p class="more">and {more} more</p>{/if}
-      {:else if nowPlaying.up_next}
-        <ol class="queue">
-          <li>
-            {#if nowPlaying.up_next.track.art_hash}
-              <img src={art(nowPlaying.up_next.track.art_hash, 128)} alt="" />
-            {:else}
-              <div class="no-art small">♪</div>
-            {/if}
-            <div class="text">
-              <div class="title">{nowPlaying.up_next.track.title}</div>
-              <div class="sub">{artist(nowPlaying.up_next.track)}</div>
-            </div>
-          </li>
-        </ol>
-        <p class="more">No requests yet. Yours could be next.</p>
       {:else}
+        <h2>Requests</h2>
         <p class="more">No requests yet. Yours could be next.</p>
       {/if}
 
-      <div class="join">
-        <img src="/api/join/qr.svg" alt="QR code to join" />
-        <div>
-          <div class="join-title">Add a song</div>
-          <div class="join-steps">
-            Scan with your phone camera{guestMode ? ', type your name,' : ' and sign in,'} then pick a song.
-          </div>
-          {#if joinUrl}<div class="url">{joinUrl.replace(/^https?:\/\//, '')}</div>{/if}
-        </div>
-      </div>
+      {#if autoNext.length}
+        <h2 class="coming">Coming up</h2>
+        <ol class="queue">
+          {#each autoNext as entry, i (`${entry.track.id}-${i}`)}
+            <li>
+              {#if entry.track.art_hash}
+                <img src={art(entry.track.art_hash, 128)} alt="" />
+              {:else}
+                <div class="no-art small">♪</div>
+              {/if}
+              <div class="text">
+                <div class="title">{entry.track.title}</div>
+                <div class="sub">{artist(entry.track)}</div>
+              </div>
+            </li>
+          {/each}
+        </ol>
+      {/if}
+
+
     </aside>
   {/if}
 
   <div class="corner" class:hidden={casting}>
-    <a href="/#/" class="regular-display">Regular display</a>
+    <a href="/#/" target="_top" class="regular-display">Regular display</a>
     {#if streamUrl}
       <button class:on={soundOn} onclick={toggleSound}>{soundOn ? 'Sound on' : 'Play sound here'}</button>
     {/if}
-    <button onclick={toggleFullscreen}>Full screen</button>
+    <button onclick={goFullscreen}>Full screen</button>
   </div>
   <!-- svelte-ignore a11y_media_has_caption -->
   <audio
@@ -376,11 +428,20 @@
     background: linear-gradient(90deg, rgb(10 8 16 / 0.55), rgb(10 8 16 / 0.85));
   }
 
+  .left,
   .now,
   .side,
   .message {
     position: relative;
     min-width: 0;
+  }
+
+  /* Now playing at the top, how to add a song right under it. */
+  .left {
+    display: flex;
+    flex-direction: column;
+    gap: 5vh;
+    min-height: 0;
   }
 
   .now {
@@ -556,11 +617,17 @@
     color: rgb(255 255 255 / 0.6);
   }
 
+  .coming {
+    margin-top: 1.2em;
+  }
+
+
   .join {
     display: flex;
+    align-self: flex-start;
     align-items: center;
     gap: 1em;
-    margin-top: auto;
+    max-width: 32em;
     padding: 1em;
     border-radius: 1em;
     background: rgb(255 255 255 / 0.1);

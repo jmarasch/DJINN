@@ -304,7 +304,9 @@ pub async fn after_library_check(state: &AppState, changed: bool) -> anyhow::Res
     };
     if cleared > 0 || filled > 0 {
         tracing::info!(cleared, filled, "playlists have more songs that can play");
-        state.jukebox.lock().await.auto_mix_changed().await?;
+        for jukebox in state.all_jukeboxes() {
+            jukebox.lock().await.auto_mix_changed().await?;
+        }
     }
     Ok(())
 }
@@ -414,9 +416,11 @@ async fn run_check(state: &AppState, id: i64, files: Vec<SongFile>) -> anyhow::R
             check.problems += usize::from(failed);
         });
     }
-    let mut jukebox = state.jukebox.lock().await;
-    if jukebox.active_playlist() == Some(id) {
-        jukebox.auto_mix_changed().await?;
+    for jukebox in state.all_jukeboxes() {
+        let mut jukebox = jukebox.lock().await;
+        if jukebox.active_playlist() == Some(id) {
+            jukebox.auto_mix_changed().await?;
+        }
     }
     Ok(())
 }

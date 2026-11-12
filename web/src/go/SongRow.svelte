@@ -2,8 +2,10 @@
   // One song in a list: tap to play from here, heart to like, menu for
   // the rest.
   import Art from '../lib/Art.svelte'
+  import Counts from '../lib/Counts.svelte'
   import { duration } from '../lib/format'
   import Icon from '../lib/Icon.svelte'
+  import LyricsMark from '../lib/LyricsMark.svelte'
   import type { Track } from '../lib/types'
   import { current, likes, toggleLike } from './player.svelte'
   import { ui } from './ui.svelte'
@@ -17,6 +19,7 @@
 
   const playing = $derived(current()?.id === track.id)
   const liked = $derived(likes.track.has(track.id))
+  const line = $derived([track.artist, track.album].filter(Boolean).join(' · '))
 </script>
 
 <div class="row" class:playing>
@@ -27,8 +30,10 @@
       <span class="number muted">{number ?? ''}</span>
     {/if}
     <span class="text">
-      <span class="title">{track.title}</span>
-      <span class="muted small">{[track.artist, track.album].filter(Boolean).join(' · ')}</span>
+      <span class="title-line"><span class="title">{track.title}</span><LyricsMark lyrics={track.lyrics} /></span>
+      <span class="muted small"
+        >{line}<Counts plays={track.plays} likes={track.likes} lead={!!line} /></span
+      >
     </span>
     <span class="muted small time">{duration(track.duration_ms)}</span>
   </button>
@@ -70,6 +75,12 @@
     display: flex;
     flex: 1;
     flex-direction: column;
+    min-width: 0;
+  }
+
+  .title-line {
+    display: flex;
+    align-items: center;
     min-width: 0;
   }
 

@@ -338,6 +338,26 @@ export interface Track {
   art_hash: string | null
   /** A genre or two, in the library's song list. */
   genres?: string[]
+  /** In the library lists: plays, party and GO, skipped or not. */
+  plays?: number
+  /** In the library lists: how many people favorited it. */
+  likes?: number
+  /** Lyrics found: 0 none (or not looked for yet), 1 words, 2 timed. */
+  lyrics?: number
+}
+
+export type LyricsFilter = 'all' | 'words' | 'timed'
+
+/** Finding lyrics, for the Library tab's progress box. */
+export interface LyricsProgress {
+  running: boolean
+  phase: '' | 'reading' | 'looking up'
+  held: Held | null
+  songs: number
+  words: number
+  timed: number
+  unread: number
+  to_ask: number
 }
 
 export interface Album {
@@ -351,6 +371,10 @@ export interface Album {
   genres: string | null
   /** Its folder's name, when another album has the same name and artist. */
   label: string | null
+  /** In the library lists: plays, party and GO, skipped or not. */
+  plays?: number
+  /** In the library lists: how many people favorited it. */
+  likes?: number
 }
 
 export interface Artist {
@@ -367,6 +391,8 @@ export interface SearchResults {
   described: Described | null
   /** The AI reader might understand the query better (see api.ask). */
   ask: boolean
+  /** Songs whose lyrics have the words typed (two or more words). */
+  lyrics?: LyricHit[]
 }
 
 export interface Described {
@@ -435,6 +461,8 @@ export interface NowPlaying {
   current: Entry | null
   position_ms: number
   up_next: Entry | null
+  /** The auto mix's songs planned after that, in order. */
+  later?: Entry[]
 }
 
 export type PlayState = 'idle' | 'playing' | 'paused'
@@ -460,6 +488,39 @@ export interface PlayerState {
   skip_votes_needed: number
   /** Voted to skip the last song, so sit this one out. */
   skip_resting: number[]
+}
+
+/** The mood dial: everyone nudges the auto mix from chill (-1) to hype (1). */
+export interface MoodState {
+  /** In use (Admin > Smart play). */
+  on: boolean
+  /** Where it is now. */
+  value: number
+  /** Where it rests without anyone's setting (the party schedule's). */
+  base: number
+  /** Each person's setting, by user id. */
+  votes: Record<string, number>
+  /** Songs have been listened to (sound analysis), so it has something to go by. */
+  works: boolean
+}
+
+/** One party schedule rule: from when to when, and what to set as it starts. */
+export interface ScheduleRule {
+  /** 0 Monday to 6 Sunday; empty for every day. */
+  days: number[]
+  /** Minutes after midnight. */
+  from: number
+  until: number
+  play: { kind: 'keep' } | { kind: 'wild' } | { kind: 'playlist'; id: number }
+  mood: number | null
+  volume: number | null
+}
+
+export interface PartySchedule {
+  on: boolean
+  rules: ScheduleRule[]
+  /** The rule holding now. */
+  holding?: number | null
 }
 
 export interface OutputStatus {
@@ -491,6 +552,8 @@ export interface OutputConfig {
   enabled: boolean
   volume_trim: number
   delay_ms: number
+  /** The room its speakers play. */
+  room_id: number
 }
 
 export interface OutputList {
@@ -606,6 +669,10 @@ export interface FolderListing {
 
 export interface Settings {
   history_window: number
+  /** A copy of a song that played recently counts as played. */
+  avoid_copies: boolean
+  search_history: boolean
+  wishlist_everyone: boolean
   per_user_limit: number
   /** 0 means no cap. */
   max_queue: number
@@ -634,6 +701,8 @@ export interface Settings {
   genre_page_size: number
   /** Hours before a genre's shuffled order is made again; 0 for every visit. */
   genre_refresh_hours: number
+  /** How much of a song a play must hear to count in the library lists, in percent. */
+  play_count_percent: number
   /** The TV page (/tv) works without signing in. */
   tv_page: boolean
   /** The TV page can play the party without signing in. */
@@ -691,6 +760,10 @@ export interface ArtistSummary {
   name: string
   art_hash: string | null
   track_count: number
+  /** In the library lists: plays, party and GO, skipped or not. */
+  plays?: number
+  /** In the library lists: how many people favorited it. */
+  likes?: number
 }
 
 /** Year is newest first, oldest is by year oldest first. */
@@ -748,6 +821,179 @@ export interface Schedule {
 /** Why background work is waiting. */
 export type Held = { reason: 'music' } | { reason: 'hours'; from: number; until: number }
 
+export type ProblemKind =
+  | 'missing_folder'
+  | 'unreadable'
+  | 'bad_name'
+  | 'unsupported'
+  | 'tags'
+  | 'wont_play'
+  | 'reported'
+  | 'no_artist'
+  | 'no_album'
+  | 'album_no_cover'
+  | 'album_no_year'
+  | 'album_no_genre'
+
+export interface ProblemCount {
+  kind: ProblemKind
+  count: number
+  /** Not added, or added but broken, rather than a gap in the tags. */
+  trouble: boolean
+  /** Rows are albums. */
+  per_album: boolean
+  hidden: boolean
+}
+
+export interface ProblemSummary {
+  kinds: ProblemCount[]
+  /** Trouble the admin hasn't hidden. */
+  trouble: number
+}
+
+export interface ProblemItem {
+  path: string | null
+  detail: string
+  track_id: number | null
+  album_id: number | null
+  title: string | null
+  artist: string | null
+  album: string | null
+  noticed_at: number | null
+}
+
+export type DuplicateReason = 'name' | 'recording' | 'sound'
+
+export interface DuplicateCopy {
+  id: number
+  title: string
+  artist: string | null
+  album: string | null
+  album_id: number | null
+  path: string
+  format: string | null
+  sample_rate: number | null
+  kbps: number | null
+  duration_ms: number | null
+  /** The copy DJINN suggests keeping. */
+  keep: boolean
+}
+
+export interface DuplicateGroup {
+  reasons: DuplicateReason[]
+  songs: DuplicateCopy[]
+}
+
+export interface DuplicateListing {
+  total: number
+  songs: number
+  groups: DuplicateGroup[]
+  sound_analysis: boolean
+}
+
+export interface CheckSummary {
+  at: number
+  added: number
+  removed: number
+  trouble: number
+  trouble_change: number
+  duplicates: number
+  duplicates_change: number
+  reports: number
+  reports_change: number
+}
+
+export interface ScheduledCheck {
+  on: boolean
+  /** 0 to 23, the DJINN computer's time. */
+  hour: number
+  last: CheckSummary | null
+}
+
+export interface Wish {
+  id: number
+  artist: string
+  title: string
+  status: 'open' | 'got' | 'ignored'
+  track_id: number | null
+  askers: number
+  created_at: number
+  updated_at: number
+}
+
+export interface SearchCount {
+  query: string
+  searches: number
+  people: number
+  results: number
+  requested: number
+  last_at: number
+}
+
+export interface SearchHistory {
+  on: boolean
+  searches: SearchCount[]
+}
+
+export interface StatsFilter {
+  from?: number | null
+  until?: number | null
+  user?: number | null
+  party: boolean
+  go: boolean
+}
+
+export interface StatSong {
+  track_id: number
+  title: string
+  artist: string | null
+  album_id: number | null
+  plays: number
+  skips: number
+  listened_ms: number
+}
+
+export interface Stats {
+  from: number | null
+  summary: {
+    plays: number
+    listened_ms: number
+    skips: number
+    songs: number
+    requests: number
+    requesters: number
+  }
+  top_songs: StatSong[]
+  top_artists: { artist_id: number; name: string; plays: number; skips: number }[]
+  top_requested: { track_id: number; title: string | null; artist: string | null; requests: number }[]
+  top_requesters: { user_id: number | null; name: string | null; requests: number }[]
+  most_skipped: StatSong[]
+  by_hour: [number, number][]
+  by_weekday: [number, number][]
+  by_day: [string, number][]
+}
+
+export interface HistoryCounts {
+  party_plays: number
+  go_plays: number
+  requests: number
+}
+
+export interface GoYear {
+  year: number
+  years: number[]
+  plays: number
+  minutes: number
+  songs: number
+  skips: number
+  requests: number
+  top_songs: StatSong[]
+  top_artists: { artist_id: number; name: string; plays: number; skips: number }[]
+  months: number[]
+  busiest_month: number | null
+  first: Track | null
+}
+
 export interface LibraryStatus {
   scanning: boolean
   last_scan: ScanProgress | null
@@ -757,6 +1003,7 @@ export interface LibraryStatus {
   analysis: LoudnessStatus
   listening: Listening
   lookup_running: boolean
+  lyrics: LyricsProgress
 }
 
 export interface LoudnessStatus {
@@ -979,6 +1226,8 @@ export interface SmartPlay extends SmartPlaySettings {
   /** The style in use. */
   active: number | null
   styles: PartyStyle[]
+  /** The mood dial's switches. */
+  mood: { on: boolean; strength: number }
 }
 
 /** The most favored and most avoided, strongest first. */
@@ -1050,6 +1299,15 @@ export interface SystemStatus {
   art_bytes: number
   models_bytes: number
   log_file: string | null
+  /** How busy the processor is, 0 to 1. */
+  cpu: number | null
+  memory_total: number | null
+  memory_available: number | null
+  /** The disk holding DJINN's data. */
+  disk_total: number | null
+  disk_available: number | null
+  /** When a backup was last downloaded. */
+  last_backup_ms: number | null
 }
 
 export interface ServerPorts {
@@ -1076,4 +1334,123 @@ export interface ArtistPicture {
   credit_url: string
   source: 'commons' | 'manual' | 'fanart' | 'audiodb' | 'unsplash'
   remote_url: string | null
+}
+
+/** A timed line of lyrics. */
+export interface LyricLine {
+  ms: number
+  text: string
+}
+
+/** A song's lyrics: timed lines when there are some, otherwise plain words. */
+export interface Lyrics {
+  lines: LyricLine[] | null
+  plain: string | null
+  instrumental: boolean
+  /** lrc (a file beside the song), file (its tags) or lrclib (online). */
+  source: string
+}
+
+/** A song found by its words, with the line that matched. */
+export interface LyricHit {
+  track: Track
+  line: string
+}
+
+export interface LyricsStatus {
+  songs: number
+  synced: number
+  plain: number
+  instrumental: number
+  unread: number
+  not_looked_up: number
+  running: boolean
+  phase: '' | 'reading' | 'looking up'
+}
+
+export interface LyricsSettings {
+  lookup: boolean
+  page: boolean
+}
+
+/** Another DJINN box playing a room on its own speakers. */
+export interface HouseNode {
+  id: number
+  node_id: string
+  name: string
+  status: 'pending' | 'approved'
+  room_id: number
+  address: string | null
+  version: string | null
+  platform: string | null
+  requested_at: number
+  approved_at: number | null
+  last_seen: number | null
+  /** The code the node's own screen shows, to compare. */
+  code: string
+  audio: NodeAudio
+  /** The speakers the node reported. */
+  speakers: NodeSpeaker[]
+}
+
+/** A node's speaker settings, kept on Main. */
+export interface NodeAudio {
+  /** Device id; null for the system default. */
+  device: string | null
+  delay_ms: number
+  /** Volume trim, 0 to 1. */
+  trim: number
+  equalizer: EqualizerSettings
+  /** What to do once Main is gone and what was loaded has played. */
+  offline: 'stop' | 'cached'
+  /** Plays straight through instead of correcting itself against Main. */
+  free_run?: boolean
+  /** What a screen plugged into the node shows: 'status', 'off', or pages
+   * to try in order ('lyrics', 'visual', 'tv') joined by commas. */
+  screen?: string
+  /** The node's own visualizers, or null to follow the house's. */
+  visual?: import('./visuals').Visuals | null
+  /** Songs, playing and coming up, the node keeps copies of. */
+  cache_ahead?: number
+}
+
+export interface NodeSpeaker {
+  id: string
+  name: string
+  is_default: boolean
+}
+
+export interface NodeList {
+  join_open: boolean
+  /** This server's security code, which a node shows when it first connects. */
+  security_code: string | null
+  nodes: HouseNode[]
+}
+
+/** An area with its own speakers; its own party unless linked to another. */
+export interface Room {
+  id: number
+  name: string
+  /** The room this one plays along with; null plays its own. */
+  linked_to: number | null
+  position: number
+}
+
+export interface RoomList {
+  rooms: Room[]
+  /** The room this person is in. */
+  mine: number
+}
+
+/** A speaker in a room's timing: one of Main's outputs or a node. */
+export interface TimingSpeaker {
+  kind: 'output' | 'node'
+  id: number
+  name: string
+  delay_ms: number
+}
+
+export interface RoomTiming {
+  speakers: TimingSpeaker[]
+  max_ms: number
 }

@@ -50,13 +50,8 @@ pub fn engine_configs(rows: &[OutputRow]) -> Vec<OutputConfig> {
 
 /// Sends the stored outputs to the engine.
 async fn apply(state: &AppState) -> ApiResult<Vec<OutputRow>> {
-    let rows = state.store.outputs().await?;
-    state
-        .jukebox
-        .lock()
-        .await
-        .set_outputs(engine_configs(&rows));
-    Ok(rows)
+    crate::rooms_rt::apply_outputs(state).await?;
+    Ok(state.store.outputs().await?)
 }
 
 #[derive(Serialize)]
@@ -258,7 +253,7 @@ pub async fn loudness_status(state: &AppState) -> ApiResult<LoudnessStatus> {
     Ok(LoudnessStatus {
         progress: state
             .store
-            .loudness_progress(djinn_engine::FEATURES_VERSION)
+            .loudness_progress(djinn_engine::FEATURES_VERSION, djinn_engine::PRINT_VERSION)
             .await?,
         running: state.scan.loudness_running.load(Ordering::Acquire),
         on: analysis_on(state).await,
@@ -308,7 +303,11 @@ pub async fn start_analysis(state: &AppState) {
         // done too, so they aren't tried again.
         let mut unreadable = 0usize;
         loop {
-            let batch = match state.store.tracks_to_analyze(version, ANALYSIS_BATCH).await {
+            let batch = match state
+                .store
+                .tracks_to_analyze(version, djinn_engine::PRINT_VERSION, ANALYSIS_BATCH)
+                .await
+            {
                 Ok(batch) if !batch.is_empty() => batch,
                 Ok(_) => break,
                 Err(e) => {
@@ -340,15 +339,16 @@ pub async fn start_analysis(state: &AppState) {
                     let Ok((id, result, path)) = job.await else {
                         continue;
                     };
-                    let (loudness, features) = match result {
+                    let (loudness, features, print) = match result {
                         Ok(analysis) => (
                             analysis.loudness.map(|l| (l.lufs, l.peak)),
                             analysis.features,
+                            analysis.print,
                         ),
                         Err(e) => {
                             tracing::debug!(path = %path.display(), error = %e, "cannot analyze song");
                             unreadable += 1;
-                            (None, None)
+                            (None, None, None)
                         }
                     };
                     let saved = state
@@ -356,8 +356,10 @@ pub async fn start_analysis(state: &AppState) {
                         .save_analysis(
                             id,
                             version,
+                            djinn_engine::PRINT_VERSION,
                             loudness,
                             features.as_ref().map(|f| (f.values.as_slice(), f.bpm)),
+                            print.as_deref(),
                         )
                         .await;
                     if let Err(e) = saved {
@@ -380,6 +382,7 @@ pub async fn start_analysis(state: &AppState) {
                 "songs analyzed"
             );
             crate::smart::refresh(&state).await;
+            crate::duplicates::refresh(&state);
         }
         if let Ok(status) = loudness_status(&state).await {
             let _ = state.events.send(ServerEvent::Loudness(status));
@@ -422,6 +425,7 @@ mod tests {
                 enabled: true,
                 volume_trim: 1.0,
                 delay_ms: 120,
+                room_id: 1,
             },
             OutputRow {
                 id: 2,
@@ -430,6 +434,7 @@ mod tests {
                 enabled: false,
                 volume_trim: 1.5,
                 delay_ms: 5000,
+                room_id: 1,
             },
         ];
         let configs = engine_configs(&rows);

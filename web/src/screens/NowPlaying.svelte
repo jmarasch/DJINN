@@ -1,4 +1,6 @@
 <script lang="ts">
+  import MoodDial from '../lib/MoodDial.svelte'
+  import { t } from '../lib/i18n.svelte'
   import { onMount } from 'svelte'
   import { api } from '../lib/api'
   import Art from '../lib/Art.svelte'
@@ -18,15 +20,59 @@
   } from '../lib/state.svelte'
   import { checkPlayHere, playHere, startPlayHere, stopPlayHere } from '../lib/playHere.svelte'
   import { cycleTheme, theme } from '../lib/theme.svelte'
+  import LyricsView from '../lib/LyricsView.svelte'
+  import RoomPicker from '../lib/RoomPicker.svelte'
+  import type { Lyrics } from '../lib/types'
 
   const current = $derived(app.nowPlaying.current)
   const next = $derived(app.nowPlaying.up_next)
-  /** "Up next" is a request you're part of, so you can take yours back. */
-  const nextMine = $derived(next ? myRequest(next.track.id) : null)
-  const nextQueued = $derived(next ? app.queue.find((q) => q.track.id === next.track.id) : undefined)
+  /** Auto mix songs after the requests, in the room the requests leave. */
+  const SHOWN = 6
+  const autoNext = $derived(
+    [
+      ...(next && next.source !== 'request' && next.track.id !== current?.track.id ? [next] : []),
+      ...(app.nowPlaying.later ?? []),
+    ].slice(0, Math.max(0, SHOWN - app.queue.length)),
+  )
   const total = $derived(current?.track.duration_ms ?? 0)
   let position = $state(0)
   let volume = $state(app.player.volume)
+
+  // Lyrics under the song, opened or closed per browser.
+  let lyricsOpen = $state(readLyricsOpen())
+  let lyrics = $state<Lyrics | null | undefined>(undefined)
+  function readLyricsOpen(): boolean {
+    try {
+      return localStorage.getItem('djinn-lyrics-open') === '1'
+    } catch {
+      return false
+    }
+  }
+  function toggleLyrics() {
+    lyricsOpen = !lyricsOpen
+    try {
+      localStorage.setItem('djinn-lyrics-open', lyricsOpen ? '1' : '0')
+    } catch {
+      // Not remembered.
+    }
+  }
+  $effect(() => {
+    const id = current?.track.id
+    if (!lyricsOpen || id == null) return
+    lyrics = undefined
+    let live = true
+    api
+      .trackLyrics(id)
+      .then((found) => {
+        if (live) lyrics = found
+      })
+      .catch(() => {
+        if (live) lyrics = null
+      })
+    return () => {
+      live = false
+    }
+  })
 
   onMount(() => {
     void checkPlayHere()
@@ -70,9 +116,9 @@
   async function voteSkip() {
     try {
       const { skipped } = await api.skipVote()
-      toast(skipped ? 'Skipped' : 'Vote counted')
+      toast(skipped ? t('playing.skipped') : t('playing.vote_counted'))
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not vote', true)
+      toast(e instanceof Error ? e.message : t('playing.vote_failed'), true)
     }
   }
 
@@ -103,7 +149,13 @@
     <span></span>
   {/if}
   <div class="display-actions">
-    <a class="button" href="/tv" title="Switch to TV display">TV display</a>
+    <RoomPicker />
+    <a class="button" href={app.room > 1 ? `/tv?room=${app.room}` : '/tv'} title="Switch to TV display">TV display</a>
+    <a
+      class="button"
+      href={app.room > 1 ? `/visualizer?room=${app.room}` : '/visualizer'}
+      title="A visualizer in step with this room's speakers, with the song and what's coming up">Visualizer</a
+    >
     <button class="theme" onclick={cycleTheme} aria-label="Theme: {themeLabel}" title="Theme: {themeLabel}">
       <Icon name="theme" size={18} />
       {themeLabel}
@@ -120,20 +172,20 @@
   {/if}
   <div class="song-info">
   {#if current}
-    <span class="label">{app.player.state === 'paused' ? 'Paused' : 'Now playing'}</span>
+    <span class="label">{app.player.state === 'paused' ? t('playing.paused') : t('playing.now_playing')}</span>
     <h1 class="title">{current.track.title}</h1>
     <p class="artist">
       {#if current.track.credits.length || current.track.artist}
         <Credits track={current.track} />
       {:else}
-        Unknown artist
+        {t('common.unknown_artist')}
       {/if}
       {#if current.track.album_id}
         · <a href="#/album/{current.track.album_id}">{current.track.album}</a>
       {/if}
     </p>
     {#if requesterText}
-      <p class="badge">Requested by {requesterText}</p>
+      <p class="badge">{t('playing.requested_by', { name: requesterText })}</p>
     {/if}
     <div class="progress" role="progressbar" aria-valuenow={position} aria-valuemax={total}>
       <div class="fill" style:width="{total ? (position / total) * 100 : 0}%"></div>
@@ -142,30 +194,40 @@
       <span>{duration(position)}</span>
       <span>{duration(total)}</span>
     </div>
+    <button class="lyrics-toggle" class:on={lyricsOpen} aria-pressed={lyricsOpen} onclick={toggleLyrics}>
+      <Icon name="lyrics" size={18} /> {t('playing.lyrics')}
+    </button>
+    {#if lyricsOpen}
+      <LyricsView {lyrics} position={currentPosition} />
+    {/if}
     {#if canVote}
       <button class="skip-vote" disabled={voted || resting} onclick={voteSkip}>
         <Icon name="skip" size={18} />
         {#if soleRequester}
-          Skip my song
+          {t('playing.skip_mine')}
         {:else if resting}
-          You can vote to skip again after this song
+          {t('playing.skip_resting')}
         {:else if voted}
-          Voted to skip · {app.player.skip_votes} of {app.player.skip_votes_needed}
+          {t('playing.voted', { votes: app.player.skip_votes, needed: app.player.skip_votes_needed })}
         {:else}
-          Vote to skip{app.player.skip_votes ? ` · ${app.player.skip_votes} of ${app.player.skip_votes_needed}` : ''}
+          {t('playing.vote_skip')}{app.player.skip_votes
+            ? ` · ${t('playing.votes_of', { votes: app.player.skip_votes, needed: app.player.skip_votes_needed })}`
+            : ''}
         {/if}
       </button>
     {/if}
   {:else}
     <div class="idle">
       <img src="/images/empty-record.webp" alt="" />
-      <h1>Nothing playing</h1>
+      <h1>{t('playing.nothing')}</h1>
       <p class="muted">
-        {app.output.error ? `Audio output problem: ${app.output.error}` : 'Find a song and add it to the queue.'}
+        {app.output.error ? t('playing.output_problem', { error: app.output.error }) : t('playing.nothing_hint')}
       </p>
       <a class="button primary" href="#/search">Find a song</a>
     </div>
   {/if}
+
+  <MoodDial />
 
   {#if playHere.url}
     <div class="play-here">
@@ -201,6 +263,14 @@
       <button class="round" aria-label="Skip" disabled={!current} onclick={() => control(api.skip)}>
         <Icon name="skip" size={26} />
       </button>
+      <button
+        class="small-button"
+        disabled={!current}
+        title="Skip it, and the auto mix plays it (and songs like it) less"
+        onclick={() => control(api.skipLess)}
+      >
+        Skip, play less
+      </button>
     </div>
     <div class="audio">
       <label class="volume">
@@ -222,10 +292,10 @@
 </section>
 
   <aside class="side">
-    <h2>Up next</h2>
+    <h2>{t('playing.requests')}</h2>
     {#if app.queue.length}
       <ol class="queue-list">
-        {#each app.queue.slice(0, 6) as item (item.id)}
+        {#each app.queue.slice(0, SHOWN) as item (item.id)}
           {@const mine = myRequest(item.track.id)}
           <li>
             <Art hash={item.track.art_hash} size={56} />
@@ -236,42 +306,38 @@
             </div>
             {#if mine}
               <button class="cancel" onclick={() => cancelRequest(mine.id)}>
-                {involvement(mine) === 'backer' ? 'Step back' : 'Cancel'}
+                {involvement(mine) === 'backer' ? t('playing.step_back') : t('common.cancel')}
               </button>
             {/if}
           </li>
         {/each}
       </ol>
-      {#if app.queue.length > 6}<p class="muted small">and {app.queue.length - 6} more</p>{/if}
-    {:else if next}
-      <div class="next-row">
-        <Art hash={next.track.art_hash} size={40} />
-        <div class="text">
-          <div class="ellipsis">{next.track.title}</div>
-          <div class="muted small ellipsis">
-            {byline(next.track.artist)}{nextQueued
-              ? ` · for ${askedBy(nextQueued)}`
-              : next.requested_by
-                ? ` · for ${next.requested_by}`
-                : ''}
+      {#if app.queue.length > SHOWN}<p class="muted small">{t('playing.and_more', { n: app.queue.length - SHOWN })}</p>{/if}
+    {:else}
+      <p class="muted small">{t('playing.no_requests')}</p>
+    {/if}
+
+    {#if autoNext.length}
+      <h2 class="coming">{t('playing.coming_up')}</h2>
+      {#each autoNext as entry, i (`${entry.track.id}-${i}`)}
+        <div class="next-row">
+          <Art hash={entry.track.art_hash} size={40} />
+          <div class="text">
+            <div class="ellipsis">{entry.track.title}</div>
+            <div class="muted small ellipsis">{byline(entry.track.artist)}</div>
           </div>
         </div>
-        {#if nextMine}
-          <button class="cancel" onclick={() => nextMine && cancelRequest(nextMine.id)}>
-            {involvement(nextMine) === 'backer' ? 'Step back' : 'Cancel'}
-          </button>
-        {/if}
-      </div>
-      <p class="muted small">No requests yet. Yours could be next.</p>
-    {:else}
-      <p class="muted">No requests yet. Yours could be next.</p>
+      {/each}
     {/if}
 
     <div class="join-prompt">
-      <img src="/api/join/qr.svg" alt="Scan to add a song" />
+      <img
+        src={app.address ? `/api/join/qr.svg?v=${encodeURIComponent(app.address)}` : '/api/join/qr.svg'}
+        alt={t('playing.scan_alt')}
+      />
       <div>
-        <strong>Add a song</strong>
-        <p class="small muted">Scan with your phone, then choose from the library.</p>
+        <strong>{t('playing.add_a_song')}</strong>
+        <p class="small muted">{t('playing.scan_hint')}</p>
       </div>
     </div>
   </aside>
@@ -280,16 +346,33 @@
   {#if !isAdmin()}
     <p class="host-link">
       {#if app.me?.role === 'guest'}
-        You're in as <b>{app.me.display_name}</b>.
-        <button onclick={signInAsHost}>Host sign in</button>
+        {t('playing.in_as', { name: app.me.display_name ?? '' })}
+        <button onclick={signInAsHost}>{t('join.host_sign_in')}</button>
       {:else}
-        Signed in as <b>{app.me?.username}</b>. <a href="#/account">Your account</a>
+        {t('playing.signed_in_as', { name: app.me?.username ?? '' })} <a href="#/account">{t('playing.your_account')}</a>
       {/if}
     </p>
   {/if}
 </div>
 
 <style>
+  .lyrics-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin: 4px 0 8px;
+    min-height: 36px;
+    padding: 6px 14px;
+    border-radius: 999px;
+    background: var(--surface-2);
+    color: var(--muted);
+    font-size: 0.875rem;
+  }
+
+  .lyrics-toggle.on {
+    color: var(--accent);
+  }
+
   .playing-page {
     position: relative;
     isolation: isolate;
@@ -605,6 +688,10 @@
     font-size: 0.75rem;
     text-transform: uppercase;
     letter-spacing: 0.08em;
+  }
+
+  .coming {
+    margin-top: 16px;
   }
 
   .next-row {

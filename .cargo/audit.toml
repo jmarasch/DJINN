@@ -9,4 +9,11 @@ ignore = [
     "RUSTSEC-2026-0368",
     "RUSTSEC-2026-0369",
     "RUSTSEC-2026-0429",
+    # libsqlite3-sys 0.37 (bundled SQLite 3.53), pinned by sqlx-sqlite 0.9.0.
+    # CVE-2026-119375: a database file opened together with a crafted -wal
+    # file of another page size can return stale memory. DJINN only opens
+    # its own database and a restored backup, which is a VACUUM INTO snapshot
+    # with no -wal file next to it (backup::swap removes the old one). Drop
+    # this once sqlx moves to libsqlite3-sys 0.39.
+    "RUSTSEC-2026-0459",
 ]

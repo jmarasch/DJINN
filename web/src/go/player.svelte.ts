@@ -8,6 +8,7 @@
 // party's auto mix.
 
 import { SvelteSet } from 'svelte/reactivity'
+import { attachEqualizer, wakeEqualizer } from './equalizer.svelte'
 import { api } from '../lib/api'
 import { toast } from '../lib/state.svelte'
 import type { GoPrefs, LikeKind, PlayLinks, Track } from '../lib/types'
@@ -97,7 +98,12 @@ export async function toggleLike(kind: LikeKind, id: number) {
 
 export const current = () => (player.index >= 0 ? player.queue[player.index] ?? null : null)
 
+/** Milliseconds into the song playing, read straight from the audio (for
+ * lyrics, which need more than the few updates a second `position` gets). */
+export const livePosition = () => decks[active].currentTime * 1000
+
 const decks = [new Audio(), new Audio()]
+attachEqualizer(decks)
 let active = 0
 /** The next song, already loading in the other deck. */
 let preloaded: { trackId: number; links: PlayLinks } | null = null
@@ -187,9 +193,9 @@ for (const deck of decks) {
 const canPlay = (mime: string) => decks[0].canPlayType(mime) !== ''
 
 /** Records the song being left in your history. */
-function report() {
+function report(playLess = false) {
   const song = current()
-  if (song && heardMs > 0) api.goPlayed(song.id, heardMs).catch(() => {})
+  if (song && heardMs > 0) api.goPlayed(song.id, heardMs, playLess).catch(() => {})
   heardMs = 0
 }
 
@@ -228,6 +234,7 @@ async function start(index: number, autoplay = true) {
     player.downloadUrl = links.download_url
     heardMs = 0
     setMediaSession(song)
+    wakeEqualizer()
     if (autoplay) await deck.play().catch(() => (player.playing = false))
     saveResume()
     preloadNext()
@@ -365,8 +372,17 @@ export function moveInQueue(from: number, to: number) {
   saveResume()
 }
 
+/** Plays a song from Up next now. The songs that were ahead of it stay
+ * coming up, after it; the one playing stays behind it for Previous. */
 export function jumpTo(index: number) {
   report()
+  const next = player.index + 1
+  if (player.index >= 0 && index > next) {
+    const [song] = player.queue.splice(index, 1)
+    player.queue.splice(next, 0, song)
+    index = next
+    preloaded = null
+  }
   start(index)
 }
 
@@ -385,13 +401,26 @@ export function removeAt(index: number) {
 export function toggle() {
   const deck = decks[active]
   if (player.index < 0) return
-  if (deck.paused) deck.play().catch(() => {})
-  else deck.pause()
+  if (deck.paused) {
+    wakeEqualizer()
+    deck.play().catch(() => {})
+  } else deck.pause()
 }
 
 export function next() {
   if (player.index < 0) return
   report()
+  const at = player.index + 1 < player.queue.length ? player.index + 1 : player.repeat === 'all' ? 0 : -1
+  if (at >= 0) start(at)
+}
+
+/** Skips and counts it against the song: radio plays it (and songs like it)
+ * less. A plain skip doesn't, since it may only mean "the next one, now". */
+export function nextPlayLess() {
+  if (player.index < 0) return
+  // Counts as heard for a moment at least, so the report isn't dropped.
+  if (heardMs <= 0) heardMs = 1
+  report(true)
   const at = player.index + 1 < player.queue.length ? player.index + 1 : player.repeat === 'all' ? 0 : -1
   if (at >= 0) start(at)
 }
@@ -445,6 +474,8 @@ export async function startRadio(track: Track) {
   try {
     const songs = await api.goRadio(track.id)
     if (idle()) {
+      // From the song that just ended: it doesn't start over.
+      if (songs.length > 1 && songs[0]?.id === current()?.id) songs.shift()
       playList(songs, 0, { radio: true, seed: track.id })
       toast(`Radio from "${track.title}"`)
       return

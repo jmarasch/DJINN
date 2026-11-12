@@ -1,6 +1,8 @@
 package com.newterrastudios.djinn.go.ui
 
 import com.newterrastudios.djinn.go.data.ApiException
+import com.newterrastudios.djinn.go.data.AppRelease
+import com.newterrastudios.djinn.go.data.shouldAskAboutUpdate
 import com.newterrastudios.djinn.go.player.TalkOver
 import com.newterrastudios.djinn.go.BuildConfig
 import android.content.Context
@@ -47,17 +49,18 @@ import com.newterrastudios.djinn.go.data.KIND_SMART
 import com.newterrastudios.djinn.go.data.OfflineSong
 import com.newterrastudios.djinn.go.player.Spectrum
 import com.newterrastudios.djinn.go.work.SmartCacheWorker
+import com.newterrastudios.djinn.go.i18n.t
 import java.io.IOException
 import kotlinx.coroutines.launch
 
-private val QUALITIES = listOf(
-    0 to "Full quality: keep the original files",
-    96 to "MP3, about 96 kbit/s",
-    128 to "MP3, about 128 kbit/s",
-    192 to "MP3, about 192 kbit/s",
-    320 to "MP3, about 320 kbit/s",
-)
+/** Bit rates for converted songs; 0 keeps the original files. */
+private val QUALITIES = listOf(0, 96, 128, 192, 320)
+
+private fun qualityLabel(kbps: Int) =
+    if (kbps == 0) t("settings.full_quality") else t("settings.mp3_rate", "kbps" to kbps)
 private val SMART_LIMITS = listOf(512, 1024, 2048, 5120, 10240)
+/** Songs to fetch ahead from the queue; 0 is off. */
+private val AHEAD_CHOICES = listOf(0, 1, 3, 5, 10)
 
 fun sizeText(context: Context, bytes: Long): String = Formatter.formatShortFileSize(context, bytes)
 
@@ -96,6 +99,7 @@ fun SettingsScreen(nav: Nav) {
     var smart by remember { mutableStateOf(prefs.smartCache) }
     var limit by remember { mutableIntStateOf(prefs.smartLimitMb) }
     var wifi by remember { mutableStateOf(prefs.wifiOnly) }
+    var ahead by remember { mutableIntStateOf(prefs.cacheAhead) }
     val downloads = kept.filter { it.kind == KIND_DOWNLOAD }
     val smartSongs = kept.filter { it.kind == KIND_SMART }
     var confirmSignOut by remember { mutableStateOf(false) }
@@ -104,13 +108,13 @@ fun SettingsScreen(nav: Nav) {
     if (confirmSignOut) {
         AlertDialog(
             onDismissRequest = { confirmSignOut = false },
-            title = { Text("Sign out?") },
+            title = { Text(t("settings.sign_out_question")) },
             text = {
                 Text(
                     if (keepsSongs) {
-                        "The songs kept on this phone from this server stay here, locked until you sign back in."
+                        t("settings.sign_out_keeps")
                     } else {
-                        "The songs and system sounds kept on this phone from this server will be deleted. Those from other servers stay. You can download them again after signing back in."
+                        t("settings.sign_out_deletes")
                     },
                 )
             },
@@ -118,40 +122,43 @@ fun SettingsScreen(nav: Nav) {
                 TextButton(onClick = {
                     confirmSignOut = false
                     nav.signOut()
-                }) { Text(if (keepsSongs) "Sign out" else "Sign out and delete") }
+                }) { Text(if (keepsSongs) t("settings.sign_out") else t("settings.sign_out_delete")) }
             },
-            dismissButton = { TextButton(onClick = { confirmSignOut = false }) { Text("Stay signed in") } },
+            dismissButton = { TextButton(onClick = { confirmSignOut = false }) { Text(t("settings.stay_signed_in")) } },
         )
     }
 
     LazyColumn(Modifier.fillMaxSize()) {
         item {
-            Text("Settings", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(16.dp))
+            Text(t("settings.title"), style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(16.dp))
             Text(
-                "Signed in to " + (nav.serverName?.let { "$it (${nav.address})" } ?: nav.address),
+                t("settings.signed_in_to", "server" to (nav.serverName?.let { "$it (${nav.address})" } ?: nav.address)),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp),
             )
             Note(
                 when {
-                    nav.securityCode != null -> "Encrypted. Security code ${nav.securityCode}, which Admin > GO shows too."
-                    nav.encrypted -> "Encrypted."
-                    else -> "Not encrypted: others on this network could see what's sent. The server's admin can turn encryption on."
+                    nav.securityCode != null -> t("signin.encrypted_code", "code" to (nav.securityCode ?: ""))
+                    nav.encrypted -> t("signin.encrypted")
+                    else -> t("settings.not_encrypted")
                 },
             )
             Row(
                 Modifier.padding(16.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                OutlinedButton(onClick = nav.switchServer) { Text("Other servers") }
+                OutlinedButton(onClick = nav.switchServer) { Text(t("settings.other_servers")) }
                 OutlinedButton(
                     onClick = { if (kept.isEmpty() && sounds.isEmpty()) nav.signOut() else confirmSignOut = true },
-                ) { Text("Sign out") }
+                ) { Text(t("settings.sign_out")) }
             }
             if (elsewhere.isNotEmpty()) {
                 Note(
-                    "This phone also keeps ${songCount(elsewhere.size)} for other servers or accounts, " +
-                        "${sizeText(context, elsewhere.sumOf { it.bytes })}. They're left alone while you're here.",
+                    t(
+                        "settings.elsewhere",
+                        "songs" to songCount(elsewhere.size),
+                        "size" to sizeText(context, elsewhere.sumOf { it.bytes }),
+                    ),
                 )
                 TextButton(
                     onClick = {
@@ -161,22 +168,29 @@ fun SettingsScreen(nav: Nav) {
                         }
                     },
                     modifier = Modifier.padding(horizontal = 8.dp),
-                ) { Text("Delete those") }
+                ) { Text(t("settings.delete_those")) }
             }
         }
+        item { LanguageSettings(nav) }
         item {
             UpdateOffer(nav)
-            Note("DJINN GO version ${BuildConfig.VERSION_NAME}")
+            var askUpdates by remember { mutableStateOf(prefs.askAboutUpdates) }
+            Toggle(t("settings.ask_updates"), null, askUpdates) {
+                askUpdates = it
+                prefs.askAboutUpdates = it
+            }
+            Note(t("settings.app_version", "version" to BuildConfig.VERSION_NAME))
         }
         item { TapSettings(nav) }
         item { TalkOverSettings(nav) }
         item { VisualsSettings(nav) }
+        item { EqualizerSettings(nav) }
         if (nav.canKeepSongs) {
             item {
-                Heading("Quality of kept songs")
-                Note("FLAC and WAV songs can be converted, on your server, to take less room. Other formats stay as they are. Applies to songs fetched from now on.")
+                Heading(t("settings.quality"))
+                Note(t("settings.quality_note"))
             }
-            items(QUALITIES) { (rate, label) ->
+            items(QUALITIES) { rate ->
                 Row(
                     Modifier
                         .fillMaxWidth()
@@ -191,19 +205,47 @@ fun SettingsScreen(nav: Nav) {
                         kbps = rate
                         prefs.kbps = rate
                     })
-                    Text(label)
+                    Text(qualityLabel(rate))
                 }
             }
             item {
-                Heading("Storage")
+                Heading(t("settings.storage"))
                 DownloadStatus()
-                Toggle("Download on Wi-Fi only", null, wifi) {
+                Toggle(t("settings.wifi_only"), null, wifi) {
                     wifi = it
                     prefs.wifiOnly = it
                 }
+                Text(
+                    t("settings.fetch_ahead"),
+                    style = MaterialTheme.typography.bodyLarge,
+                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp),
+                )
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    AHEAD_CHOICES.forEach { n ->
+                        val selected = ahead == n
+                        Text(
+                            if (n == 0) t("settings.fetch_ahead_off") else n.toString(),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier
+                                .clickable {
+                                    ahead = n
+                                    prefs.cacheAhead = n
+                                }
+                                .padding(8.dp),
+                        )
+                    }
+                }
+                Note(t("settings.fetch_ahead_note"))
                 Toggle(
-                    "Smart cache",
-                    "Keep what you play most and like, on Wi-Fi while charging.",
+                    t("settings.smart_cache"),
+                    t("settings.smart_cache_note"),
                     smart,
                 ) {
                     smart = it
@@ -218,7 +260,7 @@ fun SettingsScreen(nav: Nav) {
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text("Up to", modifier = Modifier.padding(end = 4.dp))
+                        Text(t("settings.up_to"), modifier = Modifier.padding(end = 4.dp))
                         SMART_LIMITS.forEach { mb ->
                             val selected = limit == mb
                             Text(
@@ -237,23 +279,23 @@ fun SettingsScreen(nav: Nav) {
                     OutlinedButton(
                         onClick = { SmartCacheWorker.runNow(context) },
                         modifier = Modifier.padding(horizontal = 16.dp),
-                    ) { Text("Update smart cache now") }
+                    ) { Text(t("settings.update_smart_cache")) }
                 }
                 Note(usage(context, downloads, smartSongs))
                 if (kbps > 0 && kept.any { !it.converted && it.path.endsWith(".flac") || !it.converted && it.path.endsWith(".wav") }) {
-                    Note("Some lossless songs are at full size: your server isn't converting for this account. Admin > GO can turn converting on.")
+                    Note(t("settings.not_converting"))
                 }
                 if (kept.isNotEmpty()) {
                     OutlinedButton(
                         onClick = { scope.launch { nav.offline.deleteEverything() } },
                         modifier = Modifier.padding(horizontal = 16.dp),
-                    ) { Text("Remove all kept songs and sounds") }
+                    ) { Text(t("settings.remove_all")) }
                 }
             }
             item {
-                Heading("Saved system sounds")
+                Heading(t("settings.saved_sounds"))
                 if (sounds.isEmpty()) {
-                    Note("A song's menu can save it as an alarm, ringtone or notification sound.")
+                    Note(t("settings.saved_sounds_note"))
                 }
             }
             items(sounds, key = { it.uri }) { sound ->
@@ -264,15 +306,61 @@ fun SettingsScreen(nav: Nav) {
                     onClick = {},
                     end = {
                         IconButton(onClick = { scope.launch { nav.offline.removeSound(sound) } }) {
-                            Icon(Icons.Default.Close, "Remove ${sound.title}")
+                            Icon(Icons.Default.Close, t("signin.remove_named", "name" to sound.title))
                         }
                     },
                 )
             }
         } else {
-            item { Note("Your role doesn't include keeping songs on this phone. Ask your host for the download permission.") }
+            item { Note(t("settings.no_downloads")) }
         }
     }
+}
+
+/** Fetches a new version and hands it to Android, which asks before installing. Says what went wrong, if anything. */
+@UnstableApi
+suspend fun Nav.installUpdate(release: AppRelease): String? = try {
+    updater.install(updater.fetch(release))
+    null
+} catch (e: IOException) {
+    if (e is ApiException) e.message else e.message ?: t("common.no_server")
+}
+
+/** Asks about a new version once when the app opens, unless that's turned off. */
+@UnstableApi
+@Composable
+fun UpdatePrompt(nav: Nav) {
+    val release = nav.update ?: return
+    if (nav.askedAboutUpdate || !shouldAskAboutUpdate(release, nav.prefs.askAboutUpdates, nav.prefs.updateDeclined)) return
+    var busy by remember { mutableStateOf(false) }
+    var problem by remember { mutableStateOf<String?>(null) }
+    AlertDialog(
+        onDismissRequest = { nav.askedAboutUpdate = true },
+        title = { Text(t("settings.update_question")) },
+        text = {
+            Text(problem ?: t("settings.update_available", "version" to release.version))
+        },
+        confirmButton = {
+            TextButton(
+                enabled = !busy,
+                onClick = {
+                    busy = true
+                    problem = null
+                    nav.scope.launch {
+                        problem = nav.installUpdate(release)
+                        busy = false
+                        if (problem == null) nav.askedAboutUpdate = true
+                    }
+                },
+            ) { Text(if (busy) t("settings.downloading") else t("settings.update")) }
+        },
+        dismissButton = {
+            TextButton(onClick = {
+                nav.prefs.updateDeclined = release.versionCode
+                nav.askedAboutUpdate = true
+            }) { Text(t("settings.not_now")) }
+        },
+    )
 }
 
 /** A newer version from the server, when there is one. Android asks before installing it. */
@@ -283,7 +371,7 @@ fun UpdateOffer(nav: Nav) {
     var busy by remember { mutableStateOf(false) }
     var problem by remember { mutableStateOf<String?>(null) }
     Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-        Text("Version ${release.version} is available from this server.")
+        Text(t("settings.update_available", "version" to release.version))
         problem?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         OutlinedButton(
             enabled = !busy,
@@ -291,31 +379,23 @@ fun UpdateOffer(nav: Nav) {
                 busy = true
                 problem = null
                 nav.scope.launch {
-                    try {
-                        nav.updater.install(nav.updater.fetch(release))
-                    } catch (e: IOException) {
-                        problem = if (e is ApiException) e.message else e.message ?: "Couldn't reach the server."
-                    } finally {
-                        busy = false
-                    }
+                    problem = nav.installUpdate(release)
+                    busy = false
                 }
             },
-        ) { Text(if (busy) "Downloading..." else "Update") }
+        ) { Text(if (busy) t("settings.downloading") else t("settings.update")) }
     }
 }
 
-private val TAP_CHOICES = listOf(
-    "play" to "Play it now",
-    "queue" to "Play it next",
-    "end" to "Add it to the end of the queue",
-)
+/** What a tap can do, as the server names it. */
+private val TAP_CHOICES = listOf("play", "queue", "end")
 
 /** What a tap on a song does. Kept on the account, so every device follows it. */
 @UnstableApi
 @Composable
 private fun TapSettings(nav: Nav) {
-    Heading("When you tap a song")
-    TAP_CHOICES.forEach { (value, label) ->
+    Heading(t("settings.when_tap"))
+    TAP_CHOICES.forEach { value ->
         fun choose() {
             val before = nav.tapAction
             nav.tapAction = value
@@ -324,7 +404,7 @@ private fun TapSettings(nav: Nav) {
                     nav.api.setPrefs(GoPrefs(value))
                 } catch (_: IOException) {
                     nav.tapAction = before
-                    nav.message = "Couldn't reach the server, so that wasn't changed."
+                    nav.message = t("settings.not_changed")
                 }
             }
         }
@@ -336,7 +416,7 @@ private fun TapSettings(nav: Nav) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             RadioButton(selected = nav.tapAction == value, onClick = ::choose)
-            Text(label)
+            Text(t("settings.tap_$value"))
         }
     }
 }
@@ -345,8 +425,8 @@ private fun TapSettings(nav: Nav) {
 @Composable
 private fun TalkOverSettings(nav: Nav) {
     val chosen by nav.prefs.talkOverChoice.collectAsState()
-    Heading("When another app needs to talk")
-    Note("Such as an assistant screening a call, or directions. A call you answer always pauses the music.")
+    Heading(t("settings.talk_over"))
+    Note(t("settings.talk_over_note"))
     TalkOver.entries.forEach { choice ->
         Row(
             Modifier
@@ -356,7 +436,7 @@ private fun TalkOverSettings(nav: Nav) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             RadioButton(selected = chosen == choice, onClick = { nav.prefs.chooseTalkOver(choice) })
-            Text(choice.label)
+            Text(t("talkover.${choice.name.lowercase()}"))
         }
     }
 }
@@ -369,17 +449,17 @@ private fun VisualsSettings(nav: Nav) {
     var lead by remember { mutableFloatStateOf(prefs.visualsLeadMs.toFloat()) }
     var intensity by remember { mutableFloatStateOf(prefs.visualsIntensity) }
     var auto by remember { mutableStateOf(prefs.visualsAuto) }
-    Heading("Visuals")
-    Note("The sparkle button on Now Playing switches between the cover and these. Fancier styles use more battery.")
+    Heading(t("settings.visuals"))
+    Note(t("settings.visuals_note"))
     VisualLookSettings(nav)
-    Toggle("Change styles by themselves", "In full screen, a new style every 30 seconds.", auto) {
+    Toggle(t("settings.auto_styles"), t("settings.auto_styles_note"), auto) {
         auto = it
         prefs.visualsAuto = it
     }
     Column(Modifier.padding(horizontal = 16.dp)) {
-        Text("Timing: ${lead.toInt()} ms")
+        Text(t("settings.timing", "ms" to lead.toInt()))
         Text(
-            "If visuals seem to come before the sound, raise this; if after, lower it.",
+            t("settings.timing_note"),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -393,7 +473,7 @@ private fun VisualsSettings(nav: Nav) {
             valueRange = 0f..800f,
             steps = 15,
         )
-        Text("Strength: ${(intensity * 100).toInt()}%")
+        Text(t("settings.strength", "percent" to (intensity * 100).toInt()))
         Slider(
             value = intensity,
             onValueChange = {
@@ -407,7 +487,47 @@ private fun VisualsSettings(nav: Nav) {
 }
 
 private fun usage(context: Context, downloads: List<OfflineSong>, smart: List<OfflineSong>): String =
-    "Downloads: ${songCount(downloads.size)}, ${sizeText(context, downloads.sumOf { it.bytes })}. " +
-        "Smart cache: ${songCount(smart.size)}, ${sizeText(context, smart.sumOf { it.bytes })}."
+    t(
+        "settings.usage",
+        "downloads" to songCount(downloads.size),
+        "download_size" to sizeText(context, downloads.sumOf { it.bytes }),
+        "smart" to songCount(smart.size),
+        "smart_size" to sizeText(context, smart.sumOf { it.bytes }),
+    )
 
-private fun songCount(n: Int) = if (n == 1) "1 song" else "$n songs"
+private fun songCount(n: Int) = t("count.songs", "n" to n)
+
+/** The app's language on this phone: the server's default (or the phone's own), or one picked here. */
+@Composable
+private fun LanguageSettings(nav: Nav) {
+    val context = LocalContext.current
+    val prefs = nav.prefs
+    val languages = remember { com.newterrastudios.djinn.go.i18n.Strings.available(context) }
+    if (languages.size < 2) return
+    var chosen by remember { mutableStateOf(prefs.language) }
+    val house = prefs.houseLanguage
+    val houseName = languages.firstOrNull { it.first == house }?.second
+    val options = listOf("" to if (houseName != null) t("language.house", "name" to houseName) else t("language.phone")) + languages
+    Heading(t("language.label"))
+    options.forEach { (code, name) ->
+        val pick = {
+            if (chosen != code) {
+                chosen = code
+                prefs.language = code
+                com.newterrastudios.djinn.go.i18n.Strings.load(context)
+                // Every screen's text comes again in the new language.
+                (context as? android.app.Activity)?.recreate()
+            }
+        }
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clickable(onClick = pick)
+                .padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            RadioButton(selected = chosen == code, onClick = pick)
+            Text(name)
+        }
+    }
+}

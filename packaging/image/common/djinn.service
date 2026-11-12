@@ -1,0 +1,26 @@
+[Unit]
+Description=DJINN party jukebox
+Documentation=https://github.com/jmarasch/DJINN
+After=network-online.target sound.target avahi-daemon.service
+Wants=network-online.target
+
+[Service]
+User=djinn
+Group=djinn
+SupplementaryGroups=audio
+Environment=HOME=/var/lib/djinn
+WorkingDirectory=/var/lib/djinn
+# DJINN works out the address phones should open when it starts. Debian
+# marks the network up before a cable's address arrives (its installer
+# sets wired ports up as hotplug), so wait up to 30 s for a route out.
+ExecStartPre=/bin/sh -c 'for i in $(seq 30); do ip -4 route show default | grep -q . && exit 0; sleep 1; done; exit 0'
+ExecStart=/opt/djinn/djinn --config /etc/djinn/config.toml --no-tray --log-file /var/lib/djinn/djinn.log
+# DJINN updates itself in place and starts again; systemd starts it again
+# too if it ever stops.
+Restart=always
+RestartSec=3
+# DJINN's own shutdown saves where the song was.
+TimeoutStopSec=20
+
+[Install]
+WantedBy=multi-user.target

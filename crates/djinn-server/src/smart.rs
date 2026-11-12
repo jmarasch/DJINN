@@ -713,12 +713,14 @@ pub async fn refresh(state: &AppState) {
         for (artist, track, _) in &led {
             song_artists.entry(*track).or_default().push(*artist);
         }
+        let index = SoundIndex::build(rows);
         let links = std::sync::Arc::new(SongLinks {
             artists: song_artists,
             genres: tags.clone(),
+            energy: index.energy().clone(),
         });
         (
-            SoundIndex::build(rows),
+            index,
             Catalog {
                 songs,
                 vocab,

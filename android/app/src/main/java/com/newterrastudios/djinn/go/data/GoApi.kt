@@ -51,6 +51,10 @@ class GoApi(private val account: Account) {
     private val jsonType = "application/json".toMediaType()
 
     private val pins = { account.servers.value.mapNotNull { it.pin }.toSet() }
+
+    /** Called when the server in use can't be reached, to look for it elsewhere. */
+    @Volatile
+    var onUnreachable: () -> Unit = {}
     private val trust = PinnedTrust(pins)
 
     /** Shared with the player and images, so they carry the sign-in too. */
@@ -85,7 +89,14 @@ class GoApi(private val account: Account) {
             } == true
             val named = request.newBuilder().header("User-Agent", "DJINN GO for Android")
             if (token != null && ours) named.header("Authorization", "Bearer $token")
-            chain.proceed(named.build())
+            try {
+                chain.proceed(named.build())
+            } catch (e: IOException) {
+                // Couldn't connect (not the server saying no, not a stop asked for):
+                // it may have a new address.
+                if (ours && e !is ApiException && !chain.call().isCanceled()) onUnreachable()
+                throw e
+            }
         })
         .build()
 
@@ -177,6 +188,8 @@ class GoApi(private val account: Account) {
 
     suspend fun keepRules(): KeepRules = get("/api/go/keep-rules")
 
+    suspend fun language(): HouseLanguage = get("/api/language")
+
     /** The app this server carries, if it does and says so. */
     suspend fun appRelease(): AppRelease? = try {
         get<AppRelease?>("/api/go/app")
@@ -220,7 +233,19 @@ class GoApi(private val account: Account) {
     suspend fun ask(query: String): Described? =
         get("/api/search/ask?q=${URLEncoder.encode(query, "UTF-8")}")
 
+    /** A song's lyrics, null when there are none. */
+    suspend fun lyrics(id: Long): Lyrics? = get("/api/tracks/$id/lyrics")
+
     suspend fun likedIds(): LikedIds = get("/api/go/likes/ids")
+    suspend fun liked(): Liked = get("/api/go/likes")
+    suspend fun setAlbumLike(id: Long, on: Boolean) = withContext(Dispatchers.IO) {
+        send(if (on) "PUT" else "DELETE", "/api/go/likes/album/$id")
+        Unit
+    }
+    suspend fun setArtistLike(id: Long, on: Boolean) = withContext(Dispatchers.IO) {
+        send(if (on) "PUT" else "DELETE", "/api/go/likes/artist/$id")
+        Unit
+    }
     suspend fun setLike(id: Long, on: Boolean) = withContext(Dispatchers.IO) {
         send(if (on) "PUT" else "DELETE", "/api/go/likes/track/$id")
         Unit
@@ -231,8 +256,8 @@ class GoApi(private val account: Account) {
 
     suspend fun playLinks(id: Long): PlayLinks = withContext(Dispatchers.IO) { playLinksBlocking(id) }
 
-    suspend fun reportPlay(id: Long, msPlayed: Long, at: Long? = null) =
-        write("POST", "/api/go/plays", PlayReport(id, msPlayed, at))
+    suspend fun reportPlay(id: Long, msPlayed: Long, at: Long? = null, playLess: Boolean = false) =
+        write("POST", "/api/go/plays", PlayReport(id, msPlayed, at, playLess))
 
     suspend fun me(): Me = get("/api/me")
     suspend fun track(id: Long): Track = get("/api/tracks/$id")
@@ -249,8 +274,8 @@ class GoApi(private val account: Account) {
         json.decodeFromString(send("POST", "/api/go/offline/versions", json.encodeToString(VersionQuery(ids))))
     }
 
-    suspend fun createPlaylist(name: String): GoPlaylistDetail = withContext(Dispatchers.IO) {
-        json.decodeFromString(send("POST", "/api/go/playlists", json.encodeToString(NewPlaylist(name))))
+    suspend fun createPlaylist(name: String, songs: List<Long> = emptyList()): GoPlaylistDetail = withContext(Dispatchers.IO) {
+        json.decodeFromString(send("POST", "/api/go/playlists", json.encodeToString(NewPlaylist(name, songs))))
     }
 
     suspend fun renamePlaylist(id: Long, name: String) = write("PATCH", "/api/go/playlists/$id", PlaylistName(name))
@@ -303,4 +328,21 @@ class GoApi(private val account: Account) {
     }
 
     suspend fun saveResume(save: ResumeSave) = write("PUT", "/api/go/resume", save)
+
+    /** Every song by an artist, a page at a time (up to 5,000). */
+    suspend fun artistSongs(id: Long, offset: Int, limit: Int): ArtistSongs =
+        get("/api/artists/$id/songs?offset=$offset&limit=$limit")
+
+    /** Songs you played on GO, newest first, 100 at a time. */
+    suspend fun history(offset: Int): List<Track> = get("/api/go/history?offset=$offset")
+
+    suspend fun year(year: Int?): GoYear = get(if (year == null) "/api/go/year" else "/api/go/year?year=$year")
+
+    /** Whether this account gets "Not in the library?". */
+    suspend fun wishesEnabled(): Boolean = get("/api/wishes/enabled")
+
+    suspend fun addWish(artist: String, title: String) = write("POST", "/api/wishes", NewWish(artist, title))
+
+    suspend fun reportSong(id: Long, reason: String, note: String?) =
+        write("POST", "/api/tracks/$id/report", SongReport(reason, note))
 }

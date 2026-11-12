@@ -21,6 +21,8 @@ pub enum ServerEvent {
     },
     QueueChanged(Vec<QueueItem>),
     PlayerState(PlayerState),
+    /// The mood dial: where it is and each person's setting.
+    Mood(crate::jukebox::MoodState),
     OutputStatus(OutputStatus),
     ScanProgress(ScanProgress),
     /// Artists, albums, or pictures changed; cached lists are stale.
@@ -34,6 +36,12 @@ pub enum ServerEvent {
     AiStatus(Box<crate::ai::AiStatus>),
     /// Identifying songs by fingerprint: progress.
     IdentifyStatus(crate::identify_api::IdentifyStatus),
+    /// Finding lyrics: progress.
+    Lyrics(crate::lyrics::Progress),
+    /// This computer's address changed: join links and QR codes with it.
+    Address {
+        url: String,
+    },
 }
 
 impl ServerEvent {
@@ -44,6 +52,7 @@ impl ServerEvent {
             Self::Position { .. } => "position",
             Self::QueueChanged(_) => "queue_changed",
             Self::PlayerState(_) => "player_state",
+            Self::Mood(_) => "mood",
             Self::OutputStatus(_) => "output_status",
             Self::ScanProgress(_) => "scan_progress",
             Self::LibraryChanged => "library_changed",
@@ -52,6 +61,8 @@ impl ServerEvent {
             Self::CastStatus(_) => "cast_status",
             Self::AiStatus(_) => "ai_status",
             Self::IdentifyStatus(_) => "identify_status",
+            Self::Lyrics(_) => "lyrics",
+            Self::Address { .. } => "address",
         }
     }
 }
@@ -61,6 +72,9 @@ pub struct NowPlaying {
     pub current: Option<Entry>,
     pub position_ms: u64,
     pub up_next: Option<Entry>,
+    /// The auto mix's songs planned after that, in order (requests still
+    /// go first).
+    pub later: Vec<Entry>,
 }
 
 #[derive(Clone, Debug, Serialize)]

@@ -40,6 +40,13 @@ pub trait Mixer: Send + Sync {
     }
 }
 
+/// Which songs are copies of one another, so the auto mix treats a copy
+/// of a song that played recently as played too.
+pub trait Copies: Send + Sync {
+    /// The other copies of a song (none if it has none or nobody knows).
+    fn copies_of(&self, id: i64) -> Vec<i64>;
+}
+
 /// How much a song weighs in wild play and radio after what parties did
 /// with it: requested songs more (up to 5x), often skipped ones less (down
 /// to 0.15x). Songs with no history weigh 1.
@@ -57,6 +64,21 @@ pub struct SongLinks {
     pub artists: HashMap<i64, Vec<i64>>,
     /// Normalized genre names.
     pub genres: HashMap<i64, Vec<String>>,
+    /// How hyped each analyzed song is, -1 (calm) to 1 (hyped).
+    pub energy: HashMap<i64, f32>,
+}
+
+/// How far the mood dial moves the odds at full strength: a song whose
+/// energy matches a dial turned all the way weighs `e^MOOD_REACH` times
+/// as much as an average one, the opposite kind as little.
+const MOOD_REACH: f32 = 2.0;
+
+/// A song's weight for the mood (-1 chill to 1 hype) at `strength` (0 to
+/// 1): songs that fit it more, ones that don't less. Songs not analyzed
+/// (no energy) weigh 1.
+pub fn mood_weight(energy: Option<f32>, mood: f32, strength: f32) -> f32 {
+    let Some(energy) = energy else { return 1.0 };
+    (MOOD_REACH * strength.clamp(0.0, 1.0) * mood.clamp(-1.0, 1.0) * energy.clamp(-1.0, 1.0)).exp()
 }
 
 /// What parties of one style liked: a factor per song, artist and genre
@@ -255,7 +277,36 @@ mod tests {
             ]
             .into_iter()
             .collect(),
+            energy: HashMap::new(),
         }
+    }
+
+    #[test]
+    fn mood_favors_songs_that_fit() {
+        let hyped = Some(1.0);
+        let calm = Some(-1.0);
+        assert_eq!(
+            mood_weight(hyped, 0.0, 1.0),
+            1.0,
+            "a centered dial changes nothing"
+        );
+        assert_eq!(mood_weight(hyped, 1.0, 0.0), 1.0, "nor does zero strength");
+        assert_eq!(
+            mood_weight(None, 1.0, 1.0),
+            1.0,
+            "songs not analyzed stay even"
+        );
+        assert!(mood_weight(hyped, 1.0, 1.0) > 5.0);
+        assert!(mood_weight(calm, 1.0, 1.0) < 0.2);
+        assert!(
+            mood_weight(calm, -1.0, 1.0) > 5.0,
+            "chill favors calm songs"
+        );
+        assert!(mood_weight(hyped, 0.5, 1.0) < mood_weight(hyped, 1.0, 1.0));
+        assert!(
+            mood_weight(hyped, 5.0, 9.0) <= MOOD_REACH.exp(),
+            "out of range is clamped"
+        );
     }
 
     #[test]

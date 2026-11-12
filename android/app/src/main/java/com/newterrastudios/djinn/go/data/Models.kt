@@ -1,10 +1,15 @@
 package com.newterrastudios.djinn.go.data
 
 import kotlinx.serialization.SerialName
+import com.newterrastudios.djinn.go.i18n.t
 import kotlinx.serialization.Serializable
 
 @Serializable
 data class ServerHello(val name: String, val id: String, val encrypted: Boolean = false)
+
+/** The server's default language for every app (Admin > System); empty for the phone's own. */
+@Serializable
+data class HouseLanguage(val default: String = "")
 
 /** The admin's rules for songs kept here. Used as they were last heard while away. */
 @Serializable
@@ -25,6 +30,11 @@ data class Track(
     @SerialName("track_no") val trackNo: Int? = null,
     @SerialName("duration_ms") val durationMs: Long? = null,
     @SerialName("art_hash") val artHash: String? = null,
+    /** In the library lists: plays (party and GO) and how many people favorited it. */
+    val plays: Long = 0,
+    val likes: Long = 0,
+    /** 0 no lyrics, 1 plain words, 2 timed lines. */
+    val lyrics: Int = 0,
 )
 
 @Serializable
@@ -36,6 +46,9 @@ data class ArtistSummary(
     val name: String,
     @SerialName("art_hash") val artHash: String? = null,
     @SerialName("track_count") val trackCount: Long = 0,
+    /** In the library lists: plays (party and GO) and how many people favorited it. */
+    val plays: Long = 0,
+    val likes: Long = 0,
 )
 
 @Serializable
@@ -55,6 +68,9 @@ data class Album(
     @SerialName("art_hash") val artHash: String? = null,
     /** Its folder's name, when another album has the same name and artist. */
     val label: String? = null,
+    /** In the library lists: plays (party and GO) and how many people favorited it. */
+    val plays: Long = 0,
+    val likes: Long = 0,
 )
 
 @Serializable
@@ -89,7 +105,26 @@ data class SearchResults(
     val described: Described? = null,
     /** The server's AI reader might understand this better: see [GoApi.ask]. */
     val ask: Boolean = false,
+    /** Songs whose lyrics have the words typed, with the line that matched. */
+    val lyrics: List<LyricHit> = emptyList(),
 )
+
+/** A timed line of lyrics: when it starts, in milliseconds. */
+@Serializable
+data class LyricLine(val ms: Long, val text: String)
+
+/** A song's lyrics: timed lines when there are some, otherwise plain words. */
+@Serializable
+data class Lyrics(
+    val lines: List<LyricLine>? = null,
+    val plain: String? = null,
+    val instrumental: Boolean = false,
+    val source: String = "",
+)
+
+/** A song found by its words. */
+@Serializable
+data class LyricHit(val track: Track, val line: String)
 
 /** The search read as a description, like "80's hair metal". */
 @Serializable
@@ -160,9 +195,9 @@ data class PlaylistRow(
     val problemText: String?
         get() = when (problem) {
             null -> null
-            "not_in_library" -> "Not in the library"
-            "file_missing" -> "File is missing"
-            else -> "File won't play"
+            "not_in_library" -> t("problem.not_in_library")
+            "file_missing" -> t("problem.file_missing")
+            else -> t("problem.wont_play")
         }
 }
 
@@ -225,7 +260,19 @@ data class GoHome(
 )
 
 @Serializable
-data class LikedIds(val tracks: List<Long> = emptyList())
+data class LikedIds(
+    val tracks: List<Long> = emptyList(),
+    val albums: List<Long> = emptyList(),
+    val artists: List<Long> = emptyList(),
+)
+
+/** Everything you like, newest first. */
+@Serializable
+data class Liked(
+    val tracks: List<Track> = emptyList(),
+    val albums: List<Album> = emptyList(),
+    val artists: List<ArtistSummary> = emptyList(),
+)
 
 @Serializable
 data class PlayLinks(
@@ -306,6 +353,61 @@ data class PlayReport(
     @SerialName("ms_played") val msPlayed: Long,
     /** When it was heard, for a play reported later. */
     val at: Long? = null,
+    /** Skipped with "Skip, play less": counts against the song in radio. */
+    @SerialName("play_less") val playLess: Boolean = false,
+)
+
+/** Your year on GO, from `/api/go/year`. */
+@Serializable
+data class GoYear(
+    val year: Int,
+    val years: List<Int> = emptyList(),
+    val plays: Long = 0,
+    val minutes: Long = 0,
+    val songs: Long = 0,
+    val requests: Long = 0,
+    @SerialName("top_songs") val topSongs: List<YearSong> = emptyList(),
+    @SerialName("top_artists") val topArtists: List<YearArtist> = emptyList(),
+    val months: List<Long> = emptyList(),
+    @SerialName("busiest_month") val busiestMonth: Int? = null,
+    val first: Track? = null,
+)
+
+@Serializable
+data class YearSong(
+    @SerialName("track_id") val trackId: Long,
+    val title: String,
+    val artist: String? = null,
+    @SerialName("album_id") val albumId: Long? = null,
+    val plays: Long = 0,
+)
+
+@Serializable
+data class YearArtist(
+    @SerialName("artist_id") val artistId: Long,
+    val name: String,
+    val plays: Long = 0,
+)
+
+/** A page of an artist's songs, with how many there are in all. */
+@Serializable
+data class ArtistSongs(val total: Long = 0, val tracks: List<Track> = emptyList())
+
+/** Asking the admin for a song the library lacks. */
+@Serializable
+data class NewWish(val artist: String, val title: String)
+
+/** A listener saying a song needs fixing; `reason` is one of [REPORT_REASONS]. */
+@Serializable
+data class SongReport(val reason: String, val note: String? = null)
+
+/** Why a song needs fixing, as the server names them, with what to show. */
+val REPORT_REASONS = listOf(
+    "wrong_info" to "The title, artist or album is wrong",
+    "wrong_cover" to "The cover is wrong",
+    "sounds_bad" to "It sounds bad, skips or cuts off",
+    "wrong_song" to "It plays a different song",
+    "other" to "Something else",
 )
 
 @Serializable

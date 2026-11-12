@@ -14,7 +14,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.MoreVert
+import kotlinx.coroutines.launch
+import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.OfflinePin
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.outlined.MicNone
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -30,6 +35,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.newterrastudios.djinn.go.data.Track
+import com.newterrastudios.djinn.go.i18n.t
 
 fun duration(ms: Long?): String {
     if (ms == null || ms <= 0) return ""
@@ -72,6 +78,7 @@ fun Row2(
     art: @Composable () -> Unit,
     onClick: () -> Unit,
     end: @Composable () -> Unit = {},
+    titleMark: @Composable () -> Unit = {},
 ) {
     Row(
         Modifier
@@ -83,7 +90,10 @@ fun Row2(
     ) {
         art()
         Column(Modifier.weight(1f)) {
-            Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                titleMark()
+            }
             if (!subtitle.isNullOrEmpty()) {
                 Text(
                     subtitle,
@@ -98,15 +108,22 @@ fun Row2(
     }
 }
 
+/** "12 plays" and "♥ 3" (people who favorited it) for a row's subtitle; none when zero. */
+fun countParts(plays: Long, likes: Long): List<String> = listOfNotNull(
+    if (plays > 0) "%,d %s".format(plays, if (plays == 1L) "play" else "plays") else null,
+    if (likes > 0) "\u2665 %,d".format(likes) else null,
+)
+
 /** One song: tap to play, dots for everything else. */
 @UnstableApi
 @Composable
-fun SongRow(track: Track, nav: Nav, onClick: () -> Unit) {
-    val line = listOfNotNull(track.artist, track.album).joinToString(" · ")
+fun SongRow(track: Track, nav: Nav, note: String? = null, onClick: () -> Unit) {
+    val line = (listOfNotNull(note, track.artist, track.album) + countParts(track.plays, track.likes)).joinToString(" · ")
     Row2(
         title = track.title,
         subtitle = line,
         art = { Art(nav.api.artUrl(track.artHash), 44.dp) },
+        titleMark = { LyricsMark(track.lyrics) },
         onClick = {
             // With nothing playing a tap always plays.
             when {
@@ -125,15 +142,36 @@ fun SongRow(track: Track, nav: Nav, onClick: () -> Unit) {
             if (track.id in nav.keptIds) {
                 Icon(
                     Icons.Default.OfflinePin,
-                    contentDescription = "On this phone",
+                    contentDescription = t("kept.on_this_phone"),
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(18.dp),
                 )
             }
+            val liked = track.id in nav.liked
+            IconButton(onClick = { nav.scope.launch { nav.setLiked(track.id, !liked) } }) {
+                Icon(
+                    if (liked) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                    contentDescription = if (liked) t("go.unlike_named", "name" to track.title) else t("go.like_named", "name" to track.title),
+                    tint = if (liked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             IconButton(onClick = { nav.menuFor = track }) {
-                Icon(Icons.Default.MoreVert, contentDescription = "More for ${track.title}")
+                Icon(Icons.Default.MoreVert, contentDescription = t("go.more_for", "title" to track.title))
             }
         },
+    )
+}
+
+/** Beside a song's title: a hollow microphone for lyrics, a filled one when they're timed. */
+@Composable
+fun LyricsMark(lyrics: Int) {
+    if (lyrics <= 0) return
+    val timed = lyrics >= 2
+    Icon(
+        if (timed) Icons.Default.Mic else Icons.Outlined.MicNone,
+        contentDescription = t(if (timed) "lyrics.timed_mark" else "lyrics.words_mark"),
+        tint = if (timed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(start = 4.dp).size(14.dp),
     )
 }
 

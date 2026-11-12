@@ -32,6 +32,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.newterrastudios.djinn.go.data.Jump
+import com.newterrastudios.djinn.go.i18n.t
 import java.text.Normalizer
 
 /** A place on the strip, and where in the list it goes. */
@@ -150,7 +151,7 @@ fun JumpStrip(entries: List<JumpEntry>, onPressed: (String?) -> Unit, onJump: (I
                     .offset(y = maxHeight * ((index + 0.5f) / entries.size) - labelHeight / 2)
                     .semantics {
                         role = Role.Button
-                        contentDescription = "Jump to ${entry.label}"
+                        contentDescription = t("library.jump_to", "label" to entry.label)
                         onClick {
                             jump(entry.offset)
                             true

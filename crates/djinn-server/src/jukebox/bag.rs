@@ -8,6 +8,11 @@ use std::collections::{HashMap, HashSet};
 use rand::seq::SliceRandom;
 use rand::{Rng, RngExt};
 
+/// With the mood dial turned, the next song is picked from this many at
+/// the front of the cycle, so the mood reorders what's near without
+/// keeping any song out of its cycle.
+const LEAN_AHEAD: usize = 8;
+
 #[derive(Debug, Default)]
 pub struct ShuffleBag {
     /// Tracks left this cycle, next one last (so drawing pops from the end).
@@ -25,11 +30,25 @@ impl ShuffleBag {
     /// The window shrinks to `pool.len() - 1` so a small pool never stalls,
     /// and tracks that joined the pool mid-cycle are mixed into the rest of
     /// the cycle.
+    #[cfg(test)]
     pub fn draw(
         &mut self,
         pool: &[i64],
         recent: &[i64],
         window: usize,
+        rng: &mut impl Rng,
+    ) -> Option<i64> {
+        self.draw_leaning(pool, recent, window, None, rng)
+    }
+
+    /// Like `draw`, but with `lean` (a weight per song) the next
+    /// song is picked by weight from the few at the front of the cycle.
+    pub fn draw_leaning(
+        &mut self,
+        pool: &[i64],
+        recent: &[i64],
+        window: usize,
+        lean: Option<&dyn Fn(i64) -> f32>,
         rng: &mut impl Rng,
     ) -> Option<i64> {
         if pool.is_empty() {
@@ -54,13 +73,13 @@ impl ShuffleBag {
         if self.remaining.is_empty() {
             self.new_cycle(pool, rng);
         }
-        if let Some(id) = self.take_first_not_in(&recent) {
+        if let Some(id) = self.take_next(&recent, lean, rng) {
             return Some(id);
         }
         // Everything left this cycle was played recently (through requests,
         // say). Start the next cycle early.
         self.new_cycle(pool, rng);
-        self.take_first_not_in(&recent)
+        self.take_next(&recent, lean, rng)
             .or_else(|| self.remaining.pop())
     }
 
@@ -97,11 +116,44 @@ impl ShuffleBag {
         self.remaining = keyed.into_iter().map(|(_, id)| id).collect();
     }
 
-    fn take_first_not_in(&mut self, exclude: &HashSet<i64>) -> Option<i64> {
-        let index = self
+    /// The next song not in `exclude`: the first, or with `lean` one of
+    /// the first few by weight.
+    fn take_next(
+        &mut self,
+        exclude: &HashSet<i64>,
+        lean: Option<&dyn Fn(i64) -> f32>,
+        rng: &mut impl Rng,
+    ) -> Option<i64> {
+        let first = self
             .remaining
             .iter()
             .rposition(|id| !exclude.contains(id))?;
+        let index = match lean {
+            None => first,
+            Some(weigh) => {
+                let near: Vec<(usize, f32)> = self
+                    .remaining
+                    .iter()
+                    .enumerate()
+                    .rev()
+                    .filter(|(_, id)| !exclude.contains(id))
+                    .take(LEAN_AHEAD)
+                    .map(|(i, &id)| (i, weigh(id).max(0.0)))
+                    .collect();
+                let total: f32 = near.iter().map(|(_, w)| w).sum();
+                if total > 0.0 {
+                    let mut at = rng.random::<f32>() * total;
+                    near.iter()
+                        .find(|(_, w)| {
+                            at -= w;
+                            at < 0.0
+                        })
+                        .map_or(first, |(i, _)| *i)
+                } else {
+                    first
+                }
+            }
+        };
         let id = self.remaining.remove(index);
         self.drawn.insert(id);
         Some(id)
@@ -116,6 +168,33 @@ mod tests {
 
     fn rng() -> StdRng {
         StdRng::seed_from_u64(7)
+    }
+
+    #[test]
+    fn leaning_reorders_but_keeps_the_cycle() {
+        let pool: Vec<i64> = (1..=40).collect();
+        let lean = |id: i64| if id > 20 { 50.0 } else { 1.0 };
+        // Favored songs in the first half of a cycle, over many shuffles.
+        let early = |leaning: bool| -> usize {
+            (0..40)
+                .map(|seed| {
+                    let mut bag = ShuffleBag::default();
+                    let mut rng = StdRng::seed_from_u64(seed);
+                    let weigh: Option<&dyn Fn(i64) -> f32> = leaning.then_some(&lean);
+                    let cycle: Vec<i64> = (0..40)
+                        .filter_map(|_| bag.draw_leaning(&pool, &[], 0, weigh, &mut rng))
+                        .collect();
+                    let unique: HashSet<i64> = cycle.iter().copied().collect();
+                    assert_eq!(unique.len(), 40, "every song still plays once a cycle");
+                    cycle[..20].iter().filter(|&&id| id > 20).count()
+                })
+                .sum()
+        };
+        let (plain, leaning) = (early(false), early(true));
+        assert!(
+            leaning * 10 > plain * 12,
+            "favored songs come earlier: {leaning} against {plain}"
+        );
     }
 
     #[test]

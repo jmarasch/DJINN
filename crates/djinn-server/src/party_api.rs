@@ -46,6 +46,8 @@ struct Overview {
     /// The style in use.
     active: Option<i64>,
     styles: Vec<PartyStyle>,
+    /// The mood dial's switches.
+    mood: crate::mood_api::MoodSettings,
 }
 
 async fn overview(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json<Overview>> {
@@ -58,6 +60,7 @@ async fn overview(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json
         },
         active: store.active_party_style().await?,
         styles: store.party_styles().await?,
+        mood: crate::mood_api::mood_settings(&state).await?,
     }))
 }
 
@@ -75,7 +78,9 @@ async fn set_settings(
     store
         .set_setting(SMART_STRENGTH, &body.strength.to_string())
         .await?;
-    state.jukebox.lock().await.party_changed();
+    for jukebox in state.all_jukeboxes() {
+        jukebox.lock().await.party_changed();
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -140,7 +145,9 @@ async fn use_style(
     if !state.store.use_party_style(id).await? {
         return Err(ApiError::not_found());
     }
-    state.jukebox.lock().await.party_changed();
+    for jukebox in state.all_jukeboxes() {
+        jukebox.lock().await.party_changed();
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -152,7 +159,9 @@ async fn clear(
     if !state.store.clear_party_style(id).await? {
         return Err(ApiError::not_found());
     }
-    state.jukebox.lock().await.party_changed();
+    for jukebox in state.all_jukeboxes() {
+        jukebox.lock().await.party_changed();
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 

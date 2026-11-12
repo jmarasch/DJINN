@@ -109,6 +109,18 @@ jobs:
             container: ubuntu:22.04
             asset: djinn-linux-x86_64
             binary: djinn
+          # Raspberry Pi 3, 4 and 5 (and other 64-bit ARM boxes), built
+          # natively on GitHub's ARM runners.
+          - os: ubuntu-24.04-arm
+            container: ubuntu:22.04
+            asset: djinn-linux-aarch64
+            binary: djinn
+          # Every Raspberry Pi down to the Pi 1 and Zero W (ARMv6), built
+          # with cross (Docker) on the regular runner; see Cross.toml.
+          - os: ubuntu-latest
+            asset: djinn-linux-arm
+            binary: djinn
+            cross: arm-unknown-linux-gnueabihf
           - os: windows-latest
             asset: djinn-windows-x86_64.exe
             binary: djinn.exe
@@ -117,7 +129,7 @@ jobs:
     steps:
       # Git before checkout, so build.rs can read the commit.
       - name: Install build tools
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && matrix.container
         run: |
           apt-get update
           DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
@@ -172,23 +184,37 @@ jobs:
           toolchain: stable
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
-      - run: cargo build --release --locked
+      - if: ${{ !matrix.cross }}
+        run: cargo build --release --locked
+
+      - name: Cross build
+        if: ${{ matrix.cross }}
+        env:
+          PKG_CONFIG_PATH_arm_unknown_linux_gnueabihf: /usr/lib/arm-linux-gnueabihf/pkgconfig
+          PKG_CONFIG_ALLOW_CROSS: "1"
+        run: |
+          cargo install cross --locked --version 0.2.5
+          cross build --release --locked --target ${{ matrix.cross }}
 
       # The bare binary is what in-app updates download; people installing
-      # for the first time get the tarball or the setup program.
+      # for the first time get the tarball, an image, or the setup program.
       - name: Name the binary
         shell: bash
         run: |
           mkdir out
-          cp target/release/${{ matrix.binary }} out/${{ matrix.asset }}
+          dir=target/release
+          if [ -n "${{ matrix.cross }}" ]; then dir=target/${{ matrix.cross }}/release; fi
+          cp "$dir/${{ matrix.binary }}" out/${{ matrix.asset }}
+          echo "BUILT=$dir/${{ matrix.binary }}" >> "$GITHUB_ENV"
 
       - name: Linux download (tarball with install.sh)
         if: runner.os == 'Linux'
+        shell: bash
         run: |
           mkdir -p stage/djinn
-          cp target/release/djinn packaging/linux/install.sh packaging/linux/djinn.desktop.in LICENSE.md stage/djinn/
+          cp "$BUILT" packaging/linux/install.sh packaging/linux/djinn.desktop.in LICENSE.md stage/djinn/
           cp web/public/icon-512.png stage/djinn/djinn.png
-          tar czf out/djinn-linux-x86_64.tar.gz -C stage djinn
+          tar czf out/${{ matrix.asset }}.tar.gz -C stage djinn
 
       - name: Windows setup program
         if: runner.os == 'Windows'
@@ -392,8 +418,46 @@ jobs:
           path: out/*.apk
           if-no-files-found: error
 
+  # Install images for boxes of their own: a PC install disc and Raspberry
+  # Pi images, each with the binary built above (packaging/image).
+  images:
+    name: Install images
+    needs: [plan, build]
+    if: needs.plan.outputs.build == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.plan.outputs.ref }}
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: djinn-linux-*
+          path: bins
+          merge-multiple: true
+      - name: Build tools
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends xorriso cpio
+      - name: PC install disc
+        run: sh packaging/image/pc/build-iso.sh bins/djinn-linux-x86_64 out/djinn-installer-pc-x86_64.iso
+      - name: Raspberry Pi 3, 4, 5
+        run: sh packaging/image/pi/build-pi.sh arm64 bins/djinn-linux-aarch64 out/djinn-pi-arm64.img.xz
+      - name: Every Raspberry Pi (32-bit)
+        run: sh packaging/image/pi/build-pi.sh armhf bins/djinn-linux-arm out/djinn-pi-armhf.img.xz
+      - name: Keep only the images
+        run: |
+          mkdir images
+          mv out/djinn-installer-pc-x86_64.iso out/djinn-pi-arm64.img.xz out/djinn-pi-armhf.img.xz images/
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: djinn-images
+          path: images/*
+          if-no-files-found: error
+          compression-level: 0
+
   publish:
-    needs: [plan, build, gpu, android]
+    needs: [plan, build, gpu, android, images]
     if: needs.plan.outputs.publish == 'true'
     runs-on: ubuntu-latest
     permissions:

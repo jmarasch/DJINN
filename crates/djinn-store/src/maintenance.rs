@@ -15,23 +15,26 @@ impl Store {
     /// Forgets how every song sounds and how loud it is, so the background
     /// analysis measures them all again.
     pub async fn clear_analysis(&self) -> Result<()> {
-        let mut tx = self.pool.begin().await?;
+        let mut tx = self.write().await?;
         sqlx::query(
             "UPDATE tracks SET loudness_lufs = NULL, loudness_peak = NULL, \
                     loudness_checked_at = NULL",
         )
         .execute(&mut *tx)
         .await?;
-        sqlx::query("UPDATE track_sound SET features = NULL, features_version = NULL, bpm = NULL")
-            .execute(&mut *tx)
-            .await?;
+        sqlx::query(
+            "UPDATE track_sound SET features = NULL, features_version = NULL, bpm = NULL, \
+                    print = NULL, print_version = NULL",
+        )
+        .execute(&mut *tx)
+        .await?;
         tx.commit().await?;
         Ok(())
     }
 
     /// Forgets what the AI heard in every song, so it listens again.
     pub async fn clear_listening(&self) -> Result<()> {
-        sqlx::query("UPDATE track_sound SET heard = NULL, heard_version = NULL")
+        sqlx::query("DELETE FROM track_heard")
             .execute(&self.pool)
             .await?;
         Ok(())
@@ -40,7 +43,7 @@ impl Store {
     /// Forgets every play and request: the history, top songs, and what the
     /// auto mix learned from them, for every party style.
     pub async fn clear_history(&self) -> Result<()> {
-        let mut tx = self.pool.begin().await?;
+        let mut tx = self.write().await?;
         sqlx::query("DELETE FROM play_events")
             .execute(&mut *tx)
             .await?;
@@ -54,7 +57,7 @@ impl Store {
     /// Drops every tag correction. Returns the songs' file paths, to read
     /// again so their own tags show.
     pub async fn clear_tag_edits(&self) -> Result<Vec<String>> {
-        let mut tx = self.pool.begin().await?;
+        let mut tx = self.write().await?;
         let paths =
             sqlx::query_scalar("SELECT t.path FROM tag_edits e JOIN tracks t ON t.id = e.track_id")
                 .fetch_all(&mut *tx)
@@ -68,7 +71,7 @@ impl Store {
 
     /// Removes these settings, so each goes back to its default.
     pub async fn reset_settings(&self, keys: &[&str]) -> Result<()> {
-        let mut tx = self.pool.begin().await?;
+        let mut tx = self.write().await?;
         for key in keys {
             sqlx::query("DELETE FROM settings WHERE key = ?")
                 .bind(key)

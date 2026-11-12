@@ -2,8 +2,10 @@
 
 pub mod art;
 pub mod credits;
+pub mod duplicates;
 pub mod genres;
 pub mod identify;
+pub mod lyrics;
 pub mod online;
 pub mod playlist_file;
 pub mod playlist_match;
@@ -18,12 +20,18 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::UNIX_EPOCH;
 
-use djinn_store::{ScannedTrack, Store, StoreError, TagEdit};
+use djinn_store::{ProblemKind, ScanProblem, ScannedTrack, Store, StoreError, TagEdit};
 use serde::Serialize;
 use walkdir::WalkDir;
 
 /// File extensions the engine can decode.
 const AUDIO_EXTENSIONS: &[&str] = &["mp3", "flac", "m4a", "mp4", "aac", "ogg", "oga", "wav"];
+/// Audio formats DJINN doesn't play, reported on the Problems page instead
+/// of skipped without a word.
+const OTHER_AUDIO: &[&str] = &[
+    "opus", "wma", "aif", "aiff", "aifc", "ape", "wv", "mpc", "dsf", "dff", "mka", "webm", "weba",
+    "ac3", "dts", "amr", "tta", "ra", "rm", "au", "caf", "m4b", "m4p", "mp2", "spx", "mid", "midi",
+];
 /// Files read per batch; each batch is saved in one transaction.
 const BATCH: usize = 64;
 /// Threads reading tags in parallel, which mostly helps on network shares.
@@ -31,8 +39,8 @@ const READERS: usize = 4;
 /// Bumped when the scanner starts extracting something new, so the next
 /// scan re-reads every file once. 2: artwork sources, " - Topic" cleanup.
 /// 3: separate artists for collaborations and features. 4: ReplayGain tags.
-/// 6: original release years.
-const SCAN_VERSION: i64 = 6;
+/// 6: original release years. 7: notes on unreadable tags.
+const SCAN_VERSION: i64 = 7;
 /// Set to anything else to make the next scan re-read every file.
 pub const SCAN_VERSION_KEY: &str = "scan_version";
 /// Artist names never split (one per line); unset means the defaults.
@@ -120,7 +128,7 @@ pub async fn scan(
 ) -> Result<ScanProgress, LibraryError> {
     progress(&ScanProgress::default());
     let walk_roots = roots.to_vec();
-    let (found, available_roots) = tokio::task::spawn_blocking(move || walk(&walk_roots))
+    let (found, available_roots, problems) = tokio::task::spawn_blocking(move || walk(&walk_roots))
         .await
         .map_err(|e| LibraryError::Task(e.to_string()))?;
 
@@ -182,6 +190,7 @@ pub async fn scan(
         .map(|k| k.id)
         .collect();
     store.mark_removed(&vanished).await?;
+    store.replace_walk_problems(&problems).await?;
     // Which pictures show only changes when files do.
     if status.read > 0 || !vanished.is_empty() {
         store.refresh_artwork().await?;
@@ -245,13 +254,22 @@ pub async fn reread(
 }
 
 /// Lists audio files under the roots. Returns them with the roots that could
-/// actually be read.
-fn walk(roots: &[PathBuf]) -> (Vec<FoundFile>, Vec<PathBuf>) {
+/// actually be read and what couldn't be added.
+fn walk(roots: &[PathBuf]) -> (Vec<FoundFile>, Vec<PathBuf>, Vec<ScanProblem>) {
     let mut found = Vec::new();
     let mut available = Vec::new();
+    let mut problems = Vec::new();
+    let mut note = |path: &Path, kind: ProblemKind, detail: String| {
+        problems.push(ScanProblem {
+            path: path.to_string_lossy().into_owned(),
+            kind,
+            detail,
+        });
+    };
     for root in roots {
         if !root.is_dir() {
             tracing::warn!(root = %root.display(), "library root missing, skipping");
+            note(root, ProblemKind::MissingFolder, String::new());
             continue;
         }
         available.push(root.clone());
@@ -260,17 +278,37 @@ fn walk(roots: &[PathBuf]) -> (Vec<FoundFile>, Vec<PathBuf>) {
                 Ok(entry) => entry,
                 Err(e) => {
                     tracing::warn!(path = ?e.path(), error = %e, "cannot read library entry");
+                    let why = if e.loop_ancestor().is_some() {
+                        "a shortcut that loops back to a folder above it".to_owned()
+                    } else {
+                        e.io_error()
+                            .map_or_else(|| e.to_string(), ToString::to_string)
+                    };
+                    note(e.path().unwrap_or(root), ProblemKind::Unreadable, why);
                     continue;
                 }
             };
-            if !entry.file_type().is_file() || !is_audio(entry.path()) {
+            if !entry.file_type().is_file() {
+                continue;
+            }
+            if !is_audio(entry.path()) {
+                if let Some(ext) = other_audio(entry.path()) {
+                    note(entry.path(), ProblemKind::Unsupported, ext);
+                }
                 continue;
             }
             let Some(path_str) = entry.path().to_str() else {
                 tracing::warn!(path = %entry.path().display(), "skipping non-UTF-8 path");
+                note(entry.path(), ProblemKind::BadName, String::new());
                 continue;
             };
-            let Ok(meta) = entry.metadata() else { continue };
+            let meta = match entry.metadata() {
+                Ok(meta) => meta,
+                Err(e) => {
+                    note(entry.path(), ProblemKind::Unreadable, e.to_string());
+                    continue;
+                }
+            };
             let mtime = meta
                 .modified()
                 .ok()
@@ -292,13 +330,34 @@ fn walk(roots: &[PathBuf]) -> (Vec<FoundFile>, Vec<PathBuf>) {
             });
         }
     }
-    (found, available)
+    (found, available, problems)
 }
 
 fn is_audio(path: &Path) -> bool {
     path.extension()
         .and_then(|e| e.to_str())
         .is_some_and(|e| AUDIO_EXTENSIONS.iter().any(|a| a.eq_ignore_ascii_case(e)))
+}
+
+/// A file listed under its name alone, with why its tags are missing.
+fn untagged(f: &FoundFile, why: &str) -> ScannedTrack {
+    ScannedTrack {
+        path: f.path_str.clone(),
+        size: f.size,
+        mtime: f.mtime,
+        title: f
+            .path
+            .file_stem()
+            .map_or_else(|| f.path_str.clone(), |s| s.to_string_lossy().into_owned()),
+        tag_problem: Some(why.to_owned()),
+        ..Default::default()
+    }
+}
+
+/// The extension, lower case, of an audio file in a format DJINN can't play.
+fn other_audio(path: &Path) -> Option<String> {
+    let ext = path.extension()?.to_str()?.to_ascii_lowercase();
+    OTHER_AUDIO.contains(&ext.as_str()).then_some(ext)
 }
 
 /// What the admin set that changes how files read: artist names never
@@ -341,14 +400,22 @@ fn read_batch(
                     files
                         .iter()
                         .map(|f| {
-                            tags::read(
-                                &f.path,
-                                &f.path_str,
-                                f.size,
-                                f.mtime,
-                                f.artist_dir.as_deref(),
-                                &scan,
-                            )
+                            // A file that crashes the tag reader is still
+                            // listed, under its name, with a note.
+                            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                tags::read(
+                                    &f.path,
+                                    &f.path_str,
+                                    f.size,
+                                    f.mtime,
+                                    f.artist_dir.as_deref(),
+                                    &scan,
+                                )
+                            }))
+                            .unwrap_or_else(|_| {
+                                tracing::warn!(path = f.path_str, "reading tags crashed");
+                                untagged(f, "reading the tags crashed the tag reader")
+                            })
                         })
                         .collect::<Vec<_>>()
                 })
@@ -382,6 +449,7 @@ mod tests {
         std::fs::copy(fixture("gapless_b.mp3"), album.join("02 Second.mp3")).unwrap();
         std::fs::write(album.join("notes.txt"), b"not audio").unwrap();
         std::fs::write(album.join("cover.jpg"), [0xFF, 0xD8, 0xFF, 0xE0, 9, 9]).unwrap();
+        std::fs::write(album.join("03 Third.wma"), b"not played").unwrap();
         let art_dir = tmp.join("art");
         let missing_root = tmp.join("unmounted");
 
@@ -394,6 +462,19 @@ mod tests {
         assert_eq!((first.found, first.read, first.removed), (2, 2, 0));
         assert!(first.done);
         assert!(updates >= 2);
+
+        // What couldn't be added is noted: the .wma and the missing folder.
+        let unsupported = store
+            .problems(ProblemKind::Unsupported, 0, 10)
+            .await
+            .unwrap();
+        assert_eq!(unsupported.len(), 1);
+        assert_eq!(unsupported[0].detail, "wma");
+        let missing = store
+            .problems(ProblemKind::MissingFolder, 0, 10)
+            .await
+            .unwrap();
+        assert_eq!(missing.len(), 1);
 
         // Untagged files fall back to the file name and pick up folder art.
         let hits = store.search("first", 10).await.unwrap().tracks;

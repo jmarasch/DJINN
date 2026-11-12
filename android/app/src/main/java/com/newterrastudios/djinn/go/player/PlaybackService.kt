@@ -28,7 +28,10 @@ import androidx.media3.session.CacheBitmapLoader
 import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
+import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionCommands
+import androidx.media3.session.SessionResult
+import android.os.Bundle
 import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
@@ -39,6 +42,7 @@ import com.newterrastudios.djinn.go.data.ResumeSave
 import com.newterrastudios.djinn.go.data.PendingPlay
 import com.newterrastudios.djinn.go.data.Track
 import com.newterrastudios.djinn.go.work.SyncWorker
+import com.newterrastudios.djinn.go.i18n.t
 import java.io.File
 import java.io.IOException
 import kotlinx.coroutines.CoroutineScope
@@ -55,7 +59,9 @@ import kotlinx.coroutines.launch
 import java.util.concurrent.ConcurrentHashMap
 
 /** How the player names a song; it becomes a real link only when it's fetched. */
-private const val TRACK_SCHEME = "djinn"
+internal const val TRACK_SCHEME = "djinn"
+/** The app's own "Skip, play less": reports the song as one to play less, then skips it. */
+internal val SKIP_PLAY_LESS = SessionCommand("djinn.SKIP_PLAY_LESS", Bundle.EMPTY)
 private const val SAVE_EVERY_MS = 15_000L
 /** Links work for a few hours on the server; a fresh one well before that. */
 private const val LINK_LIFE_MS = 60 * 60 * 1000L
@@ -76,6 +82,7 @@ class PlaybackService : MediaLibraryService() {
     /** Telling the server what happened outlives the service. */
     private val reports = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var reporter: Reporter? = null
+    private var cacheAhead: CacheAhead? = null
     private var talkOverFocus: TalkOverFocus? = null
     private val links = ConcurrentHashMap<Long, HeldLink>()
     private var session: MediaLibrarySession? = null
@@ -121,6 +128,7 @@ class PlaybackService : MediaLibraryService() {
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
         // Kept songs are plain files; everything else goes through the cache.
         val sources = DefaultDataSource.Factory(this, caching)
+        GoEqualizer.settings = app.prefs.equalizer
         val renderers = object : DefaultRenderersFactory(this) {
             override fun buildAudioSink(
                 context: android.content.Context,
@@ -129,7 +137,7 @@ class PlaybackService : MediaLibraryService() {
             ): AudioSink = DefaultAudioSink.Builder(context)
                 .setEnableFloatOutput(enableFloatOutput)
                 .setEnableAudioOutputPlaybackParameters(enableAudioOutputPlaybackParameters)
-                .setAudioProcessors(arrayOf(TeeAudioProcessor(Spectrum)))
+                .setAudioProcessors(arrayOf(EqualizerProcessor(), TeeAudioProcessor(Spectrum)))
                 .build()
         }
         val attributes = AudioAttributes.Builder()
@@ -143,6 +151,11 @@ class PlaybackService : MediaLibraryService() {
             .setWakeMode(C.WAKE_MODE_NETWORK)
             .build()
         reporter = Reporter(player).also(player::addListener)
+        cacheAhead = CacheAhead(scope, caching, { app.prefs.cacheAhead }) { mediaId ->
+            val id = mediaId.toLongOrNull()
+            // Kept songs, here or for another server, play from their files.
+            if (id == null || app.offline.local(id) != null) null else "${app.account.scope}|$mediaId"
+        }.also(player::addListener)
         val focus = TalkOverFocus(this, player).also(player::addListener)
         talkOverFocus = focus
         scope.launch {
@@ -176,6 +189,7 @@ class PlaybackService : MediaLibraryService() {
     }
 
     override fun onDestroy() {
+        cacheAhead?.stop()
         reporter?.finish()
         talkOverFocus?.release()
         session?.run {
@@ -295,7 +309,24 @@ class PlaybackService : MediaLibraryService() {
             lastTick = if (player.isPlaying) now else 0L
         }
 
-        private fun report() {
+        /**
+         * "Skip, play less": the song counts against itself, then the next one
+         * plays. With nothing after it, the player empties: nothing playing.
+         */
+        fun skipPlayLess() {
+            count()
+            // Counts as heard for a moment at least, so the report isn't dropped.
+            if (heardMs <= 0) heardMs = 1
+            report(playLess = true)
+            if (player.hasNextMediaItem()) {
+                player.seekToNextMediaItem()
+            } else {
+                player.stop()
+                player.clearMediaItems()
+            }
+        }
+
+        private fun report(playLess: Boolean = false) {
             count()
             val id = hearing
             val ms = heardMs
@@ -306,18 +337,22 @@ class PlaybackService : MediaLibraryService() {
             // Another server's song: it hears about it when that server is next in use.
             hearingFor?.let { other ->
                 reports.launch {
-                    app.offline.dao.addPlay(PendingPlay(server = other, trackId = id, msPlayed = ms, at = at))
+                    app.offline.dao.addPlay(
+                        PendingPlay(server = other, trackId = id, msPlayed = ms, at = at, playLess = playLess),
+                    )
                 }
                 return
             }
             val server = app.account.scope
             reports.launch {
                 try {
-                    app.api.reportPlay(id, ms, at)
+                    app.api.reportPlay(id, ms, at, playLess)
                 } catch (e: IOException) {
                     // Not reachable: it goes when it can. The server saying no is final.
                     if (e !is com.newterrastudios.djinn.go.data.ApiException && server != null) {
-                        app.offline.dao.addPlay(PendingPlay(server = server, trackId = id, msPlayed = ms, at = at))
+                        app.offline.dao.addPlay(
+                            PendingPlay(server = server, trackId = id, msPlayed = ms, at = at, playLess = playLess),
+                        )
                         SyncWorker.enqueue(this@PlaybackService)
                     }
                 }
@@ -354,11 +389,36 @@ class PlaybackService : MediaLibraryService() {
                 session.isAutomotiveController(controller) ||
                 session.isMediaNotificationController(controller) ||
                 mayBrowse(controller.packageName)
+            if (controller.uid == Process.myUid()) {
+                // Not built from super.onConnect: that is a stand-in with empty
+                // lists, filled in by Media3 only when passed back unchanged.
+                // Copying its lists left the app's own screens unable to play.
+                return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
+                    .setAvailableSessionCommands(
+                        MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS
+                            .buildUpon().add(SKIP_PLAY_LESS).build(),
+                    )
+                    .setAvailablePlayerCommands(MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS)
+                    .build()
+            }
             if (full) return super.onConnect(session, controller)
             return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
                 .setAvailableSessionCommands(SessionCommands.EMPTY)
                 .setAvailablePlayerCommands(REMOTE_BUTTONS)
                 .build()
+        }
+
+        override fun onCustomCommand(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo,
+            customCommand: SessionCommand,
+            args: Bundle,
+        ): ListenableFuture<SessionResult> {
+            if (customCommand.customAction != SKIP_PLAY_LESS.customAction) {
+                return super.onCustomCommand(session, controller, customCommand, args)
+            }
+            reporter?.skipPlayLess()
+            return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
         }
 
         /**
@@ -493,10 +553,10 @@ class PlaybackService : MediaLibraryService() {
         return try {
             when {
                 parent == ROOT -> listOf(
-                    folder(RECENT, "Lately played"),
-                    folder(KEPT, "On this phone"),
-                    folder(PLAYLISTS, "Playlists"),
-                    folder(ALBUMS, "Albums"),
+                    folder(RECENT, t("go.played_lately")),
+                    folder(KEPT, t("kept.on_this_phone")),
+                    folder(PLAYLISTS, t("nav.playlists")),
+                    folder(ALBUMS, t("library.albums")),
                 )
                 parent == RECENT -> api.home().recent.map { it.toMediaItem(api) }
                 parent == KEPT -> keptForCar(server)
@@ -511,7 +571,7 @@ class PlaybackService : MediaLibraryService() {
         } catch (_: IOException) {
             // Away from the server, the car still has what's kept here.
             when (parent) {
-                ROOT -> listOf(folder(KEPT, "On this phone"))
+                ROOT -> listOf(folder(KEPT, t("kept.on_this_phone")))
                 KEPT -> keptForCar(server)
                 else -> emptyList()
             }

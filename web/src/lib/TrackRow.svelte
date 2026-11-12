@@ -1,12 +1,15 @@
 <script lang="ts">
+  import Counts from './Counts.svelte'
   // One song: tap its picture or title to queue it; the artist and album
   // names go to their pages.
   import Art from './Art.svelte'
   import Credits from './Credits.svelte'
   import { duration } from './format'
   import Icon from './Icon.svelte'
+  import LyricsMark from './LyricsMark.svelte'
   import { tapTrack, toggleRequest, trackStatus } from './state.svelte'
   import TrackMenu from './TrackMenu.svelte'
+  import Heart from './Heart.svelte'
   import type { Track } from './types'
 
   let {
@@ -36,7 +39,10 @@
     <span class="num">{number}</span>
   {/if}
   <div class="text">
-    <button class="title ellipsis" onclick={() => tapTrack(track)}>{track.title}</button>
+    <div class="title-line">
+      <button class="title ellipsis" onclick={() => tapTrack(track)}>{track.title}</button>
+      <LyricsMark lyrics={track.lyrics} />
+    </div>
     <div class="sub ellipsis">
       <Credits {track} />
       {#if showAlbum && track.album}
@@ -45,6 +51,7 @@
       {/if}
       {#if track.duration_ms}<span class="meta"> · {duration(track.duration_ms)}</span>{/if}
       {#if note}<span class="meta"> · {note}</span>{/if}
+      <Counts plays={track.plays} likes={track.likes} />
       {#each track.genres ?? [] as genre, i (genre)}
         <span class="meta">{i === 0 ? ' · ' : ', '}</span><a class="genre" href="#/genre/{encodeURIComponent(genre)}"
           >{genre}</a
@@ -52,6 +59,7 @@
       {/each}
     </div>
   </div>
+  <Heart kind="track" id={track.id} name={track.title} />
   <TrackMenu {track} />
   <button
     class="queue"
@@ -115,9 +123,16 @@
     min-width: 0;
   }
 
+  .title-line {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+  }
+
   .title {
     display: block;
-    width: 100%;
+    min-width: 0;
+    max-width: 100%;
     min-height: 0;
     padding: 0;
     background: transparent;

@@ -6,7 +6,14 @@ import android.net.nsd.NsdServiceInfo
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.net.Inet4Address
@@ -151,5 +158,45 @@ class ServerFinder(context: Context) {
         idByInstance[info.serviceName] = id
         val pin = said["fp"]?.decodeToString()?.takeIf { it.isNotBlank() }
         _servers.value = withServer(_servers.value, FoundServer(id, name, foundAddress(host, info.port), pin))
+    }
+}
+
+/** How long to listen for the server each time, and how often at most. */
+private const val SEEK_FOR_MS = 15_000L
+private const val SEEK_EVERY_MS = 30_000L
+
+/** Which announcement is the server in use, if any: the one with its id. */
+internal fun announcedAs(servers: List<FoundServer>, id: String): FoundServer? = servers.firstOrNull { it.id == id }
+
+/**
+ * Finds the server in use again when its address changes (a router handing
+ * out a new one). When it can't be reached, listens for its announcement and
+ * follows it there. Only servers with a pinned certificate move: the new
+ * address still has to present that certificate before anything is sent.
+ */
+class ServerSeeker(private val context: Context, private val account: Account) {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    @Volatile
+    private var lastLook = 0L
+
+    /** Any thread. Looks at most every SEEK_EVERY_MS. */
+    fun lost() {
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastLook < SEEK_EVERY_MS) return
+        lastLook = now
+        val current = account.current.value ?: return
+        val id = current.id ?: return
+        if (current.pin == null) return
+        scope.launch {
+            val finder = ServerFinder(context)
+            finder.start()
+            val heard = withTimeoutOrNull(SEEK_FOR_MS) {
+                finder.servers.first { announcedAs(it, id) != null }
+            }
+            finder.stop()
+            val found = heard?.let { announcedAs(it, id) } ?: return@launch
+            Log.i(TAG, "${current.name ?: id} is at ${found.address} now")
+            account.moved(id, found.address)
+        }
     }
 }

@@ -20,6 +20,7 @@ use crate::equalizer::Equalizer;
 use crate::output::{Output, BUFFER_SECS};
 use crate::player::Sink;
 use crate::tap::StreamTap;
+use crate::timed::{Mark, TimedTap};
 use crate::{
     EqualizerConfig, Event, OutputConfig, OutputDevice, OutputState, OutputStatus, MAX_DELAY_MS,
 };
@@ -116,6 +117,10 @@ pub(crate) struct Outputs {
     reported: Vec<OutputStatus>,
     events: Vec<Event>,
     tap: Option<StreamTap>,
+    /// The timed copy for nodes, and whether it has heard the volume and
+    /// pause state since it was switched on.
+    timed: Option<TimedTap>,
+    timed_told: bool,
     virtual_clock: Option<VirtualClock>,
 }
 
@@ -139,10 +144,43 @@ impl Outputs {
             reported: Vec::new(),
             events: Vec::new(),
             tap,
+            timed: None,
+            timed_told: false,
             virtual_clock: None,
         };
         outputs.configure(configs);
         outputs
+    }
+
+    /// Copies the master stream, timed, for nodes.
+    pub fn set_timed(&mut self, timed: Option<TimedTap>) {
+        self.timed = timed;
+        self.timed_told = false;
+    }
+
+    fn timed_active(&self) -> bool {
+        self.timed.as_ref().is_some_and(TimedTap::is_active)
+    }
+
+    fn timed_mark(&mut self, mark: Mark) {
+        if let Some(timed) = self.timed.as_mut() {
+            timed.mark(mark);
+        }
+    }
+
+    /// Seconds until a frame written now is heard on the clock output (its
+    /// delay aside), or by the system clock when only taps listen.
+    fn heard_in(&mut self) -> f64 {
+        if let Some((clock, delay)) = self.clock_output() {
+            return clock.latency() - delay;
+        }
+        let rate = self.master_rate;
+        match &self.virtual_clock {
+            Some(clock) => {
+                self.frames_in.saturating_sub(clock.played(rate)) as f64 / f64::from(rate)
+            }
+            None => 0.0,
+        }
     }
 
     pub fn take_events(&mut self) -> std::vec::Drain<'_, Event> {
@@ -200,6 +238,8 @@ impl Outputs {
 
     pub fn set_volume(&mut self, volume: f32) {
         self.volume = volume.clamp(0.0, 1.0);
+        let volume = self.volume;
+        self.timed_mark(Mark::Volume(volume));
         self.apply_gains();
     }
 
@@ -209,6 +249,7 @@ impl Outputs {
 
     pub fn set_paused(&mut self, paused: bool) {
         self.paused = paused;
+        self.timed_mark(if paused { Mark::Pause } else { Mark::Resume });
         if let Some(clock) = self.virtual_clock.as_mut() {
             clock.set_paused(paused);
         }
@@ -514,7 +555,7 @@ impl Sink for Outputs {
             let wanted = ((BUFFER_SECS + delay - clock.latency()) * master_rate).max(0.0) as usize;
             return room.min(wanted);
         }
-        if !self.tap.as_ref().is_some_and(StreamTap::is_active) {
+        if !self.tap.as_ref().is_some_and(StreamTap::is_active) && !self.timed_active() {
             // Nothing to play to: hold still until an output opens.
             self.virtual_clock = None;
             return 0;
@@ -536,6 +577,22 @@ impl Sink for Outputs {
     }
 
     fn write(&mut self, samples: &[f32]) {
+        // When this chunk will be heard, worked out before it's queued.
+        let timed_at = if self.timed_active() {
+            if !self.timed_told {
+                self.timed_told = true;
+                let (volume, paused) = (self.volume, self.paused);
+                self.timed_mark(Mark::Volume(volume));
+                if paused {
+                    self.timed_mark(Mark::Pause);
+                }
+            }
+            let ahead = self.heard_in();
+            Some(crate::clock::now_micros() + (ahead * 1e6) as i64)
+        } else {
+            self.timed_told = false;
+            None
+        };
         self.frames_in += (samples.len() / 2) as u64;
         let samples = if self.equalizer.active() {
             self.equalized.clear();
@@ -547,6 +604,9 @@ impl Sink for Outputs {
         };
         if let Some(tap) = self.tap.as_mut() {
             tap.write(samples);
+        }
+        if let (Some(timed), Some(at)) = (self.timed.as_mut(), timed_at) {
+            timed.write(samples, at);
         }
         for output in self.slots.iter_mut().filter_map(|s| s.output.as_mut()) {
             output.write(samples);
@@ -569,6 +629,7 @@ impl Sink for Outputs {
     }
 
     fn flush(&mut self) {
+        self.timed_mark(Mark::Flush);
         for slot in &mut self.slots {
             let delay = slot.delay();
             if let Some(output) = slot.output.as_mut() {
@@ -591,6 +652,55 @@ impl Sink for Outputs {
 mod tests {
     use super::*;
     use crate::tap::stream_tap;
+
+    #[test]
+    fn nodes_get_chunks_stamped_with_when_they_are_heard() {
+        let rate = 48_000;
+        let (timed, mut reader) = crate::timed::timed_tap(5.0, rate);
+        let mut outputs = Outputs::new(rate, Vec::new(), None);
+        outputs.set_timed(Some(timed));
+        assert_eq!(outputs.free_frames(), 0, "no node listening: hold still");
+
+        reader.set_active(true);
+        let ahead = outputs.free_frames();
+        assert!(ahead > 20_000, "paced by the system clock: {ahead}");
+        let before = crate::clock::now_micros();
+        outputs.write(&vec![0.0; 4800 * 2]);
+        outputs.write(&vec![0.0; 4800 * 2]);
+        outputs.set_paused(true);
+        outputs.set_paused(false);
+        outputs.flush();
+        let pieces = reader.read();
+        let marks: Vec<_> = pieces.iter().map(|p| p.mark).collect();
+        assert!(
+            matches!(marks[0], crate::timed::Mark::Volume(_)),
+            "volume first: {marks:?}"
+        );
+        let (first, second) = match (marks[1], marks[2]) {
+            (
+                crate::timed::Mark::Audio {
+                    play_at_us: a,
+                    frames: 4800,
+                },
+                crate::timed::Mark::Audio {
+                    play_at_us: b,
+                    frames: 4800,
+                },
+            ) => (a, b),
+            other => panic!("two chunks expected: {other:?}"),
+        };
+        assert!(first >= before - 1000, "the first is heard about now");
+        let gap = second - first;
+        assert!((99_000..=101_000).contains(&gap), "100 ms apart: {gap}");
+        assert_eq!(
+            &marks[3..],
+            &[
+                crate::timed::Mark::Pause,
+                crate::timed::Mark::Resume,
+                crate::timed::Mark::Flush
+            ]
+        );
+    }
 
     #[test]
     fn casting_alone_is_paced_by_the_system_clock() {

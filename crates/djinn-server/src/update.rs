@@ -21,7 +21,6 @@ use serde::{Deserialize, Serialize};
 use crate::auth::AdminUser;
 use crate::download::CheckedFile;
 use crate::error::{ApiError, ApiResult};
-use crate::events::PlayState;
 use crate::settings;
 use crate::state::AppState;
 
@@ -297,7 +296,7 @@ async fn tick(state: &AppState) {
         return;
     };
     // Never in the middle of the music.
-    let playing = state.jukebox.lock().await.player_state().state == PlayState::Playing;
+    let playing = state.anything_playing().await;
     if !playing && state.update.blocker(&release).is_none() {
         tracing::info!(version = %release.version, "installing an update by itself");
         start_install(state, release);
@@ -562,6 +561,11 @@ fn parse_version(v: &str) -> Option<(u64, u64, u64, bool)> {
 }
 
 /// True if `version` is newer than this copy.
+/// Whether version `a` comes after version `b`.
+pub fn newer(a: &str, b: &str) -> bool {
+    matches!((parse_version(a), parse_version(b)), (Some(a), Some(b)) if a > b)
+}
+
 fn is_newer(version: &str) -> bool {
     match (
         parse_version(version),
@@ -686,7 +690,7 @@ async fn install(state: &AppState, release: &Release) -> Result<(), String> {
 }
 
 /// Puts `new` in place of the running program at `exe`.
-fn replace(exe: &Path, new: &Path) -> std::io::Result<()> {
+pub(crate) fn replace(exe: &Path, new: &Path) -> std::io::Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -793,19 +797,9 @@ mod tests {
     #[test]
     fn checks_the_signature() {
         let key = SigningKey::from_bytes(&[7u8; 32]);
-        let public: String = key
-            .verifying_key()
-            .as_bytes()
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect();
+        let public = crate::security::hex(key.verifying_key().as_bytes());
         let sums = b"abc123  djinn-linux-x86_64\n";
-        let signature: String = key
-            .sign(sums)
-            .to_bytes()
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect();
+        let signature = crate::security::hex(&key.sign(sums).to_bytes());
         assert!(signed(sums, &format!("{signature}\n"), &public));
         assert!(!signed(
             b"tampered  djinn-linux-x86_64\n",

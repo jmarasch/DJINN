@@ -1,24 +1,32 @@
 <script lang="ts">
+  import { t } from '../../lib/i18n.svelte'
   // The whole library: search as you type, or browse by artist, album,
   // song or genre (the same browser as the party app). Tapping a song in
-  // the big lists plays it, then songs like it.
+  // the big lists plays it, then songs like it. Descriptions ("chill house",
+  // "upbeat like KREAM") also list the songs that fit, read by the AI reader
+  // when the phrase reader doesn't know every word.
   import { api } from '../../lib/api'
   import Art from '../../lib/Art.svelte'
   import ScrollRow from '../../lib/ScrollRow.svelte'
   import type { SearchResults, Track } from '../../lib/types'
   import Browse from '../../screens/Browse.svelte'
-  import { playRadio, tapSong } from '../player.svelte'
+  import { playList, playRadio, tapSong } from '../player.svelte'
   import SongList from '../SongList.svelte'
   import SongRow from '../SongRow.svelte'
   import LikeButton from '../LikeButton.svelte'
   import SongTile from '../SongTile.svelte'
+  import NotInLibrary from '../../lib/NotInLibrary.svelte'
+  import { toast } from '../../lib/state.svelte'
+  import { playlistName } from '../../lib/format'
 
   let searchBar = $state<HTMLElement>()
 
   let query = $state(remembered())
   let results = $state<SearchResults | null>(null)
   let error = $state('')
-  let timer: ReturnType<typeof setTimeout> | undefined
+  /** The AI reader is reading the query. */
+  let thinking = $state(false)
+  let latest = 0
 
   function remembered(): string {
     try {
@@ -30,7 +38,6 @@
 
   $effect(() => {
     const q = query.trim()
-    clearTimeout(timer)
     try {
       sessionStorage.setItem('go-search', query)
     } catch {
@@ -40,23 +47,98 @@
       results = null
       return
     }
-    timer = setTimeout(async () => {
+    const id = ++latest
+    thinking = false
+    const timer = setTimeout(async () => {
       try {
-        results = await api.search(q)
+        const found = await api.search(q)
+        if (id !== latest) return
+        results = found
         error = ''
+        if (!found.ask) return
+        // Words the phrase reader didn't know: once typing stops, let the
+        // AI reader have a go (a few seconds).
+        thinking = true
+        await new Promise((resolve) => setTimeout(resolve, 600))
+        if (id !== latest) return
+        const read = await api.ask(q)
+        if (id === latest && read && results) results = { ...results, described: read }
       } catch (e) {
-        error = e instanceof Error ? e.message : 'Search failed'
+        if (id === latest && !results) error = e instanceof Error ? e.message : 'Search failed'
+      } finally {
+        if (id === latest) thinking = false
       }
     }, 250)
+    return () => clearTimeout(timer)
   })
+
+  const described = $derived(results?.described ?? null)
+  /** Matches by name come first when there are any; a description with
+   * nothing by that name leads with what fits. */
+  const describedFirst = $derived(!!described && !results?.tracks.length && !results?.artists.length)
+
+  /** Keeps a search's songs as one of your playlists. */
+  async function savePlaylist(search: string, tracks: Track[]) {
+    try {
+      const list = await api.goCreatePlaylist(playlistName(search), tracks.map((t) => t.id))
+      toast(t('search.made_playlist', { name: list.name }))
+      location.hash = `/playlist/${list.id}`
+    } catch (e) {
+      toast(e instanceof Error ? e.message : t('search.playlist_failed'), true)
+    }
+  }
 
   /** A tap in the big lists: the song, then songs like it (or into the
    * queue, if that's what taps do). */
   const play = (track: Track) => tapSong(track, () => playRadio(track))
 </script>
 
+{#snippet describedSection()}
+  {#if thinking}
+    <p class="small muted thinking"><span class="spinner" aria-hidden="true"></span> {t('go.thinking')}</p>
+  {/if}
+  {#if described}
+    <div class="described-head">
+      <h2>
+        {t('search.matches')} <span class="muted">{described.summary.join(' · ')}</span>
+        {#if described.read_by_ai}<span class="tag">{t('search.read_by_ai')}</span>{/if}
+      </h2>
+      {#if described.tracks.length}
+        <p class="small muted">
+          {described.total} {described.total === 1 ? 'song fits' : 'songs fit'}{described.total > described.tracks.length
+            ? `, showing ${described.tracks.length}`
+            : ''}.{described.unknown.length ? ` Not sure about "${described.unknown.join(' ')}".` : ''}
+        </p>
+        <div class="actions">
+          <button onclick={() => playList(described.tracks)}>{t('go.play_all')}</button>
+          <button onclick={() => described && savePlaylist(described.summary.join(' '), described.tracks)}>{t('search.save_playlist')}</button>
+        </div>
+      {:else}
+        <p class="small muted">{t('search.nothing_fits')}</p>
+      {/if}
+    </div>
+    {#if described.artists.length}
+      <div class="chips">
+        {#each described.artists as artist (artist.id)}
+          <a class="chip" href="#/artist/{artist.id}">{artist.name}</a>
+        {/each}
+      </div>
+    {/if}
+    <SongList tracks={described.tracks} />
+  {/if}
+{/snippet}
+
 <div class="search-bar" bind:this={searchBar}>
-  <input class="search" type="search" placeholder="Search songs, artists, albums" bind:value={query} aria-label="Search" />
+  <input
+    class="search"
+    type="search"
+    placeholder={t('search.placeholder')}
+    bind:value={query}
+    aria-label="Search"
+    autocomplete="off"
+    autocapitalize="none"
+    enterkeyhint="search"
+  />
 </div>
 {#if error}<p class="error">{error}</p>{/if}
 
@@ -73,8 +155,9 @@
     {/snippet}
   </Browse>
 {:else if results}
+  {#if describedFirst}{@render describedSection()}{/if}
   {#if results.artists.length}
-    <h2>Artists</h2>
+    <h2>{t('library.artists')}</h2>
     <ScrollRow gap={12}>
       {#each results.artists as artist (artist.id)}
         <div class="tile-wrap">
@@ -88,7 +171,7 @@
     </ScrollRow>
   {/if}
   {#if results.albums.length}
-    <h2>Albums</h2>
+    <h2>{t('library.albums')}</h2>
     <ScrollRow gap={12}>
       {#each results.albums as album (album.id)}
         <div class="tile-wrap">
@@ -102,15 +185,40 @@
       {/each}
     </ScrollRow>
   {/if}
-  <h2>Songs</h2>
   {#if results.tracks.length}
+    <h2>{t('library.songs')}</h2>
+    <div class="actions">
+      <button onclick={() => results && playList(results.tracks)}>{t('go.play_all')}</button>
+      <button onclick={() => results && savePlaylist(query, results.tracks)}>{t('search.save_playlist')}</button>
+    </div>
     <SongList tracks={results.tracks} />
-  {:else}
-    <p class="muted">No songs match.</p>
+  {:else if !described?.tracks.length && !results.lyrics?.length && !thinking}
+    <h2>{t('library.songs')}</h2>
+    <p class="muted">{t('go.no_songs')}</p>
   {/if}
+  {#if results.lyrics?.length}
+    <h2>{t('search.lyric_matches')}</h2>
+    {#each results.lyrics as hit (hit.track.id)}
+      <SongRow
+        track={hit.track}
+        onplay={() => tapSong(hit.track, () => playList(results?.lyrics?.map((h) => h.track) ?? [hit.track], results?.lyrics?.indexOf(hit) ?? 0))}
+      />
+      <p class="quote">“{hit.line}”</p>
+    {/each}
+  {/if}
+  {#if !describedFirst}{@render describedSection()}{/if}
+  <NotInLibrary {query} />
 {/if}
 
 <style>
+  /* The lyric line a search matched, under its song. */
+  .quote {
+    margin: -6px 0 10px 56px;
+    color: var(--muted);
+    font-size: 0.875rem;
+    font-style: italic;
+  }
+
   .search-bar {
     position: sticky;
     top: var(--nav-height, 60px);
@@ -126,6 +234,43 @@
   h2 {
     margin: 18px 0 8px;
     font-size: 1.05rem;
+  }
+
+  .thinking {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 12px 0;
+  }
+
+  .tag {
+    margin-left: 6px;
+    padding: 1px 6px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    font-size: 0.6875rem;
+    font-weight: 500;
+    color: var(--muted);
+    vertical-align: 2px;
+  }
+
+  .described-head h2 {
+    margin-bottom: 2px;
+  }
+
+  .described-head p {
+    margin: 0 0 8px;
+  }
+
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+
+  .chips {
+    margin-bottom: 8px;
   }
 
   .tile {

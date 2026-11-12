@@ -5,6 +5,7 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod accounts;
+mod address;
 mod ai;
 mod api;
 mod audio_api;
@@ -19,6 +20,7 @@ mod convert;
 mod cpu;
 mod desktop;
 mod download;
+mod duplicates;
 mod error;
 mod events;
 mod folders;
@@ -27,24 +29,41 @@ mod go_announce;
 mod go_app;
 mod go_library;
 mod go_upnp;
+mod go_year;
 mod gpu;
 mod identify_api;
 mod jukebox;
+mod language;
 mod library_api;
+mod likes_api;
 mod logs;
+mod lyrics;
+mod mood_api;
 mod network;
+mod node_audio;
+mod node_builds;
+mod node_mode;
+mod node_offline;
+mod nodes;
 mod party_api;
 mod player_api;
 mod playlist_api;
 mod playlist_import;
+mod problems_api;
 mod reader;
+mod rooms_api;
+mod rooms_rt;
+mod schedule;
+mod scheduled_check;
 mod security;
 mod settings;
 mod smart;
 mod sse;
 mod state;
+mod stats_api;
 mod submissions;
 mod subsonic;
+mod sync_tone;
 mod system_api;
 #[cfg(test)]
 mod test_util;
@@ -52,8 +71,10 @@ mod tls;
 mod tv_api;
 mod two_step;
 mod update;
+mod visuals;
 mod watcher;
 mod web;
+mod wishes_api;
 mod youtube;
 
 use std::path::PathBuf;
@@ -173,6 +194,23 @@ async fn run() -> anyhow::Result<()> {
     tracing::info!(path = %config.database.path.display(), "database ready");
     logs::apply(&store).await?;
     system_api::apply_ports(&store, &mut config).await?;
+    // A node plays a room for a main DJINN: no library, no party app.
+    if node_mode::is_node(&store).await? {
+        if let Some(banner) = &config.server.console_banner {
+            let url = banner::urls(config.server.listen)
+                .first()
+                .cloned()
+                .unwrap_or_default();
+            write_banner(
+                banner,
+                &format!(
+                    "DJINN node: {url}/node (or http://{}.local:8066/node)\n",
+                    go_announce::computer_name()
+                ),
+            );
+        }
+        return node_mode::serve(store, &config.database.path, config.server.listen).await;
+    }
     tokio::spawn(async {
         let mut hourly = tokio::time::interval(std::time::Duration::from_secs(60 * 60));
         loop {
@@ -205,12 +243,16 @@ async fn run() -> anyhow::Result<()> {
     // A copy of the mix for casting, encoded to MP3 while anyone listens.
     let (tap, tap_reader) = djinn_engine::stream_tap(4.0, config.audio.master_rate);
     let stream = djinn_cast::stream::LiveStream::start(tap_reader, config.audio.master_rate)?;
-    let engine = Engine::start_with_tap(
+    // The mix again, stamped with when it's heard, for nodes.
+    let (timed, timed_reader) = djinn_engine::timed_tap(4.0, config.audio.master_rate);
+    let node_audio = node_audio::Hub::start(timed_reader, config.audio.master_rate)?;
+    let engine = Engine::start_with_taps(
         EngineConfig {
             master_rate: config.audio.master_rate,
             outputs,
         },
         Some(tap),
+        Some(timed),
         move |event| {
             let _ = engine_tx.send(event);
         },
@@ -230,7 +272,7 @@ async fn run() -> anyhow::Result<()> {
     )
     .await?;
     let urls = banner::urls(config.server.listen);
-    system_api::started(&config.database.path, urls.clone(), config.server.listen);
+    system_api::started(&config.database.path, config.server.listen);
     let base_url = urls.first().cloned().unwrap_or_default();
     // Older cache files had no extension; give them one so the folder is
     // easy to browse. Once is enough.
@@ -254,6 +296,12 @@ async fn run() -> anyhow::Result<()> {
         events,
     )
     .with_join_url(base_url.clone())
+    .with_node_audio(node_audio)
+    .with_rooms(rooms_rt::Rooms::new(
+        config.audio.master_rate,
+        playback_store.clone(),
+    ))
+    .with_open_setup(config.server.open_setup)
     .with_stream(stream, cast_api::token(&store).await?)
     .with_go_listen(config.go.listen);
 
@@ -262,6 +310,19 @@ async fn run() -> anyhow::Result<()> {
         .lock()
         .await
         .set_mixer(std::sync::Arc::new(smart::SmartMixer::new(&state)));
+    state
+        .jukebox
+        .lock()
+        .await
+        .set_copies(std::sync::Arc::new(duplicates::KnownCopies::new(&state)));
+    duplicates::refresh(&state);
+    // A player for each room playing its own music.
+    if let Err(e) = rooms_rt::sync(&state).await {
+        tracing::error!(error = %format!("{e:#}"), "starting the rooms failed");
+    }
+    rooms_rt::watch_quiet(state.clone());
+    nodes::watch_joining(state.clone(), config.server.listen.port());
+    node_mode::find_mains_during_setup(state.clone());
 
     let guest_mode = settings::flag(&store, settings::GUEST_MODE, false).await?;
     state
@@ -288,6 +349,30 @@ async fn run() -> anyhow::Result<()> {
         }
         Some(url)
     };
+    // A box without a screen of its own shows where to go on whatever
+    // screen is plugged in.
+    if let Some(banner) = &config.server.console_banner {
+        let token = state.bootstrap_token.lock().ok().and_then(|t| t.clone());
+        let text = console_text(&base_url, token.as_deref(), config.server.open_setup);
+        write_banner(banner, &text);
+    }
+    // A new address from the router reaches the join link, QR codes, casts
+    // and the plugged-in screen's banner.
+    {
+        let banner = config.server.console_banner.clone();
+        let open_setup = config.server.open_setup;
+        let bootstrap = std::sync::Arc::clone(&state.bootstrap_token);
+        address::watch(
+            state.clone(),
+            config.server.listen,
+            Box::new(move |url| {
+                if let Some(banner) = &banner {
+                    let token = bootstrap.lock().ok().and_then(|t| t.clone());
+                    write_banner(banner, &console_text(url, token.as_deref(), open_setup));
+                }
+            }),
+        );
+    }
 
     let listener = match bind(config.server.listen).await {
         Ok(listener) => listener,
@@ -343,6 +428,9 @@ async fn run() -> anyhow::Result<()> {
         });
     }
     watcher::start(state.clone());
+    scheduled_check::start(state.clone());
+    schedule::start(state.clone());
+    lyrics::start(&state);
     update::start(&state);
     if let Err(e) = convert::apply(&state).await {
         tracing::error!(error = %format!("{e:#}"), "couldn't read the converting settings");
@@ -438,6 +526,30 @@ async fn run() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Writes the address to show on the box's own screen (a login banner).
+/// What the box's own screen says: where to set it up (with the setup
+/// link's secret unless the page is open anyway), or where it's running.
+fn console_text(base_url: &str, setup_token: Option<&str>, open_setup: bool) -> String {
+    let base_url = base_url.trim_end_matches('/');
+    let name = go_announce::computer_name();
+    match setup_token {
+        Some(_) if open_setup => {
+            format!("DJINN: set it up at {base_url}/setup (or http://{name}.local:8066/setup)\n")
+        }
+        Some(token) => format!("DJINN: set it up at {base_url}/setup?token={token}\n"),
+        None => format!("DJINN is running: {base_url} (or http://{name}.local:8066)\n"),
+    }
+}
+
+pub fn write_banner(path: &std::path::Path, text: &str) {
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    if let Err(e) = std::fs::write(path, text) {
+        tracing::warn!(path = %path.display(), error = %e, "couldn't write the console banner");
+    }
+}
+
 /// Binds the listen address. Right after an update restart the old process
 /// may still hold it for a moment, so keep trying for a few seconds.
 async fn bind(addr: std::net::SocketAddr) -> std::io::Result<tokio::net::TcpListener> {
@@ -510,6 +622,8 @@ fn app(state: AppState) -> Router {
     Router::new()
         .nest("/api", api::router())
         .merge(cast_api::stream_router())
+        // What a screen plugged into this box shows (the kiosk opens it).
+        .route("/screen", axum::routing::get(auth::screen))
         .fallback(web::static_handler)
         .layer(middleware::from_fn(security::same_origin))
         .layer(middleware::from_fn_with_state(state.clone(), party_headers))
@@ -525,8 +639,16 @@ async fn party_headers(State(state): State<AppState>, request: Request, next: Ne
         request.headers(),
         &state.go.proxies(),
     );
+    let screen = security::SCREEN_PAGES.contains(&request.uri().path());
     let mut response = next.run(request).await;
-    security::set_headers(response.headers_mut(), security::PARTY_CSP, origin.https);
+    if screen {
+        security::set_headers(response.headers_mut(), security::SCREEN_CSP, origin.https);
+        response
+            .headers_mut()
+            .remove(axum::http::header::X_FRAME_OPTIONS);
+    } else {
+        security::set_headers(response.headers_mut(), security::PARTY_CSP, origin.https);
+    }
     response
 }
 
@@ -617,6 +739,28 @@ mod tests {
             assert!(response.headers().contains_key(name), "{name}");
         }
         assert!(!response.headers().contains_key("strict-transport-security"));
+    }
+
+    #[tokio::test]
+    async fn only_screen_pages_may_be_framed_and_only_by_a_node_page() {
+        let headers = |path: &'static str| async move {
+            app(AppState::for_tests().await)
+                .oneshot(Request::get(path).body(Body::empty()).unwrap())
+                .await
+                .unwrap()
+                .headers()
+                .clone()
+        };
+        let tv = headers("/tv").await;
+        assert!(!tv.contains_key("x-frame-options"));
+        let csp = tv["content-security-policy"].to_str().unwrap().to_owned();
+        assert!(csp.contains("frame-ancestors 'self' http://localhost:8066"));
+        let home = headers("/").await;
+        assert_eq!(home["x-frame-options"], "DENY");
+        assert!(home["content-security-policy"]
+            .to_str()
+            .unwrap()
+            .contains("frame-ancestors 'none'"));
     }
 
     #[tokio::test]

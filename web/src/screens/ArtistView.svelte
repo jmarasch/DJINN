@@ -2,6 +2,7 @@
   import AddToPlaylist from '../lib/AddToPlaylist.svelte'
   import GenreChips from '../lib/GenreChips.svelte'
   import QueueAll from '../lib/QueueAll.svelte'
+  import Heart from '../lib/Heart.svelte'
   import RadioButton from '../lib/RadioButton.svelte'
   import { api } from '../lib/api'
   import ArtistSlideshow from '../lib/ArtistSlideshow.svelte'
@@ -13,8 +14,8 @@
   import TagEditor from '../lib/TagEditor.svelte'
   import TrackRow from '../lib/TrackRow.svelte'
   import { byName } from '../lib/format'
-  import { isAdmin } from '../lib/state.svelte'
-  import type { Album, ArtistDetail, ArtistPicture, ArtistSummary, TagFields } from '../lib/types'
+  import { isAdmin, toast } from '../lib/state.svelte'
+  import type { Album, ArtistDetail, ArtistPicture, ArtistSummary, TagFields, Track } from '../lib/types'
 
   let { id }: { id: number } = $props()
   let artist = $state<ArtistDetail | null>(null)
@@ -63,8 +64,17 @@
 
   /** Top songs earn the title once anyone has requested or played them. */
   const ranked = $derived(artist?.top_tracks.some((t) => t.requests || t.plays) ?? false)
-  const topIds = $derived(new Set(artist?.top_tracks.map((t) => t.id)))
-  const moreSongs = $derived(artist?.other_tracks.filter((t) => !topIds.has(t.id)) ?? [])
+  // The top songs here; Show all opens every song on a page of its own.
+  let songTotal = $state(0)
+  const songs = $derived(artist ? artist.top_tracks : [])
+
+  $effect(() => {
+    songTotal = 0
+    api
+      .artistSongs(id, 0, 1)
+      .then((page) => (songTotal = page.total))
+      .catch(() => {})
+  })
   const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
 
   let albumSort = $state<'year' | 'name'>('year')
@@ -98,6 +108,7 @@
             <div class="genres"><GenreChips genres={artist.genres.split(', ')} /></div>
           {/if}
           <div class="admin-actions">
+            <Heart kind="artist" id={artist.id} name={artist.name} />
             <RadioButton seed={{ kind: 'artist', id: artist.id }} />
             <QueueAll kind="artist" refId={artist.id} />
             <AddToPlaylist kind="artist" refId={artist.id} label={artist.name} />
@@ -135,11 +146,18 @@
       </section>
     {/if}
 
-    {#if artist.top_tracks.length}
-      <h2>{ranked ? 'Top songs' : 'Songs'}</h2>
+    {#if songs.length}
+      <h2>
+        {ranked ? 'Top songs' : 'Songs'}{#if songTotal}<span class="muted small"
+            >{` (${songTotal.toLocaleString()})`}</span
+          >{/if}
+      </h2>
       {#each artist.top_tracks as track (track.id)}
         <TrackRow {track} note={track.requests ? plural(track.requests, 'request') : null} />
       {/each}
+      {#if artist.top_tracks.length < songTotal}
+        <a class="more-songs button" href="#/artist/{artist.id}/songs">Show all {songTotal.toLocaleString()} songs</a>
+      {/if}
     {/if}
 
     {#if artist.albums.length}
@@ -151,11 +169,14 @@
       </div>
       <div class="albums">
         {#each sorted(artist.albums) as album (album.id)}
-          <a class="album" href="#/album/{album.id}">
-            <div class="cover"><Art hash={album.art_hash} size={160} round={10} /></div>
-            <span class="ellipsis">{album.title}</span>
-            {#if album.year}<span class="muted small">{album.year}</span>{/if}
-          </a>
+          <div class="album-tile">
+            <a class="album" href="#/album/{album.id}">
+              <div class="cover"><Art hash={album.art_hash} size={160} round={10} /></div>
+              <span class="ellipsis">{album.title}</span>
+              {#if album.year}<span class="muted small">{album.year}</span>{/if}
+            </a>
+            <div class="corner"><Heart kind="album" id={album.id} name={album.title} size={18} /></div>
+          </div>
         {/each}
       </div>
     {/if}
@@ -164,29 +185,29 @@
       <h2>Appears on</h2>
       <div class="albums">
         {#each sorted(artist.appears_on) as album (album.id)}
-          <a class="album" href="#/album/{album.id}">
-            <div class="cover"><Art hash={album.art_hash} size={160} round={10} /></div>
-            <span class="ellipsis">{album.title}</span>
-            <span class="muted small ellipsis">{album.artist}</span>
-          </a>
+          <div class="album-tile">
+            <a class="album" href="#/album/{album.id}">
+              <div class="cover"><Art hash={album.art_hash} size={160} round={10} /></div>
+              <span class="ellipsis">{album.title}</span>
+              <span class="muted small ellipsis">{album.artist}</span>
+            </a>
+            <div class="corner"><Heart kind="album" id={album.id} name={album.title} size={18} /></div>
+          </div>
         {/each}
       </div>
     {/if}
 
-    {#if moreSongs.length}
-      <h2>More songs</h2>
-      {#each moreSongs as track (track.id)}
-        <TrackRow {track} />
-      {/each}
-    {/if}
     {#if similar.length}
       <h2>Similar artists</h2>
       <ScrollRow>
         {#each similar as other (other.id)}
-          <a class="artist" href="#/artist/{other.id}">
-            <Art hash={other.art_hash} size={96} round={999} letter={other.name.charAt(0).toUpperCase()} />
-            <span class="ellipsis">{other.name}</span>
-          </a>
+          <div class="album-tile">
+            <a class="artist" href="#/artist/{other.id}">
+              <Art hash={other.art_hash} size={96} round={999} letter={other.name.charAt(0).toUpperCase()} />
+              <span class="ellipsis">{other.name}</span>
+            </a>
+            <div class="corner round"><Heart kind="artist" id={other.id} name={other.name} size={18} /></div>
+          </div>
         {/each}
       </ScrollRow>
     {/if}
@@ -214,6 +235,14 @@
 {/if}
 
 <style>
+  .more-songs {
+    display: flex;
+    justify-content: center;
+    width: 100%;
+    margin-top: 8px;
+    text-decoration: none;
+  }
+
   .artist-page {
     position: relative;
   }
@@ -364,6 +393,29 @@
 
   .cover {
     aspect-ratio: 1;
+  }
+
+  .album-tile {
+    position: relative;
+    min-width: 0;
+  }
+
+  /* The heart sits on the cover's corner. */
+  .corner {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    border-radius: 999px;
+    background: rgb(0 0 0 / 0.45);
+  }
+
+  .corner.round {
+    top: 0;
+    right: 0;
+  }
+
+  .corner :global(.heart:not(.liked)) {
+    color: #fff;
   }
 
   .cover :global(.art) {

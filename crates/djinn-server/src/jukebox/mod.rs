@@ -12,6 +12,7 @@ mod auto;
 mod bag;
 mod gain;
 mod mix;
+mod mood;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
@@ -36,13 +37,17 @@ use self::bag::ShuffleBag;
 pub use self::gain::{
     ReplayGain, ReplayGainMode, MAX_PREAMP_DB, REPLAY_GAIN_MODE, REPLAY_GAIN_PREAMP,
 };
-pub use self::mix::{Learned, Mixer, Radio, RadioSeed, SongLinks};
+pub use self::mix::{Copies, Learned, Mixer, Radio, RadioSeed, SongLinks};
+pub use self::mood::{MoodError, MoodState, DEFAULT_MOOD_STRENGTH, MOOD_DIAL, MOOD_STRENGTH};
 use crate::events::{
     Entry, NowPlaying, OutputStatus, PlayState, PlayerState, PlaylistRef, ServerEvent,
 };
 use crate::settings;
 
 pub const HISTORY_WINDOW: &str = "history_window";
+/// Whether a copy of a song that played recently counts as played (on
+/// unless turned off).
+pub const AVOID_COPIES: &str = "avoid_copies";
 pub const PER_USER_LIMIT: &str = "per_user_limit";
 pub const VOLUME: &str = "volume";
 /// Most requests the whole queue may hold; 0 means no cap.
@@ -72,10 +77,20 @@ pub const DEFAULT_PER_USER_LIMIT: i64 = 3;
 const DEFAULT_VOLUME: i64 = 80;
 /// Tracks replaced in the engine's slot that it may already have taken.
 const MAX_REPLACED: usize = 8;
+/// The engine's id for the speaker sync tone; never a song's.
+pub const TONE_ID: i64 = -7;
+/// Auto mix songs planned beyond the next one, so screens can show what's
+/// coming and it plays in that order.
+const PLAN_AHEAD: usize = 4;
+/// The most auto mix songs planned when nodes ask to keep more ready.
+const MAX_PLAN: usize = 50;
+/// How long a node's ask for a longer plan holds without being repeated
+/// (nodes check in every 5 s).
+const PLAN_WISH_SECS: u64 = 30;
 
 pub type EngineSink = Box<dyn Fn(Command) + Send + Sync>;
 
-#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct EqualizerSettings {
     pub enabled: bool,
@@ -92,7 +107,7 @@ impl EqualizerSettings {
             && (MIN_OUTPUT_GAIN_DB..=MAX_OUTPUT_GAIN_DB).contains(&self.output_gain_db)
     }
 
-    fn engine_config(self) -> EqualizerConfig {
+    pub fn engine_config(self) -> EqualizerConfig {
         EqualizerConfig {
             enabled: self.enabled,
             bands_db: self.bands_db,
@@ -198,6 +213,8 @@ struct Playing {
 }
 
 pub struct Jukebox {
+    /// The room this jukebox plays for.
+    room: i64,
     store: Store,
     engine: EngineSink,
     events: broadcast::Sender<ServerEvent>,
@@ -206,6 +223,8 @@ pub struct Jukebox {
     queued: Option<Pending>,
     replaced: VecDeque<Pending>,
     in_flight: VecDeque<Pending>,
+    /// Auto mix songs to play after `queued`, drawn ahead (see PLAN_AHEAD).
+    planned: VecDeque<Pending>,
     playing: Option<Playing>,
     /// Songs fading out under the playing one during a crossfade.
     ending: Vec<Playing>,
@@ -213,6 +232,9 @@ pub struct Jukebox {
     volume: u8,
     crossfade: u8,
     skip_requested_by: Option<i64>,
+    /// The skip asked for also counts against the song: 0 no, 1 someone chose
+    /// "play less", 2 the room's skip votes did (counts double).
+    skip_play_less: u8,
     /// People who voted to skip the song playing.
     skip_votes: HashSet<i64>,
     /// Votes that skip a song; 0 when skip voting is off.
@@ -234,6 +256,8 @@ pub struct Jukebox {
     equalizer: EqualizerSettings,
     /// Picks radio songs (set once the server's sound index exists).
     mixer: Option<Arc<dyn Mixer>>,
+    /// Knows which songs are copies of one another.
+    copies: Option<Arc<dyn Copies>>,
     /// The radio, while it's the active "playlist".
     radio: Option<Radio>,
     /// Each song's party weight, and when it was read.
@@ -242,6 +266,12 @@ pub struct Jukebox {
     resuming: Option<Pending>,
     /// Last position saved for the song playing, in whole seconds.
     saved_second: Option<u64>,
+    /// Songs planned ahead that nodes asked for, and when they last asked.
+    plan_wish: Option<(usize, Instant)>,
+    /// The mood dial is in use.
+    mood_on: bool,
+    /// Where the mood dial is.
+    mood: mood::Mood,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -264,20 +294,56 @@ pub enum QueueError {
     Other(#[from] anyhow::Error),
 }
 
+/// A setting's key for `room`: Main's own key for Main, a prefixed one for
+/// the others (each room has its own playlist, volume, rules).
+pub fn room_key(room: i64, key: &str) -> String {
+    if room == djinn_store::MAIN_ROOM {
+        key.to_owned()
+    } else {
+        format!("room{room}.{key}")
+    }
+}
+
+/// A number setting for `room`, falling back to Main's when the room has
+/// none of its own (so a new room starts with the house rules).
+pub async fn room_number(store: &Store, room: i64, key: &str, default: i64) -> anyhow::Result<i64> {
+    if room != djinn_store::MAIN_ROOM {
+        if let Some(value) = store.get_setting(&room_key(room, key)).await? {
+            if let Ok(n) = value.trim().parse() {
+                return Ok(n);
+            }
+        }
+    }
+    settings::number(store, key, default).await
+}
+
 impl Jukebox {
+    /// Main's jukebox.
     pub async fn new(
         store: Store,
         engine: EngineSink,
         events: broadcast::Sender<ServerEvent>,
     ) -> anyhow::Result<Self> {
-        let volume = settings::number(&store, VOLUME, DEFAULT_VOLUME)
+        Self::for_room(store, djinn_store::MAIN_ROOM, engine, events).await
+    }
+
+    /// The jukebox for one room, with that room's queue and settings.
+    pub async fn for_room(
+        store: Store,
+        room: i64,
+        engine: EngineSink,
+        events: broadcast::Sender<ServerEvent>,
+    ) -> anyhow::Result<Self> {
+        let volume = room_number(&store, room, VOLUME, DEFAULT_VOLUME)
             .await?
             .clamp(0, 100) as u8;
-        let cursor = settings::number(&store, PLAYLIST_CURSOR, 0).await?;
-        let crossfade = settings::number(&store, CROSSFADE, 0)
+        let cursor = settings::number(&store, &room_key(room, PLAYLIST_CURSOR), 0).await?;
+        let crossfade = room_number(&store, room, CROSSFADE, 0)
             .await?
             .clamp(0, i64::from(djinn_engine::MAX_CROSSFADE_SECS)) as u8;
-        let skip_votes_needed = settings::number(&store, SKIP_VOTES, 0).await?.clamp(0, 100) as u32;
+        let skip_votes_needed = room_number(&store, room, SKIP_VOTES, 0)
+            .await?
+            .clamp(0, 100) as u32;
         let replay_gain = ReplayGain {
             mode: ReplayGainMode::parse(
                 store
@@ -292,6 +358,7 @@ impl Jukebox {
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(0.0),
         };
+        let mood_on = settings::flag(&store, MOOD_DIAL, true).await?;
         let saved_equalizer = store.get_setting(EQUALIZER_SETTING).await?;
         let equalizer = parse_equalizer(saved_equalizer.as_deref());
         let mut seed = [0u8; 8];
@@ -305,15 +372,18 @@ impl Jukebox {
             queued: None,
             replaced: VecDeque::new(),
             in_flight: VecDeque::new(),
+            planned: VecDeque::new(),
             playing: None,
             ending: Vec::new(),
             state: PlayState::Idle,
             volume,
             crossfade,
             skip_requested_by: None,
+            skip_play_less: 0,
             skip_votes: HashSet::new(),
             skip_votes_needed,
             songs_started: 0,
+            room,
             skip_voted_on: HashMap::new(),
             output: OutputStatus::default(),
             last_position_second: None,
@@ -323,10 +393,14 @@ impl Jukebox {
             replay_gain,
             equalizer,
             mixer: None,
+            copies: None,
             radio: None,
             party: None,
             resuming: None,
             saved_second: None,
+            plan_wish: None,
+            mood_on,
+            mood: mood::Mood::default(),
         };
         (jukebox.engine)(Command::SetVolume(gain(volume)));
         (jukebox.engine)(Command::SetCrossfade(u32::from(crossfade)));
@@ -338,7 +412,7 @@ impl Jukebox {
 
     /// Picks up the song a restart cut off; it goes to the engine first.
     async fn load_resume(&mut self) -> anyhow::Result<()> {
-        let saved = self.store.get_setting(RESUME).await?;
+        let saved = self.store.get_setting(&room_key(self.room, RESUME)).await?;
         let Some(resume) = saved.and_then(|s| serde_json::from_str::<Resume>(&s).ok()) else {
             return Ok(());
         };
@@ -385,12 +459,19 @@ impl Jukebox {
         match resume {
             Some(resume) => {
                 self.store
-                    .set_setting(RESUME, &serde_json::to_string(&resume)?)
+                    .set_setting(
+                        &room_key(self.room, RESUME),
+                        &serde_json::to_string(&resume)?,
+                    )
                     .await?
             }
             // Until it plays again, keep what a restart cut off.
             None if self.carrying_on() => {}
-            None => self.store.set_setting(RESUME, "").await?,
+            None => {
+                self.store
+                    .set_setting(&room_key(self.room, RESUME), "")
+                    .await?
+            }
         }
         Ok(())
     }
@@ -404,7 +485,37 @@ impl Jukebox {
                 .front()
                 .or(self.queued.as_ref())
                 .map(Pending::entry),
+            later: self
+                .planned
+                .iter()
+                .take(PLAN_AHEAD)
+                .map(Pending::entry)
+                .collect(),
         }
+    }
+
+    /// How many auto mix songs to plan: PLAN_AHEAD, or more while nodes ask
+    /// to keep more ready.
+    fn plan_len(&self) -> usize {
+        match self.plan_wish {
+            Some((n, at)) if at.elapsed().as_secs() < PLAN_WISH_SECS => {
+                n.clamp(PLAN_AHEAD, MAX_PLAN)
+            }
+            _ => PLAN_AHEAD,
+        }
+    }
+
+    /// A node wants `more` auto mix songs planned (beyond what's queued), to
+    /// keep them ready. The largest ask from the last PLAN_WISH_SECS counts.
+    /// Returns every planned song, in order.
+    pub async fn plan_for_nodes(&mut self, more: usize) -> anyhow::Result<Vec<i64>> {
+        let more = more.min(MAX_PLAN);
+        self.plan_wish = Some(match self.plan_wish {
+            Some((n, at)) if at.elapsed().as_secs() < PLAN_WISH_SECS / 2 => (n.max(more), at),
+            _ => (more, Instant::now()),
+        });
+        self.top_up_plan().await?;
+        Ok(self.planned.iter().map(|p| p.track.id).collect())
     }
 
     pub fn player_state(&self) -> PlayerState {
@@ -470,17 +581,23 @@ impl Jukebox {
         let limits = if unlimited {
             RequestLimits::default()
         } else {
-            let cap = settings::number(&self.store, MAX_QUEUE, 0).await?;
+            let cap = room_number(&self.store, self.room, MAX_QUEUE, 0).await?;
             RequestLimits {
                 per_user: Some(
-                    settings::number(&self.store, PER_USER_LIMIT, DEFAULT_PER_USER_LIMIT).await?,
+                    room_number(
+                        &self.store,
+                        self.room,
+                        PER_USER_LIMIT,
+                        DEFAULT_PER_USER_LIMIT,
+                    )
+                    .await?,
                 ),
                 queue_cap: (cap > 0).then_some(cap),
             }
         };
         let added = self
             .store
-            .add_request(track_id, user.id, limits, origin)
+            .add_request(self.room, track_id, user.id, limits, origin)
             .await?;
         self.queue_changed().await?;
         Ok(added)
@@ -498,7 +615,7 @@ impl Jukebox {
         for &id in track_ids {
             match self
                 .store
-                .add_request(id, admin.id, RequestLimits::default(), origin)
+                .add_request(self.room, id, admin.id, RequestLimits::default(), origin)
                 .await
             {
                 Ok(_) => added += 1,
@@ -552,12 +669,39 @@ impl Jukebox {
         (self.engine)(Command::Play);
     }
 
+    /// Plays the speaker sync tone (a file of evenly spaced clicks) while
+    /// nothing else is lined up. The tone is never a song: nothing is
+    /// recorded. False if music is playing or lined up.
+    pub fn play_tone(&mut self, path: PathBuf) -> bool {
+        if self.playing.is_some() || self.queued.is_some() || !self.in_flight.is_empty() {
+            return false;
+        }
+        (self.engine)(Command::SetNext(Some(djinn_engine::Track {
+            id: TrackId(TONE_ID),
+            path,
+            gapless: false,
+            gain: 1.0,
+            start_ms: 0,
+        })));
+        (self.engine)(Command::Play);
+        true
+    }
+
     pub fn pause(&self) {
         (self.engine)(Command::Pause);
     }
 
     pub fn skip(&mut self, by: &User) {
         self.skip_requested_by = Some(by.id);
+        self.skip_play_less = 0;
+        (self.engine)(Command::Skip);
+    }
+
+    /// Skips and counts it against the song: the auto mix and radio play it
+    /// (and, in radio, songs like it) less. A plain skip doesn't.
+    pub fn skip_play_less(&mut self, by: &User) {
+        self.skip_requested_by = Some(by.id);
+        self.skip_play_less = 1;
         (self.engine)(Command::Skip);
     }
 
@@ -600,7 +744,11 @@ impl Jukebox {
         self.skip_votes.insert(user.id);
         let skipped = self.skip_votes.len() >= self.skip_votes_needed as usize;
         if skipped {
-            self.skip(user);
+            // The room voted it away: that counts against the song, twice as
+            // much as one person choosing "play less".
+            self.skip_requested_by = Some(user.id);
+            self.skip_play_less = 2;
+            (self.engine)(Command::Skip);
         }
         self.send(ServerEvent::PlayerState(self.player_state()));
         Ok(skipped)
@@ -611,7 +759,7 @@ impl Jukebox {
         self.crossfade = secs.min(djinn_engine::MAX_CROSSFADE_SECS as u8);
         (self.engine)(Command::SetCrossfade(u32::from(self.crossfade)));
         self.store
-            .set_setting(CROSSFADE, &self.crossfade.to_string())
+            .set_setting(&room_key(self.room, CROSSFADE), &self.crossfade.to_string())
             .await?;
         self.send(ServerEvent::PlayerState(self.player_state()));
         Ok(())
@@ -621,13 +769,35 @@ impl Jukebox {
         self.volume = volume.min(100);
         (self.engine)(Command::SetVolume(gain(self.volume)));
         self.store
-            .set_setting(VOLUME, &self.volume.to_string())
+            .set_setting(&room_key(self.room, VOLUME), &self.volume.to_string())
             .await?;
         self.send(ServerEvent::PlayerState(self.player_state()));
         Ok(())
     }
 
     pub async fn on_engine_event(&mut self, event: EngineEvent) -> anyhow::Result<()> {
+        // The sync tone isn't a song, and a quiet room stays quiet after it
+        // (a request made meanwhile still follows it).
+        let tone = matches!(
+            event,
+            EngineEvent::NextNeeded {
+                after: Some(TrackId(TONE_ID))
+            } | EngineEvent::TrackStarted {
+                id: TrackId(TONE_ID)
+            } | EngineEvent::TrackEnded {
+                id: TrackId(TONE_ID),
+                ..
+            } | EngineEvent::TrackError {
+                id: TrackId(TONE_ID),
+                ..
+            } | EngineEvent::Position {
+                id: TrackId(TONE_ID),
+                ..
+            }
+        );
+        if tone {
+            return Ok(());
+        }
         match event {
             EngineEvent::NextNeeded { after } => {
                 if let Some(TrackId(id)) = after {
@@ -635,10 +805,16 @@ impl Jukebox {
                         self.queued.take()
                     } else {
                         // Replaced after the engine had already taken it.
-                        self.replaced
+                        let late = self
+                            .replaced
                             .iter()
                             .position(|p| p.track.id == id)
-                            .and_then(|i| self.replaced.remove(i))
+                            .and_then(|i| self.replaced.remove(i));
+                        // It went back into the plan when it was replaced.
+                        if let Some(i) = self.planned.iter().position(|p| p.track.id == id) {
+                            self.planned.remove(i);
+                        }
+                        late
                     };
                     if let Some(pending) = taken {
                         self.in_flight.push_back(pending);
@@ -724,7 +900,7 @@ impl Jukebox {
         if pending.source == PlaySource::Pool {
             self.cursor = Some(id);
             self.store
-                .set_setting(PLAYLIST_CURSOR, &id.to_string())
+                .set_setting(&room_key(self.room, PLAYLIST_CURSOR), &id.to_string())
                 .await?;
         }
         // A song carried on after a restart keeps its play.
@@ -733,6 +909,7 @@ impl Jukebox {
             None => (
                 self.store
                     .start_play_event(
+                        self.room,
                         id,
                         pending.source,
                         pending.requested_by.as_ref().map(|(id, _)| *id),
@@ -779,6 +956,11 @@ impl Jukebox {
         } else {
             None
         };
+        let play_less = if skipped {
+            i64::from(std::mem::take(&mut self.skip_play_less))
+        } else {
+            0
+        };
         let finished = match self.playing.take_if(|p| p.pending.track.id == id) {
             Some(playing) => Some(playing),
             None => self
@@ -794,6 +976,7 @@ impl Jukebox {
                     i64::try_from(playing.offset_ms + played_ms).unwrap_or(i64::MAX),
                     skipped,
                     skipped_by,
+                    play_less,
                 )
                 .await?;
             self.save_resume().await?;
@@ -820,8 +1003,13 @@ impl Jukebox {
 
     /// Makes sure the engine's next slot holds the right track: the first
     /// request not already on its way, otherwise the active playlist's next
-    /// song.
+    /// song. Then plans the auto mix's next few songs.
     async fn refresh_next(&mut self) -> anyhow::Result<()> {
+        self.refresh_slot().await?;
+        self.top_up_plan().await
+    }
+
+    async fn refresh_slot(&mut self) -> anyhow::Result<()> {
         // The song a restart cut off goes first, whatever else is waiting.
         if self.queued.as_ref().is_some_and(|q| q.resume.is_some()) {
             return Ok(());
@@ -837,7 +1025,7 @@ impl Jukebox {
             let in_flight: Vec<i64> = self.in_flight.iter().filter_map(|p| p.request_id).collect();
             let head = self
                 .store
-                .queue()
+                .queue(self.room)
                 .await?
                 .into_iter()
                 .find(|q| !in_flight.contains(&q.id));
@@ -861,6 +1049,8 @@ impl Jukebox {
                     if pool.iter().any(|(id, _)| *id == q.track.id) && self.start_at.is_none() {
                         return Ok(());
                     }
+                    // The playlist changed under it: so did the plan.
+                    self.clear_plan();
                     match self.draw(&pool).await? {
                         Some(track) => track,
                         None => return self.clear_next(),
@@ -868,9 +1058,12 @@ impl Jukebox {
                 }
                 (None, _) => {
                     let pool = self.auto_mix().await?;
-                    match self.draw(&pool).await? {
+                    match self.take_planned(&pool) {
                         Some(track) => track,
-                        None => return self.clear_next(),
+                        None => match self.draw(&pool).await? {
+                            Some(track) => track,
+                            None => return self.clear_next(),
+                        },
                     }
                 }
             };
@@ -893,8 +1086,10 @@ impl Jukebox {
             return Ok(false);
         };
         if let Some(old) = self.queued.take() {
+            // A request pushed an auto mix song back: it plays after the
+            // requests, still in its place in the plan.
             if old.source == PlaySource::Pool && candidate.source == PlaySource::Request {
-                self.bag.put_back(old.track.id);
+                self.planned.push_front(old.clone());
             }
             self.replaced.push_back(old);
             if self.replaced.len() > MAX_REPLACED {
@@ -935,7 +1130,9 @@ impl Jukebox {
     }
 
     async fn broadcast_queue(&self) -> anyhow::Result<()> {
-        self.send(ServerEvent::QueueChanged(self.store.queue().await?));
+        self.send(ServerEvent::QueueChanged(
+            self.store.queue(self.room).await?,
+        ));
         Ok(())
     }
 

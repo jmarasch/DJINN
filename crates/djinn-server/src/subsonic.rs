@@ -439,7 +439,7 @@ async fn sign_in(state: &AppState, params: &Params, device: &Device) -> Result<U
             }
             (None, Some(t), Some(s)) => {
                 let digest = Md5::digest(format!("{secret}{s}").as_bytes());
-                let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+                let hex = crate::security::hex(&digest);
                 same(hex.as_bytes(), t.to_ascii_lowercase().as_bytes())
             }
             _ => return Err(Failure::missing("p or t and s")),
@@ -477,7 +477,7 @@ async fn refuse(
 }
 
 fn same(a: &[u8], b: &[u8]) -> bool {
-    a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+    crate::security::same_secret(a, b)
 }
 
 fn decode_hex(hex: &str) -> Option<String> {
@@ -799,7 +799,7 @@ async fn music_directory(state: &AppState, user: &User, params: &Params) -> Answ
             Node::new("directory")
                 .a("id", id)
                 .a("name", detail.artist.name.as_str())
-                .items(albums.collect::<Vec<_>>()),
+                .items(albums),
         );
     }
     let album_id = id
@@ -921,27 +921,13 @@ async fn album_list(state: &AppState, user: &User, method: &str, params: &Params
     } else {
         "albumList2"
     };
-    reply(
-        Node::new(name).items(
-            albums
-                .iter()
-                .map(|a| album_node("album", a, &liked))
-                .collect::<Vec<_>>(),
-        ),
-    )
+    reply(Node::new(name).items(albums.iter().map(|a| album_node("album", a, &liked))))
 }
 
 async fn songs_node(state: &AppState, user: &User, name: &'static str, ids: &[i64]) -> Answer {
     let tracks = state.store.tracks_by_ids(ids).await?;
     let songs = Songs::load(state, user, &tracks).await?;
-    reply(
-        Node::new(name).items(
-            tracks
-                .iter()
-                .map(|t| songs.node("song", t))
-                .collect::<Vec<_>>(),
-        ),
-    )
+    reply(Node::new(name).items(tracks.iter().map(|t| songs.node("song", t))))
 }
 
 async fn random_songs(state: &AppState, user: &User, params: &Params) -> Answer {
@@ -970,19 +956,12 @@ async fn songs_by_genre(state: &AppState, user: &User, params: &Params) -> Answe
 
 async fn genres(state: &AppState) -> Answer {
     let genres = state.store.ss_genres().await?;
-    reply(
-        Node::new("genres").items(
-            genres
-                .into_iter()
-                .map(|g| {
-                    Node::new("genre")
-                        .a("songCount", g.songs)
-                        .a("albumCount", g.albums)
-                        .text(g.name)
-                })
-                .collect::<Vec<_>>(),
-        ),
-    )
+    reply(Node::new("genres").items(genres.into_iter().map(|g| {
+        Node::new("genre")
+            .a("songCount", g.songs)
+            .a("albumCount", g.albums)
+            .text(g.name)
+    })))
 }
 
 /// Search, or, with an empty query, everything a page at a time (apps like
@@ -1076,24 +1055,9 @@ async fn search(state: &AppState, user: &User, method: &str, params: &Params) ->
     };
     reply(
         Node::new(name)
-            .items(
-                artists
-                    .iter()
-                    .map(|a| artist_node(a, &liked))
-                    .collect::<Vec<_>>(),
-            )
-            .items(
-                albums
-                    .iter()
-                    .map(|a| album_node("album", a, &liked))
-                    .collect::<Vec<_>>(),
-            )
-            .items(
-                tracks
-                    .iter()
-                    .map(|t| songs.node("song", t))
-                    .collect::<Vec<_>>(),
-            ),
+            .items(artists.iter().map(|a| artist_node(a, &liked)))
+            .items(albums.iter().map(|a| album_node("album", a, &liked)))
+            .items(tracks.iter().map(|t| songs.node("song", t))),
     )
 }
 
@@ -1119,13 +1083,10 @@ async fn starred(state: &AppState, user: &User, method: &str) -> Answer {
         "starred2"
     };
     reply(
-        Node::new(name).items(artists).items(albums).items(
-            liked
-                .tracks
-                .iter()
-                .map(|t| songs.node("song", t))
-                .collect::<Vec<_>>(),
-        ),
+        Node::new(name)
+            .items(artists)
+            .items(albums)
+            .items(liked.tracks.iter().map(|t| songs.node("song", t))),
     )
 }
 
@@ -1699,10 +1660,7 @@ mod tests {
             .set_subsonic_key(sam.id, "AppPass123")
             .await
             .unwrap();
-        let token: String = Md5::digest(b"AppPass123salty")
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect();
+        let token = crate::security::hex(&Md5::digest(b"AppPass123salty"));
         let auth = format!("u=sam&t={token}&s=salty&v=1.16.1&c=test");
 
         // Token sign-in, JSON and XML.

@@ -27,6 +27,30 @@ pub fn router() -> Router<AppState> {
         .route("/tv/events", get(crate::sse::tv_events))
         .route("/tv/art/{hash}", get(art))
         .route("/tv/pictures", get(pictures))
+        .route("/tv/levels", get(levels))
+        .route("/tv/visuals", get(visuals))
+}
+
+#[derive(Deserialize)]
+struct RoomQuery {
+    room: Option<i64>,
+}
+
+/// The sound as a room's speakers play it here, for the visualizer page
+/// (`/visualizer`), in step with them. Public like the TV page.
+async fn levels(
+    State(state): State<AppState>,
+    Query(query): Query<RoomQuery>,
+) -> ApiResult<impl IntoResponse> {
+    check_enabled(&state).await?;
+    let hub = state.hub_for(query.room.unwrap_or(djinn_store::MAIN_ROOM));
+    Ok(crate::node_audio::levels_events(hub.levels().clone()))
+}
+
+/// The house's visualizers, for the visualizer page.
+async fn visuals(State(state): State<AppState>) -> ApiResult<Json<crate::visuals::Visuals>> {
+    check_enabled(&state).await?;
+    Ok(Json(crate::visuals::house(&state).await?))
 }
 
 pub async fn enabled(state: &AppState) -> ApiResult<bool> {
@@ -61,6 +85,8 @@ struct TvSnapshot {
 struct TvQuery {
     /// The stream's secret, from the address a cast opens.
     key: Option<String>,
+    /// Which room to show (Main when missing).
+    room: Option<i64>,
 }
 
 async fn snapshot(
@@ -71,15 +97,19 @@ async fn snapshot(
     let token = state.stream_token();
     let sound = query.key.as_deref() == Some(token.as_str())
         || settings::flag(&state.store, TV_SOUND, false).await?;
+    let room = state
+        .rooms
+        .leader(query.room.unwrap_or(djinn_store::MAIN_ROOM));
     let (now_playing, player) = {
-        let jukebox = state.jukebox.lock().await;
+        let jukebox = state.sound_jukebox_for(room);
+        let jukebox = jukebox.lock().await;
         (jukebox.now_playing(), jukebox.player_state())
     };
     Ok(Json(TvSnapshot {
         now_playing,
         player,
-        queue: state.store.queue().await?,
-        join_url: state.join_url.to_string(),
+        queue: state.store.queue(room).await?,
+        join_url: state.join_url.get(),
         guest_mode: state.guest_mode(),
         stream_url: state
             .stream
@@ -129,6 +159,8 @@ mod tests {
         let state = AppState::for_tests().await;
         let (status, _) = call(&state, Method::GET, "/api/tv", None, None).await;
         assert_eq!(status, StatusCode::OK, "no sign-in needed");
+        let (status, _) = call(&state, Method::GET, "/api/tv/visuals", None, None).await;
+        assert_eq!(status, StatusCode::OK);
         // The member feed still needs a session.
         let (status, _) = call(&state, Method::GET, "/api/events", None, None).await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
@@ -138,5 +170,9 @@ mod tests {
         assert_eq!(status, StatusCode::FORBIDDEN);
         let (status, _) = call(&state, Method::GET, "/api/tv/events", None, None).await;
         assert_eq!(status, StatusCode::FORBIDDEN);
+        for path in ["/api/tv/levels", "/api/tv/visuals"] {
+            let (status, _) = call(&state, Method::GET, path, None, None).await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{path}");
+        }
     }
 }

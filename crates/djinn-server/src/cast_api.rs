@@ -191,7 +191,23 @@ async fn stop_all(_: AdminUser, State(state): State<AppState>) -> ApiResult<Stat
 /// Changes the secret in the stream's address, for when it has got around.
 /// Casts carry on with the new one; browsers playing Play here ask for it.
 async fn new_link(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json<CastList>> {
-    let targets = cast_targets(&state);
+    let token = new_stream_token()?;
+    state.store.set_setting(CAST_TOKEN, &token).await?;
+    if let Ok(mut current) = state.cast_token.write() {
+        *current = token;
+    }
+    tracing::warn!("the live stream has a new address");
+    recast(&state).await;
+    Ok(Json(cast_list(&state)))
+}
+
+/// Starts every running cast again, for when its address changed (a new
+/// secret, or this computer's own address).
+pub async fn recast(state: &AppState) {
+    let targets = cast_targets(state);
+    if targets.is_empty() {
+        return;
+    }
     state.caster.stop_all().await;
     for _ in 0..50 {
         if state.caster.active().is_empty() {
@@ -199,19 +215,12 @@ async fn new_link(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    let token = new_stream_token()?;
-    state.store.set_setting(CAST_TOKEN, &token).await?;
-    if let Ok(mut current) = state.cast_token.write() {
-        *current = token;
-    }
-    tracing::warn!("the live stream has a new address");
     for line in &targets {
         let (id, mode) = parse_target(line);
-        if let Err(e) = start_cast(&state, id, mode).await {
+        if let Err(e) = start_cast(state, id, mode).await {
             tracing::warn!(device = id, error = ?e, "couldn't start the cast again");
         }
     }
-    Ok(Json(cast_list(&state)))
 }
 
 #[derive(Deserialize)]
@@ -240,7 +249,8 @@ async fn start_cast(state: &AppState, id: &str, mode: Mode) -> ApiResult<()> {
             "the audio stream isn't running",
         ));
     }
-    let base = state.join_url.trim_end_matches('/');
+    let base = state.join_url.base();
+    let base = base.as_str();
     let token = state.stream_token();
     let media = match mode {
         Mode::Audio => CastMedia::Stream {
@@ -333,10 +343,10 @@ pub fn spawn_background(state: &AppState) {
 
 /// The join QR code as a PNG: what TVs show while they play the party.
 async fn join_png(State(state): State<AppState>, Path(token): Path<String>) -> Response {
-    if state.stream_token() != token {
+    if !crate::security::same_secret(state.stream_token().as_bytes(), token.as_bytes()) {
         return StatusCode::NOT_FOUND.into_response();
     }
-    let Ok(code) = qrcode::QrCode::new(state.join_url.as_bytes()) else {
+    let Ok(code) = qrcode::QrCode::new(state.join_url.get().as_bytes()) else {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     };
     let image = code
@@ -361,9 +371,7 @@ pub async fn token(store: &Store) -> anyhow::Result<String> {
 }
 
 fn new_stream_token() -> anyhow::Result<String> {
-    let mut bytes = [0u8; 16];
-    getrandom::fill(&mut bytes).map_err(|e| anyhow::anyhow!("no system randomness: {e}"))?;
-    Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
+    crate::security::random_hex(16)
 }
 
 /// Path of the live stream, relative to the server.
@@ -376,11 +384,9 @@ async fn live(
     Path(token): Path<String>,
     headers: axum::http::HeaderMap,
 ) -> Response {
-    let Some(stream) = state
-        .stream
-        .as_ref()
-        .filter(|_| state.stream_token() == token)
-    else {
+    let Some(stream) = state.stream.as_ref().filter(|_| {
+        crate::security::same_secret(state.stream_token().as_bytes(), token.as_bytes())
+    }) else {
         return StatusCode::NOT_FOUND.into_response();
     };
     // Internet radio players (Sonos, many receivers, VLC) ask for song

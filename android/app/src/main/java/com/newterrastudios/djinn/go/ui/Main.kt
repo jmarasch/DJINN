@@ -16,6 +16,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayCircle
@@ -28,6 +30,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.Text
@@ -48,21 +51,26 @@ import com.newterrastudios.djinn.go.data.Prefs
 import com.newterrastudios.djinn.go.player.CastState
 import com.newterrastudios.djinn.go.data.Track
 import com.newterrastudios.djinn.go.player.PlayerState
+import com.newterrastudios.djinn.go.i18n.t
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 
 sealed interface Screen {
     data class Album(val id: Long) : Screen
     data class Artist(val id: Long) : Screen
+    /** Every song by an artist. */
+    data class ArtistSongs(val id: Long) : Screen
     data class Playlist(val id: Long) : Screen
     data class Genre(val name: String) : Screen
     data object NowPlaying : Screen
     data object Settings : Screen
     data object Visuals : Screen
     data object Cover : Screen
+    data object Year : Screen
 }
 
-enum class Tab(val label: String) { Home("Home"), Library("Library"), Search("Search") }
+/** The tabs, with their names' translation keys. */
+enum class Tab(val key: String) { Home("go.home"), Library("nav.library"), Mine("go.your_music"), Account("go.account") }
 
 /** Where you are in the app, and what every screen needs. */
 @UnstableApi
@@ -120,6 +128,11 @@ class Nav(
     val stack = mutableStateListOf<Screen>()
     var menuFor by mutableStateOf<Track?>(null)
     val liked = mutableStateListOf<Long>()
+    val likedAlbums = mutableStateListOf<Long>()
+    val likedArtists = mutableStateListOf<Long>()
+    /** Library lists show only what you like. */
+    /** The update you've been asked about since opening the app. */
+    var askedAboutUpdate by mutableStateOf(false)
     /** A song to start radio from. */
     var radioFor by mutableStateOf<Track?>(null)
 
@@ -182,7 +195,25 @@ fun MainScreen(nav: Nav) {
         bottomBar = {
             Column {
                 if (top != Screen.NowPlaying) MiniPlayer(nav)
+                // Icons only on phones; tablets (600 dp and wider) keep the words.
+                val labels = LocalConfiguration.current.screenWidthDp >= 600
                 NavigationBar {
+                    // Playing first, left of Home.
+                    NavigationBarItem(
+                        selected = top == Screen.NowPlaying,
+                        onClick = nav::showPlayer,
+                        icon = {
+                            Icon(
+                                Icons.Default.PlayCircle,
+                                contentDescription = if (labels) null else t("nav.playing"),
+                            )
+                        },
+                        label = if (labels) {
+                            { Text(t("nav.playing")) }
+                        } else {
+                            null
+                        },
+                    )
                     Tab.entries.forEach { tab ->
                         NavigationBarItem(
                             selected = nav.tab == tab && top == null,
@@ -194,22 +225,20 @@ fun MainScreen(nav: Nav) {
                                 Icon(
                                     when (tab) {
                                         Tab.Home -> Icons.Default.Home
-                                        Tab.Library -> Icons.Default.LibraryMusic
-                                        Tab.Search -> Icons.Default.Search
+                                        Tab.Library -> Icons.Default.Search
+                                        Tab.Mine -> Icons.Default.Favorite
+                                        Tab.Account -> Icons.Default.Settings
                                     },
-                                    contentDescription = null,
+                                    contentDescription = if (labels) null else t(tab.key),
                                 )
                             },
-                            label = { Text(tab.label) },
+                            label = if (labels) {
+                                { Text(t(tab.key)) }
+                            } else {
+                                null
+                            },
                         )
                     }
-                    NavigationBarItem(
-                        selected = top == Screen.NowPlaying,
-                        enabled = nav.player.current != null,
-                        onClick = nav::showPlayer,
-                        icon = { Icon(Icons.Default.PlayCircle, contentDescription = null) },
-                        label = { Text("Playing") },
-                    )
                 }
             }
         },
@@ -223,14 +252,17 @@ fun MainScreen(nav: Nav) {
             when (top) {
                 is Screen.Album -> AlbumScreen(top.id, nav)
                 is Screen.Artist -> ArtistScreen(top.id, nav)
+                is Screen.ArtistSongs -> ArtistSongsScreen(top.id, nav)
                 is Screen.Playlist -> PlaylistScreen(top.id, nav)
                 is Screen.Genre -> GenreScreen(top.name, nav)
                 Screen.Settings -> SettingsScreen(nav)
+                Screen.Year -> YearScreen(nav)
                 Screen.NowPlaying -> NowPlayingScreen(nav)
                 else -> when (nav.tab) {
                     Tab.Home -> HomeScreen(nav)
-                    Tab.Library -> LibraryScreen(nav)
-                    Tab.Search -> SearchScreen(nav)
+                    Tab.Library -> SearchScreen(nav)
+                    Tab.Mine -> YourMusicScreen(nav)
+                    Tab.Account -> SettingsScreen(nav)
                 }
             }
             LaunchedEffect(nav.message) {
@@ -257,7 +289,7 @@ fun MainScreen(nav: Nav) {
                                 undo()
                                 nav.message = null
                                 nav.undo = null
-                            }) { Text("Undo") }
+                            }) { Text(t("common.undo")) }
                         }
                     },
                 ) { Text(message) }
@@ -265,6 +297,7 @@ fun MainScreen(nav: Nav) {
         }
     }
     nav.menuFor?.let { SongMenu(it, nav) }
+    UpdatePrompt(nav)
 }
 
 /** The song playing, along the bottom. Opens Now Playing. */
@@ -302,11 +335,11 @@ private fun MiniPlayer(nav: Nav) {
             IconButton(onClick = player::toggle) {
                 Icon(
                     if (player.playing) Icons.Default.Pause else Icons.Default.PlayArrow,
-                    contentDescription = if (player.playing) "Pause" else "Play",
+                    contentDescription = if (player.playing) t("player.pause") else t("player.play"),
                 )
             }
             IconButton(onClick = player::next, enabled = player.upNext.isNotEmpty()) {
-                Icon(Icons.Default.SkipNext, contentDescription = "Next")
+                Icon(Icons.Default.SkipNext, contentDescription = t("player.next"))
             }
         }
     }

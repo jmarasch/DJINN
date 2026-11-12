@@ -1,6 +1,6 @@
 //! REST API mounted under `/api`.
 
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::http::{header, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::get;
@@ -13,9 +13,10 @@ use crate::error::ApiResult;
 
 use crate::state::AppState;
 use crate::{
-    accounts, ai, audio_api, auth, backup, cast_api, convert, folders, go, go_library,
-    identify_api, library_api, party_api, player_api, playlist_api, playlist_import, smart, sse,
-    submissions, system_api, tv_api, two_step, update,
+    accounts, ai, audio_api, auth, backup, cast_api, convert, duplicates, folders, go, go_library,
+    identify_api, library_api, likes_api, lyrics, mood_api, nodes, party_api, player_api,
+    playlist_api, playlist_import, problems_api, rooms_api, scheduled_check, smart, sse, stats_api,
+    submissions, system_api, tv_api, two_step, update, wishes_api,
 };
 
 pub fn router() -> Router<AppState> {
@@ -32,10 +33,23 @@ pub fn router() -> Router<AppState> {
         .merge(submissions::router())
         .merge(convert::router())
         .merge(library_api::router())
+        .merge(likes_api::router())
+        .merge(lyrics::router())
+        .merge(nodes::router())
+        .merge(crate::visuals::router())
+        .merge(crate::language::router())
+        .merge(rooms_api::router())
+        .merge(problems_api::router())
+        .merge(duplicates::router())
+        .merge(scheduled_check::router())
+        .merge(stats_api::router())
+        .merge(wishes_api::router())
         .merge(player_api::router())
         .merge(playlist_api::router())
         .merge(playlist_import::router())
         .merge(party_api::router())
+        .merge(mood_api::router())
+        .merge(crate::schedule::router())
         .merge(audio_api::router())
         .merge(tv_api::router())
         .merge(cast_api::router())
@@ -72,24 +86,44 @@ struct Join {
 
 /// The address guests open. Public: the join page is shown on a screen
 /// for people who aren't signed in yet.
-async fn join(State(state): State<AppState>) -> Json<Join> {
+/// A join link can name the room the guest walks into.
+#[derive(serde::Deserialize)]
+struct JoinQuery {
+    room: Option<i64>,
+}
+
+fn join_url_for(state: &AppState, room: Option<i64>) -> String {
+    match room.filter(|r| *r != djinn_store::MAIN_ROOM) {
+        Some(room) => format!("{}/?room={room}", state.join_url.base()),
+        None => state.join_url.get(),
+    }
+}
+
+async fn join(State(state): State<AppState>, Query(query): Query<JoinQuery>) -> Json<Join> {
     // Answers with the last check; a reload shows a newer one.
     crate::network::refresh(&state);
     Json(Join {
-        url: state.join_url.to_string(),
+        url: join_url_for(&state, query.room),
         public_network: state.network.public(),
     })
 }
 
-async fn join_qr(State(state): State<AppState>) -> ApiResult<impl IntoResponse> {
-    let code = QrCode::new(state.join_url.as_bytes()).map_err(anyhow::Error::from)?;
-    let svg = code
+async fn join_qr(
+    State(state): State<AppState>,
+    Query(query): Query<JoinQuery>,
+) -> ApiResult<impl IntoResponse> {
+    let url = join_url_for(&state, query.room);
+    Ok(([(header::CONTENT_TYPE, "image/svg+xml")], qr_svg(&url)?))
+}
+
+/// A QR code for `url`, as an SVG image.
+pub fn qr_svg(url: &str) -> anyhow::Result<String> {
+    Ok(QrCode::new(url.as_bytes())?
         .render::<svg::Color>()
         .min_dimensions(320, 320)
         .dark_color(svg::Color("#14111f"))
         .light_color(svg::Color("#ffffff"))
-        .build();
-    Ok(([(header::CONTENT_TYPE, "image/svg+xml")], svg))
+        .build())
 }
 
 async fn not_found() -> StatusCode {

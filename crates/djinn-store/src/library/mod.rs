@@ -34,6 +34,8 @@ pub struct Track {
     pub genre: Option<String>,
     pub duration_ms: Option<i64>,
     pub art_hash: Option<String>,
+    /// Lyrics found: 0 none (or not looked for yet), 1 words, 2 timed.
+    pub lyrics: i64,
 }
 
 // Column lists are macros so queries stay `&'static str` (built with
@@ -48,7 +50,9 @@ macro_rules! track_columns {
                 JOIN artists a ON a.id = ta.artist_id \
                 WHERE ta.track_id = t.id ORDER BY ta.position) c) AS credits, \
          t.track_no, t.disc_no, t.year, t.genre, t.duration_ms, \
-         coalesce(t.art_hash, (SELECT fa.art_hash FROM albums fa WHERE fa.id = t.album_id)) AS art_hash"
+         coalesce(t.art_hash, (SELECT fa.art_hash FROM albums fa WHERE fa.id = t.album_id)) AS art_hash, \
+         coalesce((SELECT CASE WHEN tl.synced IS NOT NULL THEN 2 WHEN tl.plain IS NOT NULL THEN 1 ELSE 0 END \
+                   FROM lyrics tl WHERE tl.track_id = t.id), 0) AS lyrics"
     };
 }
 pub(crate) use track_columns;
@@ -247,6 +251,18 @@ impl AlbumFilter {
     }
 }
 
+/// Which songs the song list shows, by their lyrics.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LyricsFilter {
+    #[default]
+    All,
+    /// Any lyrics, timed or not.
+    Words,
+    /// Timed lyrics only.
+    Timed,
+}
+
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum TrackSort {
@@ -409,6 +425,9 @@ pub struct ScannedTrack {
     /// `album_artist`, then the first credit.
     pub album_owner: Option<String>,
     pub replay_gain: ReplayGainTags,
+    /// Why the tags couldn't be read, if they couldn't. The song is still
+    /// listed, under its file name; Admin > Library > Problems shows it.
+    pub tag_problem: Option<String>,
 }
 
 /// ReplayGain values from a file's tags.
@@ -570,6 +589,17 @@ impl Store {
     }
 
     /// Playable tracks by id, in the order given (missing ones skipped).
+    /// The files of the songs with these ids that are still in the library.
+    pub async fn track_paths(&self, ids: &[i64]) -> Result<std::collections::HashMap<i64, String>> {
+        let rows: Vec<(i64, String)> = sqlx::query_as(
+            "SELECT id, path FROM tracks WHERE id IN (SELECT value FROM json_each(?)) AND removed_at IS NULL",
+        )
+        .bind(json_ids(ids))
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.into_iter().collect())
+    }
+
     pub async fn tracks_by_ids(&self, ids: &[i64]) -> Result<Vec<Track>> {
         let list = json_ids(ids);
         let found: Vec<Track> = sqlx::query_as(concat!(
@@ -769,6 +799,43 @@ impl Store {
             other_tracks,
         }))
     }
+
+    /// Every playable song an artist is credited on, a page at a time:
+    /// albums oldest first, each in track order, then songs without one.
+    /// With how many there are in all.
+    pub async fn artist_song_page(
+        &self,
+        id: i64,
+        offset: i64,
+        limit: i64,
+    ) -> Result<(i64, Vec<Track>)> {
+        let total: i64 = sqlx::query_scalar(concat!(
+            "SELECT count(*) FROM tracks t
+             WHERE EXISTS (SELECT 1 FROM track_artists ta WHERE ta.track_id = t.id AND ta.artist_id = ?)
+               AND ",
+            available!()
+        ))
+        .bind(id)
+        .fetch_one(&self.pool)
+        .await?;
+        let tracks = sqlx::query_as(concat!(
+            "SELECT ",
+            track_columns!(),
+            " FROM tracks t
+             LEFT JOIN albums al ON al.id = t.album_id
+             WHERE EXISTS (SELECT 1 FROM track_artists ta WHERE ta.track_id = t.id AND ta.artist_id = ?)
+               AND ",
+            available!(),
+            " ORDER BY al.id IS NULL, al.year, al.title, al.id, t.disc_no, t.track_no, t.title, t.id
+             LIMIT ? OFFSET ?"
+        ))
+        .bind(id)
+        .bind(limit.max(0))
+        .bind(offset.max(0))
+        .fetch_all(&self.pool)
+        .await?;
+        Ok((total, tracks))
+    }
 }
 
 /// Genres from several songs, each once, as "a, b, c"; `None` if there are
@@ -799,6 +866,8 @@ fn in_order<T>(ids: &[i64], found: Vec<T>, id: impl Fn(&T) -> i64) -> Vec<T> {
 
 mod browse;
 pub(crate) use browse::BrowseMemo;
+mod counts;
+pub use counts::Counts;
 mod editions;
 mod info;
 mod scan;

@@ -18,8 +18,50 @@
   Local network), then reload. Other browsers may work without it until
   they ask too.
 - **The address:** the join QR code and the address under it point at this
-  computer. If it changed (a new network), reopen the QR code. Admin >
-  System > **Status** lists every address phones can use.
+  computer. They follow it when the router gives it a new address (see
+  below). Admin > System > **Status** lists every address phones can use.
+
+## The computer's address changed
+
+Routers hand out addresses, and can give the DJINN computer a new one after
+a restart or a power cut, or when it moves from Wi-Fi to a cable. DJINN
+notices within about 10 seconds and carries on:
+
+- **Join links and QR codes** show the new address, on open pages and the TV
+  page too. Guests who joined before scan the code again.
+- **Casts** are started again with the new address.
+- **A box's own screen** (the install discs) shows the new address.
+- **Nodes** look for their main DJINN after 15 seconds without it: on the
+  network, at addresses it had before, and by its name. They only follow the
+  one with the certificate they paired with.
+- **DJINN GO for Android** looks for the server on the network when it can't
+  reach it, and follows it if it's the same server (encrypted connections
+  only).
+- For an hour after a change, DJINN announces itself on the network even if
+  **Let phones on this network find DJINN** is off, so phones and nodes
+  that knew the old address can find it.
+
+Web GO in a browser and saved bookmarks still have the old address: open the
+new one from Admin > System > **Status**, or use the name instead (below).
+
+### Keep the same address
+
+The most reliable fix is an address that never changes:
+
+- **Reserve it on the router.** Most routers have a page called DHCP
+  reservation, address reservation or static lease: pick the DJINN computer
+  from the list of devices and keep its current address. Nothing changes on
+  the computer itself. Do the same for each node.
+- **Use its name.** On most networks the computer also answers at
+  `http://<name>.local:8066`, listed last under Admin > System > **Status**
+  (`http://djinn.local:8066` on the install discs). Phones and laptops can bookmark
+  that instead of the numbers. Some Android phones and some routers don't
+  resolve these names; the reserved address always works.
+- **Tailscale.** If the DJINN computer and your phones run
+  [Tailscale](https://tailscale.com), its Tailscale address (`100.x.y.z`)
+  stays the same whatever the router does, at home and away. See
+  [Using GO away from home](djinn-go.md#tailscale-recommended). Nodes need
+  to be on the same home network as their main DJINN.
 
 ## No sound
 

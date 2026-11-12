@@ -21,6 +21,15 @@ use crate::EngineError;
 
 /// Bumped when the features change meaning, so songs get analyzed again.
 pub const FEATURES_VERSION: i64 = 1;
+/// Bumped when [`Analysis::print`] changes, so songs get analyzed again
+/// without the features (and the radio built on them) going stale.
+pub const PRINT_VERSION: i64 = 1;
+/// Audio the print covers, from the start.
+const PRINT_SECS: u64 = 45;
+/// Values kept: about 32 seconds after any silence at the start.
+pub const PRINT_LEN: usize = 256;
+/// Fewer values than this (a few seconds) can't tell songs apart.
+const PRINT_MIN: usize = 40;
 /// Length of [`Features::values`].
 pub const FEATURE_COUNT: usize = 37;
 
@@ -105,6 +114,10 @@ pub struct Analysis {
     pub loudness: Option<Loudness>,
     /// `None` for silence or very short files.
     pub features: Option<Features>,
+    /// The start of the song's Chromaprint fingerprint (raw, one value per
+    /// eighth of a second or so), to find copies of a song. `None` for
+    /// silence or very short files.
+    pub print: Option<Vec<u32>>,
 }
 
 /// Decodes the file once and measures its loudness and sound.
@@ -125,12 +138,30 @@ pub fn analyze(path: &Path) -> Result<Analysis, EngineError> {
     let mut stereo = Vec::new();
     let mut staged = Vec::new();
     let max = MAX_SECS * RATE as usize;
+    let print_config = rusty_chromaprint::Configuration::preset_test2();
+    let mut printer = rusty_chromaprint::Fingerprinter::new(&print_config);
+    let mut printing = printer.start(rate, 2).is_ok();
+    let print_max = PRINT_SECS * u64::from(rate) * 2;
+    let (mut printed, mut ints) = (0u64, Vec::new());
     loop {
         stereo.clear();
         if !decoder.decode_next(&mut stereo)? {
             break;
         }
         meter.add_frames_f32(&stereo).map_err(meter_error)?;
+        if printing {
+            let take = usize::try_from(print_max - printed).unwrap_or(usize::MAX);
+            ints.clear();
+            ints.extend(
+                stereo
+                    .iter()
+                    .take(take)
+                    .map(|s| (s.clamp(-1.0, 1.0) * f32::from(i16::MAX)) as i16),
+            );
+            printer.consume(&ints);
+            printed += ints.len() as u64;
+            printing = printed < print_max;
+        }
         if mono.len() >= max {
             continue;
         }
@@ -155,10 +186,49 @@ pub fn analyze(path: &Path) -> Result<Analysis, EngineError> {
         .filter_map(|c| meter.sample_peak(c).ok())
         .fold(0.0, f64::max);
     let loudness = lufs.is_finite().then_some(Loudness { lufs, peak });
+    printer.finish();
     Ok(Analysis {
         features: features(&mono, loudness.map(|l| l.lufs as f32)),
         loudness,
+        print: trim_print(printer.fingerprint()),
     })
+}
+
+/// A print without the silence at its start (all zeros), cut to
+/// [`PRINT_LEN`]. `None` if too little is left to tell songs apart.
+fn trim_print(raw: &[u32]) -> Option<Vec<u32>> {
+    let start = raw.iter().position(|&v| v != 0)?;
+    let print: Vec<u32> = raw[start..].iter().copied().take(PRINT_LEN).collect();
+    (print.len() >= PRINT_MIN).then_some(print)
+}
+
+/// How alike two prints are, from 0 (nothing alike) to 1 (the same): the
+/// share of matching bits at the best alignment within `max_shift` values
+/// either way, over at least `min_overlap` values.
+pub fn print_similarity(a: &[u32], b: &[u32], max_shift: usize, min_overlap: usize) -> f32 {
+    let mut best = 0.0f32;
+    for shift in 0..=max_shift {
+        for (turn, (x, y)) in [(a, b), (b, a)].into_iter().enumerate() {
+            // Unshifted, both ways round are the same comparison.
+            if shift == 0 && turn == 1 {
+                continue;
+            }
+            let Some(x) = x.get(shift..) else { continue };
+            let overlap = x.len().min(y.len());
+            if overlap < min_overlap.max(1) {
+                continue;
+            }
+            let differing: u32 = x
+                .iter()
+                .zip(y)
+                .take(overlap)
+                .map(|(p, q)| (p ^ q).count_ones())
+                .sum();
+            let same = 1.0 - differing as f32 / (overlap as f32 * 32.0);
+            best = best.max(same);
+        }
+    }
+    best
 }
 
 /// Decodes a whole file to interleaved stereo, a chunk at a time (for
@@ -685,6 +755,83 @@ mod tests {
         let major = features(&chord(&[261.63, 329.63, 392.0]), None).unwrap();
         let minor = features(&chord(&[261.63, 311.13, 392.0]), None).unwrap();
         assert!(major.values[11] > minor.values[11]);
+    }
+
+    /// Writes 16-bit mono PCM as a WAV file.
+    fn write_wav(path: &Path, rate: u32, samples: &[f32]) {
+        let data: Vec<u8> = samples
+            .iter()
+            .flat_map(|s| ((s.clamp(-1.0, 1.0) * 32_000.0) as i16).to_le_bytes())
+            .collect();
+        let mut out = Vec::with_capacity(44 + data.len());
+        out.extend_from_slice(b"RIFF");
+        out.extend_from_slice(&(36 + data.len() as u32).to_le_bytes());
+        out.extend_from_slice(b"WAVEfmt ");
+        out.extend_from_slice(&16u32.to_le_bytes());
+        out.extend_from_slice(&1u16.to_le_bytes());
+        out.extend_from_slice(&1u16.to_le_bytes());
+        out.extend_from_slice(&rate.to_le_bytes());
+        out.extend_from_slice(&(rate * 2).to_le_bytes());
+        out.extend_from_slice(&2u16.to_le_bytes());
+        out.extend_from_slice(&16u16.to_le_bytes());
+        out.extend_from_slice(b"data");
+        out.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        out.extend_from_slice(&data);
+        std::fs::write(path, out).unwrap();
+    }
+
+    /// A tune: a note every quarter second, from a seeded sequence, over
+    /// a little noise.
+    fn tune(seed: u32, secs: f32, rate: u32) -> Vec<f32> {
+        let mut state = seed;
+        let note = (rate / 4) as usize;
+        let total = (secs * rate as f32) as usize;
+        let hiss = noise(secs);
+        let mut out = Vec::with_capacity(total);
+        let mut freq = 440.0f32;
+        for i in 0..total {
+            if i % note == 0 {
+                state = state.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+                freq = 220.0 * 2f32.powf(((state >> 16) % 24) as f32 / 12.0);
+            }
+            let t = i as f32 / rate as f32;
+            out.push(0.5 * (2.0 * PI * freq * t).sin() + 0.05 * hiss[i % hiss.len()]);
+        }
+        out
+    }
+
+    #[test]
+    fn prints_find_the_same_song_and_not_another() {
+        let dir = std::env::temp_dir().join(format!("djinn-print-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let rate = 44_100;
+        let song = tune(7, 40.0, rate);
+        // The same song, quieter, after half a second of silence.
+        let mut copy = vec![0.0; rate as usize / 2];
+        copy.extend(song.iter().map(|s| s * 0.6));
+        let other = tune(99, 40.0, rate);
+        let paths = ["song.wav", "copy.wav", "other.wav"].map(|n| dir.join(n));
+        write_wav(&paths[0], rate, &song);
+        write_wav(&paths[1], rate, &copy);
+        write_wav(&paths[2], rate, &other);
+        let [a, b, c] = paths.map(|p| analyze(&p).unwrap().print.unwrap());
+        assert!(a.len() > 100 && a.len() <= PRINT_LEN);
+        let same = print_similarity(&a, &b, 16, 100);
+        let different = print_similarity(&a, &c, 16, 100);
+        assert!(same > 0.9, "same song: {same}");
+        assert!(different < 0.8, "different songs: {different}");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn print_similarity_finds_the_best_alignment() {
+        let a: Vec<u32> = (0..200u32).map(|i| i.wrapping_mul(2_654_435_761)).collect();
+        let shifted: Vec<u32> = std::iter::repeat_n(0, 5).chain(a.iter().copied()).collect();
+        assert!(print_similarity(&a, &a, 0, 50) > 0.999);
+        assert!(print_similarity(&a, &shifted, 8, 50) > 0.999);
+        assert!(print_similarity(&a, &shifted, 2, 50) < 0.8);
+        assert_eq!(print_similarity(&a[..10], &a, 0, 50), 0.0);
+        assert_eq!(trim_print(&[0, 0, 0]), None);
     }
 
     #[test]

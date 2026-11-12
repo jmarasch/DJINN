@@ -1,6 +1,7 @@
 package com.newterrastudios.djinn.go.data
 
 import android.content.Context
+import com.newterrastudios.djinn.go.i18n.t
 import android.content.Intent
 import androidx.core.content.FileProvider
 import kotlinx.coroutines.Dispatchers
@@ -24,6 +25,10 @@ data class AppRelease(
 /** Only ever newer: moving to a server with an older version offers nothing. */
 fun offeredUpdate(release: AppRelease?, installedCode: Long): AppRelease? =
     release?.takeIf { it.versionCode > installedCode }
+
+/** Whether to ask about an update when the app opens: once a version, unless turned off. */
+fun shouldAskAboutUpdate(release: AppRelease?, asking: Boolean, declined: Long): Boolean =
+    asking && release != null && release.versionCode != declined
 
 internal fun sha256Of(file: File): String {
     val digest = MessageDigest.getInstance("SHA-256")
@@ -56,7 +61,7 @@ class AppUpdater(private val context: Context, private val api: GoApi, private v
         }
         if (sha256Of(file) != release.sha256) {
             file.delete()
-            throw IOException("The download didn't match what the server said it was sending.")
+            throw IOException(t("update.mismatch"))
         }
         file
     }

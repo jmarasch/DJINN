@@ -35,7 +35,9 @@ pub struct AppState {
     /// watcher follows.
     pub roots_changed: Arc<Notify>,
     /// The URL guests open, shown on the join page.
-    pub join_url: Arc<String>,
+    pub join_url: Arc<crate::address::JoinUrl>,
+    /// Main DJINNs heard on the network, while this one isn't set up.
+    pub found_mains: Arc<std::sync::Mutex<Vec<crate::node_mode::FoundMain>>>,
     /// Whether Windows has the guests' network set to Public.
     pub network: Arc<crate::network::Watch>,
     /// Guests may join with just a name. Mirrors the `guest_mode` setting.
@@ -64,6 +66,15 @@ pub struct AppState {
     pub tickets: Arc<crate::two_step::Tickets>,
     /// DJINN GO's optional converting.
     pub converter: Arc<crate::convert::Converter>,
+    /// Copies of songs, worked out when asked and kept until the library
+    /// changes.
+    pub duplicates: Arc<tokio::sync::Mutex<Option<Arc<crate::duplicates::Duplicates>>>>,
+    /// The mix, timed, for nodes.
+    pub node_audio: Arc<crate::node_audio::Hub>,
+    /// Players for the other rooms, and who follows whom.
+    pub rooms: Arc<crate::rooms_rt::Rooms>,
+    /// First-time setup without the setup link (`server.open_setup`).
+    pub open_setup: Arc<AtomicBool>,
 }
 
 #[derive(Default)]
@@ -111,7 +122,8 @@ impl AppState {
             shutdown_request: Arc::new(Notify::new()),
             session_ending: Arc::new(AtomicBool::new(false)),
             roots_changed: Arc::new(Notify::new()),
-            join_url: Arc::new(String::new()),
+            join_url: Arc::default(),
+            found_mains: Arc::default(),
             network: Arc::default(),
             guest_mode: Arc::new(AtomicBool::new(false)),
             stream: None,
@@ -126,7 +138,31 @@ impl AppState {
             limiter: Arc::default(),
             tickets: Arc::default(),
             converter: Arc::default(),
+            duplicates: Arc::default(),
+            node_audio: Arc::default(),
+            rooms: Arc::default(),
+            open_setup: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    pub fn with_open_setup(self, open: bool) -> Self {
+        self.open_setup
+            .store(open, std::sync::atomic::Ordering::Release);
+        self
+    }
+
+    pub fn open_setup(&self) -> bool {
+        self.open_setup.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    pub fn with_rooms(mut self, rooms: crate::rooms_rt::Rooms) -> Self {
+        self.rooms = Arc::new(rooms);
+        self
+    }
+
+    pub fn with_node_audio(mut self, hub: crate::node_audio::Hub) -> Self {
+        self.node_audio = Arc::new(hub);
+        self
     }
 
     pub fn with_stream(mut self, stream: djinn_cast::stream::LiveStream, token: String) -> Self {
@@ -154,7 +190,7 @@ impl AppState {
     }
 
     pub fn with_join_url(mut self, url: String) -> Self {
-        self.join_url = Arc::new(url);
+        self.join_url = Arc::new(crate::address::JoinUrl::new(url));
         self
     }
 

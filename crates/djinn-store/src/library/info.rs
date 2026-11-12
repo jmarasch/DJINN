@@ -100,7 +100,7 @@ impl Store {
         .bind(artist_id)
         .fetch_all(&self.pool)
         .await?;
-        let mut tx = self.pool.begin().await?;
+        let mut tx = self.write().await?;
         sqlx::query("DELETE FROM artist_pictures WHERE artist_id = ?")
             .bind(artist_id)
             .execute(&mut *tx)
@@ -165,7 +165,7 @@ impl Store {
         {
             return Ok(false);
         }
-        let mut tx = self.pool.begin().await?;
+        let mut tx = self.write().await?;
         sqlx::query("DELETE FROM artist_pictures WHERE artist_id = ?")
             .bind(artist_id)
             .execute(&mut *tx)

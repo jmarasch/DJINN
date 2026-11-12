@@ -1,5 +1,17 @@
+import type { Visuals } from './visuals'
 import type {
+  MoodState,
+  PartySchedule,
+  RoomTiming,
+  TimingSpeaker,
   About,
+  Room,
+  RoomList,
+  NodeAudio,
+  NodeList,
+  Lyrics,
+  LyricsSettings,
+  LyricsStatus,
   ConvertSettings,
   Submission,
   UploadSettings,
@@ -58,6 +70,17 @@ import type {
   OutputList,
   OutputStatus,
   Page,
+  GoYear,
+  Wish,
+  SearchHistory,
+  Stats,
+  StatsFilter,
+  HistoryCounts,
+  ScheduledCheck,
+  DuplicateListing,
+  ProblemItem,
+  ProblemKind,
+  ProblemSummary,
   PartyStyle,
   PlayerState,
   ImportResult,
@@ -85,6 +108,7 @@ import type {
   ServerPorts,
   TagChange,
   UploadedBackup,
+  LyricsFilter,
   Track,
   TrackSort,
   TrackEdit,
@@ -130,6 +154,17 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   return res.json() as Promise<T>
 }
 
+/** A stats filter as query parameters. */
+export function statsQuery(filter: StatsFilter): string {
+  const params = new URLSearchParams()
+  if (filter.from != null) params.set('from', String(filter.from))
+  if (filter.until != null) params.set('until', String(filter.until))
+  if (filter.user != null) params.set('user', String(filter.user))
+  params.set('party', String(filter.party))
+  params.set('go', String(filter.go))
+  return params.toString()
+}
+
 const get = <T>(path: string) => request<T>('GET', path)
 const post = <T>(path: string, body?: unknown) => request<T>('POST', path, body ?? {})
 const put = <T>(path: string, body: unknown) => request<T>('PUT', path, body)
@@ -165,9 +200,10 @@ export const api = {
   goLikedIds: () => get<LikedIds>('/go/likes/ids'),
   goLike: (kind: LikeKind, id: number, on: boolean) =>
     on ? put<void>(`/go/likes/${kind}/${id}`, {}) : del<void>(`/go/likes/${kind}/${id}`),
-  goPlayed: (trackId: number, msPlayed: number) =>
-    post<void>('/go/plays', { track_id: trackId, ms_played: Math.round(msPlayed) }),
+  goPlayed: (trackId: number, msPlayed: number, playLess = false) =>
+    post<void>('/go/plays', { track_id: trackId, ms_played: Math.round(msPlayed), play_less: playLess }),
   goHistory: (offset = 0) => get<Played[]>(`/go/history?offset=${offset}`),
+  goYear: (year?: number) => get<GoYear>(year ? `/go/year?year=${year}` : '/go/year'),
   goResume: () => get<GoResume | null>('/go/resume'),
   goPrefs: () => get<GoPrefs>('/go/prefs'),
   setGoPrefs: (prefs: GoPrefs) => put<void>('/go/prefs', prefs),
@@ -196,28 +232,74 @@ export const api = {
   goApp: () => get<GoAppRelease | null>('/go/app'),
   saveGoSettings: (settings: { encryption: boolean; keep: GoKeepRules; server_name: string; discoverable: boolean; enabled: boolean; allow_remote: boolean; allow_plain_remote: boolean; https_hostname: string; upnp: boolean; trusted_proxies: string; admin_two_step: boolean }) =>
     put<GoStatus>('/go/settings', settings),
-  signIns: (limit = 200) => get<SignIn[]>(`/go/sign-ins?limit=${limit}`),
+  signIns: (offset = 0, limit = 50) => get<{ items: SignIn[]; total: number }>(`/sign-ins?offset=${offset}&limit=${limit}`),
+  clearSignIns: (keepDays: number) => del<{ cleared: number }>(`/sign-ins?older_than_days=${keepDays}`),
   turnOffUserTwoStep: (id: number) => del<void>(`/users/${id}/two-step`),
   logout: () => post<void>('/auth/logout'),
-  bootstrapStatus: () => get<{ needed: boolean }>('/auth/bootstrap'),
+  bootstrapStatus: () => get<{
+      needed: boolean
+      open?: boolean
+      address?: string | null
+      mains?: { name: string; address: string; joining: boolean }[]
+    }>('/auth/bootstrap'),
   mode: () => get<Mode>('/auth/mode'),
   joinAsGuest: (name: string) => post<User>('/auth/guest', { name }),
   /** A User when signed in right away; { pending: true } when the account waits for approval. */
   signUp: (username: string, password: string, invite?: string) =>
     post<User | { pending: true }>('/auth/signup', { username, password, invite }),
   checkInvite: (token: string) => get<{ role: string }>(`/auth/invite/${encodeURIComponent(token)}`),
+  bootstrapNode: (token: string) => post<void>('/auth/bootstrap/node', { token }),
   bootstrap: (token: string, username: string, password: string) =>
     post<User>('/auth/bootstrap', { token, username, password }),
 
   search: (q: string) => get<SearchResults>(`/search?q=${encodeURIComponent(q)}`),
   /** The query read by the AI reader; takes a few seconds. */
   ask: (q: string) => get<Described | null>(`/search/ask?q=${encodeURIComponent(q)}`),
+  trackLyrics: (id: number) => get<Lyrics | null>(`/tracks/${id}/lyrics`),
+  lyricsStatus: () => get<LyricsStatus>('/lyrics/status'),
+  lyricsSettings: () => get<LyricsSettings>('/lyrics/settings'),
+  setLyricsSettings: (settings: LyricsSettings) => put<void>('/lyrics/settings', settings),
+  recheckLyrics: () => post<void>('/lyrics/recheck'),
+  rooms: () => get<RoomList>('/rooms'),
+  chooseRoom: (roomId: number) => put<void>('/me/room', { room_id: roomId }),
+  createRoom: (name: string) => post<Room>('/rooms', { name }),
+  renameRoom: (id: number, name: string) => patch<void>(`/rooms/${id}`, { name }),
+  deleteRoom: (id: number) => del<void>(`/rooms/${id}`),
+  linkRoom: (id: number, to: number | null) => put<void>(`/rooms/${id}/link`, { to }),
+  placeOutput: (id: number, roomId: number) => put<void>(`/outputs/${id}/room`, { room_id: roomId }),
+  setNodeRoom: (id: number, roomId: number) => patch<void>(`/nodes/${id}`, { room_id: roomId }),
+  roomRules: (id: number) => get<{ max_queue: number; per_user_limit: number; skip_votes: number }>(`/rooms/${id}/rules`),
+  setRoomRules: (id: number, rules: { max_queue: number; per_user_limit: number; skip_votes: number }) =>
+    put<void>(`/rooms/${id}/rules`, rules),
+  roomQuiet: (id: number) => get<{ follow_main: boolean; takeover: 'now' | 'after_song' }>(`/rooms/${id}/quiet`),
+  setRoomQuiet: (id: number, rules: { follow_main: boolean; takeover: 'now' | 'after_song' }) =>
+    put<void>(`/rooms/${id}/quiet`, rules),
+  /** A one-time link that opens a node's own page, ready to manage it. */
+  nodeManageLink: (id: number) => post<{ url: string }>(`/nodes/${id}/manage`),
+  playSyncTone: (id: number) => post<void>(`/rooms/${id}/sync-tone`),
+  roomTiming: (id: number) => get<RoomTiming>(`/rooms/${id}/timing`),
+  /** Moves one speaker later (+ms) or earlier (-ms). */
+  nudgeTiming: (id: number, kind: TimingSpeaker['kind'], speaker: number, ms: number) =>
+    post<RoomTiming>(`/rooms/${id}/timing`, { kind, id: speaker, ms }),
+  nodes: () => get<NodeList>('/nodes'),
+  setNodeJoining: (joinOpen: boolean) => put<void>('/nodes/settings', { join_open: joinOpen }),
+  acceptNode: (id: number, password: string) => post<void>(`/nodes/${id}/accept`, { password }),
+  renameNode: (id: number, name: string) => patch<void>(`/nodes/${id}`, { name }),
+  removeNode: (id: number) => del<void>(`/nodes/${id}`),
+  setNodeAudio: (id: number, audio: NodeAudio) => put<void>(`/nodes/${id}/audio`, audio),
+  /** What node screens draw, for the whole house. */
+  visuals: () => get<Visuals>('/visuals'),
+  setVisuals: (visuals: Visuals) => put<Visuals>('/visuals', visuals),
+  /** The house's default language ('' for each device's own). */
+  language: () => get<{ default: string }>('/language'),
+  setLanguage: (code: string) => put<{ default: string }>('/language', { default: code }),
   artists: (sort: ArtistSort, offset: number) => get<Page<ArtistSummary>>(`/artists?sort=${sort}&offset=${offset}`),
   albums: (sort: AlbumSort, filter: AlbumFilter, offset: number) => get<Page<Album>>(`/albums?sort=${sort}&filter=${filter}&offset=${offset}`),
   /** Where each letter (or year) starts in a list, for the jump strip. */
   artistJumps: (sort: ArtistSort) => get<Jump[]>(`/artists/jumps?sort=${sort}`),
   albumJumps: (sort: AlbumSort, filter: AlbumFilter) => get<Jump[]>(`/albums/jumps?sort=${sort}&filter=${filter}`),
-  trackJumps: (sort: TrackSort) => get<Jump[]>(`/tracks/jumps?sort=${sort}`),
+  trackJumps: (sort: TrackSort, lyrics: LyricsFilter = 'all') =>
+    get<Jump[]>(`/tracks/jumps?sort=${sort}&lyrics=${lyrics}`),
   playWild: () => post<void>('/playlists/wild/play'),
   playRadio: (seed: RadioSeed) => post<void>('/playlists/radio/play', seed),
   trackTags: (id: number) => get<TrackTags>(`/tracks/${id}/tags`),
@@ -233,8 +315,8 @@ export const api = {
     get<GenreMap>(top && lines ? `/genres?top=${top}&lines=${lines}` : '/genres'),
   playlistFromSongs: (name: string, trackIds: number[]) =>
     post<PlaylistSummary>('/playlists/from-songs', { name, track_ids: trackIds }),
-  tracks: (sort: TrackSort, offset: number) =>
-    get<Page<Track>>(`/tracks?sort=${sort}&offset=${offset}`),
+  tracks: (sort: TrackSort, offset: number, lyrics: LyricsFilter = 'all') =>
+    get<Page<Track>>(`/tracks?sort=${sort}&offset=${offset}&lyrics=${lyrics}`),
   track: (id: number) => get<Track>(`/tracks/${id}`),
   similarTracks: (id: number) =>
     get<{ tracks: Track[]; analyzed: boolean; analysis_on: boolean }>(`/tracks/${id}/similar`),
@@ -264,6 +346,12 @@ export const api = {
   addRequest: (trackId: number) =>
     post<QueueItem & { outcome: 'added' | 'backed' }>('/queue', { track_id: trackId }),
   skipVote: () => post<{ skipped: boolean }>('/player/skip-vote'),
+  mood: () => get<MoodState>('/mood'),
+  nudgeMood: (value: number) => put<MoodState>('/mood', { value }),
+  saveMoodSettings: (settings: { on: boolean; strength: number }) => put<void>('/party/mood', settings),
+  partySchedule: (room: number) => get<PartySchedule>(`/party/schedule?room=${room}`),
+  savePartySchedule: (room: number, schedule: PartySchedule) =>
+    put<void>(`/party/schedule?room=${room}`, { on: schedule.on, rules: schedule.rules }),
   /** The live stream for Play here; null when the host turned it off. */
   listen: () => get<{ url: string | null }>('/listen'),
   trackEdit: (id: number) => get<TrackEdit>(`/tracks/${id}/edit`),
@@ -282,6 +370,8 @@ export const api = {
   play: () => post<void>('/player/play'),
   pause: () => post<void>('/player/pause'),
   skip: () => post<void>('/player/skip'),
+  /** Skips and counts it against the song, so the mix plays it less. */
+  skipLess: () => post<void>('/player/skip?less=1'),
   setVolume: (volume: number) => put<void>('/player/volume', { volume }),
   setCrossfade: (secs: number) => put<void>('/player/crossfade', { secs }),
 
@@ -381,6 +471,7 @@ export const api = {
   stopIdentify: () => post<void>('/identify/stop'),
   about: () => get<About>('/about'),
   systemStatus: () => get<SystemStatus>('/system/status'),
+  changedSettings: () => get<string[]>('/settings/changed'),
   systemPorts: () => get<ServerPorts>('/system/ports'),
   saveSystemPorts: (ports: { party_port: number; go_port: number }) => put<ServerPorts>('/system/ports', ports),
   systemLog: (level: string, q: string) =>
@@ -428,4 +519,32 @@ export const api = {
   libraryStatus: () => get<LibraryStatus>('/library/status'),
   openArtFolder: () => post<void>('/library/open-art-folder'),
   rescan: () => post<StartResponse>('/library/rescan'),
+  libraryProblems: () => get<ProblemSummary>('/library/problems'),
+  libraryProblemList: (kind: ProblemKind, offset = 0) =>
+    get<ProblemItem[]>(`/library/problems/${kind}?offset=${offset}&limit=100`),
+  duplicates: (offset = 0) => get<DuplicateListing>(`/library/duplicates?offset=${offset}`),
+  notDuplicates: (ids: number[]) => post<void>('/library/duplicates/dismiss', { ids }),
+  reportSong: (id: number, reason: string, note?: string) => post<void>(`/tracks/${id}/report`, { reason, note }),
+  clearSongReports: (trackId: number) => del<void>(`/library/reports/${trackId}`),
+  scheduledCheck: () => get<ScheduledCheck>('/library/scheduled'),
+  saveScheduledCheck: (on: boolean, hour: number) => put<ScheduledCheck>('/library/scheduled', { on, hour }),
+  wishesEnabled: () => get<boolean>('/wishes/enabled'),
+  addWish: (artist: string, title: string) => post<number>('/wishes', { artist, title }),
+  wishes: (status: 'open' | 'got' | 'ignored') => get<Wish[]>(`/wishes?status=${status}`),
+  setWish: (id: number, status: 'open' | 'got' | 'ignored') => put<void>(`/wishes/${id}`, { status }),
+  deleteWish: (id: number) => del<void>(`/wishes/${id}`),
+  searchHistory: (since: number, nothingFound: boolean) =>
+    get<SearchHistory>(`/stats/searches?since=${since}&nothing_found=${nothingFound}`),
+  clearSearchHistory: () => del<void>('/stats/searches'),
+  stats: (filter: StatsFilter) => get<Stats>(`/stats?${statsQuery(filter)}`),
+  recap: () => get<Stats | null>('/stats/recap'),
+  historyCounts: (filter: StatsFilter) => get<HistoryCounts>(`/stats/clear?${statsQuery(filter)}`),
+  clearHistory: (filter: StatsFilter) => post<HistoryCounts>('/stats/clear', filter),
+  likeIds: () => get<LikedIds>('/likes/ids'),
+  liked: () => get<Liked>('/likes'),
+  setLike: (kind: LikeKind, id: number, on: boolean) =>
+    on ? put<void>(`/likes/${kind}/${id}`, {}) : del<void>(`/likes/${kind}/${id}`),
+  artistSongs: (id: number, offset = 0, limit = 100) =>
+    get<{ total: number; tracks: Track[] }>(`/artists/${id}/songs?offset=${offset}&limit=${limit}`),
+  hideLibraryProblems: (kinds: ProblemKind[]) => put<{ kinds: ProblemKind[] }>('/library/problems/hidden', { kinds }),
 }

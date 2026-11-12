@@ -93,7 +93,10 @@ pub fn read(
             embedded_art = cover_picture(&file);
         }
         // Still list the file: symphonia may play what lofty can't parse.
-        Err(e) => tracing::debug!(path = path_str, error = %e, "unreadable tags"),
+        Err(e) => {
+            tracing::debug!(path = path_str, error = %e, "unreadable tags");
+            track.tag_problem = Some(e.to_string());
+        }
     }
     if track.title.is_empty() {
         track.title = path

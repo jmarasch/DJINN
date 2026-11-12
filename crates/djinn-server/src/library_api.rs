@@ -1,7 +1,7 @@
 //! Browsing the library: search, tracks, albums, artists, art, rescans,
 //! and tag corrections.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::Ordering;
 
 use axum::body::{to_bytes, Body};
@@ -12,8 +12,8 @@ use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use djinn_library::{art, ScanProgress};
 use djinn_store::{
-    Album, AlbumDetail, AlbumFilter, AlbumSort, ArtistDetail, ArtistSort, ArtistSummary, Jump,
-    Page, SearchResults, TagChange, TagEdit, Track, TrackSort,
+    Album, AlbumDetail, AlbumFilter, AlbumSort, ArtistDetail, ArtistSort, ArtistSummary, Counts,
+    Jump, Page, SearchResults, TagChange, TagEdit, Track, TrackSort,
 };
 use serde::{Deserialize, Serialize};
 
@@ -43,6 +43,7 @@ pub fn router() -> Router<AppState> {
         .route("/artists", get(artists))
         .route("/artists/jumps", get(artist_jumps))
         .route("/artists/{id}", get(artist))
+        .route("/artists/{id}/songs", get(artist_songs))
         .route(
             "/artists/{id}/pictures",
             get(artist_pictures).post(add_artist_picture),
@@ -85,7 +86,12 @@ struct SearchResponse {
     described: Option<crate::smart::Described>,
     /// The AI reader might understand it better: ask `/search/ask`.
     ask: bool,
+    /// Songs whose lyrics have the words, with the line that matched.
+    lyrics: Vec<crate::lyrics::LyricHit>,
 }
+
+/// Songs found by their words, at most.
+const LYRIC_HITS: i64 = 20;
 
 async fn search(
     CurrentUser(user): CurrentUser,
@@ -103,10 +109,19 @@ async fn search(
     let read = allowed.then(|| state.ai.reader.cached(&query.q)).flatten();
     let ask =
         allowed && read.is_none() && crate::smart::worth_asking(&state, &query.q, plain_found);
+    let described = crate::smart::describe(&state, &query.q, plain_found, read.as_ref()).await?;
+    let lyrics = crate::lyrics::search(&state, &query.q, LYRIC_HITS).await?;
+    let found = results.tracks.len()
+        + results.albums.len()
+        + results.artists.len()
+        + described.as_ref().map_or(0, |d| d.tracks.len())
+        + lyrics.len();
+    crate::wishes_api::log_search(&state, user.id, &query.q, found);
     Ok(Json(SearchResponse {
-        described: crate::smart::describe(&state, &query.q, plain_found, read.as_ref()).await?,
+        described,
         results,
         ask,
+        lyrics,
     }))
 }
 
@@ -134,6 +149,9 @@ struct PageQuery {
     limit: Option<i64>,
     #[serde(default)]
     sort: TrackSort,
+    /// Only songs with lyrics (`words`) or timed lyrics (`timed`).
+    #[serde(default)]
+    lyrics: djinn_store::LyricsFilter,
 }
 
 impl PageQuery {
@@ -154,24 +172,57 @@ struct ArtistQuery {
     sort: ArtistSort,
 }
 
+/// A row in the library's artist or album list, with how often its songs
+/// were played and how many people favorited it.
+#[derive(Serialize)]
+struct Counted<T> {
+    #[serde(flatten)]
+    item: T,
+    #[serde(flatten)]
+    counts: Counts,
+}
+
+fn counted<T>(
+    page: Page<T>,
+    id: impl Fn(&T) -> i64,
+    mut counts: HashMap<i64, Counts>,
+) -> Page<Counted<T>> {
+    Page {
+        total: page.total,
+        items: page
+            .items
+            .into_iter()
+            .map(|item| Counted {
+                counts: counts.remove(&id(&item)).unwrap_or_default(),
+                item,
+            })
+            .collect(),
+    }
+}
+
 async fn artists(
     _: CurrentUser,
     State(state): State<AppState>,
     Query(query): Query<ArtistQuery>,
-) -> ApiResult<Json<Page<ArtistSummary>>> {
+) -> ApiResult<Json<Page<Counted<ArtistSummary>>>> {
     let (offset, limit) = PageQuery {
         offset: query.offset,
         limit: query.limit,
         sort: TrackSort::default(),
+        lyrics: djinn_store::LyricsFilter::All,
     }
     .bounds();
     let show = settings::flag(&state.store, "show_collaboration_artists", true).await?;
-    Ok(Json(
-        state
-            .store
-            .artists_page_filtered(query.sort, show, offset, limit)
-            .await?,
-    ))
+    let page = state
+        .store
+        .artists_page_filtered(query.sort, show, offset, limit)
+        .await?;
+    let ids: Vec<i64> = page.items.iter().map(|a| a.id).collect();
+    let counts = state
+        .store
+        .artist_counts(&ids, play_count_percent(&state).await?)
+        .await?;
+    Ok(Json(counted(page, |a| a.id, counts)))
 }
 
 #[derive(Deserialize)]
@@ -189,19 +240,24 @@ async fn albums(
     _: CurrentUser,
     State(state): State<AppState>,
     Query(query): Query<AlbumQuery>,
-) -> ApiResult<Json<Page<Album>>> {
+) -> ApiResult<Json<Page<Counted<Album>>>> {
     let page = PageQuery {
         offset: query.offset,
         limit: query.limit,
         sort: TrackSort::default(),
+        lyrics: djinn_store::LyricsFilter::All,
     };
     let (offset, limit) = page.bounds();
-    Ok(Json(
-        state
-            .store
-            .albums_page_filtered(query.sort, query.filter, offset, limit)
-            .await?,
-    ))
+    let page = state
+        .store
+        .albums_page_filtered(query.sort, query.filter, offset, limit)
+        .await?;
+    let ids: Vec<i64> = page.items.iter().map(|a| a.id).collect();
+    let counts = state
+        .store
+        .album_counts(&ids, play_count_percent(&state).await?)
+        .await?;
+    Ok(Json(counted(page, |a| a.id, counts)))
 }
 
 /// Where each letter starts in the artist list, for the jump strip.
@@ -236,6 +292,10 @@ async fn track_jumps(
     State(state): State<AppState>,
     Query(page): Query<PageQuery>,
 ) -> ApiResult<Json<Vec<Jump>>> {
+    // A list picked by lyrics changes as they're found: no jumps for it.
+    if page.lyrics != djinn_store::LyricsFilter::All {
+        return Ok(Json(Vec::new()));
+    }
     Ok(Json(state.store.track_jumps(page.sort).await?))
 }
 
@@ -245,6 +305,8 @@ struct ListedTrack {
     #[serde(flatten)]
     track: Track,
     genres: Vec<String>,
+    #[serde(flatten)]
+    counts: Counts,
 }
 
 async fn tracks(
@@ -253,8 +315,16 @@ async fn tracks(
     Query(page): Query<PageQuery>,
 ) -> ApiResult<Json<Page<ListedTrack>>> {
     let (offset, limit) = page.bounds();
-    let found = state.store.tracks_page(page.sort, offset, limit).await?;
+    let found = state
+        .store
+        .tracks_page_filtered(page.sort, page.lyrics, offset, limit)
+        .await?;
     let mut genres = crate::smart::list_genres(&state, found.items.iter().map(|t| t.id));
+    let ids: Vec<i64> = found.items.iter().map(|t| t.id).collect();
+    let mut counts = state
+        .store
+        .track_counts(&ids, play_count_percent(&state).await?)
+        .await?;
     Ok(Json(Page {
         total: found.total,
         items: found
@@ -262,6 +332,7 @@ async fn tracks(
             .into_iter()
             .map(|track| ListedTrack {
                 genres: genres.remove(&track.id).unwrap_or_default(),
+                counts: counts.remove(&track.id).unwrap_or_default(),
                 track,
             })
             .collect(),
@@ -529,6 +600,33 @@ async fn album(
         .ok_or_else(ApiError::not_found)
 }
 
+#[derive(Deserialize)]
+struct SongPage {
+    #[serde(default)]
+    offset: i64,
+    limit: Option<i64>,
+}
+
+#[derive(Serialize)]
+struct ArtistSongs {
+    /// Songs in all.
+    total: i64,
+    tracks: Vec<djinn_store::Track>,
+}
+
+/// Every song by an artist, a page at a time (up to 5,000, enough to play
+/// them all).
+async fn artist_songs(
+    _: CurrentUser,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Query(page): Query<SongPage>,
+) -> ApiResult<Json<ArtistSongs>> {
+    let limit = page.limit.unwrap_or(100).clamp(1, 5000);
+    let (total, tracks) = state.store.artist_song_page(id, page.offset, limit).await?;
+    Ok(Json(ArtistSongs { total, tracks }))
+}
+
 async fn artist(
     _: CurrentUser,
     State(state): State<AppState>,
@@ -599,6 +697,8 @@ struct LibraryStatus {
     analysis: crate::events::LoudnessStatus,
     listening: crate::ai::Listening,
     lookup_running: bool,
+    /// Finding lyrics, alongside like the lookups.
+    lyrics: crate::lyrics::Progress,
     /// Where cover art and artist photos are cached.
     art_dir: String,
 }
@@ -611,6 +711,7 @@ async fn status(_: CurrentUser, State(state): State<AppState>) -> ApiResult<Json
         analysis: crate::audio_api::loudness_status(&state).await?,
         listening: crate::ai::listening(&state).await?,
         lookup_running: state.scan.lookup_running.load(Ordering::Acquire),
+        lyrics: crate::lyrics::progress(&state).await?,
         art_dir: state.art_dir.display().to_string(),
     }))
 }
@@ -720,6 +821,18 @@ pub fn lookup_status(state: &AppState) -> LookupStatus {
 /// Setting key: 1 to show slideshows of more artist pictures, from
 /// Wikimedia Commons (with artist photos and bios, and MusicBrainz).
 pub const ARTIST_PICTURES: &str = "artist_pictures";
+
+/// How much of a song a play must hear to count in the library lists, in percent.
+pub const PLAY_COUNT_PERCENT: &str = "play_count_percent";
+pub const PLAY_COUNT_PERCENT_DEFAULT: i64 = 50;
+
+async fn play_count_percent(state: &AppState) -> anyhow::Result<i64> {
+    Ok(
+        settings::number(&state.store, PLAY_COUNT_PERCENT, PLAY_COUNT_PERCENT_DEFAULT)
+            .await?
+            .clamp(0, 100),
+    )
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default)]
@@ -1411,6 +1524,7 @@ pub fn start_artist_lookup(state: &AppState, force: bool) -> bool {
                         }
                     }
                     let _ = state.events.send(ServerEvent::LibraryChanged);
+                    crate::duplicates::refresh(&state);
                     // New genres change search by description and similar
                     // artists.
                     if did_work {
@@ -1475,6 +1589,11 @@ pub fn start_scan(state: &AppState) -> bool {
                 if let Err(e) = crate::playlist_import::after_library_check(&state, changed).await {
                     tracing::error!(error = %format!("{e:#}"), "updating playlists failed");
                 }
+                if changed {
+                    if let Err(e) = crate::wishes_api::grant_wishes(&state).await {
+                        tracing::warn!(error = %format!("{e:#}"), "checking wishes failed");
+                    }
+                }
                 // Nothing new or gone: no artists to look up, no songs to
                 // measure, and the playlist is the same.
                 if !changed {
@@ -1486,10 +1605,13 @@ pub fn start_scan(state: &AppState) -> bool {
                 }
                 crate::audio_api::start_analysis(&state).await;
                 crate::ai::start(&state);
+                crate::lyrics::start(&state);
                 // New tracks may have joined albums and artists in the
                 // active playlist.
-                if let Err(e) = state.jukebox.lock().await.auto_mix_changed().await {
-                    tracing::error!(error = %format!("{e:#}"), "refreshing the queue failed");
+                for jukebox in state.all_jukeboxes() {
+                    if let Err(e) = jukebox.lock().await.auto_mix_changed().await {
+                        tracing::error!(error = %format!("{e:#}"), "refreshing the queue failed");
+                    }
                 }
             }
             Err(e) => tracing::error!(error = %e, "library scan failed"),

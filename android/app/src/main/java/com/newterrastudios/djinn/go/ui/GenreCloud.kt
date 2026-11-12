@@ -50,6 +50,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.media3.common.util.UnstableApi
 import com.newterrastudios.djinn.go.data.GenreList
+import com.newterrastudios.djinn.go.i18n.t
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlin.math.min
@@ -57,7 +58,8 @@ import kotlin.math.min
 private const val MAX_ZOOM = 3f
 private const val MOVE_MS = 350
 val GENRE_TOP_CHOICES = listOf(50, 100, 200, 300)
-val GENRE_LINE_CHOICES = listOf("Fewer" to 2, "Normal" to 4, "More" to 8)
+/** Line choices: (translation key, links per genre). */
+val GENRE_LINE_CHOICES = listOf("genres.fewer" to 2, "genres.normal" to 4, "genres.more" to 8)
 
 private data class Point(val x: Float, val y: Float)
 
@@ -152,7 +154,7 @@ fun GenreCloud(
         ) {
             if (nav.genrePath.isEmpty()) {
                 Text(
-                    "Top ${current?.dots?.size ?: 0} of ${list.genres.size} genres. Tap one to see what's near it.",
+                    t("genres.top_of", "shown" to (current?.dots?.size ?: 0), "n" to list.genres.size),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(8.dp),
@@ -177,7 +179,7 @@ fun GenreCloud(
             Canvas(
                 Modifier
                     .fillMaxSize()
-                    .semantics { contentDescription = "Genres and how they relate. The list view has the same genres." }
+                    .semantics { contentDescription = t("genres.cloud_description") }
                     .pointerInput(current, center) {
                         detectTapGestures { tap ->
                             val l = current ?: return@detectTapGestures
@@ -245,15 +247,15 @@ fun GenreCloud(
                 onClick = { nav.genrePath = emptyList() },
                 enabled = nav.genrePath.isNotEmpty(),
                 modifier = corner.align(Alignment.TopStart),
-            ) { Icon(Icons.Default.Home, "Back to the top") }
+            ) { Icon(Icons.Default.Home, t("genres.back_to_top")) }
             FilledTonalIconButton(onClick = ::showAll, modifier = corner.align(Alignment.TopEnd)) {
-                Icon(Icons.Default.FitScreen, "Fit this view")
+                Icon(Icons.Default.FitScreen, t("genres.fit"))
             }
             FilledTonalIconButton(onClick = { zoomBy(1.4f) }, modifier = corner.align(Alignment.BottomStart)) {
-                Icon(Icons.Default.Add, "Zoom in")
+                Icon(Icons.Default.Add, t("genres.zoom_in"))
             }
             FilledTonalIconButton(onClick = { zoomBy(1 / 1.4f) }, modifier = corner.align(Alignment.BottomEnd)) {
-                Icon(Icons.Default.Remove, "Zoom out")
+                Icon(Icons.Default.Remove, t("genres.zoom_out"))
             }
         }
         Row(
@@ -264,13 +266,13 @@ fun GenreCloud(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("Genres", style = MaterialTheme.typography.bodySmall)
+            Text(t("library.genres"), style = MaterialTheme.typography.bodySmall)
             GENRE_TOP_CHOICES.forEach { choice ->
                 FilterChip(selected = top == choice, onClick = { onTop(choice) }, label = { Text("$choice") })
             }
-            Text("Lines", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(start = 8.dp))
+            Text(t("genres.lines"), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(start = 8.dp))
             GENRE_LINE_CHOICES.forEach { (label, links) ->
-                FilterChip(selected = lines == links, onClick = { onLines(links) }, label = { Text(label) })
+                FilterChip(selected = lines == links, onClick = { onLines(links) }, label = { Text(t(label)) })
             }
         }
     }

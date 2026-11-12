@@ -18,7 +18,7 @@ pub fn start_tray(state: &AppState, listen: SocketAddr) -> Option<Tray> {
     let bootstrap = Arc::clone(&state.bootstrap_token);
     let shutdown = Arc::clone(&state.shutdown_request);
     let session_ending = Arc::clone(&state.session_ending);
-    let tooltip = format!("DJINN jukebox\n{}", state.join_url);
+    let tooltip = format!("DJINN jukebox\n{}", state.join_url.get());
 
     let result = Tray::spawn(tooltip, move |action| match action {
         TrayAction::Open => {

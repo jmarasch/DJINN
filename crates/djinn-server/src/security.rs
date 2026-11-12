@@ -130,12 +130,76 @@ pub const PARTY_CSP: HeaderValue = HeaderValue::from_static(
      connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; \
      frame-ancestors 'none'",
 );
+/// The TV and lyrics pages: the same, but a node's own page (on the box
+/// itself) may show them in a frame, over its visualizer.
+pub const SCREEN_CSP: HeaderValue = HeaderValue::from_static(
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; \
+     img-src 'self' data: blob: https://images.unsplash.com; media-src 'self' blob:; \
+     connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; \
+     frame-ancestors 'self' http://localhost:8066 http://127.0.0.1:8066",
+);
+/// Pages a node's screen shows in a frame.
+pub const SCREEN_PAGES: [&str; 2] = ["/tv", "/lyrics"];
 /// The same for DJINN GO's page.
 pub const GO_CSP: HeaderValue = HeaderValue::from_static(
     "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; \
      img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; \
      object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
 );
+
+/// Pages on a node's own port: its status page, which shows Main's TV or
+/// lyrics page in a frame (so frames may come from any DJINN address).
+pub const NODE_CSP: HeaderValue = HeaderValue::from_static(
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; \
+     img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; \
+     frame-src http: https:; object-src 'none'; base-uri 'none'; form-action 'self'; \
+     frame-ancestors 'none'",
+);
+
+/// Bytes as lowercase hex.
+pub fn hex(bytes: &[u8]) -> String {
+    use std::fmt::Write;
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        let _ = write!(out, "{b:02x}");
+    }
+    out
+}
+
+/// `n` random bytes from the system, hex encoded: tokens, ids and secrets.
+pub fn random_hex(n: usize) -> anyhow::Result<String> {
+    let mut bytes = vec![0u8; n];
+    getrandom::fill(&mut bytes).map_err(|e| anyhow::anyhow!("no system randomness: {e}"))?;
+    Ok(hex(&bytes))
+}
+
+/// `len` random characters from `alphabet`, each equally likely: a byte
+/// that would favor the alphabet's first letters is thrown away rather than
+/// wrapped around.
+pub fn random_text(len: usize, alphabet: &[u8]) -> anyhow::Result<String> {
+    debug_assert!(!alphabet.is_empty() && alphabet.len() <= 256);
+    let fair_below = 256 - (256 % alphabet.len());
+    let mut out = String::with_capacity(len);
+    let mut bytes = [0u8; 64];
+    while out.len() < len {
+        getrandom::fill(&mut bytes).map_err(|e| anyhow::anyhow!("no system randomness: {e}"))?;
+        for b in bytes {
+            if out.len() == len {
+                break;
+            }
+            if usize::from(b) < fair_below {
+                out.push(char::from(alphabet[usize::from(b) % alphabet.len()]));
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// Whether two secrets match, taking the same time whatever differs, so
+/// nobody learns how much of a guess was right from how fast it was refused.
+pub fn same_secret(a: &[u8], b: &[u8]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
 
 /// Security headers for a response. HSTS only through a proxy's HTTPS: on
 /// DJINN's own certificate, which browsers warn about, it would leave no way
@@ -598,6 +662,17 @@ mod tests {
         assert!(limiter.allow("signup", a, 2).is_err());
         assert_eq!(limiter.allow("guest", a, 2), Ok(()), "counted apart");
         assert_eq!(limiter.allow("signup", None, 2), Ok(()));
+    }
+
+    #[test]
+    fn hex_and_random_text() {
+        assert_eq!(hex(&[0, 15, 255]), "000fff");
+        assert_eq!(random_hex(16).unwrap().len(), 32);
+        let text = random_text(200, b"abc").unwrap();
+        assert_eq!(text.len(), 200);
+        assert!(text.bytes().all(|b| b"abc".contains(&b)));
+        assert!(same_secret(b"abc", b"abc"));
+        assert!(!same_secret(b"abc", b"abd") && !same_secret(b"abc", b"ab"));
     }
 
     #[test]

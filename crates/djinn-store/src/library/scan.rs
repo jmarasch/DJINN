@@ -16,7 +16,7 @@ impl Store {
 
     /// Inserts or updates scanned files in one transaction.
     pub async fn save_scanned(&self, tracks: &[ScannedTrack]) -> Result<()> {
-        let mut tx = self.pool.begin().await?;
+        let mut tx = self.write().await?;
         let now = now_ms();
         for track in tracks {
             save_track(&mut tx, track, now).await?;
@@ -30,7 +30,7 @@ impl Store {
     /// uses them). Run after a scan.
     pub async fn refresh_artwork(&self) -> Result<()> {
         let apart = self.get_setting(ALBUM_FOLDERS_KEY).await?.as_deref() != Some("0");
-        let mut tx = self.pool.begin().await?;
+        let mut tx = self.write().await?;
         // Files without an album-artist tag are provisionally filed under
         // their first credited artist. Compare the tracks in each album
         // folder after the scan, then collect multi-artist albums together.
@@ -169,7 +169,7 @@ impl Store {
     }
 
     pub async fn mark_removed(&self, ids: &[i64]) -> Result<()> {
-        let mut tx = self.pool.begin().await?;
+        let mut tx = self.write().await?;
         let now = now_ms();
         for id in ids {
             sqlx::query("UPDATE tracks SET removed_at = ? WHERE id = ? AND removed_at IS NULL")
@@ -317,6 +317,21 @@ async fn save_track(tx: &mut Transaction<'_, Sqlite>, t: &ScannedTrack, now: i64
     .bind(t.replay_gain.album_peak)
     .fetch_one(&mut **tx)
     .await?;
+    // Whether its tags could be read this time.
+    sqlx::query("DELETE FROM scan_problems WHERE path = ?")
+        .bind(&t.path)
+        .execute(&mut **tx)
+        .await?;
+    if let Some(problem) = &t.tag_problem {
+        sqlx::query(
+            "INSERT INTO scan_problems (path, kind, detail, noticed_at) VALUES (?, 'tags', ?, ?)",
+        )
+        .bind(&t.path)
+        .bind(problem)
+        .bind(now)
+        .execute(&mut **tx)
+        .await?;
+    }
     // A file that changed gets another chance to play.
     sqlx::query(
         "DELETE FROM track_problems WHERE track_id = ? AND (size IS NOT ? OR mtime IS NOT ?)",

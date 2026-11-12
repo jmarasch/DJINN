@@ -396,6 +396,54 @@ impl Store {
         offset: i64,
         limit: i64,
     ) -> Result<Page<Track>> {
+        self.tracks_page_filtered(sort, LyricsFilter::All, offset, limit)
+            .await
+    }
+
+    /// Playable tracks in the given order, only those with lyrics (or timed
+    /// lyrics) when asked. Lyrics come in while the list is kept, so they're
+    /// picked out of it each time (a few ms with `lyrics_words`/`lyrics_timed`).
+    pub async fn tracks_page_filtered(
+        &self,
+        sort: TrackSort,
+        lyrics: LyricsFilter,
+        offset: i64,
+        limit: i64,
+    ) -> Result<Page<Track>> {
+        if lyrics != LyricsFilter::All {
+            let sql = match lyrics {
+                LyricsFilter::Timed => "SELECT track_id FROM lyrics WHERE synced IS NOT NULL",
+                _ => "SELECT track_id FROM lyrics WHERE synced IS NOT NULL OR plain IS NOT NULL",
+            };
+            let with: std::collections::HashSet<i64> = sqlx::query_scalar(sql)
+                .fetch_all(&self.pool)
+                .await?
+                .into_iter()
+                .collect();
+            // Popular isn't kept as a list; newest first stands in for its
+            // order among songs with lyrics.
+            let order = if sort == TrackSort::Popular {
+                TrackSort::Added
+            } else {
+                sort
+            };
+            let list = self.track_list(order).await?;
+            let shown = Listed {
+                items: list
+                    .items
+                    .iter()
+                    .copied()
+                    .filter(|id| with.contains(id))
+                    .collect(),
+                jumps: Vec::new(),
+            };
+            let page = shown.page(offset, limit);
+            let total = shown.total();
+            return Ok(Page {
+                items: self.tracks_by_ids(page).await?,
+                total,
+            });
+        }
         if sort == TrackSort::Popular {
             let items = sqlx::query_as(concat!(
                 "SELECT ",

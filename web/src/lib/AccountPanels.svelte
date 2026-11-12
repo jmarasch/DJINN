@@ -1,10 +1,12 @@
 <script lang="ts">
-  // Your own account: username, password, two-step sign-in, and where you're signed
-  // in. Used by the party app's Account page and by DJINN GO.
+  // Your own account: the language on this device, username, password,
+  // two-step sign-in, and where you're signed in. Used by the party app's
+  // Account page and by DJINN GO.
   import { onMount } from 'svelte'
   import { api } from './api'
   import { deviceName } from './format'
   import { app } from './state.svelte'
+  import LanguagePicker from './LanguagePicker.svelte'
   import TwoStepPanel from './TwoStepPanel.svelte'
   import type { Device } from './types'
 
@@ -97,6 +99,8 @@
     new Date(ms).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 </script>
 
+<section class="card language-card"><LanguagePicker /></section>
+
 {#if app.me?.role !== 'guest'}
   <section class="card">
     <h2>Username</h2>
@@ -159,6 +163,18 @@
 </section>
 
 <style>
+  .language-card :global(label) {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+  }
+
+  .language-card :global(select) {
+    min-height: 40px;
+    font-size: 1rem;
+  }
+
   .stack {
     display: flex;
     flex-direction: column;
