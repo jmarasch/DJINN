@@ -295,8 +295,8 @@ impl Node {
         if let (Some(id), Some(secret)) = (id, secret) {
             return Ok((id, secret));
         }
-        let id = format!("node-{}", random_hex(8)?);
-        let secret = random_hex(32)?;
+        let id = format!("node-{}", crate::security::random_hex(8)?);
+        let secret = crate::security::random_hex(32)?;
         self.store.set_setting(NODE_ID, &id).await?;
         self.store.set_setting(NODE_SECRET, &secret).await?;
         Ok((id, secret))
@@ -682,7 +682,7 @@ impl Node {
             .bytes()
             .await
             .map_err(|e| format!("download from Main failed: {}", plain_error(&e)))?;
-        let got = crate::node_builds::hex(&Sha256::digest(&bytes));
+        let got = crate::security::hex(&Sha256::digest(&bytes));
         if got != update.sha256 {
             return Err("the download doesn't match what Main said it was".into());
         }
@@ -1078,7 +1078,7 @@ impl Node {
         if !response.status().is_success() {
             return Err("that link has expired or was already used: open Manage again".into());
         }
-        let cookie = random_hex(16).map_err(|e| e.to_string())?;
+        let cookie = crate::security::random_hex(16).map_err(|e| e.to_string())?;
         if let Ok(mut managers) = self.managers.lock() {
             let now = std::time::Instant::now();
             managers.retain(|_, until| *until > now);
@@ -1225,7 +1225,7 @@ async fn own_build() -> String {
         tokio::task::spawn_blocking(|| {
             std::env::current_exe()
                 .and_then(std::fs::read)
-                .map(|bytes| crate::node_builds::hex(&Sha256::digest(&bytes)))
+                .map(|bytes| crate::security::hex(&Sha256::digest(&bytes)))
                 .unwrap_or_default()
         })
         .await
@@ -1339,12 +1339,6 @@ fn node_settings(audio: Option<&crate::nodes::AudioSettings>) -> djinn_engine::N
     }
 }
 
-fn random_hex(bytes: usize) -> anyhow::Result<String> {
-    let mut buf = vec![0u8; bytes];
-    getrandom::fill(&mut buf).map_err(|e| anyhow::anyhow!("no system randomness: {e}"))?;
-    Ok(buf.iter().map(|b| format!("{b:02x}")).collect())
-}
-
 /// The error's own words, without reqwest's long chain.
 fn plain_error(e: &reqwest::Error) -> String {
     if e.is_timeout() {
@@ -1420,10 +1414,7 @@ impl ServerCertVerifier for Pin {
         _ocsp: &[u8],
         _now: UnixTime,
     ) -> Result<ServerCertVerified, rustls::Error> {
-        let fingerprint: String = Sha256::digest(end_entity.as_ref())
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect();
+        let fingerprint = crate::security::hex(&Sha256::digest(end_entity.as_ref()));
         if let Ok(mut seen) = self.seen.lock() {
             *seen = Some(fingerprint.clone());
         }
@@ -1527,7 +1518,20 @@ pub fn router(node: Node) -> Router {
         .route("/api/node/restart", post(restart))
         .route("/api/node/levels", get(levels))
         .fallback(crate::web::static_handler)
+        .layer(axum::middleware::from_fn(crate::security::same_origin))
+        .layer(axum::middleware::from_fn(node_headers))
         .with_state(node)
+}
+
+/// The same security headers as Main's pages, with the node's own policy.
+/// A node never sits behind a proxy's HTTPS, so no HSTS.
+async fn node_headers(
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    let mut response = next.run(request).await;
+    crate::security::set_headers(response.headers_mut(), crate::security::NODE_CSP, false);
+    response
 }
 
 /// The sound as this node's speaker plays it, for the screen's visualizer
@@ -1537,7 +1541,7 @@ async fn levels(
 ) -> axum::response::sse::Sse<
     impl futures_util::Stream<Item = Result<axum::response::sse::Event, std::convert::Infallible>>,
 > {
-    crate::node_audio::levels_events(node.levels.clone())
+    crate::node_audio::levels_events(node.levels)
 }
 
 #[derive(Serialize)]
@@ -2177,6 +2181,46 @@ mod tests {
             "the first look is noted"
         );
         assert_eq!(node.status().pairing, Pairing::Setup);
+    }
+
+    #[tokio::test]
+    async fn the_node_page_sends_security_headers_and_refuses_other_pages() {
+        use tower::ServiceExt;
+        let dir = std::env::temp_dir().join(format!("djinn-node-headers-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let node = Node::new(Store::open_in_memory().await.unwrap(), dir)
+            .await
+            .unwrap();
+        let app = router(node);
+        let req = axum::http::Request::builder()
+            .uri("/api/node/status")
+            .body(axum::body::Body::empty())
+            .unwrap();
+        let res = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let csp = res
+            .headers()
+            .get(axum::http::header::CONTENT_SECURITY_POLICY)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default();
+        assert!(csp.contains("frame-src http: https:"), "{csp}");
+        assert_eq!(
+            res.headers()
+                .get(axum::http::header::X_CONTENT_TYPE_OPTIONS)
+                .and_then(|v| v.to_str().ok()),
+            Some("nosniff")
+        );
+
+        // A page from somewhere else can't press the node's buttons.
+        let req = axum::http::Request::builder()
+            .method("POST")
+            .uri("/api/node/ask-again")
+            .header(axum::http::header::HOST, "192.168.1.9:8066")
+            .header(axum::http::header::ORIGIN, "http://evil.example")
+            .body(axum::body::Body::empty())
+            .unwrap();
+        let res = app.oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::FORBIDDEN);
     }
 
     #[tokio::test]

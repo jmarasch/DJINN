@@ -972,7 +972,7 @@ async fn setup_allowed(state: &AppState, token: &str) -> ApiResult<bool> {
         .clone();
     Ok(expected
         .as_deref()
-        .is_some_and(|t| constant_time_eq(t.as_bytes(), token.as_bytes())))
+        .is_some_and(|t| security::same_secret(t.as_bytes(), token.as_bytes())))
 }
 
 #[derive(Deserialize)]
@@ -1364,17 +1364,11 @@ fn session_token(headers: &HeaderMap) -> Option<String> {
 
 /// 32 random bytes, hex encoded.
 pub fn new_token() -> anyhow::Result<String> {
-    let mut bytes = [0u8; 32];
-    getrandom::fill(&mut bytes).map_err(|e| anyhow::anyhow!("no system randomness: {e}"))?;
-    Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
+    security::random_hex(32)
 }
 
 pub(crate) fn hash_token(token: &str) -> Vec<u8> {
     Sha256::digest(token.as_bytes()).to_vec()
-}
-
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
 /// Argon2 takes about 19 MB and a good part of a second each, so only a few

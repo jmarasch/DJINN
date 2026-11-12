@@ -269,9 +269,9 @@ mod tests {
         assert!(stops.next().is_none());
 
         let mut keeps = Picker::new(vec![a.clone()], true, vec![a.clone(), b.clone()]);
-        assert_eq!(keeps.next().map(|t| t.path), Some(a.clone()));
+        assert_eq!(keeps.next().map(|t| t.path), Some(a));
         // The only song not just played.
-        assert_eq!(keeps.next().map(|t| t.path), Some(b.clone()));
+        assert_eq!(keeps.next().map(|t| t.path), Some(b));
         assert!(keeps.next().is_some(), "carries on");
     }
 }

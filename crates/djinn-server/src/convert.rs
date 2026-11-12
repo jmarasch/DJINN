@@ -122,12 +122,9 @@ pub async fn converted_as(
         .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
         .map_or(0, |d| d.as_secs());
     let kind = if vbr { "|vbr" } else { "" };
-    let key: String = md5::Md5::digest(
+    let key = crate::security::hex(&md5::Md5::digest(
         format!("{}|{}|{modified}|{kbps}{kind}", path.display(), meta.len()).as_bytes(),
-    )
-    .iter()
-    .map(|b| format!("{b:02x}"))
-    .collect();
+    ));
     let dir = cache_dir(state);
     let target = dir.join(format!("{key}.mp3"));
     // Someone else converting the same file: wait for them.

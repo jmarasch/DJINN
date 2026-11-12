@@ -120,12 +120,7 @@ fn new_recovery_codes() -> anyhow::Result<(Vec<String>, Vec<Vec<u8>>)> {
     let mut codes = Vec::with_capacity(RECOVERY_CODES);
     let mut hashes = Vec::with_capacity(RECOVERY_CODES);
     for _ in 0..RECOVERY_CODES {
-        let mut bytes = [0u8; 10];
-        getrandom::fill(&mut bytes).map_err(|e| anyhow::anyhow!("no system randomness: {e}"))?;
-        let plain: String = bytes
-            .iter()
-            .map(|b| char::from(ALPHABET[usize::from(*b) % ALPHABET.len()]))
-            .collect();
+        let plain = crate::security::random_text(10, ALPHABET)?;
         hashes.push(recovery_hash(&plain));
         codes.push(format!("{}-{}", &plain[..5], &plain[5..]));
     }

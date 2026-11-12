@@ -96,10 +96,7 @@ pub fn security_code(fingerprint: &str) -> String {
 }
 
 fn fingerprint_of(certificate: &[u8]) -> String {
-    Sha256::digest(certificate)
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect()
+    crate::security::hex(&Sha256::digest(certificate))
 }
 
 /// The certificate in `dir`, made the first time.

@@ -62,12 +62,7 @@ pub fn release() -> Option<AppRelease> {
     Some(AppRelease {
         version: version.to_owned(),
         version_code: version_code(version)?,
-        sha256: file
-            .metadata
-            .sha256_hash()
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect(),
+        sha256: crate::security::hex(&file.metadata.sha256_hash()),
         size: file.data.len() as u64,
     })
 }

@@ -54,17 +54,13 @@ pub fn router() -> Router<AppState> {
 
 /// SHA-256 of a secret, hex.
 pub fn hash_secret(secret: &str) -> String {
-    hex(&Sha256::digest(secret.as_bytes()))
-}
-
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
+    crate::security::hex(&Sha256::digest(secret.as_bytes()))
 }
 
 /// The code both screens show for a request: from the node's id and its
 /// secret's hash, so the node works it out the same way.
 pub fn pairing_code(node_id: &str, secret_hash: &str) -> String {
-    let digest = hex(&Sha256::digest(
+    let digest = crate::security::hex(&Sha256::digest(
         format!("djinn-node:{node_id}:{secret_hash}").as_bytes(),
     ));
     format!(
@@ -76,11 +72,7 @@ pub fn pairing_code(node_id: &str, secret_hash: &str) -> String {
 
 /// Compares two strings in time that doesn't depend on where they differ.
 fn same(a: &str, b: &str) -> bool {
-    a.len() == b.len()
-        && a.bytes()
-            .zip(b.bytes())
-            .fold(0u8, |acc, (x, y)| acc | (x ^ y))
-            == 0
+    crate::security::same_secret(a.as_bytes(), b.as_bytes())
 }
 
 /// Node traffic only goes over the encrypted connection.
@@ -502,9 +494,7 @@ async fn manage_link(
     let address = node.address.ok_or_else(|| {
         ApiError::bad_request("this node hasn't checked in yet, so its address isn't known")
     })?;
-    let mut bytes = [0u8; 16];
-    getrandom::fill(&mut bytes).map_err(|e| anyhow::anyhow!("no system randomness: {e}"))?;
-    let token = hex(&bytes);
+    let token = crate::security::random_hex(16)?;
     let now = djinn_store::now_ms();
     if let Ok(mut links) = MANAGE_LINKS.lock() {
         links.retain(|link| link.2 > now);

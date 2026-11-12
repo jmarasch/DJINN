@@ -362,12 +362,7 @@ async fn new_app_password(
     }
     // 20 letters and digits: typed into phone apps, so no symbols.
     const ALPHABET: &[u8] = b"abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-    let mut bytes = [0u8; 20];
-    getrandom::fill(&mut bytes).map_err(|e| anyhow::anyhow!("no system randomness: {e}"))?;
-    let password: String = bytes
-        .iter()
-        .map(|b| char::from(ALPHABET[usize::from(*b) % ALPHABET.len()]))
-        .collect();
+    let password = crate::security::random_text(20, ALPHABET)?;
     state.store.set_subsonic_key(me.user.id, &password).await?;
     tracing::info!(username = %me.user.username, "app password made");
     Ok(Json(AppPassword { password }))

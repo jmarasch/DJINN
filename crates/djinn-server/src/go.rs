@@ -1598,7 +1598,7 @@ mod tests {
             },
             KeepRules {
                 away_days: MAX_AWAY_DAYS + 1,
-                ..good.clone()
+                ..good
             },
         ] {
             assert!(rules.check().is_err(), "{rules:?}");

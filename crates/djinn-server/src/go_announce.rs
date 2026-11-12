@@ -69,9 +69,7 @@ pub async fn server_id(store: &Store) -> anyhow::Result<String> {
             return Ok(id);
         }
     }
-    let mut bytes = [0u8; 8];
-    getrandom::fill(&mut bytes).map_err(|e| anyhow::anyhow!("no system randomness: {e}"))?;
-    let id: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+    let id = crate::security::random_hex(8)?;
     store.set_setting(SERVER_ID, &id).await?;
     Ok(id)
 }

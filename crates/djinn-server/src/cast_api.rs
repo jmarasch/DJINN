@@ -343,7 +343,7 @@ pub fn spawn_background(state: &AppState) {
 
 /// The join QR code as a PNG: what TVs show while they play the party.
 async fn join_png(State(state): State<AppState>, Path(token): Path<String>) -> Response {
-    if state.stream_token() != token {
+    if !crate::security::same_secret(state.stream_token().as_bytes(), token.as_bytes()) {
         return StatusCode::NOT_FOUND.into_response();
     }
     let Ok(code) = qrcode::QrCode::new(state.join_url.get().as_bytes()) else {
@@ -371,9 +371,7 @@ pub async fn token(store: &Store) -> anyhow::Result<String> {
 }
 
 fn new_stream_token() -> anyhow::Result<String> {
-    let mut bytes = [0u8; 16];
-    getrandom::fill(&mut bytes).map_err(|e| anyhow::anyhow!("no system randomness: {e}"))?;
-    Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
+    crate::security::random_hex(16)
 }
 
 /// Path of the live stream, relative to the server.
@@ -386,11 +384,9 @@ async fn live(
     Path(token): Path<String>,
     headers: axum::http::HeaderMap,
 ) -> Response {
-    let Some(stream) = state
-        .stream
-        .as_ref()
-        .filter(|_| state.stream_token() == token)
-    else {
+    let Some(stream) = state.stream.as_ref().filter(|_| {
+        crate::security::same_secret(state.stream_token().as_bytes(), token.as_bytes())
+    }) else {
         return StatusCode::NOT_FOUND.into_response();
     };
     // Internet radio players (Sonos, many receivers, VLC) ask for song

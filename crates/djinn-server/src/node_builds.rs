@@ -227,7 +227,7 @@ async fn download(dir: &Path, name: &str) -> Result<(), String> {
         .bytes()
         .await
         .map_err(|e| format!("download failed: {e}"))?;
-    let got = hex(&Sha256::digest(&bytes));
+    let got = crate::security::hex(&Sha256::digest(&bytes));
     if got != expected {
         return Err(format!("{name} doesn't match the signed checksum"));
     }
@@ -237,10 +237,6 @@ async fn download(dir: &Path, name: &str) -> Result<(), String> {
     std::fs::rename(&part, dir.join(name)).map_err(|e| e.to_string())?;
     std::fs::write(dir.join(format!("{name}.sha256")), &got).map_err(|e| e.to_string())?;
     Ok(())
-}
-
-pub fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// The update file for the asking node's processor.

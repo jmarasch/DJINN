@@ -797,19 +797,9 @@ mod tests {
     #[test]
     fn checks_the_signature() {
         let key = SigningKey::from_bytes(&[7u8; 32]);
-        let public: String = key
-            .verifying_key()
-            .as_bytes()
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect();
+        let public = crate::security::hex(key.verifying_key().as_bytes());
         let sums = b"abc123  djinn-linux-x86_64\n";
-        let signature: String = key
-            .sign(sums)
-            .to_bytes()
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect();
+        let signature = crate::security::hex(&key.sign(sums).to_bytes());
         assert!(signed(sums, &format!("{signature}\n"), &public));
         assert!(!signed(
             b"tampered  djinn-linux-x86_64\n",
