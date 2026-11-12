@@ -1,7 +1,11 @@
 <script lang="ts">
   // A screen's big title between two small waveforms, with an optional
   // line under it, as in the party app's Library, Favorites and Queue.
-  let { title, subtitle = '' }: { title: string; subtitle?: string } = $props()
+  let {
+    title,
+    subtitle = '',
+    align = 'center',
+  }: { title: string; subtitle?: string; align?: 'center' | 'left' } = $props()
   // Bar heights for each side's waveform, mirrored on the right.
   const left = [3, 6, 10, 15, 9, 13, 6, 4]
   const right = [...left].reverse()
@@ -15,7 +19,7 @@
   </svg>
 {/snippet}
 
-<header class="page-title">
+<header class="page-title" class:left={align === 'left'}>
   <div class="line">
     {@render wave(left)}
     <h1>{title}</h1>
@@ -28,6 +32,14 @@
   .page-title {
     margin: 8px 0 16px;
     text-align: center;
+  }
+
+  .left {
+    text-align: left;
+  }
+
+  .left .line {
+    justify-content: flex-start;
   }
 
   .line {

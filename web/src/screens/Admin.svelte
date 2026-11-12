@@ -24,6 +24,7 @@
   import ReplayGainPanel from '../lib/ReplayGainPanel.svelte'
   import SmartPlayPanel from '../lib/SmartPlayPanel.svelte'
   import SchedulePanel from '../lib/SchedulePanel.svelte'
+  import PageTitle from '../lib/PageTitle.svelte'
   import { adminGroups, adminTabLabel, type AdminTab } from '../lib/adminTabs'
   import { adminEntries, searchAdmin, type AdminEntry } from '../lib/adminSearch'
   import AdminHome from '../lib/AdminHome.svelte'
@@ -507,7 +508,22 @@
       <button class:active={layout === 'sections'} aria-pressed={layout === 'sections'} onclick={() => setLayout('sections')}>Sections</button>
     </div>
   {/if}
-  <input class="find" type="search" placeholder="Find a setting" aria-label="Find a setting" bind:value={query} />
+  <label class="find">
+    <Icon name="search" size={20} />
+    <input type="search" placeholder="Find a setting" aria-label="Find a setting" bind:value={query} />
+  </label>
+  <select
+    class="phone-sections"
+    aria-label="Admin section"
+    value={tab}
+    onchange={(e) => (location.hash = `#/admin/${e.currentTarget.value}`)}
+  >
+    {#each adminGroups as group (group.label)}
+      <optgroup label={group.label}>
+        {#each group.tabs as t (t.id)}<option value={t.id}>{t.label}</option>{/each}
+      </optgroup>
+    {/each}
+  </select>
   {#if query.trim()}
     <ul class="results">
       {#each results.slice(0, 12) as entry (entry.tab + entry.label)}
@@ -543,6 +559,7 @@
                 {/if}
               {:else}
                 <a href="#/admin/{t.id}" class:active={tab === t.id} aria-current={tab === t.id ? 'page' : undefined}>
+                  <Icon name={t.icon} size={20} />
                   {t.label}
                   {#if t.id === 'problems' && trouble > 0}<span class="badge">{trouble.toLocaleString()}</span>{/if}
                   {#if changedTabs.has(t.id)}<span class="changed-dot" title="Has settings changed from the default"></span>{/if}
@@ -574,7 +591,10 @@
 </aside>
 
 <div class="admin-content" bind:this={content}>
-{#if layout === 'sections'}<h1>{adminTabLabel(tab)}</h1>{/if}
+{#if layout === 'sections'}
+  <div class="crumbs small muted"><Icon name="home" size={16} /> Admin <Icon name="chevron-right" size={16} /> {adminTabLabel(tab)}</div>
+  <PageTitle title={adminTabLabel(tab)} align="left" />
+{/if}
 <PublicNetworkNote />
 
 {#if layout === 'page'}
@@ -602,7 +622,7 @@
   @media (min-width: 900px) {
     .admin {
       display: grid;
-      grid-template-columns: 220px minmax(0, 1fr);
+      grid-template-columns: 240px minmax(0, 1fr);
       gap: 24px;
       align-items: start;
     }
@@ -628,13 +648,64 @@
     flex-direction: column;
     gap: 10px;
     margin-bottom: 14px;
-    padding: 10px;
-    border-radius: 12px;
-    background: var(--surface);
+    padding: 12px;
+    border: 1px solid var(--edge);
+    border-radius: 18px;
+    background: var(--card-bg);
+    box-shadow: var(--glow);
+  }
+
+  .crumbs {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 4px;
+  }
+
+  .phone-sections {
+    width: 100%;
+    border-color: var(--edge);
+  }
+
+  /* Phones pick a section from the list; wide screens have the menu. */
+  .side nav {
+    display: none;
+  }
+
+  @media (min-width: 900px) {
+    .phone-sections {
+      display: none;
+    }
+
+    .side nav {
+      display: block;
+    }
   }
 
   .find {
-    width: 100%;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    padding: 0 0 0 12px;
+    border: 1px solid var(--edge);
+    border-radius: 12px;
+    background: var(--surface-2);
+    color: var(--muted);
+  }
+
+  .find:focus-within {
+    border-color: var(--edge-strong);
+    box-shadow: var(--glow-strong);
+  }
+
+  .find input,
+  .find input:focus-visible {
+    flex: 1;
+    min-width: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
   }
 
   .layout {
@@ -739,13 +810,22 @@
     border-top: 0;
   }
 
+  .group {
+    padding: 8px 0 6px;
+    border-top: 1px solid var(--edge);
+  }
+
+  .group:first-child {
+    border-top: 0;
+  }
+
   .group-label {
-    margin: 4px 4px 2px;
+    margin: 4px 10px 6px;
     color: var(--muted);
-    font-size: 0.75rem;
+    font-size: 0.7rem;
     font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.04em;
+    letter-spacing: 0.14em;
   }
 
   .links {
@@ -758,18 +838,34 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 6px;
-    min-height: 38px;
+    gap: 10px;
+    min-height: 40px;
     padding: 0 12px;
-    border-radius: 8px;
-    color: var(--muted);
+    border: 1px solid transparent;
+    border-radius: 12px;
+    color: var(--text);
     text-decoration: none;
   }
 
+  .links a :global(svg) {
+    flex: none;
+    color: var(--accent);
+  }
+
+  .links a:hover {
+    color: var(--text);
+  }
+
   .links a.active {
-    background: var(--surface-3);
+    border-color: var(--edge-strong);
+    background: linear-gradient(90deg, rgb(180 140 255 / 0.5), rgb(180 140 255 / 0.28));
+    box-shadow: var(--glow-strong);
     color: var(--text);
     font-weight: 600;
+  }
+
+  .links a.active :global(svg) {
+    color: var(--text);
   }
 
   .badge {

@@ -307,6 +307,11 @@ label {
   margin: 0;
 }
 
+.card h2 {
+  color: var(--text);
+  font-size: 1.125rem;
+}
+
 .muted {
   color: var(--muted);
 }

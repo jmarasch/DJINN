@@ -166,7 +166,7 @@
     <div class="phone-room"><RoomPicker /></div>
   </header>
 
-  <nav class="side" aria-label="Main navigation">
+  <nav class="side" class:rail={tab === 'admin'} aria-label="Main navigation">
     <a class="brand side-brand" href="#/" aria-label="DJINN">
       <Logo size={48} />
       <span class="brand-text">
@@ -301,7 +301,7 @@
 
   /* Admin's side menu needs room next to the page. */
   main.app-main.wide {
-    --main-max: 920px;
+    --main-max: 1140px;
   }
 
   @media (min-width: 900px) {
@@ -610,6 +610,42 @@
 
     .top-room {
       display: block;
+    }
+
+    /* On Admin pages the menu shrinks to icons, leaving room for Admin's own. */
+    :global(:root:has(nav.rail)) {
+      --side-width: 76px;
+    }
+
+    nav.rail {
+      padding: 20px 10px;
+    }
+
+    nav.rail .brand-text {
+      display: none;
+    }
+
+    /* Out of sight, but still each link's name for screen readers. */
+    nav.rail .tabs span,
+    nav.rail .extras span {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
+    }
+
+    nav.rail .side-brand {
+      justify-content: center;
+      padding: 0 0 14px;
+    }
+
+    nav.rail .tabs a,
+    nav.rail .extras a,
+    nav.rail .tune-in {
+      justify-content: center;
+      padding: 10px 0;
     }
 
     main.app-main {
