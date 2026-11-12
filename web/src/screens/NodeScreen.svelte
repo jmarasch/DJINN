@@ -166,6 +166,7 @@
     </div>
   {/if}
   <div class="card">
+    {#if status?.pairing !== 'joined'}<img class="waiting" src="/images/waiting-for-main.webp" alt="" />{/if}
     <h1>DJINN node</h1>
     {#if unreachable && !status}
       <p class="muted">Can't reach this node's DJINN. Is it running?</p>
@@ -310,6 +311,12 @@
 </main>
 
 <style>
+  .waiting {
+    align-self: center;
+    width: min(180px, 50vw);
+    height: auto;
+  }
+
   .blank {
     position: fixed;
     inset: 0;

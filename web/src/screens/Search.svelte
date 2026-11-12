@@ -169,7 +169,10 @@
 </div>
 
 {#if empty && !loading && !thinking && !described}
-  <p class="muted center">{t('search.no_matches', { query: query.trim() })}</p>
+  <div class="nothing">
+    <img src="/images/nothing-found.webp" alt="" />
+    <p class="muted">{t('search.no_matches', { query: query.trim() })}</p>
+  </div>
 {/if}
 
 {#if results}
@@ -217,6 +220,19 @@
 {/if}
 
 <style>
+  .nothing {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin-top: 24px;
+    text-align: center;
+  }
+
+  .nothing img {
+    width: min(170px, 50vw);
+    height: auto;
+  }
+
   /* The lyric line a search matched, under its song. */
   .quote {
     margin: -4px 0 10px 56px;

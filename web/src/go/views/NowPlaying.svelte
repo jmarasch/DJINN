@@ -218,7 +218,7 @@
     </section>
   {:else}
     <section class="empty">
-      <img src="/images/empty-record.webp" alt="" />
+      <img src="/images/nothing-playing.webp" alt="" />
       <h2>Nothing playing yet</h2>
       <p class="muted">Find something in the library to start listening.</p>
       <a class="button primary" href="#/search">Explore the library</a>

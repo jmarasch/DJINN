@@ -218,7 +218,7 @@
     {/if}
   {:else}
     <div class="idle">
-      <img src="/images/empty-record.webp" alt="" />
+      <img src="/images/nothing-playing.webp" alt="" />
       <h1>{t('playing.nothing')}</h1>
       <p class="muted">
         {app.output.error ? t('playing.output_problem', { error: app.output.error }) : t('playing.nothing_hint')}

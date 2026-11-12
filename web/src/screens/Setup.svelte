@@ -146,6 +146,7 @@
   </div>
 {:else if needed && kind === null}
   <div class="card">
+    <img class="shiny" src="/images/shiny-icon.webp" alt="" />
     <h1>Welcome to DJINN</h1>
     <p class="muted">What will this computer be?</p>
     <div class="kinds">
@@ -186,6 +187,12 @@
 {/if}
 
 <style>
+  .shiny {
+    align-self: center;
+    width: 112px;
+    height: 112px;
+  }
+
   .kinds {
     display: flex;
     flex-direction: column;

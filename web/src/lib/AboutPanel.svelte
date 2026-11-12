@@ -15,6 +15,7 @@
 
 {#if about}
   <section class="card">
+    <img class="shiny" src="/images/shiny-icon.webp" alt="" />
     <h2>DJINN {about.version}</h2>
     <p class="small muted">
       A party jukebox by New Terra Studios.{#if about.commit}
@@ -46,6 +47,12 @@
 {/if}
 
 <style>
+  .shiny {
+    align-self: center;
+    width: 120px;
+    height: 120px;
+  }
+
   .links {
     display: flex;
     flex-wrap: wrap;

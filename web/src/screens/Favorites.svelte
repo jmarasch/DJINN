@@ -24,7 +24,10 @@
 {#if !liked}
   <p class="muted small">Loading...</p>
 {:else if empty}
-  <p class="muted">Tap the heart on a song, album or artist to keep it here.</p>
+  <div class="empty">
+    <img src="/images/no-favorites.webp" alt="" />
+    <p class="muted">Tap the heart on a song, album or artist to keep it here.</p>
+  </div>
 {:else}
   {#if liked.artists.length}
     <h2>Artists</h2>
@@ -64,6 +67,18 @@
 {/if}
 
 <style>
+  .empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+  }
+
+  .empty img {
+    width: min(190px, 55vw);
+    height: auto;
+  }
+
   h2 {
     margin: 18px 0 8px;
     font-size: 1.05rem;

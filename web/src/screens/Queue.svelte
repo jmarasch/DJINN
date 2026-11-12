@@ -34,7 +34,7 @@
 </div>
 {#if app.queue.length === 0}
   <div class="empty">
-    <img src="/images/empty-record.webp" alt="" />
+    <img src="/images/empty-queue.webp" alt="" />
     <p class="muted">{t('queue.empty')}</p>
     <a class="button primary" href="#/search">{t('common.find_a_song')}</a>
   </div>
