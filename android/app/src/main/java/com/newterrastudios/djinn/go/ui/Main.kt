@@ -198,6 +198,22 @@ fun MainScreen(nav: Nav) {
                 // Icons only on phones; tablets (600 dp and wider) keep the words.
                 val labels = LocalConfiguration.current.screenWidthDp >= 600
                 NavigationBar {
+                    // Playing first, left of Home.
+                    NavigationBarItem(
+                        selected = top == Screen.NowPlaying,
+                        onClick = nav::showPlayer,
+                        icon = {
+                            Icon(
+                                Icons.Default.PlayCircle,
+                                contentDescription = if (labels) null else t("nav.playing"),
+                            )
+                        },
+                        label = if (labels) {
+                            { Text(t("nav.playing")) }
+                        } else {
+                            null
+                        },
+                    )
                     Tab.entries.forEach { tab ->
                         NavigationBarItem(
                             selected = nav.tab == tab && top == null,
@@ -223,21 +239,6 @@ fun MainScreen(nav: Nav) {
                             },
                         )
                     }
-                    NavigationBarItem(
-                        selected = top == Screen.NowPlaying,
-                        onClick = nav::showPlayer,
-                        icon = {
-                            Icon(
-                                Icons.Default.PlayCircle,
-                                contentDescription = if (labels) null else t("nav.playing"),
-                            )
-                        },
-                        label = if (labels) {
-                            { Text(t("nav.playing")) }
-                        } else {
-                            null
-                        },
-                    )
                 }
             }
         },
