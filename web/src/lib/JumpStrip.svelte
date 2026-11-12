@@ -189,6 +189,10 @@
     touch-action: none;
     user-select: none;
     -webkit-user-select: none;
+    border: 1px solid var(--edge);
+    border-radius: 999px;
+    background: var(--card-bg);
+    box-shadow: var(--glow);
   }
 
   /* No room beside the list (a phone): on the screen's edge. */
@@ -214,6 +218,7 @@
     font-weight: 600;
     line-height: 1.2;
     font-variant-numeric: tabular-nums;
+    text-shadow: 0 0 8px var(--accent);
   }
 
   .years button {
