@@ -409,7 +409,9 @@ mod playback_pool_tests {
                 .unwrap();
         }
         analysis.await.unwrap();
-        std::fs::remove_dir_all(dir).unwrap();
+        // Windows won't delete files that are still open.
+        store.close().await;
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[tokio::test]
