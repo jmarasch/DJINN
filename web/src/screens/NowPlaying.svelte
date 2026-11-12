@@ -20,6 +20,7 @@
   } from '../lib/state.svelte'
   import { checkPlayHere, playHere, startPlayHere, stopPlayHere } from '../lib/playHere.svelte'
   import { cycleTheme, theme } from '../lib/theme.svelte'
+  import Heart from '../lib/Heart.svelte'
   import LyricsView from '../lib/LyricsView.svelte'
   import type { Lyrics } from '../lib/types'
 
@@ -148,6 +149,9 @@
     <span></span>
   {/if}
   <div class="display-actions">
+    {#if app.rooms.length > 1}
+      <span class="room-pill"><Icon name="home" size={14} /> {app.rooms.find((r) => r.id === app.room)?.name ?? ''}</span>
+    {/if}
     <a class="button" href={app.room > 1 ? `/tv?room=${app.room}` : '/tv'} title="Switch to TV display">TV display</a>
     <a
       class="button"
@@ -225,7 +229,7 @@
     {/if}
     </div>
     {#if lyricsOpen}
-      <LyricsView {lyrics} position={currentPosition} />
+      <div class="lyrics-card"><LyricsView {lyrics} position={currentPosition} /></div>
     {/if}
   {:else}
     <div class="idle">
@@ -270,6 +274,8 @@
   {/if}
 
   {#if isAdmin()}
+    <details class="admin-controls">
+    <summary>{t('playing.controls')}</summary>
     <div class="controls">
       {#if app.player.state !== 'playing'}
         <button class="round big" aria-label="Play" onclick={() => control(api.play)}>
@@ -307,6 +313,7 @@
         {/if}
       </p>
     </div>
+    </details>
   {/if}
   </div>
 </section>
@@ -347,6 +354,7 @@
             <div class="ellipsis">{entry.track.title}</div>
             <div class="muted small ellipsis">{byline(entry.track.artist)}</div>
           </div>
+          <Heart kind="track" id={entry.track.id} name={entry.track.title} />
         </div>
       {/each}
     {/if}
@@ -512,6 +520,48 @@
     display: flex;
     align-items: center;
     gap: 8px;
+  }
+
+  .room-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 34px;
+    padding: 0 12px;
+    border: 1px solid var(--edge);
+    border-radius: 999px;
+    background: var(--surface);
+    box-shadow: var(--glow);
+    color: var(--text);
+    font-size: 0.8125rem;
+    font-weight: 600;
+  }
+
+  .lyrics-card {
+    margin-top: 8px;
+    padding: 12px;
+    border: 1px solid var(--edge);
+    border-radius: 14px;
+    background: var(--card-bg);
+    box-shadow: var(--glow);
+  }
+
+  /* The host's buttons and volume stay folded away until wanted. */
+  .admin-controls {
+    margin-top: 14px;
+    border: 1px solid var(--edge);
+    border-radius: 14px;
+    background: var(--surface);
+    padding: 0 14px 10px;
+  }
+
+  .admin-controls summary {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    color: var(--muted);
+    font-weight: 600;
   }
 
   .display-actions .button {

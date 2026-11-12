@@ -78,6 +78,7 @@
   },
   "playing.no_requests": "No requests yet. Yours could be next.",
   "playing.coming_up": "Coming up",
+  "playing.controls": "Controls",
   "playing.scan_alt": "Scan to add a song",
   "playing.add_a_song": "Add a song",
   "playing.scan_hint": "Scan with your phone, then choose from the library.",
