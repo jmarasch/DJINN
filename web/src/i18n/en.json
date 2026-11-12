@@ -577,5 +577,7 @@
   "visual.particles": "Particles",
   "visual.terrain": "Terrain",
   "visual.flyover": "Flyover",
-  "favorites.subtitle": "Your saved music"
+  "favorites.subtitle": "Your saved music",
+  "favorites.see_all": "See all",
+  "favorites.fewer": "Show fewer"
 }
