@@ -12,10 +12,21 @@
   --ok: #6fdc9b;
   --bad: #ff7a85;
   --bad-surface: #5a2430;
+  /* The second color, from the logo's waveform. */
+  --accent-2: #3fe0cf;
+  /* Neon edges: a thin lavender line with a soft glow around it. */
+  --edge: rgb(180 140 255 / 0.46);
+  --edge-strong: rgb(180 140 255 / 0.75);
+  --glow: 0 0 16px rgb(180 140 255 / 0.22);
+  --glow-strong: 0 0 18px rgb(180 140 255 / 0.42);
+  --card-bg: linear-gradient(180deg, rgb(39 33 58 / 0.82), rgb(26 22 39 / 0.9));
+  --page-bg:
+    radial-gradient(1100px 600px at 85% -10%, rgb(124 64 200 / 0.22), transparent 60%),
+    radial-gradient(900px 600px at -10% 110%, rgb(90 40 150 / 0.2), transparent 60%), #14111f;
 
   color-scheme: dark;
 
-  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-family: 'Outfit Variable', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   line-height: 1.45;
   color: var(--text);
   background: var(--bg);
@@ -39,6 +50,13 @@
     --ok: #1d8a4c;
     --bad: #c9303f;
     --bad-surface: #f9d7db;
+    --accent-2: #0d9488;
+    --edge: rgb(111 63 214 / 0.26);
+    --edge-strong: rgb(111 63 214 / 0.6);
+    --glow: 0 0 12px rgb(111 63 214 / 0.08);
+    --glow-strong: 0 0 14px rgb(111 63 214 / 0.25);
+    --card-bg: #ffffff;
+    --page-bg: radial-gradient(1100px 600px at 85% -10%, rgb(180 140 255 / 0.18), transparent 60%), #f6f4fb;
     color-scheme: light;
   }
 }
@@ -56,6 +74,13 @@
   --ok: #1d8a4c;
   --bad: #c9303f;
   --bad-surface: #f9d7db;
+  --accent-2: #0d9488;
+  --edge: rgb(111 63 214 / 0.26);
+  --edge-strong: rgb(111 63 214 / 0.6);
+  --glow: 0 0 12px rgb(111 63 214 / 0.08);
+  --glow-strong: 0 0 14px rgb(111 63 214 / 0.25);
+  --card-bg: #ffffff;
+  --page-bg: radial-gradient(1100px 600px at 85% -10%, rgb(180 140 255 / 0.18), transparent 60%), #f6f4fb;
   color-scheme: light;
 }
 
@@ -66,11 +91,14 @@
 body {
   margin: 0;
   min-height: 100dvh;
-  background: var(--bg);
+  background: var(--page-bg);
+  background-attachment: fixed;
 }
 
 h1 {
-  font-size: 1.625rem;
+  font-size: 1.75rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
   margin: 8px 0 12px;
 }
 
@@ -112,6 +140,7 @@ button.primary,
   background: var(--accent);
   color: var(--accent-text);
   font-weight: 600;
+  box-shadow: var(--glow-strong);
 }
 
 /* Something that deletes or stops things for everyone. */
@@ -134,6 +163,7 @@ button.round.big {
   height: 72px;
   background: var(--accent);
   color: var(--accent-text);
+  box-shadow: var(--glow-strong);
 }
 
 /* Icon-only buttons inside rows stay flat. */
@@ -162,6 +192,16 @@ select {
   background: var(--surface-2);
   color: var(--text);
   font: inherit;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
+}
+
+input:focus-visible,
+select:focus-visible {
+  outline: none;
+  border-color: var(--edge-strong);
+  box-shadow: var(--glow-strong);
 }
 
 .search-box input {
@@ -206,6 +246,7 @@ label {
 
 .chip {
   padding: 10px 16px;
+  border: 1px solid var(--edge);
   border-radius: 999px;
   background: var(--surface-2);
   color: var(--text);
@@ -245,8 +286,19 @@ label {
   gap: 12px;
   margin: 0 0 16px;
   padding: 16px;
-  border-radius: 14px;
-  background: var(--surface);
+  border: 1px solid var(--edge);
+  border-radius: 16px;
+  background: var(--card-bg);
+  box-shadow:
+    var(--glow),
+    inset 0 1px 0 rgb(255 255 255 / 0.04);
+}
+
+/* A panel with the neon edge but no card spacing, for lists and bars. */
+.neon {
+  border: 1px solid var(--edge);
+  background: var(--card-bg);
+  box-shadow: var(--glow);
 }
 
 .card h1,

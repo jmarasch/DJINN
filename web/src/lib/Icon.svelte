@@ -44,10 +44,19 @@
     | 'home'
     | 'lyrics'
     | 'lyrics-outline'
+    | 'playing'
+    | 'library'
+    | 'queue-play'
+    | 'book'
 
   let { name, size = 22 }: { name: Name; size?: number } = $props()
 
   const paths: Record<Name, string> = {
+    playing:
+      'M2 10.5h1.8v3H2zM5.2 8H7v8H5.2zM8.4 5h1.8v14H8.4zM11.6 3h1.8v18h-1.8zM14.8 6h1.8v12h-1.8zM18 8.5h1.8v7H18zM21.2 10.5H23v3h-1.8z',
+    library: 'M3 5h12v2H3zm0 4h12v2H3zm0 4h7v2H3zm14-6v8.3a3 3 0 1 0 2 2.7V9h3V7z',
+    'queue-play': 'M3 5h13v2H3zm0 5h13v2H3zm0 5h8v2H3zm11-1v7l6-3.5z',
+    book: 'M12 6.5C10.3 5.3 8 4.8 5.5 4.8c-1.3 0-2.5.2-3.5.5v13.5c1-.3 2.2-.5 3.5-.5 2.5 0 4.8.5 6.5 1.7 1.7-1.2 4-1.7 6.5-1.7 1.3 0 2.5.2 3.5.5V5.3c-1-.3-2.2-.5-3.5-.5-2.5 0-4.8.5-6.5 1.7zM11 17.6c-1.5-.7-3.4-1-5.5-1-.5 0-1 0-1.5.1V6.9c.5-.1 1-.1 1.5-.1 2 0 3.9.4 5.5 1.3zm9-1c-.5-.1-1-.1-1.5-.1-2.1 0-4 .3-5.5 1V8.1c1.6-.9 3.5-1.3 5.5-1.3.5 0 1 0 1.5.1z',
     play: 'M8 5v14l11-7z',
     upload: 'M9 16h6v-6h4l-7-7-7 7h4zM5 18v2h14v-2z',
     warning: 'M1 21h22L12 2zm12-3h-2v-2h2zm0-4h-2v-4h2z',

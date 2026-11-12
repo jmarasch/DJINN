@@ -1,5 +1,6 @@
 import './polyfills'
 import { mount } from 'svelte'
+import '@fontsource-variable/outfit'
 import './app.css'
 import App from './App.svelte'
 import { applyTheme } from './lib/theme.svelte'

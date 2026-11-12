@@ -135,13 +135,13 @@
     <button class="back" disabled={!navigation.canGoBack} onclick={goBack} aria-label="Back" title="Back">
       <Icon name="back" size={28} /><span>{t('nav.back')}</span>
     </button>
-    <a href="#/" class:active={tab === 'now'}><Icon name="disc" /><span>{t('nav.playing')}</span></a>
-    <a href="#/search" class:active={tab === 'search'}><Icon name="search" /><span>{t('nav.library')}</span></a>
+    <a href="#/" class:active={tab === 'now'}><Icon name="playing" /><span>{t('nav.playing')}</span></a>
+    <a href="#/search" class:active={tab === 'search'}><Icon name="library" /><span>{t('nav.library')}</span></a>
     {#if hasPlaylists()}
       <a href="#/favorites" class:active={tab === 'favorites'}><Icon name="heart" /><span>{t('nav.favorites')}</span></a>
     {/if}
     <a href="#/queue" class:active={tab === 'queue'}>
-      <Icon name="queue" />
+      <Icon name="queue-play" />
       <span>{t('nav.queue')}{app.queue.length ? ` (${app.queue.length})` : ''}</span>
     </a>
     <button class:active={showJoin} onclick={() => (showJoin = true)}><Icon name="qr" /><span>{t('nav.join')}</span></button>
@@ -235,7 +235,8 @@
     padding: calc(6px + env(safe-area-inset-top)) 4px 6px;
     background: color-mix(in srgb, var(--surface) 92%, transparent);
     backdrop-filter: blur(12px);
-    border-bottom: 1px solid var(--line);
+    border-bottom: 1px solid var(--edge);
+    box-shadow: var(--glow);
   }
 
   nav a,
@@ -263,7 +264,27 @@
 
   nav a.active,
   nav button.active {
+    position: relative;
     color: var(--accent);
+    text-shadow: 0 0 10px rgb(180 140 255 / 0.5);
+  }
+
+  nav a.active::after,
+  nav button.active::after {
+    content: '';
+    position: absolute;
+    left: 25%;
+    right: 25%;
+    bottom: 0;
+    height: 3px;
+    border-radius: 3px;
+    background: var(--accent);
+    box-shadow: var(--glow-strong);
+  }
+
+  nav a.active :global(svg),
+  nav button.active :global(svg) {
+    filter: drop-shadow(0 0 5px rgb(180 140 255 / 0.6));
   }
 
   nav .back {
