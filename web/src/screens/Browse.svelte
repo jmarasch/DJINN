@@ -311,7 +311,17 @@
           <div class="row-with-like">
             <a class="row" href="#/artist/{artist.id}">
               <Art hash={artist.art_hash} size={44} round={999} letter={initial(artist.name)} />
-              <span class="name ellipsis">{artist.name}</span>
+              <span class="name">
+                <span class="ellipsis block">{artist.name}</span>
+                {#if artist.about}<span class="muted small ellipsis block about">{artist.about}</span>{/if}
+              </span>
+              {#if artist.genres}
+                <span class="genre-chips">
+                  {#each artist.genres.split(',').slice(0, 3) as genre (genre)}
+                    <span class="genre-chip">{genre.trim()}</span>
+                  {/each}
+                </span>
+              {/if}
               <span class="muted small counts"
                 >{plural(artist.track_count, 'songs')}<Counts plays={artist.plays} likes={artist.likes} /></span
               >
@@ -519,7 +529,12 @@
     display: block;
   }
 
-  /* Genres sit beside an album on wide screens only. */
+  /* A bio's first lines sit under an artist's name on wide screens only. */
+  .about {
+    display: none;
+  }
+
+  /* Genres sit beside an album or artist on wide screens only. */
   .genre-chips {
     display: none;
   }
@@ -543,6 +558,10 @@
     .row {
       gap: 16px;
       padding: 6px 0;
+    }
+
+    .about {
+      display: block;
     }
 
     .genre-chips {

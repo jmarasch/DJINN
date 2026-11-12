@@ -760,6 +760,10 @@ export interface ArtistSummary {
   name: string
   art_hash: string | null
   track_count: number
+  /** In the library lists: the start of their bio. */
+  about?: string
+  /** In the library lists: comma separated. */
+  genres?: string
   /** In the library lists: plays, party and GO, skipped or not. */
   plays?: number
   /** In the library lists: how many people favorited it. */

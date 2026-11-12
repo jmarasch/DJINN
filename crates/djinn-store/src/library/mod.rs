@@ -181,6 +181,13 @@ pub struct ArtistSummary {
     pub art_hash: Option<String>,
     /// Playable tracks by this artist or on their albums.
     pub track_count: i64,
+    /// The start of their bio and their genres, in the library lists only.
+    #[sqlx(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub about: Option<String>,
+    #[sqlx(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub genres: Option<String>,
 }
 
 /// A name as sorted: a leading "The", "A", or "An" doesn't count, so The
@@ -553,7 +560,8 @@ macro_rules! artist_songs {
 // took seconds per page on a library of 36,000 songs.)
 macro_rules! artist_counts {
     () => {
-        "SELECT ar.id, ar.name, ar.art_hash, coalesce(c.track_count, 0) AS track_count \
+        "SELECT ar.id, ar.name, ar.art_hash, coalesce(c.track_count, 0) AS track_count, \
+         substr(ar.bio, 1, 240) AS about, ar.genres \
          FROM artists ar LEFT JOIN ( \
            SELECT artist_id, count(*) AS track_count FROM ( \
              SELECT ta.artist_id, ta.track_id FROM track_artists ta \
