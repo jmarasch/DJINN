@@ -7,6 +7,7 @@
   import JoinCard from './lib/JoinCard.svelte'
   import { goBack, navigation, param, route } from './lib/router.svelte'
   import Sheet from './lib/Sheet.svelte'
+  import LanguagePicker from './lib/LanguagePicker.svelte'
   import { app, connect, hasPlaylists, isAdmin, refreshMe, refreshMode } from './lib/state.svelte'
   import Toasts from './lib/Toasts.svelte'
   import Admin from './screens/Admin.svelte'
@@ -187,6 +188,9 @@
   {#if showJoin}
     <Sheet title={t('join.help_friend')} onclose={() => (showJoin = false)}>
       <JoinCard />
+      {#if app.me?.role === 'guest'}
+        <div class="join-language"><LanguagePicker /></div>
+      {/if}
     </Sheet>
   {/if}
 {/if}
@@ -194,6 +198,12 @@
 <Toasts />
 
 <style>
+  .join-language {
+    display: flex;
+    justify-content: center;
+    margin-top: 16px;
+  }
+
   main {
     max-width: 640px;
     margin: 0 auto;

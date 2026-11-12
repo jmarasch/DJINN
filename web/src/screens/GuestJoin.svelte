@@ -1,5 +1,6 @@
 <script lang="ts">
   import { t } from '../lib/i18n.svelte'
+  import LanguagePicker from '../lib/LanguagePicker.svelte'
   import { api } from '../lib/api'
   import { app, connect } from '../lib/state.svelte'
 
@@ -47,6 +48,8 @@
   {/if}
 </div>
 
+<div class="language"><LanguagePicker /></div>
+
 <button class="link host" onclick={() => (app.hostLogin = true)}>{t('join.host_sign_in')}</button>
 
 <style>
@@ -66,6 +69,12 @@
     background: transparent;
     color: var(--muted);
     text-decoration: underline;
+  }
+
+  .language {
+    display: flex;
+    justify-content: center;
+    margin-top: 12px;
   }
 
   .host {

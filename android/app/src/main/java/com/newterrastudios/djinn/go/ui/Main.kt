@@ -225,7 +225,6 @@ fun MainScreen(nav: Nav) {
                     }
                     NavigationBarItem(
                         selected = top == Screen.NowPlaying,
-                        enabled = nav.player.current != null,
                         onClick = nav::showPlayer,
                         icon = {
                             Icon(

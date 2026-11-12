@@ -18,6 +18,8 @@ import kotlinx.coroutines.launch
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.OfflinePin
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.outlined.MicNone
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -76,6 +78,7 @@ fun Row2(
     art: @Composable () -> Unit,
     onClick: () -> Unit,
     end: @Composable () -> Unit = {},
+    titleMark: @Composable () -> Unit = {},
 ) {
     Row(
         Modifier
@@ -87,7 +90,10 @@ fun Row2(
     ) {
         art()
         Column(Modifier.weight(1f)) {
-            Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                titleMark()
+            }
             if (!subtitle.isNullOrEmpty()) {
                 Text(
                     subtitle,
@@ -117,6 +123,7 @@ fun SongRow(track: Track, nav: Nav, note: String? = null, onClick: () -> Unit) {
         title = track.title,
         subtitle = line,
         art = { Art(nav.api.artUrl(track.artHash), 44.dp) },
+        titleMark = { LyricsMark(track.lyrics) },
         onClick = {
             // With nothing playing a tap always plays.
             when {
@@ -152,6 +159,19 @@ fun SongRow(track: Track, nav: Nav, note: String? = null, onClick: () -> Unit) {
                 Icon(Icons.Default.MoreVert, contentDescription = t("go.more_for", "title" to track.title))
             }
         },
+    )
+}
+
+/** Beside a song's title: a hollow microphone for lyrics, a filled one when they're timed. */
+@Composable
+fun LyricsMark(lyrics: Int) {
+    if (lyrics <= 0) return
+    val timed = lyrics >= 2
+    Icon(
+        if (timed) Icons.Default.Mic else Icons.Outlined.MicNone,
+        contentDescription = t(if (timed) "lyrics.timed_mark" else "lyrics.words_mark"),
+        tint = if (timed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(start = 4.dp).size(14.dp),
     )
 }
 

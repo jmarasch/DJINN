@@ -33,6 +33,8 @@ data class Track(
     /** In the library lists: plays (party and GO) and how many people favorited it. */
     val plays: Long = 0,
     val likes: Long = 0,
+    /** 0 no lyrics, 1 plain words, 2 timed lines. */
+    val lyrics: Int = 0,
 )
 
 @Serializable
