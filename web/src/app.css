@@ -86,6 +86,7 @@
 
 * {
   box-sizing: border-box;
+  scrollbar-color: var(--surface-3) transparent;
 }
 
 body {

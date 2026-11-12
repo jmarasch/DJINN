@@ -414,7 +414,8 @@
     display: flex;
     gap: 4px;
     padding: 4px;
-    border-radius: 12px;
+    border: 1px solid var(--edge);
+    border-radius: 14px;
     background: var(--surface);
   }
 
@@ -450,9 +451,10 @@
 
   .tabs button.active,
   .views button.active {
-    background: var(--surface-3);
-    color: var(--text);
+    background: var(--accent);
+    color: var(--accent-text);
     font-weight: 600;
+    box-shadow: var(--glow-strong);
   }
 
   /* An artist's song and play counts stay on one line beside the name. */

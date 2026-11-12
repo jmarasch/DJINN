@@ -4,6 +4,7 @@
   import Art from '../lib/Art.svelte'
   import ScrollRow from '../lib/ScrollRow.svelte'
   import Browse from './Browse.svelte'
+  import PageTitle from '../lib/PageTitle.svelte'
   import Icon from '../lib/Icon.svelte'
   import TrackRow from '../lib/TrackRow.svelte'
   import NotInLibrary from '../lib/NotInLibrary.svelte'
@@ -139,6 +140,8 @@
   {/if}
 {/snippet}
 
+<PageTitle title={t('nav.library')} subtitle={t('library.subtitle')} />
+
 <div class="search-box" bind:this={searchBox}>
   <Icon name="search" />
   <div class="field">
@@ -273,15 +276,30 @@
 
   .search-box {
     position: sticky;
-    top: var(--nav-height, 0px);
+    top: calc(var(--nav-height, 0px) + 8px);
     z-index: 5;
     display: flex;
     align-items: center;
     gap: 10px;
-    margin: 0 -16px;
-    padding: 12px 16px;
-    background: var(--bg);
+    margin: 0 0 12px;
+    padding: 2px 6px 2px 16px;
+    border: 1px solid var(--edge);
+    border-radius: 16px;
+    background: var(--surface-2);
+    box-shadow: var(--glow);
     color: var(--muted);
+  }
+
+  .search-box:focus-within {
+    border-color: var(--edge-strong);
+    box-shadow: var(--glow-strong);
+  }
+
+  .search-box :global(input),
+  .search-box :global(input:focus-visible) {
+    border: 0;
+    background: transparent;
+    box-shadow: none;
   }
 
   .field {

@@ -12,6 +12,7 @@
   "nav.queue": "Warteschlange",
   "nav.join": "Beitreten",
   "nav.playlists": "Playlists",
+  "nav.menu": "Menü",
   "join.welcome_back": "Willkommen zurück, {name}!",
   "join.joining": "Trete bei...",
   "join.continue_as": "Weiter als {name}",
@@ -49,6 +50,7 @@
   },
   "queue.ask_for_too": "{title} auch wünschen",
   "queue.remove": "{title} entfernen",
+  "queue.subtitle": "Als Nächstes · gewünschte Songs",
   "playing.skipped": "Übersprungen",
   "playing.vote_counted": "Stimme gezählt",
   "playing.vote_failed": "Abstimmen nicht möglich",
@@ -56,6 +58,10 @@
   "playing.now_playing": "Läuft gerade",
   "playing.requested_by": "Gewünscht von {name}",
   "playing.lyrics": "Songtext",
+  "playing.tune_in": "Hier hören",
+  "playing.tune_in_hint": "Die Party auf diesem Gerät hören",
+  "playing.tune_in_on": "Ein paar Sekunden hinter den Lautsprechern. Nutze die Lautstärke dieses Geräts.",
+  "playing.tune_in_connecting": "Verbinde...",
   "playing.skip_mine": "Meinen Song überspringen",
   "playing.skip_resting": "Nach diesem Song kannst du wieder fürs Überspringen stimmen",
   "playing.voted": "Fürs Überspringen gestimmt · {votes} von {needed}",
@@ -519,6 +525,7 @@
   "problem.file_missing": "Datei fehlt",
   "problem.wont_play": "Datei lässt sich nicht abspielen",
   "library.jump_to": "Springe zu {label}",
+  "library.subtitle": "Musik stöbern und wünschen",
   "update.mismatch": "Der Download passt nicht zu dem, was der Server angekündigt hat.",
   "go.album_queued": {
     "one": "{n} Lied zur Warteschlange hinzugefügt",
@@ -568,5 +575,6 @@
   "visual.circle": "Kreis",
   "visual.particles": "Partikel",
   "visual.terrain": "Landschaft",
-  "visual.flyover": "Überflug"
+  "visual.flyover": "Überflug",
+  "favorites.subtitle": "Deine gespeicherte Musik"
 }

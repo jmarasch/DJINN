@@ -1,4 +1,6 @@
 <script lang="ts">
+  import PageTitle from '../lib/PageTitle.svelte'
+  import { t } from '../lib/i18n.svelte'
   // Your favorites: the artists, albums and songs you've hearted.
   import { api } from '../lib/api'
   import Art from '../lib/Art.svelte'
@@ -20,7 +22,7 @@
   const empty = $derived(liked && !liked.artists.length && !liked.albums.length && !liked.tracks.length)
 </script>
 
-<h1>Favorites</h1>
+<PageTitle title={t('nav.favorites')} subtitle={t('favorites.subtitle')} />
 {#if !liked}
   <p class="muted small">Loading...</p>
 {:else if empty}

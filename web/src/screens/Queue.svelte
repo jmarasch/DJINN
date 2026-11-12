@@ -1,10 +1,10 @@
 <script lang="ts">
   import { t } from '../lib/i18n.svelte'
-  import RoomPicker from '../lib/RoomPicker.svelte'
   import { api } from '../lib/api'
   import Art from '../lib/Art.svelte'
   import { byline, duration } from '../lib/format'
   import Icon from '../lib/Icon.svelte'
+  import PageTitle from '../lib/PageTitle.svelte'
   import { app, askedBy, cancelRequest, involvement, isAdmin, requestTrack, toast } from '../lib/state.svelte'
   import type { QueueItem } from '../lib/types'
 
@@ -28,10 +28,7 @@
   }
 </script>
 
-<div class="queue-title">
-  <h1>{t('queue.title')}</h1>
-  <RoomPicker />
-</div>
+<PageTitle title={t('queue.title')} subtitle={t('queue.subtitle')} />
 {#if app.queue.length === 0}
   <div class="empty">
     <img src="/images/empty-queue.webp" alt="" />
@@ -45,8 +42,9 @@
   </p>
   <ol>
     {#each app.queue as item, i (item.id)}
-      <li>
-        <Art hash={item.track.art_hash} size={44} />
+      <li class="neon">
+        <span class="num">{i + 1}</span>
+        <Art hash={item.track.art_hash} size={56} round={10} />
         <div class="text">
           <div class="ellipsis">{item.track.title}</div>
           <div class="muted small ellipsis">
@@ -55,9 +53,14 @@
           </div>
           <div class="who small">
             {t('queue.for', { name: askedBy(item) })}
-            {#if item.backers.length}<span class="count">{t('queue.asked', { n: item.backers.length + 1 })}</span>{/if}
           </div>
         </div>
+        {#if item.backers.length}
+          <span class="people" title={t('queue.asked', { n: item.backers.length + 1 })}>
+            <Icon name="person" size={16} />
+            {item.backers.length + 1}
+          </span>
+        {/if}
         {#if involvement(item) === null && !app.pending.has(item.track.id)}
           <button class="metoo" aria-label={t('queue.ask_for_too', { title: item.track.title })} onclick={() => requestTrack(item.track.id)}>
             <Icon name="up" />
@@ -92,14 +95,6 @@
 {/if}
 
 <style>
-  .queue-title {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    flex-wrap: wrap;
-  }
-
   .empty {
     display: flex;
     flex-direction: column;
@@ -118,13 +113,45 @@
     padding: 0;
   }
 
+  ol {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
   li {
     display: flex;
     align-items: center;
     gap: 12px;
-    min-height: 68px;
-    padding: 6px 0;
-    border-bottom: 1px solid var(--line);
+    min-height: 76px;
+    padding: 10px 12px;
+    border-radius: 16px;
+  }
+
+  .num {
+    flex: none;
+    width: 22px;
+    color: var(--text);
+    font-size: 1.15rem;
+    font-weight: 600;
+    text-align: center;
+  }
+
+  .text .ellipsis:first-child {
+    font-size: 1.05rem;
+    font-weight: 600;
+  }
+
+  .people {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
+    border: 1px solid var(--edge);
+    border-radius: 10px;
+    background: var(--surface-2);
+    font-weight: 600;
   }
 
   .text {
@@ -136,13 +163,6 @@
     color: var(--accent);
   }
 
-  .count {
-    margin-left: 6px;
-    padding: 0 6px;
-    border-radius: 999px;
-    background: var(--surface-3);
-    color: var(--text);
-  }
 
   .metoo {
     flex: none;

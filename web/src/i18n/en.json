@@ -12,6 +12,7 @@
   "nav.queue": "Queue",
   "nav.join": "Join",
   "nav.playlists": "Playlists",
+  "nav.menu": "Menu",
   "join.welcome_back": "Welcome back, {name}!",
   "join.joining": "Joining...",
   "join.continue_as": "Continue as {name}",
@@ -49,6 +50,7 @@
   },
   "queue.ask_for_too": "Ask for {title} too",
   "queue.remove": "Remove {title}",
+  "queue.subtitle": "Up next · requested songs",
   "playing.skipped": "Skipped",
   "playing.vote_counted": "Vote counted",
   "playing.vote_failed": "Could not vote",
@@ -56,6 +58,10 @@
   "playing.now_playing": "Now playing",
   "playing.requested_by": "Requested by {name}",
   "playing.lyrics": "Lyrics",
+  "playing.tune_in": "Tune In",
+  "playing.tune_in_hint": "Listen to the party on this device",
+  "playing.tune_in_on": "A few seconds behind the speakers. Use this device's volume.",
+  "playing.tune_in_connecting": "Connecting...",
   "playing.skip_mine": "Skip my song",
   "playing.skip_resting": "You can vote to skip again after this song",
   "playing.voted": "Voted to skip · {votes} of {needed}",
@@ -519,6 +525,7 @@
   "problem.file_missing": "File is missing",
   "problem.wont_play": "File won't play",
   "library.jump_to": "Jump to {label}",
+  "library.subtitle": "Browse and request music",
   "update.mismatch": "The download didn't match what the server said it was sending.",
   "go.album_queued": {
     "one": "Added {n} song to the queue",
@@ -568,5 +575,6 @@
   "visual.circle": "Circle",
   "visual.particles": "Particles",
   "visual.terrain": "Terrain",
-  "visual.flyover": "Flyover"
+  "visual.flyover": "Flyover",
+  "favorites.subtitle": "Your saved music"
 }

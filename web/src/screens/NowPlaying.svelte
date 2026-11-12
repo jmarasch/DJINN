@@ -21,7 +21,6 @@
   import { checkPlayHere, playHere, startPlayHere, stopPlayHere } from '../lib/playHere.svelte'
   import { cycleTheme, theme } from '../lib/theme.svelte'
   import LyricsView from '../lib/LyricsView.svelte'
-  import RoomPicker from '../lib/RoomPicker.svelte'
   import type { Lyrics } from '../lib/types'
 
   const current = $derived(app.nowPlaying.current)
@@ -149,7 +148,6 @@
     <span></span>
   {/if}
   <div class="display-actions">
-    <RoomPicker />
     <a class="button" href={app.room > 1 ? `/tv?room=${app.room}` : '/tv'} title="Switch to TV display">TV display</a>
     <a
       class="button"
@@ -163,11 +161,22 @@
   </div>
 </div>
 
+{#snippet wave(side: string)}
+  <svg class="wave {side}" width="56" height="60" viewBox="0 0 56 60" aria-hidden="true">
+    {#each [8, 18, 30, 44, 26, 38, 16, 10] as h, i (i)}
+      <rect x={side === 'left' ? i * 7 : 49 - i * 7} y={30 - h / 2} width="3" height={h} rx="1.5" />
+    {/each}
+  </svg>
+{/snippet}
+
 <div class="stage">
 <section class="now">
   {#if current}
     <div class="cover">
+      <span class="disc" aria-hidden="true"></span>
+      {@render wave('left')}
       <Art hash={current.track.art_hash} size={420} round={16} />
+      {@render wave('right')}
     </div>
   {/if}
   <div class="song-info">
@@ -185,7 +194,7 @@
       {/if}
     </p>
     {#if requesterText}
-      <p class="badge">{t('playing.requested_by', { name: requesterText })}</p>
+      <p class="badge"><Icon name="person" size={18} /> {t('playing.requested_by', { name: requesterText })}</p>
     {/if}
     <div class="progress" role="progressbar" aria-valuenow={position} aria-valuemax={total}>
       <div class="fill" style:width="{total ? (position / total) * 100 : 0}%"></div>
@@ -194,12 +203,10 @@
       <span>{duration(position)}</span>
       <span>{duration(total)}</span>
     </div>
+    <div class="actions">
     <button class="lyrics-toggle" class:on={lyricsOpen} aria-pressed={lyricsOpen} onclick={toggleLyrics}>
-      <Icon name="lyrics" size={18} /> {t('playing.lyrics')}
+      <Icon name="book" size={22} /> {t('playing.lyrics')}
     </button>
-    {#if lyricsOpen}
-      <LyricsView {lyrics} position={currentPosition} />
-    {/if}
     {#if canVote}
       <button class="skip-vote" disabled={voted || resting} onclick={voteSkip}>
         <Icon name="skip" size={18} />
@@ -215,6 +222,10 @@
             : ''}
         {/if}
       </button>
+    {/if}
+    </div>
+    {#if lyricsOpen}
+      <LyricsView {lyrics} position={currentPosition} />
     {/if}
   {:else}
     <div class="idle">
@@ -232,20 +243,29 @@
   {#if playHere.url}
     <div class="play-here">
       <button
+        class="tune neon"
         class:on={playHere.on}
         class:waiting={playHere.on && playHere.waiting}
         aria-pressed={playHere.on}
-        title={playHere.on ? 'Stop playing on this device' : 'Play the party on this device'}
         onclick={() => (playHere.on ? stopPlayHere() : startPlayHere())}
       >
-        <Icon name="headphones" size={18} />
-        Tune In
+        <Icon name="headphones" size={30} />
+        <span class="tune-text">
+          <strong>{t('playing.tune_in')}</strong>
+          <small>
+            {#if playHere.on}
+              {playHere.waiting ? t('playing.tune_in_connecting') : t('playing.tune_in_on')}
+            {:else}
+              {t('playing.tune_in_hint')}
+            {/if}
+          </small>
+        </span>
+        <svg class="tune-wave" width="70" height="28" viewBox="0 0 70 28" aria-hidden="true">
+          {#each [6, 12, 20, 10, 24, 14, 8, 18, 12, 6, 10, 4] as h, i (i)}
+            <rect x={i * 6} y={14 - h / 2} width="2.4" height={h} rx="1.2" />
+          {/each}
+        </svg>
       </button>
-      {#if playHere.on}
-        <p class="small muted">
-          {playHere.waiting ? 'Connecting… ' : ''}A few seconds behind the speakers. Use this device's volume.
-        </p>
-      {/if}
     </div>
   {/if}
 
@@ -291,13 +311,14 @@
   </div>
 </section>
 
-  <aside class="side">
+  <aside class="side neon">
     <h2>{t('playing.requests')}</h2>
     {#if app.queue.length}
       <ol class="queue-list">
-        {#each app.queue.slice(0, SHOWN) as item (item.id)}
+        {#each app.queue.slice(0, SHOWN) as item, i (item.id)}
           {@const mine = myRequest(item.track.id)}
           <li>
+            <span class="num">{i + 1}</span>
             <Art hash={item.track.art_hash} size={56} />
             <div class="text">
               <div class="ellipsis">{item.track.title}</div>
@@ -359,14 +380,16 @@
   .lyrics-toggle {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    margin: 4px 0 8px;
-    min-height: 36px;
-    padding: 6px 14px;
-    border-radius: 999px;
+    justify-content: center;
+    gap: 8px;
+    min-height: 52px;
+    padding: 0 18px;
+    border: 1px solid var(--edge);
+    border-radius: 14px;
     background: var(--surface-2);
-    color: var(--muted);
-    font-size: 0.875rem;
+    color: var(--text);
+    font-size: 1.05rem;
+    font-weight: 600;
   }
 
   .lyrics-toggle.on {
@@ -402,23 +425,47 @@
     text-align: left;
   }
 
-  .play-here button {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 0 16px;
-    min-height: 40px;
-    border-radius: 999px;
+  .tune {
+    display: flex;
+    width: 100%;
+    justify-content: flex-start;
+    gap: 14px;
+    min-height: 72px;
+    padding: 12px 18px;
+    border-radius: 16px;
+    color: var(--accent);
+    text-align: left;
+  }
+
+  .tune-text {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  .tune-text strong {
+    color: var(--text);
+    font-size: 1.15rem;
+  }
+
+  .tune-text small {
+    color: var(--muted);
     font-size: 0.875rem;
   }
 
-  .play-here button.on {
-    background: var(--accent);
-    color: var(--accent-text);
-    box-shadow: 0 0 16px var(--accent);
+  .tune-wave {
+    flex: none;
+    fill: var(--accent);
+    opacity: 0.55;
   }
 
-  .play-here button.waiting {
+  .play-here .tune.on {
+    border-color: var(--edge-strong);
+    box-shadow: var(--glow-strong);
+  }
+
+  .play-here .tune.waiting {
     animation: tuning 1.2s ease-in-out infinite alternate;
   }
 
@@ -430,24 +477,27 @@
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .play-here button.waiting {
+    .play-here .tune.waiting {
       animation: none;
     }
   }
 
-  .play-here p {
-    margin: 6px 0 0;
-  }
+
 
   .skip-vote {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    margin: 12px 0 0;
-    padding: 0 16px;
-    min-height: 40px;
-    border-radius: 999px;
-    font-size: 0.875rem;
+    justify-content: center;
+    gap: 8px;
+    min-height: 52px;
+    padding: 0 18px;
+    border: 1px solid var(--edge-strong);
+    border-radius: 14px;
+    background: var(--accent);
+    color: var(--accent-text);
+    font-size: 1.05rem;
+    font-weight: 700;
+    box-shadow: var(--glow-strong);
   }
 
   .top {
@@ -499,6 +549,56 @@
     font-size: 0.8125rem;
   }
 
+  .actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin: 18px 0 8px;
+  }
+
+  .actions > :only-child {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+
+  /* A record peeking out behind the cover, as on a turntable. */
+  .disc {
+    position: absolute;
+    inset: 0 -12% 0 12%;
+    border-radius: 50%;
+    background:
+      radial-gradient(circle, #2a2140 0 9%, #0d0a14 9.5% 12%, transparent 12.5%),
+      repeating-radial-gradient(circle, #15111f 0 2px, #1d1729 2px 4px);
+    box-shadow:
+      0 0 0 1px rgb(180 140 255 / 0.25),
+      0 0 30px rgb(180 140 255 / 0.15);
+  }
+
+  .wave {
+    display: none;
+    position: absolute;
+    top: 50%;
+    fill: var(--accent);
+    filter: drop-shadow(0 0 5px rgb(180 140 255 / 0.7));
+    transform: translateY(-50%);
+  }
+
+  .wave.left {
+    right: calc(100% + 8px);
+  }
+
+  .wave.right {
+    left: calc(100% + 26px);
+  }
+
+  .num {
+    flex: none;
+    width: 18px;
+    color: var(--muted);
+    font-weight: 600;
+    text-align: center;
+  }
+
   .now {
     display: flex;
     align-items: flex-start;
@@ -513,15 +613,22 @@
   }
 
   .cover {
+    position: relative;
     flex: none;
-    width: min(32vw, 330px);
+    width: min(28vw, 330px);
     aspect-ratio: 1;
+    margin-right: min(4vw, 44px);
   }
 
   .cover :global(.art) {
+    position: relative;
+    z-index: 1;
     width: 100% !important;
     height: 100% !important;
-    box-shadow: 0 16px 48px rgb(0 0 0 / 0.35);
+    border: 1px solid var(--edge-strong);
+    box-shadow:
+      0 16px 48px rgb(0 0 0 / 0.45),
+      0 0 24px rgb(180 140 255 / 0.3);
   }
 
   .title {
@@ -533,7 +640,8 @@
 
   .artist {
     margin: 0;
-    color: var(--muted);
+    color: var(--accent);
+    font-size: 1.25rem;
   }
 
   .artist a {
@@ -541,26 +649,32 @@
   }
 
   .badge {
-    display: inline-block;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
     margin: 16px 0 0;
-    padding: 4px 12px;
-    border-radius: 999px;
+    padding: 6px 16px;
+    border: 1px solid var(--edge);
+    border-radius: 12px;
     background: var(--surface-2);
-    font-size: 0.875rem;
+    color: var(--muted);
+    font-size: 0.95rem;
   }
 
   .progress {
     width: 100%;
-    height: 6px;
-    margin-top: 18px;
-    border-radius: 3px;
-    background: var(--surface-2);
+    height: 8px;
+    margin-top: 22px;
+    border-radius: 4px;
+    background: var(--surface-3);
     overflow: hidden;
   }
 
   .fill {
     height: 100%;
-    background: var(--accent);
+    border-radius: 4px;
+    background: linear-gradient(90deg, #9b6dff, var(--accent));
+    box-shadow: 0 0 12px rgb(180 140 255 / 0.7);
   }
 
   .times {
@@ -625,8 +739,11 @@
   .side {
     display: flex;
     flex-direction: column;
+    align-self: start;
     min-width: 0;
-    padding: 26px 0 0;
+    margin-top: 26px;
+    padding: 20px;
+    border-radius: 18px;
   }
 
   .side h2 {
@@ -640,7 +757,7 @@
   .queue-list {
     display: flex;
     flex-direction: column;
-    gap: 18px;
+    gap: 10px;
     margin: 0;
     padding: 0;
     list-style: none;
@@ -651,6 +768,10 @@
     align-items: center;
     gap: 12px;
     min-width: 0;
+    padding: 10px 12px;
+    border: 1px solid var(--edge);
+    border-radius: 14px;
+    background: rgb(255 255 255 / 0.02);
   }
 
   .requester {
@@ -661,8 +782,9 @@
     display: flex;
     align-items: center;
     gap: 16px;
-    margin-top: auto;
+    margin-top: 20px;
     padding: 16px;
+    border: 1px solid var(--edge);
     border-radius: 16px;
     background: color-mix(in srgb, var(--surface) 80%, transparent);
   }
@@ -684,10 +806,12 @@
   }
 
   .label {
-    color: var(--muted);
-    font-size: 0.75rem;
+    display: block;
+    color: var(--accent);
+    font-size: 0.8rem;
+    font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.3em;
   }
 
   .coming {
@@ -753,9 +877,6 @@
       padding-top: 10px;
     }
 
-    .cover {
-      width: min(72vw, 300px);
-    }
 
     .song-info {
       width: 100%;
@@ -770,8 +891,39 @@
       justify-content: center;
     }
 
-    .skip-vote {
-      margin: 12px auto 0;
+    .label {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-top: 18px;
+    }
+
+    .label::before,
+    .label::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, var(--accent));
+    }
+
+    .label::after {
+      background: linear-gradient(90deg, var(--accent), transparent);
+    }
+
+    .cover {
+      width: min(62vw, 280px);
+    }
+
+    .cover {
+      margin-right: 0;
+    }
+
+    .disc {
+      inset: -10%;
+    }
+
+    .wave {
+      display: block;
     }
 
     .idle {

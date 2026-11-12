@@ -12,6 +12,7 @@
   "nav.queue": "Cola",
   "nav.join": "Unirse",
   "nav.playlists": "Listas",
+  "nav.menu": "Menú",
   "join.welcome_back": "¡Hola de nuevo, {name}!",
   "join.joining": "Entrando...",
   "join.continue_as": "Seguir como {name}",
@@ -49,6 +50,7 @@
   },
   "queue.ask_for_too": "Pedir {title} también",
   "queue.remove": "Quitar {title}",
+  "queue.subtitle": "A continuación · canciones pedidas",
   "playing.skipped": "Saltada",
   "playing.vote_counted": "Voto contado",
   "playing.vote_failed": "No se pudo votar",
@@ -56,6 +58,10 @@
   "playing.now_playing": "Sonando ahora",
   "playing.requested_by": "Pedida por {name}",
   "playing.lyrics": "Letra",
+  "playing.tune_in": "Escuchar aquí",
+  "playing.tune_in_hint": "Escucha la fiesta en este dispositivo",
+  "playing.tune_in_on": "Unos segundos por detrás de los altavoces. Usa el volumen de este dispositivo.",
+  "playing.tune_in_connecting": "Conectando...",
   "playing.skip_mine": "Saltar mi canción",
   "playing.skip_resting": "Podrás votar para saltar otra vez después de esta canción",
   "playing.voted": "Votaste saltar · {votes} de {needed}",
@@ -519,6 +525,7 @@
   "problem.file_missing": "Falta el archivo",
   "problem.wont_play": "El archivo no se reproduce",
   "library.jump_to": "Ir a {label}",
+  "library.subtitle": "Explora y pide música",
   "update.mismatch": "La descarga no coincide con lo que el servidor dijo que enviaba.",
   "go.album_queued": {
     "one": "Se añadió {n} canción a la cola",
@@ -568,5 +575,6 @@
   "visual.circle": "Círculo",
   "visual.particles": "Partículas",
   "visual.terrain": "Terreno",
-  "visual.flyover": "Sobrevuelo"
+  "visual.flyover": "Sobrevuelo",
+  "favorites.subtitle": "Tu música guardada"
 }
