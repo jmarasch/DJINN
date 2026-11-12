@@ -231,11 +231,61 @@ label {
   gap: 8px;
 }
 
-.switch input {
+.switch input[type='checkbox'] {
+  appearance: none;
   flex: none;
-  width: 20px;
-  min-height: 20px;
-  accent-color: var(--accent);
+  position: relative;
+  width: 42px;
+  min-height: 24px;
+  height: 24px;
+  margin: 0;
+  border: 1px solid var(--edge);
+  border-radius: 999px;
+  background: var(--surface-2);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
+}
+
+.switch input[type='checkbox']::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--text);
+  opacity: 0.6;
+  transition: transform 0.15s, opacity 0.15s, background 0.15s;
+}
+
+.switch input[type='checkbox']:checked {
+  border-color: var(--edge-strong);
+  background: color-mix(in srgb, var(--accent) 35%, var(--surface-2));
+  box-shadow: var(--glow-strong);
+}
+
+.switch input[type='checkbox']:checked::after {
+  transform: translateX(18px);
+  background: var(--accent);
+  opacity: 1;
+}
+
+.switch input[type='checkbox']:focus-visible {
+  outline: 2px solid var(--accent-2);
+  outline-offset: 2px;
+}
+
+.switch input[type='checkbox']:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .switch input[type='checkbox'],
+  .switch input[type='checkbox']::after {
+    transition: none;
+  }
 }
 
 /* A row of rounded links, such as artists in search results. */
