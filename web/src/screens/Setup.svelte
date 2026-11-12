@@ -146,7 +146,7 @@
   </div>
 {:else if needed && kind === null}
   <div class="card">
-    <img class="shiny" src="/images/shiny-icon.webp" alt="" />
+    <img class="shiny" src="/images/logo.webp" alt="" />
     <h1>Welcome to DJINN</h1>
     <p class="muted">What will this computer be?</p>
     <div class="kinds">

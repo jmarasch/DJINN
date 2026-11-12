@@ -15,7 +15,7 @@
 
 {#if about}
   <section class="card">
-    <img class="shiny" src="/images/shiny-icon.webp" alt="" />
+    <img class="shiny" src="/images/logo.webp" alt="" />
     <h2>DJINN {about.version}</h2>
     <p class="small muted">
       A party jukebox by New Terra Studios.{#if about.commit}
