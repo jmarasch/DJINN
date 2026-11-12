@@ -261,6 +261,7 @@ export const api = {
   setLyricsSettings: (settings: LyricsSettings) => put<void>('/lyrics/settings', settings),
   recheckLyrics: () => post<void>('/lyrics/recheck'),
   rooms: () => get<RoomList>('/rooms'),
+  roomPeople: () => get<{ count: number }>('/me/room/people'),
   chooseRoom: (roomId: number) => put<void>('/me/room', { room_id: roomId }),
   createRoom: (name: string) => post<Room>('/rooms', { name }),
   renameRoom: (id: number, name: string) => patch<void>(`/rooms/${id}`, { name }),

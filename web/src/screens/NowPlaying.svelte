@@ -74,15 +74,33 @@
     }
   })
 
+  // How many people have the app open in this room.
+  let people = $state(0)
+  async function loadPeople() {
+    try {
+      people = (await api.roomPeople()).count
+    } catch {
+      // The count is a nicety; leave it as it was.
+    }
+  }
+
   onMount(() => {
     void checkPlayHere()
+    void loadPeople()
+    // Again soon: this page's own connection isn't open at the first look.
+    const soon = setTimeout(() => void loadPeople(), 1500)
+    const counting = setInterval(() => void loadPeople(), 15_000)
     let frame = 0
     const tick = () => {
       position = Math.min(currentPosition(), total || Infinity)
       frame = requestAnimationFrame(tick)
     }
     tick()
-    return () => cancelAnimationFrame(frame)
+    return () => {
+      cancelAnimationFrame(frame)
+      clearInterval(counting)
+      clearTimeout(soon)
+    }
   })
 
   // Follow changes made elsewhere.
@@ -149,6 +167,13 @@
     <span></span>
   {/if}
   <div class="display-actions">
+    {#if people > 0}
+      <span class="room-pill people" title={t('playing.people_here', { n: people })}>
+        <Icon name="person" size={14} />
+        {people}
+        <span class="bars" aria-hidden="true"><i></i><i></i><i></i></span>
+      </span>
+    {/if}
     {#if app.rooms.length > 1}
       <span class="room-pill"><Icon name="home" size={14} /> {app.rooms.find((r) => r.id === app.room)?.name ?? ''}</span>
     {/if}
@@ -535,6 +560,47 @@
     color: var(--text);
     font-size: 0.8125rem;
     font-weight: 600;
+  }
+
+  /* Three small bars that move, so the room feels alive. */
+  .bars {
+    display: inline-flex;
+    align-items: flex-end;
+    gap: 2px;
+    height: 12px;
+  }
+
+  .bars i {
+    width: 2px;
+    height: 100%;
+    border-radius: 1px;
+    background: var(--accent-2);
+    transform-origin: bottom;
+    animation: bounce 1.1s ease-in-out infinite;
+  }
+
+  .bars i:nth-child(2) {
+    animation-delay: 0.25s;
+  }
+
+  .bars i:nth-child(3) {
+    animation-delay: 0.5s;
+  }
+
+  @keyframes bounce {
+    0%,
+    100% {
+      transform: scaleY(0.3);
+    }
+    50% {
+      transform: scaleY(1);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .bars i {
+      animation: none;
+    }
   }
 
   .lyrics-card {

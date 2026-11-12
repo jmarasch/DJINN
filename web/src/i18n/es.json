@@ -79,6 +79,10 @@
   "playing.no_requests": "Aún no hay peticiones. La tuya puede ser la siguiente.",
   "playing.coming_up": "A continuación",
   "playing.controls": "Controles",
+  "playing.people_here": {
+    "one": "{n} persona aquí",
+    "other": "{n} personas aquí"
+  },
   "playing.scan_alt": "Escanea para añadir una canción",
   "playing.add_a_song": "Añade una canción",
   "playing.scan_hint": "Escanea con el móvil y elige en la biblioteca.",

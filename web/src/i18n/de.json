@@ -79,6 +79,10 @@
   "playing.no_requests": "Noch keine Wünsche. Deiner könnte der nächste sein.",
   "playing.coming_up": "Als Nächstes",
   "playing.controls": "Steuerung",
+  "playing.people_here": {
+    "one": "{n} Person hier",
+    "other": "{n} Personen hier"
+  },
   "playing.scan_alt": "Scannen, um einen Song hinzuzufügen",
   "playing.add_a_song": "Song hinzufügen",
   "playing.scan_hint": "Mit dem Handy scannen, dann in der Bibliothek auswählen.",

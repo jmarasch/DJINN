@@ -19,6 +19,7 @@ pub fn router() -> Router<AppState> {
         .route("/rooms/{id}", axum::routing::patch(rename).delete(remove))
         .route("/rooms/{id}/link", put(link))
         .route("/me/room", put(choose))
+        .route("/me/room/people", get(people))
         .route("/outputs/{id}/room", put(place_output))
         .route("/rooms/sync", post(resync))
         .route("/rooms/{id}/quiet", get(get_quiet).put(put_quiet))
@@ -52,6 +53,19 @@ async fn list(
         rooms: state.store.rooms().await?,
         mine: state.room_of(user.id).await,
     }))
+}
+
+#[derive(Serialize)]
+struct People {
+    count: usize,
+}
+
+/// How many people have the party app open in this person's room.
+async fn people(CurrentUser(user): CurrentUser, State(state): State<AppState>) -> Json<People> {
+    let room = state.room_of(user.id).await;
+    Json(People {
+        count: state.presence.count(room),
+    })
 }
 
 #[derive(Deserialize)]

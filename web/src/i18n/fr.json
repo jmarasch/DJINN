@@ -79,6 +79,10 @@
   "playing.no_requests": "Pas encore de demandes. La tienne pourrait être la prochaine.",
   "playing.coming_up": "À venir",
   "playing.controls": "Commandes",
+  "playing.people_here": {
+    "one": "{n} personne ici",
+    "other": "{n} personnes ici"
+  },
   "playing.scan_alt": "Scanne pour ajouter une chanson",
   "playing.add_a_song": "Ajoute une chanson",
   "playing.scan_hint": "Scanne avec ton téléphone, puis choisis dans la bibliothèque.",

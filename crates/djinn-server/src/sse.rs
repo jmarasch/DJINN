@@ -89,7 +89,8 @@ pub async fn events(
     State(state): State<AppState>,
 ) -> ApiResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {
     let room = state.room_of(user.id).await;
-    live(state, Audience::Member, room).await
+    let here = state.presence.arrive(room, user.id);
+    live(state, Audience::Member, room, Some(here)).await
 }
 
 /// The TV page's feed. Public while the TV page is on.
@@ -102,6 +103,7 @@ pub async fn tv_events(
         state,
         Audience::Tv,
         query.room.unwrap_or(djinn_store::MAIN_ROOM),
+        None,
     )
     .await
 }
@@ -115,6 +117,7 @@ pub async fn lyrics_events(
         state,
         Audience::Tv,
         query.room.unwrap_or(djinn_store::MAIN_ROOM),
+        None,
     )
     .await
 }
@@ -123,6 +126,7 @@ async fn live(
     state: AppState,
     audience: Audience,
     room: i64,
+    here: Option<crate::presence::Here>,
 ) -> ApiResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {
     let room = state.rooms.leader(room);
     // Subscribe before taking the snapshot so nothing falls in between. A
@@ -176,7 +180,11 @@ async fn live(
         .chain(updates)
         .flat_map(stream::iter)
         .filter(move |event| std::future::ready(audience.wants(event)))
-        .map(|event| Ok(to_sse(&event)))
+        .map(move |event| {
+            // The person stays counted as long as this connection lives.
+            let _ = &here;
+            Ok(to_sse(&event))
+        })
         .take_until(async move {
             let _ = shutdown.wait_for(|&stop| stop).await;
         });

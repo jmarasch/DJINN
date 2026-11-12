@@ -49,6 +49,7 @@ mod party_api;
 mod player_api;
 mod playlist_api;
 mod playlist_import;
+mod presence;
 mod problems_api;
 mod reader;
 mod rooms_api;
