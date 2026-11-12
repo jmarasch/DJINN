@@ -403,3 +403,21 @@ label {
     transform: rotate(360deg);
   }
 }
+
+/* Cards side by side where there is room; a card with `wide` spans both. */
+.cards-2 {
+  display: block;
+}
+
+@media (min-width: 1280px) {
+  .cards-2 {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0 16px;
+    align-items: start;
+  }
+
+  .cards-2 > .wide {
+    grid-column: 1 / -1;
+  }
+}

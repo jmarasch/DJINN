@@ -184,6 +184,16 @@
         .filter((el) => (el.textContent ?? '').toLowerCase().includes(want))
         .sort((a, b) => (a.textContent ?? '').length - (b.textContent ?? '').length)[0]
       if (found) {
+        const holder = found.closest<HTMLElement>('[data-subtab]')
+        if (holder?.hidden) {
+          const group = holder.closest('.admin-content')?.querySelector('.subtabs')
+            ? Object.keys(sub).find((g) => entry.tab === g)
+            : undefined
+          if (group && holder.dataset.subtab) {
+            openSub(group, holder.dataset.subtab)
+            await tick()
+          }
+        }
         found.scrollIntoView({ behavior: 'smooth', block: 'center' })
         found.classList.add('found')
         setTimeout(() => found.classList.remove('found'), 2500)
@@ -191,6 +201,14 @@
       }
       await new Promise((r) => setTimeout(r, 100))
     }
+  }
+
+  // Tabs inside the longest sections; the others stay in the page, hidden,
+  // so Find a setting can still reach them.
+  let sub = $state<Record<string, string>>({ library: 'folders', smart: 'play' })
+
+  function openSub(group: string, id: string) {
+    sub[group] = id
   }
 
   let roots = $state<LibraryRoot[]>([])
@@ -279,6 +297,16 @@
     new Date(ms).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 </script>
 
+{#snippet subtabs(group: string, items: [string, string][])}
+  <div class="subtabs" role="tablist">
+    {#each items as [id, label] (id)}
+      <button role="tab" aria-selected={sub[group] === id} class:active={sub[group] === id} onclick={() => openSub(group, id)}>
+        {label}
+      </button>
+    {/each}
+  </div>
+{/snippet}
+
 {#snippet sectionContent(t: AdminTab)}
 {#if t === 'home'}
   <AdminHome />
@@ -292,6 +320,13 @@
   <LibraryProblems />
   <LibraryDuplicates />
 {:else if t === 'library'}
+  {@render subtabs('library', [
+    ['folders', 'Folders and checks'],
+    ['settings', 'Library settings'],
+    ['online', 'Online info'],
+  ])}
+  <div data-subtab="folders" hidden={sub.library !== 'folders'}>
+  <div class="cards-2">
   <section class="card">
     <h2>Music folders</h2>
     {#each roots as root (root.path)}
@@ -321,9 +356,20 @@
     {/if}
     <button disabled={scanning} onclick={checkForChanges}>Check for changes</button>
   </section>
+  </div>
 
   <p class="small muted">Files that didn't make it in, copies of songs and the nightly check are under <a href="#/admin/problems">Problems</a>.</p>
+  <section class="card">
+    <h2>Image cache</h2>
+    <p class="small muted">
+      Covers and artist photos DJINN finds are kept here, on this computer. Your music folders are never changed.
+    </p>
+    <p class="path small mono">{artDir}</p>
+    <button onclick={() => attempt(api.openArtFolder)}>Open image folder</button>
+  </section>
+  </div>
 
+  <div data-subtab="settings" hidden={sub.library !== 'settings'}>
   {#if settings}
     <section class="card">
       <h2>Artist library</h2>
@@ -368,18 +414,15 @@
         <button class="primary">Save</button>
       </form>
     </section>
+  {/if}
+  </div>
 
+  <div data-subtab="online" hidden={sub.library !== 'online'}>
+  {#if settings}
     <LibraryExtras bind:settings />
   {/if}
+  </div>
 
-  <section class="card">
-    <h2>Image cache</h2>
-    <p class="small muted">
-      Covers and artist photos DJINN finds are kept here, on this computer. Your music folders are never changed.
-    </p>
-    <p class="path small mono">{artDir}</p>
-    <button onclick={() => attempt(api.openArtFolder)}>Open image folder</button>
-  </section>
 
   {#if picking}
     <Sheet title="Pick a music folder" onclose={() => (picking = false)}>
@@ -393,8 +436,12 @@
   <ReplayGainPanel />
   <EqualizerPanel />
 {:else if t === 'smart'}
-  <SmartPlayPanel />
-  <SchedulePanel />
+  {@render subtabs('smart', [
+    ['play', 'Smart play'],
+    ['schedule', 'Party schedule'],
+  ])}
+  <div data-subtab="play" hidden={sub.smart !== 'play'}><SmartPlayPanel /></div>
+  <div data-subtab="schedule" hidden={sub.smart !== 'schedule'}><SchedulePanel /></div>
 {:else if t === 'ai'}
   <AiPanel />
 {:else if t === 'users'}
@@ -614,6 +661,32 @@
 </div>
 
 <style>
+  .subtabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin: 0 0 14px;
+    padding: 4px;
+    border: 1px solid var(--edge);
+    border-radius: 14px;
+    background: var(--surface);
+  }
+
+  .subtabs button {
+    flex: 1;
+    min-height: 40px;
+    padding: 0 12px;
+    background: transparent;
+    color: var(--muted);
+  }
+
+  .subtabs button.active {
+    background: var(--accent);
+    color: var(--accent-text);
+    font-weight: 600;
+    box-shadow: var(--glow-strong);
+  }
+
   .admin {
     display: block;
   }

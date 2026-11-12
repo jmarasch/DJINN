@@ -2,6 +2,7 @@
   // Admin > Home: how DJINN is doing at a glance. Each line says whether
   // it's fine, worth a look, or wrong, and links to where to fix it.
   import { api } from './api'
+  import Icon from './Icon.svelte'
   import { toast } from './state.svelte'
   import type { About, ProblemSummary, ScheduledCheck, SystemStatus } from './types'
 
@@ -167,10 +168,10 @@
   })
 </script>
 
-{#snippet block(title: string, lines: Line[])}
+{#snippet block(title: string, lines: Line[], icon: 'playing' | 'library' | 'settings' | 'cloud')}
   {#if lines.length}
     <section class="card">
-      <h2>{title}</h2>
+      <h2><Icon name={icon} size={20} /> {title}</h2>
       <ul>
         {#each lines as line, i (i)}
           <li>
@@ -190,13 +191,72 @@
 {#if !status}
   <p class="small muted">Loading...</p>
 {:else}
-  {@render block('Music', music)}
-  {@render block('Library', library)}
-  {@render block('This computer', computer)}
-  {@render block('Upkeep', upkeep)}
+  <div class="stats">
+    <div class="stat">
+      <Icon name="library" size={22} />
+      <strong>{n(status.songs)}</strong>
+      <span class="small muted">Songs</span>
+    </div>
+    <div class="stat">
+      <Icon name={status.state === 'playing' ? 'playing' : 'pause'} size={22} />
+      <strong>{status.state === 'playing' ? 'Playing' : status.state === 'paused' ? 'Paused' : 'Quiet'}</strong>
+      <span class="small muted">Right now</span>
+    </div>
+    {#if status.cpu !== null}
+      <div class="stat">
+        <Icon name="settings" size={22} />
+        <strong>{Math.round(status.cpu * 100)}%</strong>
+        <span class="small muted">Processor</span>
+      </div>
+    {/if}
+    {#if status.disk_available !== null}
+      <div class="stat">
+        <Icon name="folder" size={22} />
+        <strong>{size(status.disk_available)}</strong>
+        <span class="small muted">Disk free</span>
+      </div>
+    {/if}
+  </div>
+  <div class="cards-2">
+    {@render block('Music', music, 'playing')}
+    {@render block('Library', library, 'library')}
+    {@render block('This computer', computer, 'settings')}
+    {@render block('Upkeep', upkeep, 'cloud')}
+  </div>
 {/if}
 
 <style>
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  .stat {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 14px 16px;
+    border: 1px solid var(--edge);
+    border-radius: 16px;
+    background: var(--card-bg);
+    box-shadow: var(--glow);
+    color: var(--accent);
+  }
+
+  .stat strong {
+    color: var(--text);
+    font-size: 1.5rem;
+    line-height: 1.2;
+  }
+
+  h2 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
   ul {
     margin: 0;
     padding: 0;
