@@ -38,7 +38,7 @@
   import VisualsPanel from '../lib/VisualsPanel.svelte'
   import HouseLanguage from '../lib/HouseLanguage.svelte'
   import RoomsPanel from '../lib/RoomsPanel.svelte'
-  import { app, logout, toast } from '../lib/state.svelte'
+  import { app, toast } from '../lib/state.svelte'
   import type { LibraryRoot, RequestLogEntry, Settings } from '../lib/types'
 
   let { tab = 'home' }: { tab?: AdminTab } = $props()
@@ -205,7 +205,7 @@
 
   // Tabs inside the longest sections; the others stay in the page, hidden,
   // so Find a setting can still reach them.
-  let sub = $state<Record<string, string>>({ library: 'folders', smart: 'play' })
+  let sub = $state<Record<string, string>>({ library: 'folders', smart: 'play', audio: 'sound' })
 
   function openSub(group: string, id: string) {
     sub[group] = id
@@ -310,8 +310,6 @@
 {#snippet sectionContent(t: AdminTab)}
 {#if t === 'home'}
   <AdminHome />
-  <SystemStatus />
-  <AboutPanel />
 {:else if t === 'stats'}
   <StatsPanel />
   <SearchesWishes />
@@ -356,9 +354,7 @@
     {/if}
     <button disabled={scanning} onclick={checkForChanges}>Check for changes</button>
   </section>
-  </div>
 
-  <p class="small muted">Files that didn't make it in, copies of songs and the nightly check are under <a href="#/admin/problems">Problems</a>.</p>
   <section class="card">
     <h2>Image cache</h2>
     <p class="small muted">
@@ -368,10 +364,12 @@
     <button onclick={() => attempt(api.openArtFolder)}>Open image folder</button>
   </section>
   </div>
+  <p class="small muted">Files that didn't make it in, copies of songs and the nightly check are under <a href="#/admin/problems">Problems</a>.</p>
+  </div>
 
   <div data-subtab="settings" hidden={sub.library !== 'settings'}>
   {#if settings}
-    <section class="card">
+    <section class="card wide">
       <h2>Artist library</h2>
       <form class="settings" onsubmit={saveSettings}>
         <label class="switch big">
@@ -419,7 +417,7 @@
 
   <div data-subtab="online" hidden={sub.library !== 'online'}>
   {#if settings}
-    <LibraryExtras bind:settings />
+    <div class="cards-2"><LibraryExtras bind:settings /></div>
   {/if}
   </div>
 
@@ -430,30 +428,39 @@
     </Sheet>
   {/if}
 {:else if t === 'audio'}
-  <CrossfadePanel />
-  <OutputsPanel />
-  <CastPanel />
-  <ReplayGainPanel />
-  <EqualizerPanel />
+  {@render subtabs('audio', [
+    ['sound', 'Sound'],
+    ['outputs', 'Outputs'],
+    ['casting', 'Casting'],
+  ])}
+  <div data-subtab="sound" hidden={sub.audio !== 'sound'}>
+    <div class="cards-2">
+      <CrossfadePanel />
+      <ReplayGainPanel />
+      <div class="wide"><EqualizerPanel /></div>
+    </div>
+  </div>
+  <div data-subtab="outputs" hidden={sub.audio !== 'outputs'}><OutputsPanel /></div>
+  <div data-subtab="casting" hidden={sub.audio !== 'casting'}><CastPanel /></div>
 {:else if t === 'smart'}
   {@render subtabs('smart', [
     ['play', 'Smart play'],
     ['schedule', 'Party schedule'],
   ])}
-  <div data-subtab="play" hidden={sub.smart !== 'play'}><SmartPlayPanel /></div>
+  <div data-subtab="play" hidden={sub.smart !== 'play'}><div class="cards-2"><SmartPlayPanel /></div></div>
   <div data-subtab="schedule" hidden={sub.smart !== 'schedule'}><SchedulePanel /></div>
 {:else if t === 'ai'}
-  <AiPanel />
+  <div class="cards-2"><AiPanel /></div>
 {:else if t === 'users'}
-  <UsersPanel />
+  <div class="cards-2"><UsersPanel /></div>
 {:else if t === 'go'}
-  <GoPanel />
+  <div class="cards-2"><GoPanel /></div>
 {:else if t === 'nodes'}
-  <NodesPanel />
+  <div class="cards-2"><NodesPanel /></div>
 {:else if t === 'visuals'}
   <VisualsPanel />
 {:else if t === 'rooms'}
-  <RoomsPanel />
+  <div class="cards-2"><RoomsPanel /></div>
 {:else if t === 'log'}
   <section class="card">
     <div class="log-head">
@@ -536,10 +543,15 @@
     </form>
   </section>
 {:else if t === 'system'}
-  <HouseLanguage />
-  <UpdatePanel />
-  <BackupPanel />
-  <ResetPanel />
+  <div class="cards-2">
+    <AboutPanel part="build" />
+    <SystemStatus />
+    <HouseLanguage />
+    <UpdatePanel />
+    <BackupPanel />
+    <ResetPanel />
+    <AboutPanel part="credits" />
+  </div>
 {:else if t === 'serverlog'}
   <LogViewer />
 {:else if t === 'signins'}
@@ -640,7 +652,7 @@
 <div class="admin-content" bind:this={content}>
 {#if layout === 'sections'}
   <div class="crumbs small muted"><Icon name="home" size={16} /> Admin <Icon name="chevron-right" size={16} /> {adminTabLabel(tab)}</div>
-  <PageTitle title={adminTabLabel(tab)} align="left" />
+  <PageTitle title={adminTabLabel(tab)} />
 {/if}
 <PublicNetworkNote />
 
@@ -655,8 +667,6 @@
   {@render sectionContent(tab)}
 {/if}
 
-<a class="button account-link" href="#/account">Your account (password, two-step sign-in)</a>
-<button class="signout" onclick={logout}>Sign out</button>
 </div>
 </div>
 
@@ -1089,13 +1099,4 @@
     width: 100px;
   }
 
-  .account-link {
-    width: 100%;
-    margin-top: 8px;
-  }
-
-  .signout {
-    width: 100%;
-    margin: 8px 0 24px;
-  }
 </style>

@@ -583,6 +583,16 @@ impl Store {
         Ok(count)
     }
 
+    /// The size of the playable songs' files together, in bytes.
+    pub async fn library_bytes(&self) -> Result<i64> {
+        let bytes = sqlx::query_scalar(
+            "SELECT coalesce(sum(t.size), 0) FROM tracks t WHERE t.removed_at IS NULL",
+        )
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(bytes)
+    }
+
     pub async fn track(&self, id: i64) -> Result<Option<Track>> {
         let track = sqlx::query_as(concat!(
             "SELECT ",

@@ -375,6 +375,8 @@ export interface Album {
   plays?: number
   /** In the library lists: how many people favorited it. */
   likes?: number
+  /** In the album list: how many songs it has. */
+  songs?: number
 }
 
 export interface Artist {
@@ -768,6 +770,8 @@ export interface ArtistSummary {
   plays?: number
   /** In the library lists: how many people favorited it. */
   likes?: number
+  /** In the artist list: how many albums they have. */
+  albums?: number
 }
 
 /** Year is newest first, oldest is by year oldest first. */
@@ -1290,6 +1294,10 @@ export interface SystemStatus {
   /** Windows has the network set to Public, which blocks phones. */
   public_network: boolean
   songs: number
+  artists: number
+  albums: number
+  /** The music files' size together. */
+  library_bytes: number
   library_folders: number
   scanning: boolean
   last_scan: { found: number; to_read: number; read: number; removed: number; done: boolean } | null

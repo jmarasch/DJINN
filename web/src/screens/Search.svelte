@@ -9,6 +9,7 @@
   import TrackRow from '../lib/TrackRow.svelte'
   import NotInLibrary from '../lib/NotInLibrary.svelte'
   import { isAdmin } from '../lib/state.svelte'
+  import { navigation } from '../lib/router.svelte'
   import SearchSongActions from '../lib/SearchSongActions.svelte'
   import type { SearchResults } from '../lib/types'
 
@@ -142,7 +143,7 @@
 
 <PageTitle title={t('nav.library')} subtitle={t('library.subtitle')} />
 
-<div class="search-box" bind:this={searchBox}>
+<div class="search-box" class:after-back={navigation.canGoBack} bind:this={searchBox}>
   <Icon name="search" />
   <div class="field">
     <!-- svelte-ignore a11y_autofocus -->
@@ -288,6 +289,17 @@
     background: var(--surface-2);
     box-shadow: var(--glow);
     color: var(--muted);
+  }
+
+  /* On wide screens the search sits beside the back button, not under it. */
+  @media (min-width: 900px) {
+    .search-box {
+      top: 8px;
+    }
+
+    .search-box.after-back {
+      margin-left: 52px;
+    }
   }
 
   .search-box:focus-within {

@@ -14,6 +14,7 @@
   import Toasts from './lib/Toasts.svelte'
   import Admin from './screens/Admin.svelte'
   import { adminTabFor } from './lib/adminTabs'
+  import { cycleTheme, theme } from './lib/theme.svelte'
   import Account from './screens/Account.svelte'
   import AlbumView from './screens/AlbumView.svelte'
   import ArtistView from './screens/ArtistView.svelte'
@@ -53,8 +54,8 @@
   const onVisualizerPage = location.pathname === '/visualizer'
   let showJoin = $state(false)
   let showMenu = $state(false)
-  /** Phones keep Playlists, your account and Admin in a menu. */
-  const hasMenu = $derived(!!app.me && (hasPlaylists() || app.me.role !== 'guest' || isAdmin()))
+  /** Phones keep Playlists, your account, Admin and the theme in a menu. */
+  const hasMenu = $derived(!!app.me)
 
   onMount(async () => {
     if (onJoinPage || onTvPage || onLyricsPage || onNodePage || onVisualizerPage) return
@@ -86,6 +87,7 @@
   const playlistId = $derived(param('/playlist'))
   const similarId = $derived(param('/similar'))
   const adminTab = $derived(adminTabFor(route.path))
+  const themeLabel = $derived({ auto: 'Auto', light: 'Light', dark: 'Dark' }[theme.mode])
   const tab = $derived(
     route.path.startsWith('/search') || albumId || artistId || artistSongsId || similarId || genreName
       ? 'search'
@@ -140,7 +142,7 @@
        on wide screens a side menu with the same tabs and the rest below. -->
   <header class="topbar" bind:offsetHeight={navHeight}>
     <div class="topbar-row">
-      {#if navigation.canGoBack}
+      {#if navigation.canGoBack && tab !== 'admin'}
         <button class="back" onclick={goBack} aria-label={t('nav.back')} title={t('nav.back')}>
           <Icon name="back" size={24} />
         </button>
@@ -153,7 +155,6 @@
         </span>
       </a>
       <span class="spacer"></span>
-      <div class="top-room"><RoomPicker /></div>
       <button class="icon-only top-join" onclick={() => (showJoin = true)} aria-label={t('nav.join')} title={t('nav.join')}>
         <Icon name="qr" />
       </button>
@@ -163,7 +164,7 @@
         </button>
       {/if}
     </div>
-    <div class="phone-room"><RoomPicker /></div>
+    {#if tab !== 'admin'}<div class="phone-room"><RoomPicker /></div>{/if}
   </header>
 
   <nav class="side" class:rail={tab === 'admin'} aria-label="Main navigation">
@@ -174,6 +175,7 @@
         <small>{t('brand.tagline')}</small>
       </span>
     </a>
+    {#if tab !== 'admin'}<div class="side-room"><RoomPicker /></div>{/if}
     <div class="tabs">
       <a href="#/" class:active={tab === 'now'}><Icon name="playing" /><span>{t('nav.playing')}</span></a>
       <a href="#/search" class:active={tab === 'search'}><Icon name="library" /><span>{t('nav.library')}</span></a>
@@ -190,11 +192,14 @@
         <a href="#/playlists" class:active={tab === 'playlists'}><Icon name="playlist" /><span>{t('nav.playlists')}</span></a>
       {/if}
       {#if app.me.role !== 'guest'}
-        <a href="#/account" class:active={route.path === '/account'}><Icon name="theme" /><span>{t('playing.your_account')}</span></a>
+        <a href="#/account" class:active={route.path === '/account'}><Icon name="person" /><span>{t('playing.your_account')}</span></a>
       {/if}
       {#if isAdmin()}
         <a href="#/admin" class:active={tab === 'admin'}><Icon name="settings" /><span>Admin</span></a>
       {/if}
+      <button class="theme-toggle" onclick={cycleTheme} aria-label="Theme: {themeLabel}" title="Theme: {themeLabel}">
+        <Icon name="theme" /><span>{themeLabel}</span>
+      </button>
       <button class="tune-in neon" onclick={() => (showJoin = true)}>
         <Icon name="qr" size={26} />
         <span>
@@ -250,11 +255,12 @@
           <a href="#/playlists"><Icon name="playlist" /><span>{t('nav.playlists')}</span></a>
         {/if}
         {#if app.me.role !== 'guest'}
-          <a href="#/account"><Icon name="theme" /><span>{t('playing.your_account')}</span></a>
+          <a href="#/account"><Icon name="person" /><span>{t('playing.your_account')}</span></a>
         {/if}
         {#if isAdmin()}
           <a href="#/admin"><Icon name="settings" /><span>Admin</span></a>
         {/if}
+        <button class="theme-toggle sheet-theme" onclick={cycleTheme}><Icon name="theme" /><span>Theme: {themeLabel}</span></button>
       </div>
     </Sheet>
   {/if}
@@ -373,10 +379,6 @@
     flex: 1;
   }
 
-  .top-room {
-    display: none;
-  }
-
   .phone-room:has(:global(.room)) {
     display: flex;
     justify-content: center;
@@ -414,8 +416,23 @@
   }
 
   .side-brand,
+  .side-room,
   .extras {
     display: none;
+  }
+
+  .theme-toggle {
+    justify-content: flex-start;
+    gap: 12px;
+    background: transparent;
+  }
+
+  .sheet-theme {
+    min-height: 48px;
+    padding: 12px 14px;
+    border: 1px solid var(--edge);
+    border-radius: 12px;
+    background: var(--surface-2);
   }
 
   .tabs {
@@ -521,6 +538,31 @@
       border-top: 1px solid var(--edge);
     }
 
+    .side-room {
+      display: block;
+    }
+
+    .side-room :global(.room) {
+      display: flex;
+      justify-content: space-between;
+      padding: 0 6px;
+    }
+
+    .side-room :global(select) {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .extras .theme-toggle {
+      display: flex;
+      align-items: center;
+      padding: 10px 14px;
+      border: 1px solid transparent;
+      border-radius: 12px;
+      color: var(--muted);
+      font-size: 1rem;
+    }
+
     .tabs a,
     .extras a {
       max-width: none;
@@ -608,10 +650,6 @@
       display: none !important;
     }
 
-    .top-room {
-      display: block;
-    }
-
     /* On Admin pages the menu shrinks to icons, leaving room for Admin's own. */
     :global(:root:has(nav.rail)) {
       --side-width: 76px;
@@ -626,6 +664,10 @@
     }
 
     /* Out of sight, but still each link's name for screen readers. */
+    nav.rail .side-room {
+      display: none;
+    }
+
     nav.rail .tabs span,
     nav.rail .extras span {
       position: absolute;
@@ -643,6 +685,7 @@
 
     nav.rail .tabs a,
     nav.rail .extras a,
+    nav.rail .extras .theme-toggle,
     nav.rail .tune-in {
       justify-content: center;
       padding: 10px 0;

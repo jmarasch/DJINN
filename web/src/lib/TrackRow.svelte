@@ -10,6 +10,8 @@
   import { tapTrack, toggleRequest, trackStatus } from './state.svelte'
   import TrackMenu from './TrackMenu.svelte'
   import Heart from './Heart.svelte'
+  import LikeCount from './LikeCount.svelte'
+  import { t } from './i18n.svelte'
   import type { Track } from './types'
 
   let {
@@ -18,6 +20,7 @@
     showAlbum = true,
     number = null,
     note = null,
+    rich = false,
   }: {
     track: Track
     showArt?: boolean
@@ -25,12 +28,14 @@
     number?: number | null
     /** Extra text after the duration, like "12 requests". */
     note?: string | null
+    /** In the library's song list: on wide screens a neon card with the genres and counts beside it. */
+    rich?: boolean
   } = $props()
 
   const status = $derived(trackStatus(track.id))
 </script>
 
-<div class="row">
+<div class="row" class:rich>
   {#if showArt}
     <button class="art" onclick={() => tapTrack(track)} aria-label="Queue {track.title}" tabindex="-1">
       <Art hash={track.art_hash} size={44} />
@@ -51,15 +56,28 @@
       {/if}
       {#if track.duration_ms}<span class="meta"> · {duration(track.duration_ms)}</span>{/if}
       {#if note}<span class="meta"> · {note}</span>{/if}
-      <Counts plays={track.plays} likes={track.likes} />
-      {#each track.genres ?? [] as genre, i (genre)}
-        <span class="meta">{i === 0 ? ' · ' : ', '}</span><a class="genre" href="#/genre/{encodeURIComponent(genre)}"
-          >{genre}</a
-        >
-      {/each}
+      <span class:narrow-only={rich}><Counts plays={track.plays} likes={track.likes} /></span>
+      <span class:narrow-only={rich}>
+        {#each track.genres ?? [] as genre, i (genre)}
+          <span class="meta">{i === 0 ? ' · ' : ', '}</span><a class="genre" href="#/genre/{encodeURIComponent(genre)}"
+            >{genre}</a
+          >
+        {/each}
+      </span>
     </div>
   </div>
-  <Heart kind="track" id={track.id} name={track.title} />
+  {#if rich}
+    <span class="genre-chips">
+      {#each (track.genres ?? []).slice(0, 3) as genre (genre)}
+        <a class="genre-chip" href="#/genre/{encodeURIComponent(genre)}">{genre}</a>
+      {/each}
+    </span>
+    {#if track.plays}<span class="plays muted small">{t('count.plays', { n: track.plays })}</span>{/if}
+    <span class="wide-only"><LikeCount kind="track" id={track.id} name={track.title} likes={track.likes} /></span>
+    <span class="narrow-only"><Heart kind="track" id={track.id} name={track.title} /></span>
+  {:else}
+    <Heart kind="track" id={track.id} name={track.title} />
+  {/if}
   <TrackMenu {track} />
   <button
     class="queue"
@@ -101,6 +119,65 @@
     gap: 12px;
     min-height: 60px;
     padding: 6px 0;
+  }
+
+  .genre-chips,
+  .plays,
+  .wide-only {
+    display: none;
+  }
+
+  /* The library's song list on wide screens: a neon card per song. */
+  @media (min-width: 900px) {
+    .row.rich {
+      margin-bottom: 8px;
+      padding: 6px 12px 6px 8px;
+      border: 1px solid var(--edge);
+      border-radius: 14px;
+      background: var(--card-bg);
+      box-shadow: var(--glow);
+    }
+
+    .row.rich:hover {
+      border-color: var(--edge-strong);
+      box-shadow: var(--glow-strong);
+    }
+
+    .narrow-only {
+      display: none;
+    }
+
+    .row.rich .genre-chips {
+      display: flex;
+      flex: none;
+      gap: 6px;
+    }
+
+    .row.rich .plays {
+      display: inline;
+      flex: none;
+      white-space: nowrap;
+    }
+
+    .row.rich .wide-only {
+      display: inline;
+    }
+
+    .genre-chip {
+      padding: 4px 10px;
+      border: 1px solid var(--edge);
+      border-radius: 999px;
+      background: var(--surface-2);
+      color: var(--muted);
+      font-size: 0.8125rem;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+
+    .genre-chip:hover {
+      border-color: var(--edge-strong);
+      color: var(--text);
+    }
   }
 
   .art {

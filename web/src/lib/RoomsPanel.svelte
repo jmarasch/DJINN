@@ -97,7 +97,7 @@
   const followers = (room: Room) => rooms.filter((r) => r.linked_to === room.id)
 </script>
 
-<section class="card">
+<section class="card wide">
   <h2>Rooms</h2>
   <p class="small muted">
     Each room is its own party: its own queue, playlist, volume and skip votes, played on the speakers and nodes you

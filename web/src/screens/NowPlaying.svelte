@@ -19,7 +19,6 @@
     toast,
   } from '../lib/state.svelte'
   import { checkPlayHere, playHere, startPlayHere, stopPlayHere } from '../lib/playHere.svelte'
-  import { cycleTheme, theme } from '../lib/theme.svelte'
   import Heart from '../lib/Heart.svelte'
   import LyricsView from '../lib/LyricsView.svelte'
   import type { Lyrics } from '../lib/types'
@@ -149,7 +148,6 @@
       : `${requesters.slice(0, -1).join(', ')} & ${requesters[requesters.length - 1]}`,
   )
 
-  const themeLabel = $derived({ auto: 'Auto', light: 'Light', dark: 'Dark' }[theme.mode])
 </script>
 
 <div class="playing-page">
@@ -183,10 +181,6 @@
       href={app.room > 1 ? `/visualizer?room=${app.room}` : '/visualizer'}
       title="A visualizer in step with this room's speakers, with the song and what's coming up">Visualizer</a
     >
-    <button class="theme" onclick={cycleTheme} aria-label="Theme: {themeLabel}" title="Theme: {themeLabel}">
-      <Icon name="theme" size={18} />
-      {themeLabel}
-    </button>
   </div>
 </div>
 
@@ -383,17 +377,6 @@
         </div>
       {/each}
     {/if}
-
-    <div class="join-prompt">
-      <img
-        src={app.address ? `/api/join/qr.svg?v=${encodeURIComponent(app.address)}` : '/api/join/qr.svg'}
-        alt={t('playing.scan_alt')}
-      />
-      <div>
-        <strong>{t('playing.add_a_song')}</strong>
-        <p class="small muted">{t('playing.scan_hint')}</p>
-      </div>
-    </div>
   </aside>
 </div>
 
@@ -656,14 +639,6 @@
     pointer-events: none;
   }
 
-  .theme {
-    min-height: 34px;
-    padding: 0 10px;
-    border-radius: 999px;
-    background: var(--surface);
-    color: var(--muted);
-    font-size: 0.8125rem;
-  }
 
   .actions {
     display: grid;
@@ -894,32 +869,9 @@
     color: var(--accent);
   }
 
-  .join-prompt {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    margin-top: 20px;
-    padding: 16px;
-    border: 1px solid var(--edge);
-    border-radius: 16px;
-    background: color-mix(in srgb, var(--surface) 80%, transparent);
-  }
 
-  .join-prompt img {
-    flex: none;
-    width: clamp(76px, 8vw, 110px);
-    aspect-ratio: 1;
-    border-radius: 8px;
-    background: #fff;
-  }
 
-  .join-prompt strong {
-    font-size: 1.1rem;
-  }
 
-  .join-prompt p {
-    margin: 6px 0 0;
-  }
 
   .label {
     display: block;
@@ -975,10 +927,6 @@
 
     .side {
       padding-top: 12px;
-    }
-
-    .join-prompt {
-      margin-top: 28px;
     }
   }
 

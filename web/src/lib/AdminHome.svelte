@@ -115,10 +115,10 @@
     const lines: Line[] = [
       {
         level: status.library_folders ? 'ok' : 'bad',
-        label: 'Songs',
+        label: 'Music folders',
         detail: status.scanning
-          ? `${n(status.songs)}, checking for changes now`
-          : `${n(status.songs)} in ${status.library_folders} ${status.library_folders === 1 ? 'folder' : 'folders'}`,
+          ? 'Checking for changes now'
+          : `${status.library_folders} ${status.library_folders === 1 ? 'folder' : 'folders'}`,
         href: '#/admin/library',
       },
     ]
@@ -198,24 +198,20 @@
       <span class="small muted">Songs</span>
     </div>
     <div class="stat">
-      <Icon name={status.state === 'playing' ? 'playing' : 'pause'} size={22} />
-      <strong>{status.state === 'playing' ? 'Playing' : status.state === 'paused' ? 'Paused' : 'Quiet'}</strong>
-      <span class="small muted">Right now</span>
+      <Icon name="person" size={22} />
+      <strong>{n(status.artists)}</strong>
+      <span class="small muted">Artists</span>
     </div>
-    {#if status.cpu !== null}
-      <div class="stat">
-        <Icon name="settings" size={22} />
-        <strong>{Math.round(status.cpu * 100)}%</strong>
-        <span class="small muted">Processor</span>
-      </div>
-    {/if}
-    {#if status.disk_available !== null}
-      <div class="stat">
-        <Icon name="folder" size={22} />
-        <strong>{size(status.disk_available)}</strong>
-        <span class="small muted">Disk free</span>
-      </div>
-    {/if}
+    <div class="stat">
+      <Icon name="playlist" size={22} />
+      <strong>{n(status.albums)}</strong>
+      <span class="small muted">Albums</span>
+    </div>
+    <div class="stat">
+      <Icon name="folder" size={22} />
+      <strong>{size(status.library_bytes)}</strong>
+      <span class="small muted">Music on disk</span>
+    </div>
   </div>
   <div class="cards-2">
     {@render block('Music', music, 'playing')}

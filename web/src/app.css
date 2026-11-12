@@ -15,10 +15,12 @@
   /* The second color, from the logo's waveform. */
   --accent-2: #3fe0cf;
   /* Neon edges: a thin lavender line with a soft glow around it. */
-  --edge: rgb(180 140 255 / 0.46);
-  --edge-strong: rgb(180 140 255 / 0.75);
-  --glow: 0 0 16px rgb(180 140 255 / 0.22);
-  --glow-strong: 0 0 18px rgb(180 140 255 / 0.42);
+  --edge: rgb(190 150 255 / 0.62);
+  --edge-strong: rgb(205 170 255 / 0.95);
+  --glow:
+    0 0 0 1px rgb(180 140 255 / 0.14), 0 0 14px rgb(180 140 255 / 0.34), inset 0 0 18px rgb(180 140 255 / 0.07);
+  --glow-strong:
+    0 0 0 1px rgb(200 165 255 / 0.3), 0 0 22px rgb(180 140 255 / 0.62), inset 0 0 20px rgb(180 140 255 / 0.12);
   --card-bg: linear-gradient(180deg, rgb(39 33 58 / 0.82), rgb(26 22 39 / 0.9));
   --page-bg:
     radial-gradient(1100px 600px at 85% -10%, rgb(124 64 200 / 0.22), transparent 60%),
@@ -404,20 +406,23 @@ label {
   }
 }
 
-/* Cards side by side where there is room; a card with `wide` spans both. */
+/* Cards in two columns where there is room, filled top to bottom so no gaps
+   open between them; a card with `wide` spans both. */
 .cards-2 {
   display: block;
 }
 
-@media (min-width: 1280px) {
+@media (min-width: 1100px) {
   .cards-2 {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0 16px;
-    align-items: start;
+    columns: 2;
+    column-gap: 16px;
+  }
+
+  .cards-2 > * {
+    break-inside: avoid;
   }
 
   .cards-2 > .wide {
-    grid-column: 1 / -1;
+    column-span: all;
   }
 }

@@ -29,14 +29,17 @@
     gap: 8px;
     min-height: 40px;
     padding: 0 14px;
+    border: 1px solid var(--edge);
     border-radius: 999px;
-    background: var(--surface);
+    background: var(--surface-2);
+    box-shadow: var(--glow);
     color: var(--text);
     text-decoration: none;
   }
 
   .tag:hover {
-    background: var(--surface-2);
+    border-color: var(--edge-strong);
+    box-shadow: var(--glow-strong);
   }
 
   .count {

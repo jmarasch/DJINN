@@ -468,12 +468,21 @@
     <span class="muted">Top {layout.dots.length} of {map.genres.length} genres. Bigger means more songs; lines join related genres.</span>
   {/if}
 </nav>
-<p class="hint small muted">
-  {center
-    ? `Showing ${center} and what's near it. Tap ${center} to open it, or another genre to move there.`
-    : "Tap a genre to see what's near it."}
-  Drag to move around; pinch, scroll or use + and - to zoom.
-</p>
+<div class="choices small">
+  <label>
+    Genres at the top
+    <select bind:value={top}>
+      {#each TOP_CHOICES as choice (choice)}<option value={choice}>{choice}</option>{/each}
+    </select>
+  </label>
+  <label>
+    Lines
+    <select bind:value={links}>
+      {#each LINE_CHOICES as choice (choice.links)}<option value={choice.links}>{choice.label}</option>{/each}
+    </select>
+  </label>
+</div>
+
 <div class="cloud" bind:clientWidth={boxWidth} bind:clientHeight={boxHeight}>
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
   <svg
@@ -528,28 +537,22 @@
   <button class="corner bottom-left" aria-label="Zoom in" onclick={() => zoomBy(1.4)}><Icon name="plus" size={20} /></button>
   <button class="corner bottom-right" aria-label="Zoom out" onclick={() => zoomBy(1 / 1.4)}><Icon name="minus" size={20} /></button>
 </div>
-<div class="choices small">
-  <label>
-    Genres at the top
-    <select bind:value={top}>
-      {#each TOP_CHOICES as choice (choice)}<option value={choice}>{choice}</option>{/each}
-    </select>
-  </label>
-  <label>
-    Lines
-    <select bind:value={links}>
-      {#each LINE_CHOICES as choice (choice.links)}<option value={choice.links}>{choice.label}</option>{/each}
-    </select>
-  </label>
-</div>
+<p class="hint small muted">
+  {center
+    ? `Showing ${center} and what's near it. Tap ${center} to open it, or another genre to move there.`
+    : "Tap a genre to see what's near it."}
+  Drag to move around; pinch, scroll or use + and - to zoom.
+</p>
 
 <style>
   .cloud {
     position: relative;
     height: min(70vh, 640px);
     overflow: hidden;
+    border: 1px solid var(--edge);
     border-radius: 14px;
     background: var(--surface);
+    box-shadow: var(--glow);
   }
 
   .corner {
@@ -606,7 +609,7 @@
     display: flex;
     flex-wrap: wrap;
     gap: 16px;
-    margin-top: 8px;
+    margin: 0 0 8px;
   }
 
   .choices label {
@@ -622,7 +625,7 @@
   }
 
   .hint {
-    margin: 0 0 6px;
+    margin: 8px 0 0;
   }
 
   svg {

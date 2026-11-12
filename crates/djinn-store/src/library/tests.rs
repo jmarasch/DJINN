@@ -1282,13 +1282,43 @@ async fn plays_and_favorites_are_counted_per_song_album_and_artist() {
         .unwrap();
 
     let songs = store.track_counts(&[one, two, 999], 0).await.unwrap();
-    assert_eq!(songs[&one], Counts { plays: 3, likes: 2 });
-    assert_eq!(songs[&two], Counts { plays: 2, likes: 0 });
+    assert_eq!(
+        songs[&one],
+        Counts {
+            plays: 3,
+            likes: 2,
+            ..Counts::default()
+        }
+    );
+    assert_eq!(
+        songs[&two],
+        Counts {
+            plays: 2,
+            likes: 0,
+            ..Counts::default()
+        }
+    );
     assert_eq!(songs[&999], Counts::default());
     let albums = store.album_counts(&[album], 0).await.unwrap();
-    assert_eq!(albums[&album], Counts { plays: 5, likes: 1 });
+    assert_eq!(
+        albums[&album],
+        Counts {
+            plays: 5,
+            likes: 1,
+            songs: 2,
+            ..Counts::default()
+        }
+    );
     let artists = store.artist_counts(&[artist], 0).await.unwrap();
-    assert_eq!(artists[&artist], Counts { plays: 5, likes: 1 });
+    assert_eq!(
+        artists[&artist],
+        Counts {
+            plays: 5,
+            likes: 1,
+            albums: 1,
+            ..Counts::default()
+        }
+    );
     assert!(store.track_counts(&[], 0).await.unwrap().is_empty());
 
     // Counting only plays that heard half the song: the GO plays above heard

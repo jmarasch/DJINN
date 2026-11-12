@@ -11,6 +11,7 @@
   import Icon from '../lib/Icon.svelte'
   import InfiniteList from '../lib/InfiniteList.svelte'
   import Counts from '../lib/Counts.svelte'
+  import LikeCount from '../lib/LikeCount.svelte'
   import JumpStrip from '../lib/JumpStrip.svelte'
   import { watchScroll } from '../lib/scrollWatch.svelte'
   import { jumpCache } from '../lib/listCache'
@@ -316,7 +317,9 @@
               <Art hash={artist.art_hash} size={44} round={999} letter={initial(artist.name)} />
               <span class="name">
                 <span class="ellipsis block">{artist.name}</span>
-                {#if artist.about}<span class="muted small ellipsis block about">{artist.about}</span>{/if}
+                <span class="muted small ellipsis block narrow-only">
+                  {plural(artist.track_count, 'songs')}<Counts plays={artist.plays} likes={artist.likes} />
+                </span>
               </span>
               {#if artist.genres}
                 <span class="genre-chips">
@@ -325,11 +328,13 @@
                   {/each}
                 </span>
               {/if}
-              <span class="muted small counts"
-                >{plural(artist.track_count, 'songs')}<Counts plays={artist.plays} likes={artist.likes} /></span
-              >
+              <span class="muted small counts wide-only">
+                {#if artist.albums}{plural(artist.albums, 'albums')} · {/if}{plural(artist.track_count, 'songs')}{#if artist.plays}
+                  · {plural(artist.plays, 'plays')}{/if}
+              </span>
             </a>
-            {#if like}{@render like('artist', artist.id, artist.name)}{/if}
+            <span class="wide-only"><LikeCount kind="artist" id={artist.id} name={artist.name} likes={artist.likes} /></span>
+            {#if like}<span class="narrow-only">{@render like('artist', artist.id, artist.name)}</span>{/if}
           </div>
         {/if}
       {/snippet}
@@ -383,7 +388,9 @@
               <span class="name">
                 <span class="ellipsis block">{album.title}</span>
                 <span class="muted small ellipsis block">
-                  {album.artist}{album.year ? ` · ${album.year}` : ''}<Counts plays={album.plays} likes={album.likes} />
+                  {album.artist}{album.year ? ` · ${album.year}` : ''}<span class="narrow-only"
+                    ><Counts plays={album.plays} likes={album.likes} /></span
+                  >
                 </span>
               </span>
               {#if album.genres}
@@ -393,8 +400,13 @@
                   {/each}
                 </span>
               {/if}
+              <span class="muted small counts wide-only">
+                {#if album.songs}{plural(album.songs, 'songs')}{/if}{#if album.plays}
+                  · {plural(album.plays, 'plays')}{/if}
+              </span>
             </a>
-            {#if like}{@render like('album', album.id, album.title)}{/if}
+            <span class="wide-only"><LikeCount kind="album" id={album.id} name={album.title} likes={album.likes} /></span>
+            {#if like}<span class="narrow-only">{@render like('album', album.id, album.title)}</span>{/if}
           </div>
         {/if}
       {/snippet}
@@ -415,7 +427,7 @@
         {:else if song}
           {@render song(track)}
         {:else}
-          <TrackRow {track} note={byYear && track.year ? String(track.year) : null} />
+          <TrackRow {track} note={byYear && track.year ? String(track.year) : null} rich />
         {/if}
       {/snippet}
     </InfiniteList>
@@ -532,8 +544,8 @@
     display: block;
   }
 
-  /* A bio's first lines sit under an artist's name on wide screens only. */
-  .about {
+  /* Details that only phones or only wide screens show. */
+  .wide-only {
     display: none;
   }
 
@@ -563,8 +575,12 @@
       padding: 6px 0;
     }
 
-    .about {
-      display: block;
+    .wide-only {
+      display: inline;
+    }
+
+    .narrow-only {
+      display: none;
     }
 
     .genre-chips {
