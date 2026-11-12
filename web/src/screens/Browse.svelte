@@ -141,7 +141,10 @@
   })
 
   function readView(): View {
-    return readStored('djinn-browse-view') === 'grid' ? 'grid' : 'list'
+    const saved = readStored('djinn-browse-view')
+    if (saved === 'grid' || saved === 'list') return saved
+    // Photo tiles on a phone until the person picks a layout.
+    return window.matchMedia('(max-width: 899px)').matches ? 'grid' : 'list'
   }
 
   function readStored(key: string): string | null {
@@ -299,7 +302,7 @@
         {#if grid}
           <div class="with-like">
             <a class="tile" href="#/artist/{artist.id}">
-              <div class="cover"><Art hash={artist.art_hash} size={160} round={999} letter={initial(artist.name)} /></div>
+              <div class="cover"><Art hash={artist.art_hash} size={160} round={13} letter={initial(artist.name)} /></div>
               <span class="ellipsis center-text">{artist.name}</span>
               <span class="muted small center-text"
                 >{plural(artist.track_count, 'songs')}<Counts plays={artist.plays} likes={artist.likes} /></span
@@ -601,6 +604,9 @@
     aspect-ratio: 1;
     min-height: 0;
     overflow: hidden;
+    border: 1px solid var(--edge);
+    border-radius: 14px;
+    box-shadow: var(--glow);
   }
 
   .cover :global(.art) {
