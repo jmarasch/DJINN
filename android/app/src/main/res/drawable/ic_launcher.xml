@@ -1,18 +1,36 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The same mark as the web app's favicon. -->
+<!-- The DJINN mark, the same as the web app's icon (web/src/lib/Logo.svelte):
+     a record whose grooves open into a waveform. Vectors have no masks, so
+     the bars are first drawn wide in the background color to part them from
+     the rings. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
-    android:viewportWidth="32"
-    android:viewportHeight="32">
+    android:viewportWidth="80"
+    android:viewportHeight="80">
     <path
         android:fillColor="#14111F"
-        android:pathData="M7,0H25A7,7 0 0 1 32,7V25A7,7 0 0 1 25,32H7A7,7 0 0 1 0,25V7A7,7 0 0 1 7,0Z" />
-    <path
-        android:pathData="M16,7A9,9 0 1 1 15.99,7"
-        android:strokeWidth="2.5"
-        android:strokeColor="#B48CFF" />
-    <path
-        android:fillColor="#B48CFF"
-        android:pathData="M16,13.5A2.5,2.5 0 1 1 15.99,13.5Z" />
+        android:pathData="M18,0H62A18,18 0 0 1 80,18V62A18,18 0 0 1 62,80H18A18,18 0 0 1 0,62V18A18,18 0 0 1 18,0Z" />
+    <group
+        android:translateX="8"
+        android:translateY="8">
+        <path
+            android:pathData="M30.16,22.29A11,11 0 1,0 30.16,41.71M34.85,19.39A16,16 0 1,0 34.85,44.61M40.61,17.95A21,21 0 1,0 40.61,46.05M47.05,18.22A26,26 0 1,0 47.05,45.78"
+            android:strokeWidth="3.4"
+            android:strokeColor="#B48CFF"
+            android:strokeLineCap="round" />
+        <path
+            android:fillColor="#B48CFF"
+            android:pathData="M25,27.4A4.6,4.6 0 1,1 24.99,27.4Z" />
+        <path
+            android:pathData="M34.5,17V47M40,9V55M45.5,16V48M51,21V43M56.5,26V38"
+            android:strokeWidth="7"
+            android:strokeColor="#14111F"
+            android:strokeLineCap="round" />
+        <path
+            android:pathData="M34.5,17V47M40,9V55M45.5,16V48M51,21V43M56.5,26V38"
+            android:strokeWidth="4"
+            android:strokeColor="#3FE0CF"
+            android:strokeLineCap="round" />
+    </group>
 </vector>

@@ -291,34 +291,73 @@ mod session {
 
 const ICON_SIZE: u32 = 64;
 
-/// The DJINN mark (purple ring and dot on a dark rounded square) as RGBA,
-/// drawn here so no image decoder is needed. Edges are antialiased by
-/// distance.
+/// The DJINN mark as RGBA (the web app's small favicon: two grooves of a
+/// record opening into a waveform, on a dark rounded square), drawn here so
+/// no image decoder is needed. Shapes are distances in the favicon's 80-unit
+/// box (-8..72), so edges are antialiased at any size.
 fn icon_rgba(size: u32) -> Vec<u8> {
     const BG: [u8; 3] = [0x14, 0x11, 0x1f];
-    const FG: [u8; 3] = [0xb4, 0x8c, 0xff];
-    let s = size as f32;
-    let center = s / 2.0;
-    let corner = s * 0.22;
-    let ring = (s * 0.27, s * 0.07); // radius, half thickness
-    let dot = s * 0.08;
-    let coverage = |d: f32| (0.5 - d).clamp(0.0, 1.0);
+    const RING: [u8; 3] = [0xb4, 0x8c, 0xff];
+    const BAR: [u8; 3] = [0x3f, 0xe0, 0xcf];
+    const CENTER: (f32, f32) = (25.0, 32.0);
+    /// Groove radius and the half-angle (degrees) left open on the right.
+    const GROOVES: [(f32, f32); 2] = [(12.0, 58.0), (20.0, 40.0)];
+    const GROOVE_HALF: f32 = 2.5;
+    const HUB: f32 = 5.5;
+    /// Bar x and height, centered on y = 32.
+    const BARS: [(f32, f32); 4] = [(34.0, 30.0), (42.0, 46.0), (50.0, 26.0), (58.0, 12.0)];
+    const BAR_HALF: f32 = 2.75;
+    /// Space kept clear around the bars, so they stand apart from the grooves.
+    const PARTING: f32 = 1.5;
+
+    let unit = size as f32 / 80.0;
+    // Coverage of a shape whose edge is `d` units away (negative inside).
+    let coverage = |d: f32| (0.5 - d * unit).clamp(0.0, 1.0);
+    let groove = |x: f32, y: f32, (r, open): (f32, f32)| {
+        let (dx, dy) = (x - CENTER.0, CENTER.1 - y);
+        let open = open.to_radians();
+        if dy.atan2(dx).abs() <= open {
+            // In the opening: distance to the nearer end of the arc.
+            let ex = CENTER.0 + r * open.cos();
+            let ey = r * open.sin();
+            ((x - ex).powi(2) + (dy.abs() - ey).powi(2)).sqrt() - GROOVE_HALF
+        } else {
+            ((dx * dx + dy * dy).sqrt() - r).abs() - GROOVE_HALF
+        }
+    };
+    let bars = |x: f32, y: f32| {
+        BARS.iter()
+            .map(|&(bx, h)| {
+                let dy = ((y - 32.0).abs() - h / 2.0).max(0.0);
+                ((x - bx).powi(2) + dy * dy).sqrt() - BAR_HALF
+            })
+            .fold(f32::MAX, f32::min)
+    };
+    let blend = |under: [u8; 3], over: [u8; 3], amount: f32| {
+        let mut out = [0u8; 3];
+        for c in 0..3 {
+            let v = f32::from(under[c]) * (1.0 - amount) + f32::from(over[c]) * amount;
+            out[c] = v.round() as u8;
+        }
+        out
+    };
 
     let mut rgba = Vec::with_capacity((size * size * 4) as usize);
-    for y in 0..size {
-        for x in 0..size {
-            let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
-            // Rounded square: distance outside the inset rectangle.
-            let qx = ((px - center).abs() - (center - corner)).max(0.0);
-            let qy = ((py - center).abs() - (center - corner)).max(0.0);
-            let bg = coverage((qx * qx + qy * qy).sqrt() - corner);
-            let r = ((px - center).powi(2) + (py - center).powi(2)).sqrt();
-            let fg = coverage((r - ring.0).abs() - ring.1).max(coverage(r - dot));
-            for c in 0..3 {
-                let v = f32::from(BG[c]) * (1.0 - fg) + f32::from(FG[c]) * fg;
-                rgba.push(v.round() as u8);
-            }
-            rgba.push((bg * 255.0).round() as u8);
+    for py in 0..size {
+        for px in 0..size {
+            let x = (px as f32 + 0.5) / unit - 8.0;
+            let y = (py as f32 + 0.5) / unit - 8.0;
+            // Rounded square, 18 units at the corners.
+            let qx = ((x - 32.0).abs() - 22.0).max(0.0);
+            let qy = ((y - 32.0).abs() - 22.0).max(0.0);
+            let square = coverage((qx * qx + qy * qy).sqrt() - 18.0);
+            let to_bars = bars(x, y);
+            let hub = ((x - CENTER.0).powi(2) + (y - CENTER.1).powi(2)).sqrt() - HUB;
+            let rings = GROOVES.iter().map(|&g| groove(x, y, g)).fold(hub, f32::min);
+            let ring = coverage(rings) * (1.0 - coverage(to_bars - PARTING));
+            let color = blend(blend(BG, RING, ring), BAR, coverage(to_bars));
+            rgba.extend_from_slice(&color);
+            rgba.push((square * 255.0).round() as u8);
         }
     }
     rgba
@@ -329,7 +368,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn icon_has_ring_dot_and_transparent_corners() {
+    fn icon_has_hub_grooves_bars_and_transparent_corners() {
         let size = 64;
         let px = icon_rgba(size);
         assert_eq!(px.len(), (size * size * 4) as usize);
@@ -337,9 +376,11 @@ mod tests {
             let i = ((y * size + x) * 4) as usize;
             [px[i], px[i + 1], px[i + 2], px[i + 3]]
         };
+        // Units map to pixels as (u + 8) * 0.8.
         assert_eq!(at(0, 0)[3], 0, "corner is transparent");
-        assert_eq!(at(32, 32), [0xb4, 0x8c, 0xff, 255], "center dot");
-        assert_eq!(at(32, 32 - 17), [0xb4, 0x8c, 0xff, 255], "ring");
-        assert_eq!(at(32, 32 - 10), [0x14, 0x11, 0x1f, 255], "gap between");
+        assert_eq!(at(26, 32), [0xb4, 0x8c, 0xff, 255], "hub");
+        assert_eq!(at(20, 32), [0x14, 0x11, 0x1f, 255], "gap around the hub");
+        assert_eq!(at(16, 32), [0xb4, 0x8c, 0xff, 255], "first groove");
+        assert_eq!(at(39, 32), [0x3f, 0xe0, 0xcf, 255], "tallest bar");
     }
 }
