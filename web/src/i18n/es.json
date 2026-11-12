@@ -559,5 +559,13 @@
   "eq.applies": "Los cambios se aplican mientras suena la música.",
   "eq.turn_on": "Actívalo para oír estos ajustes.",
   "eq.load_failed": "No se pudo cargar el ecualizador",
-  "eq.save_failed": "No se pudo guardar el ecualizador"
+  "eq.save_failed": "No se pudo guardar el ecualizador",
+  "visual.spectrogram": "Espectrograma",
+  "visual.scope": "Osciloscopio",
+  "visual.mountain": "Montaña",
+  "visual.vu": "Vúmetros",
+  "visual.circle": "Círculo",
+  "visual.particles": "Partículas",
+  "visual.terrain": "Terreno",
+  "visual.flyover": "Sobrevuelo"
 }

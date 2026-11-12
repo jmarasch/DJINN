@@ -559,5 +559,13 @@
   "eq.applies": "Les changements s'appliquent pendant la lecture.",
   "eq.turn_on": "Activez-le pour entendre ces réglages.",
   "eq.load_failed": "Impossible de charger l'égaliseur",
-  "eq.save_failed": "Impossible d'enregistrer l'égaliseur"
+  "eq.save_failed": "Impossible d'enregistrer l'égaliseur",
+  "visual.spectrogram": "Spectrogramme",
+  "visual.scope": "Oscilloscope",
+  "visual.mountain": "Montagne",
+  "visual.vu": "Vumètres",
+  "visual.circle": "Cercle",
+  "visual.particles": "Particules",
+  "visual.terrain": "Terrain",
+  "visual.flyover": "Survol"
 }

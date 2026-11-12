@@ -559,5 +559,13 @@
   "eq.applies": "Changes apply while music plays.",
   "eq.turn_on": "Turn on to hear these settings.",
   "eq.load_failed": "Could not load the equalizer",
-  "eq.save_failed": "Could not save the equalizer"
+  "eq.save_failed": "Could not save the equalizer",
+  "visual.spectrogram": "Spectrogram",
+  "visual.scope": "Scope",
+  "visual.mountain": "Mountain",
+  "visual.vu": "VU meters",
+  "visual.circle": "Circle",
+  "visual.particles": "Particles",
+  "visual.terrain": "Terrain",
+  "visual.flyover": "Flyover"
 }

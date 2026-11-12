@@ -95,6 +95,14 @@ enum class VisualStyle {
     Kaleidoscope,
     Nebula,
     Stars,
+    Spectrogram,
+    Scope,
+    Mountain,
+    Vu,
+    Circle,
+    Particles,
+    Terrain,
+    Flyover,
     ;
 
     /** The style's name in the phone's language. */
@@ -182,6 +190,8 @@ private fun ChipVisual(style: VisualStyle, onTooSlow: (VisualStyle) -> Unit, mod
 @Composable
 private fun ShapeVisual(style: VisualStyle, onBlack: Boolean, modifier: Modifier) {
     val sound = remember { SoundReader(Spectrum.analyzer) }
+    // What the newer styles keep between frames; a new style starts afresh.
+    val memory = remember(style) { VisualMemory() }
     var frame by remember { mutableLongStateOf(0L) }
     LaunchedEffect(Unit) {
         while (true) {
@@ -208,6 +218,9 @@ private fun ShapeVisual(style: VisualStyle, onBlack: Boolean, modifier: Modifier
             COLORS_CUSTOM -> lerp(color(look.quiet), color(look.loud), level)
             else -> lerp(low, high, level)
         }
+        memory.tick(frame)
+        memory.turn = if (look.colors == COLORS_ROTATE) (seconds / look.rotateSeconds.coerceAtLeast(1f)).toFloat() % 1f else 0f
+        if (drawMore(style, sound, memory)) return@Canvas
         val corner = { width: Float -> CornerRadius(if (look.rounded) width / 2 else 0f) }
         val gapShare = look.gap.coerceIn(0f, 0.9f)
         when (style) {

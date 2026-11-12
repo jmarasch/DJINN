@@ -559,5 +559,13 @@
   "eq.applies": "Änderungen gelten sofort beim Abspielen.",
   "eq.turn_on": "Schalte ihn ein, um diese Einstellungen zu hören.",
   "eq.load_failed": "Equalizer konnte nicht geladen werden",
-  "eq.save_failed": "Equalizer konnte nicht gespeichert werden"
+  "eq.save_failed": "Equalizer konnte nicht gespeichert werden",
+  "visual.spectrogram": "Spektrogramm",
+  "visual.scope": "Oszilloskop",
+  "visual.mountain": "Gebirge",
+  "visual.vu": "VU-Meter",
+  "visual.circle": "Kreis",
+  "visual.particles": "Partikel",
+  "visual.terrain": "Landschaft",
+  "visual.flyover": "Überflug"
 }
