@@ -522,5 +522,42 @@
   "go.album_queued": {
     "one": "{n} chanson ajoutée à la file",
     "other": "{n} chansons ajoutées à la file"
-  }
+  },
+  "search.made_playlist": "Liste {name} créée",
+  "search.play_as_auto_mix": "Lancer comme mix automatique",
+  "search.auto_mix_started": "{name} est maintenant le mix automatique",
+  "search.playlist_failed": "Impossible de créer la liste",
+  "mood.title": "Ambiance",
+  "mood.your_setting": "Votre ambiance, de calme à survolté",
+  "mood.party_is": "La fête : {mood}",
+  "mood.people": {
+    "one": "{n} personne ajuste",
+    "other": "{n} personnes ajustent"
+  },
+  "mood.chill": "Calme",
+  "mood.easy": "Doux",
+  "mood.middle": "Entre les deux",
+  "mood.lively": "Animé",
+  "mood.hype": "Survolté",
+  "mood.failed": "Impossible de régler l'ambiance",
+  "eq.title": "Égaliseur",
+  "eq.yours_note": "Réglez le son pour votre propre écoute sur cet appareil. Sur iPhone et iPad, la musique peut s'arrêter au verrouillage de l'écran quand l'égaliseur est activé.",
+  "eq.phone_note": "Réglez le son pour votre propre écoute sur ce téléphone. Cela ne change pas ce qu'entend la fête.",
+  "eq.on": "Égaliseur activé",
+  "eq.reset": "Remettre à plat",
+  "eq.presets": "Préréglages de l'égaliseur",
+  "eq.bands": "Bandes de l'égaliseur",
+  "eq.flat": "Neutre",
+  "eq.bass": "Basses renforcées",
+  "eq.vocals": "Voix",
+  "eq.rock": "Rock",
+  "eq.electronic": "Électronique",
+  "eq.bright": "Brillant",
+  "eq.custom": "Personnalisé",
+  "eq.output_level": "Niveau de sortie",
+  "eq.saving": "Enregistrement…",
+  "eq.applies": "Les changements s'appliquent pendant la lecture.",
+  "eq.turn_on": "Activez-le pour entendre ces réglages.",
+  "eq.load_failed": "Impossible de charger l'égaliseur",
+  "eq.save_failed": "Impossible d'enregistrer l'égaliseur"
 }

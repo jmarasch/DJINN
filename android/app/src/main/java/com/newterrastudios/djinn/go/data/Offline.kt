@@ -1,5 +1,10 @@
 package com.newterrastudios.djinn.go.data
 
+import com.newterrastudios.djinn.go.player.EQ_BAND_HZ
+import com.newterrastudios.djinn.go.player.EQ_MAX_BAND_DB
+import com.newterrastudios.djinn.go.player.EQ_MAX_OUTPUT_DB
+import com.newterrastudios.djinn.go.player.EQ_MIN_OUTPUT_DB
+import com.newterrastudios.djinn.go.player.EqSettings
 import com.newterrastudios.djinn.go.player.VisualLook
 import kotlinx.serialization.encodeToString
 import android.content.ContentValues
@@ -235,6 +240,17 @@ class Prefs(context: Context, private val scope: () -> String = { "" }) {
         prefs.edit { putString("talk_over", choice.name) }
         talkOverNow.value = choice
     }
+
+    /** Your own equalizer, for this phone (not per server). */
+    var equalizer: EqSettings
+        get() = parseEqualizer(prefs.getString("equalizer", null))
+        set(value) = prefs.edit {
+            putString(
+                "equalizer",
+                listOf(if (value.enabled) "1" else "0", value.outputGainDb.toString(), value.bandsDb.joinToString(","))
+                    .joinToString(";"),
+            )
+        }
 
     /** Ask when the server has a newer version of the app. */
     var askAboutUpdates: Boolean
@@ -680,4 +696,17 @@ enum class SoundKind(val label: String, val folder: String) {
     Alarm("alarm", Environment.DIRECTORY_ALARMS),
     Ringtone("ringtone", Environment.DIRECTORY_RINGTONES),
     Notification("notification", Environment.DIRECTORY_NOTIFICATIONS),
+}
+
+/** "1;-2.0;4.0,5.0,..." (on, output level, bands) back to settings; flat if unreadable. */
+internal fun parseEqualizer(saved: String?): EqSettings {
+    val parts = saved?.split(";") ?: return EqSettings()
+    val bands = parts.getOrNull(2)?.split(",")?.mapNotNull { it.toFloatOrNull() }
+    val output = parts.getOrNull(1)?.toFloatOrNull()
+    if (parts.size != 3 || output == null || bands == null || bands.size != EQ_BAND_HZ.size) return EqSettings()
+    return EqSettings(
+        enabled = parts[0] == "1",
+        bandsDb = bands.map { it.coerceIn(-EQ_MAX_BAND_DB, EQ_MAX_BAND_DB) },
+        outputGainDb = output.coerceIn(EQ_MIN_OUTPUT_DB, EQ_MAX_OUTPUT_DB),
+    )
 }

@@ -52,6 +52,7 @@ fn from_a_room(event: &ServerEvent) -> bool {
             | ServerEvent::Position { .. }
             | ServerEvent::QueueChanged(_)
             | ServerEvent::PlayerState(_)
+            | ServerEvent::Mood(_)
             | ServerEvent::OutputStatus(_)
     )
 }
@@ -68,7 +69,11 @@ fn wanted(event: &ServerEvent, has_own: bool, from_own: bool, follows: bool) -> 
         return !from_own;
     }
     match event {
-        ServerEvent::QueueChanged(_) | ServerEvent::OutputStatus(_) => from_own,
+        // The room's own dial steers its own auto mix, even while it
+        // follows Main's sound.
+        ServerEvent::QueueChanged(_) | ServerEvent::OutputStatus(_) | ServerEvent::Mood(_) => {
+            from_own
+        }
         _ => from_own != follows,
     }
 }
@@ -192,8 +197,13 @@ async fn snapshot(state: &AppState, room: i64) -> anyhow::Result<Vec<ServerEvent
             ServerEvent::PlayerState(sound.player_state()),
         ]
     };
-    let output = state.jukebox_for(room).lock().await.output_status();
+    let (output, mood) = {
+        let own = state.jukebox_for(room);
+        let own = own.lock().await;
+        (own.output_status(), own.mood_state())
+    };
     events.push(ServerEvent::OutputStatus(output));
+    events.push(ServerEvent::Mood(mood));
     events.push(ServerEvent::QueueChanged(state.store.queue(room).await?));
     events.push(ServerEvent::ArtistLookup(
         crate::library_api::lookup_status(state),

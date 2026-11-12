@@ -1,5 +1,7 @@
 import type { Visuals } from './visuals'
 import type {
+  MoodState,
+  PartySchedule,
   RoomTiming,
   TimingSpeaker,
   About,
@@ -344,6 +346,12 @@ export const api = {
   addRequest: (trackId: number) =>
     post<QueueItem & { outcome: 'added' | 'backed' }>('/queue', { track_id: trackId }),
   skipVote: () => post<{ skipped: boolean }>('/player/skip-vote'),
+  mood: () => get<MoodState>('/mood'),
+  nudgeMood: (value: number) => put<MoodState>('/mood', { value }),
+  saveMoodSettings: (settings: { on: boolean; strength: number }) => put<void>('/party/mood', settings),
+  partySchedule: (room: number) => get<PartySchedule>(`/party/schedule?room=${room}`),
+  savePartySchedule: (room: number, schedule: PartySchedule) =>
+    put<void>(`/party/schedule?room=${room}`, { on: schedule.on, rules: schedule.rules }),
   /** The live stream for Play here; null when the host turned it off. */
   listen: () => get<{ url: string | null }>('/listen'),
   trackEdit: (id: number) => get<TrackEdit>(`/tracks/${id}/edit`),

@@ -274,8 +274,8 @@ class GoApi(private val account: Account) {
         json.decodeFromString(send("POST", "/api/go/offline/versions", json.encodeToString(VersionQuery(ids))))
     }
 
-    suspend fun createPlaylist(name: String): GoPlaylistDetail = withContext(Dispatchers.IO) {
-        json.decodeFromString(send("POST", "/api/go/playlists", json.encodeToString(NewPlaylist(name))))
+    suspend fun createPlaylist(name: String, songs: List<Long> = emptyList()): GoPlaylistDetail = withContext(Dispatchers.IO) {
+        json.decodeFromString(send("POST", "/api/go/playlists", json.encodeToString(NewPlaylist(name, songs))))
     }
 
     suspend fun renamePlaylist(id: Long, name: String) = write("PATCH", "/api/go/playlists/$id", PlaylistName(name))

@@ -23,6 +23,7 @@
   import PublicNetworkNote from '../lib/PublicNetworkNote.svelte'
   import ReplayGainPanel from '../lib/ReplayGainPanel.svelte'
   import SmartPlayPanel from '../lib/SmartPlayPanel.svelte'
+  import SchedulePanel from '../lib/SchedulePanel.svelte'
   import { adminGroups, adminTabLabel, type AdminTab } from '../lib/adminTabs'
   import { adminEntries, searchAdmin, type AdminEntry } from '../lib/adminSearch'
   import AdminHome from '../lib/AdminHome.svelte'
@@ -392,6 +393,7 @@
   <EqualizerPanel />
 {:else if t === 'smart'}
   <SmartPlayPanel />
+  <SchedulePanel />
 {:else if t === 'ai'}
   <AiPanel />
 {:else if t === 'users'}

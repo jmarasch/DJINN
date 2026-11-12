@@ -8,6 +8,7 @@
 // party's auto mix.
 
 import { SvelteSet } from 'svelte/reactivity'
+import { attachEqualizer, wakeEqualizer } from './equalizer.svelte'
 import { api } from '../lib/api'
 import { toast } from '../lib/state.svelte'
 import type { GoPrefs, LikeKind, PlayLinks, Track } from '../lib/types'
@@ -102,6 +103,7 @@ export const current = () => (player.index >= 0 ? player.queue[player.index] ?? 
 export const livePosition = () => decks[active].currentTime * 1000
 
 const decks = [new Audio(), new Audio()]
+attachEqualizer(decks)
 let active = 0
 /** The next song, already loading in the other deck. */
 let preloaded: { trackId: number; links: PlayLinks } | null = null
@@ -232,6 +234,7 @@ async function start(index: number, autoplay = true) {
     player.downloadUrl = links.download_url
     heardMs = 0
     setMediaSession(song)
+    wakeEqualizer()
     if (autoplay) await deck.play().catch(() => (player.playing = false))
     saveResume()
     preloadNext()
@@ -398,8 +401,10 @@ export function removeAt(index: number) {
 export function toggle() {
   const deck = decks[active]
   if (player.index < 0) return
-  if (deck.paused) deck.play().catch(() => {})
-  else deck.pause()
+  if (deck.paused) {
+    wakeEqualizer()
+    deck.play().catch(() => {})
+  } else deck.pause()
 }
 
 export function next() {

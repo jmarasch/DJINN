@@ -37,6 +37,9 @@ export const adminEntries: AdminEntry[] = [
   { label: 'Learn from the party for wild play and radio', tab: 'smart', keywords: 'smart play learning', key: 'smart_play' },
   { label: 'Also use it for shuffled playlists', tab: 'smart', keywords: 'smart playlists', key: 'smart_playlists' },
   { label: 'How much it counts', tab: 'smart', keywords: 'strength smart', key: 'smart_strength' },
+  { label: 'Show the mood dial', tab: 'smart', keywords: 'mood dial chill hype energy guests', key: 'mood_dial' },
+  { label: 'How much the dial counts', tab: 'smart', keywords: 'mood strength', key: 'mood_strength' },
+  { label: 'Party schedule', tab: 'smart', keywords: 'schedule time rules quiet dance evening timer' },
   { label: 'Party styles', tab: 'smart', keywords: 'style learning forget' },
   // Audio
   { label: 'Crossfade', tab: 'audio', keywords: 'blend gapless fade transition', key: 'crossfade_secs' },

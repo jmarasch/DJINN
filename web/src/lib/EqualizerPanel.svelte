@@ -2,6 +2,7 @@
   import { onMount } from 'svelte'
   import { api } from './api'
   import { toast } from './state.svelte'
+  import { t } from './i18n.svelte'
   import type { EqualizerSettings } from './types'
 
   let {
@@ -9,7 +10,7 @@
     store = async (settings: EqualizerSettings) => {
       await api.saveEqualizer(settings)
     },
-    title = 'Equalizer',
+    title = t('eq.title'),
     note = 'Shape the party mix on every output, including casting and Tune In. Normal levels stay intact; peaks near clipping are softened.',
   }: {
     /** Where the settings come from and go (the party mix by default). */
@@ -21,12 +22,12 @@
 
   const bands = ['32', '64', '125', '250', '500', '1k', '2k', '4k', '6k', '8k', '12k', '16k']
   const presets = [
-    { id: 'flat', label: 'Flat', gains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
-    { id: 'bass', label: 'Bass Boost', gains: [4, 5, 5, 3, 1, 0, 0, 0, 0, 0, 0, 0] },
-    { id: 'vocal', label: 'Vocals', gains: [0, -1, -1, 0, 1, 2, 3, 2, 1, 0, 0, 0] },
-    { id: 'rock', label: 'Rock', gains: [3, 4, 3, 1, -1, 0, 2, 3, 2, 1, 1, 0] },
-    { id: 'electronic', label: 'Electronic', gains: [4, 5, 3, 1, 0, -1, 0, 2, 3, 2, 1, 0] },
-    { id: 'bright', label: 'Bright', gains: [0, 0, 0, 0, 0, 0, 1, 2, 2, 3, 3, 2] },
+    { id: 'flat', label: 'eq.flat', gains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
+    { id: 'bass', label: 'eq.bass', gains: [4, 5, 5, 3, 1, 0, 0, 0, 0, 0, 0, 0] },
+    { id: 'vocal', label: 'eq.vocals', gains: [0, -1, -1, 0, 1, 2, 3, 2, 1, 0, 0, 0] },
+    { id: 'rock', label: 'eq.rock', gains: [3, 4, 3, 1, -1, 0, 2, 3, 2, 1, 1, 0] },
+    { id: 'electronic', label: 'eq.electronic', gains: [4, 5, 3, 1, 0, -1, 0, 2, 3, 2, 1, 0] },
+    { id: 'bright', label: 'eq.bright', gains: [0, 0, 0, 0, 0, 0, 1, 2, 2, 3, 3, 2] },
   ]
 
   let settings = $state<EqualizerSettings>({ enabled: false, bands_db: Array(12).fill(0), output_gain_db: 0 })
@@ -45,7 +46,7 @@
         settings = found
         loaded = true
       })
-      .catch((e) => toast(e instanceof Error ? e.message : 'Could not load equalizer', true))
+      .catch((e) => toast(e instanceof Error ? e.message : t('eq.load_failed'), true))
     return () => clearTimeout(timer)
   })
 
@@ -62,7 +63,7 @@
       inFlight = inFlight
         .then(() => store(next))
         .catch((e) => {
-          toast(e instanceof Error ? e.message : 'Could not save equalizer', true)
+          toast(e instanceof Error ? e.message : t('eq.save_failed'), true)
         })
         .then(() => {
           pending--
@@ -89,21 +90,21 @@
 <section class="card">
   <div class="heading">
     <h2>{title}</h2>
-    {#if loaded}<button class="small-button" onclick={flat} disabled={selectedPreset === 'flat' && settings.output_gain_db === 0}>Reset flat</button>{/if}
+    {#if loaded}<button class="small-button" onclick={flat} disabled={selectedPreset === 'flat' && settings.output_gain_db === 0}>{t('eq.reset')}</button>{/if}
   </div>
   <p class="small muted">{note}</p>
   {#if loaded}
     <label class="switch big">
       <input type="checkbox" bind:checked={settings.enabled} onchange={() => save()} />
-      Equalizer on
+      {t('eq.on')}
     </label>
-    <div class="presets" role="group" aria-label="Equalizer presets">
+    <div class="presets" role="group" aria-label={t('eq.presets')}>
       {#each presets as preset (preset.id)}
-        <button class:chosen={selectedPreset === preset.id} aria-pressed={selectedPreset === preset.id} onclick={() => usePreset(preset)}>{preset.label}</button>
+        <button class:chosen={selectedPreset === preset.id} aria-pressed={selectedPreset === preset.id} onclick={() => usePreset(preset)}>{t(preset.label)}</button>
       {/each}
-      {#if selectedPreset === 'custom'}<span class="small muted">Custom</span>{/if}
+      {#if selectedPreset === 'custom'}<span class="small muted">{t('eq.custom')}</span>{/if}
     </div>
-    <div class="bars" role="group" aria-label="Equalizer bands">
+    <div class="bars" role="group" aria-label={t('eq.bands')}>
       <div class="zero-line" aria-hidden="true"></div>
       {#each bands as band, i (band)}
         <label class="band">
@@ -114,10 +115,10 @@
       {/each}
     </div>
     <label class="output-level">
-      <span>Output level <span class="gain">{formatted(settings.output_gain_db)}</span></span>
+      <span>{t('eq.output_level')} <span class="gain">{formatted(settings.output_gain_db)}</span></span>
       <input type="range" min="-12" max="6" step="0.5" bind:value={settings.output_gain_db} oninput={() => save(250)} />
     </label>
-    <p class="small muted status" aria-live="polite">{saving ? 'Saving…' : settings.enabled ? 'Changes apply while music plays.' : 'Turn on to hear these settings.'}</p>
+    <p class="small muted status" aria-live="polite">{saving ? t('eq.saving') : settings.enabled ? t('eq.applies') : t('eq.turn_on')}</p>
   {/if}
 </section>
 

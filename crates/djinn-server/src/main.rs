@@ -38,6 +38,7 @@ mod library_api;
 mod likes_api;
 mod logs;
 mod lyrics;
+mod mood_api;
 mod network;
 mod node_audio;
 mod node_builds;
@@ -52,6 +53,7 @@ mod problems_api;
 mod reader;
 mod rooms_api;
 mod rooms_rt;
+mod schedule;
 mod scheduled_check;
 mod security;
 mod settings;
@@ -427,6 +429,7 @@ async fn run() -> anyhow::Result<()> {
     }
     watcher::start(state.clone());
     scheduled_check::start(state.clone());
+    schedule::start(state.clone());
     lyrics::start(&state);
     update::start(&state);
     if let Err(e) = convert::apply(&state).await {

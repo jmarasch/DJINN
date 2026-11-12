@@ -522,5 +522,42 @@
   "go.album_queued": {
     "one": "Added {n} song to the queue",
     "other": "Added {n} songs to the queue"
-  }
+  },
+  "search.made_playlist": "Made the playlist {name}",
+  "search.play_as_auto_mix": "Play as the auto mix",
+  "search.auto_mix_started": "{name} is now the auto mix",
+  "search.playlist_failed": "Could not make the playlist",
+  "mood.title": "Mood",
+  "mood.your_setting": "Your mood setting, chill to hype",
+  "mood.party_is": "The party: {mood}",
+  "mood.people": {
+    "one": "{n} person nudging",
+    "other": "{n} people nudging"
+  },
+  "mood.chill": "Chill",
+  "mood.easy": "Easy",
+  "mood.middle": "In between",
+  "mood.lively": "Lively",
+  "mood.hype": "Hype",
+  "mood.failed": "Could not set the mood",
+  "eq.title": "Equalizer",
+  "eq.yours_note": "Shape the sound for your own listening on this device. On iPhones and iPads, music may stop when the screen locks while the equalizer is on.",
+  "eq.phone_note": "Shape the sound for your own listening on this phone. It doesn't change what the party hears.",
+  "eq.on": "Equalizer on",
+  "eq.reset": "Reset flat",
+  "eq.presets": "Equalizer presets",
+  "eq.bands": "Equalizer bands",
+  "eq.flat": "Flat",
+  "eq.bass": "Bass Boost",
+  "eq.vocals": "Vocals",
+  "eq.rock": "Rock",
+  "eq.electronic": "Electronic",
+  "eq.bright": "Bright",
+  "eq.custom": "Custom",
+  "eq.output_level": "Output level",
+  "eq.saving": "Saving…",
+  "eq.applies": "Changes apply while music plays.",
+  "eq.turn_on": "Turn on to hear these settings.",
+  "eq.load_failed": "Could not load the equalizer",
+  "eq.save_failed": "Could not save the equalizer"
 }

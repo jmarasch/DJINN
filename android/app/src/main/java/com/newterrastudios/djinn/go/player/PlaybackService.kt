@@ -128,6 +128,7 @@ class PlaybackService : MediaLibraryService() {
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
         // Kept songs are plain files; everything else goes through the cache.
         val sources = DefaultDataSource.Factory(this, caching)
+        GoEqualizer.settings = app.prefs.equalizer
         val renderers = object : DefaultRenderersFactory(this) {
             override fun buildAudioSink(
                 context: android.content.Context,
@@ -136,7 +137,7 @@ class PlaybackService : MediaLibraryService() {
             ): AudioSink = DefaultAudioSink.Builder(context)
                 .setEnableFloatOutput(enableFloatOutput)
                 .setEnableAudioOutputPlaybackParameters(enableAudioOutputPlaybackParameters)
-                .setAudioProcessors(arrayOf(TeeAudioProcessor(Spectrum)))
+                .setAudioProcessors(arrayOf(EqualizerProcessor(), TeeAudioProcessor(Spectrum)))
                 .build()
         }
         val attributes = AudioAttributes.Builder()

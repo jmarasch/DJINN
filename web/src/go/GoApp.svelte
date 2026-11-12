@@ -4,6 +4,8 @@
   // come as they are and this device plays them.
   import { onMount } from 'svelte'
   import AccountPanels from '../lib/AccountPanels.svelte'
+  import EqualizerPanel from '../lib/EqualizerPanel.svelte'
+  import { loadEqualizer, saveEqualizer } from './equalizer.svelte'
   import { api, ApiError, onUnauthorized } from '../lib/api'
   import Icon from '../lib/Icon.svelte'
   import { goBack, navigation, param, route } from '../lib/router.svelte'
@@ -232,6 +234,7 @@
           </label>
         </section>
       {/if}
+      <EqualizerPanel load={loadEqualizer} store={saveEqualizer} note={t('eq.yours_note')} />
       <GetApp />
       <OpenOnPhone />
       <AccountPanels />

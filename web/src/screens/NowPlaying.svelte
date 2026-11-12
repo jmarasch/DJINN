@@ -1,4 +1,5 @@
 <script lang="ts">
+  import MoodDial from '../lib/MoodDial.svelte'
   import { t } from '../lib/i18n.svelte'
   import { onMount } from 'svelte'
   import { api } from '../lib/api'
@@ -225,6 +226,8 @@
       <a class="button primary" href="#/search">Find a song</a>
     </div>
   {/if}
+
+  <MoodDial />
 
   {#if playHere.url}
     <div class="play-here">

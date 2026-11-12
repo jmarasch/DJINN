@@ -12,6 +12,7 @@ import type {
   LoudnessStatus,
   LookupStatus,
   Mode,
+  MoodState,
   NowPlaying,
   OutputStatus,
   PlayerState,
@@ -47,6 +48,8 @@ export const app = $state({
     skip_resting: [],
   } as PlayerState,
   output: { device: null, sample_rate: null, error: null, outputs: [] } as OutputStatus,
+  /** The mood dial in this room. */
+  mood: null as MoodState | null,
   queue: [] as QueueItem[],
   scan: null as ScanProgress | null,
   lookup: { running: false, last: null, finished_at: null } as LookupStatus,
@@ -146,6 +149,7 @@ export function connect() {
     app.player = data
   })
   on<OutputStatus>('output_status', (data) => (app.output = data))
+  on<MoodState>('mood', (data) => (app.mood = data))
   on<ScanProgress>('scan_progress', (data) => {
     app.scan = data
     if (data.done) {

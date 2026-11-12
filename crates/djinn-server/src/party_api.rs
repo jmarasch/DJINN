@@ -46,6 +46,8 @@ struct Overview {
     /// The style in use.
     active: Option<i64>,
     styles: Vec<PartyStyle>,
+    /// The mood dial's switches.
+    mood: crate::mood_api::MoodSettings,
 }
 
 async fn overview(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json<Overview>> {
@@ -58,6 +60,7 @@ async fn overview(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json
         },
         active: store.active_party_style().await?,
         styles: store.party_styles().await?,
+        mood: crate::mood_api::mood_settings(&state).await?,
     }))
 }
 

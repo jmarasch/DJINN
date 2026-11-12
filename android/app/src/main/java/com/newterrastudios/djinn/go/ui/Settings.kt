@@ -184,6 +184,7 @@ fun SettingsScreen(nav: Nav) {
         item { TapSettings(nav) }
         item { TalkOverSettings(nav) }
         item { VisualsSettings(nav) }
+        item { EqualizerSettings(nav) }
         if (nav.canKeepSongs) {
             item {
                 Heading(t("settings.quality"))

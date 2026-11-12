@@ -79,6 +79,11 @@ pub const DEFAULTS: &[(&str, Default)] = &[
     (crate::jukebox::SMART_PLAY, Default::Flag(true)),
     (crate::jukebox::SMART_PLAYLISTS, Default::Flag(false)),
     (crate::jukebox::SMART_STRENGTH, Default::Number(100)),
+    (crate::jukebox::MOOD_DIAL, Default::Flag(true)),
+    (
+        crate::jukebox::MOOD_STRENGTH,
+        Default::Number(crate::jukebox::DEFAULT_MOOD_STRENGTH),
+    ),
     (crate::jukebox::CROSSFADE, Default::Number(0)),
     (crate::audio_api::SOUND_ANALYSIS, Default::Flag(false)),
     (ONLINE_INFO, Default::Flag(false)),

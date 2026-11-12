@@ -7,7 +7,8 @@
   import Icon from '../lib/Icon.svelte'
   import TrackRow from '../lib/TrackRow.svelte'
   import NotInLibrary from '../lib/NotInLibrary.svelte'
-  import { hasPlaylists, isAdmin, toast } from '../lib/state.svelte'
+  import { isAdmin } from '../lib/state.svelte'
+  import SearchSongActions from '../lib/SearchSongActions.svelte'
   import type { SearchResults } from '../lib/types'
 
   let searchBox = $state<HTMLElement>()
@@ -94,18 +95,6 @@
    * with nothing by that name leads with what fits. */
   const describedFirst = $derived(!!described && !results?.tracks.length && !results?.artists.length)
 
-  async function savePlaylist() {
-    if (!described) return
-    const label = described.summary.join(' ')
-    const name = label.charAt(0).toUpperCase() + label.slice(1)
-    try {
-      const playlist = await api.playlistFromSongs(name, described.tracks.map((t) => t.id))
-      toast(`Made the playlist ${playlist.name}`)
-      location.hash = `/playlist/${playlist.id}`
-    } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not make the playlist', true)
-    }
-  }
 </script>
 
 {#snippet describedSection()}
@@ -134,10 +123,8 @@
             </p>
           {/if}
         </div>
-        {#if hasPlaylists() && described.tracks.length}
-          <button class="small-button" onclick={savePlaylist}>{t('search.save_playlist')}</button>
-        {/if}
       </div>
+      <SearchSongActions name={described.summary.join(' ')} tracks={described.tracks} />
       {#if described.artists.length}
         <div class="chips">
           {#each described.artists as artist (artist.id)}
@@ -211,6 +198,7 @@
 
   {#if results.tracks.length}
     <h2>{t('library.songs')}</h2>
+    <SearchSongActions name={query} tracks={results.tracks} />
     {#each results.tracks as track (track.id)}
       <TrackRow {track} />
     {/each}
@@ -265,11 +253,6 @@
 
   .described-head p {
     margin: 0 0 8px;
-  }
-
-  .small-button {
-    flex: none;
-    margin-top: 16px;
   }
 
   .search-box {

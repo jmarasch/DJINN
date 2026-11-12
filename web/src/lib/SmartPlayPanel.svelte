@@ -5,6 +5,7 @@
   import type { Learned, PartyStyle, SmartPlaySettings } from './types'
 
   let settings = $state<SmartPlaySettings | null>(null)
+  let mood = $state<{ on: boolean; strength: number } | null>(null)
   let styles = $state<PartyStyle[]>([])
   let active = $state<number | null>(null)
   let newName = $state('')
@@ -21,6 +22,20 @@
     settings = { smart_play: data.smart_play, smart_playlists: data.smart_playlists, strength: data.strength }
     styles = data.styles
     active = data.active
+    mood = data.mood
+  }
+
+  let moodTimer: ReturnType<typeof setTimeout>
+  function saveMood() {
+    clearTimeout(moodTimer)
+    moodTimer = setTimeout(async () => {
+      if (!mood) return
+      try {
+        await api.saveMoodSettings(mood)
+      } catch (e) {
+        toast(e instanceof Error ? e.message : 'Could not save', true)
+      }
+    }, 200)
   }
 
   async function attempt(action: () => Promise<unknown>, done?: string) {
@@ -131,6 +146,28 @@
       />
     </label>
   </section>
+
+  {#if mood}
+    <section class="card">
+      <h2>Mood dial</h2>
+      <p class="small muted">
+        Everyone at the party gets a dial on the Playing tab, from chill to hype. The auto mix then favors songs whose
+        energy fits what the room wants: faster, punchier songs for hype, calmer ones for chill. Each person's setting
+        counts for 40 minutes. It works for wild play, radio and shuffled playlists, using sound analysis (Admin >
+        Library), so songs not analyzed yet aren't moved either way.
+      </p>
+      <label class="switch">
+        <input type="checkbox" bind:checked={mood.on} onchange={saveMood} />
+        Show the mood dial
+      </label>
+      <label class="slider">
+        <span class="row-label">
+          How much the dial counts <span class="muted">{strengthLabel(mood.strength)} ({mood.strength}%)</span>
+        </span>
+        <input type="range" min="0" max="100" step="5" bind:value={mood.strength} oninput={saveMood} disabled={!mood.on} />
+      </label>
+    </section>
+  {/if}
 
   <section class="card">
     <h2>Party styles</h2>

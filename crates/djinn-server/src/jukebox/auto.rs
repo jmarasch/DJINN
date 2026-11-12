@@ -371,7 +371,15 @@ impl Jukebox {
             HashMap::new()
         };
         self.bag.set_weights(weights);
-        Ok(self.bag.draw(pool, &recent, window, &mut self.rng))
+        // The mood dial picks among the next few songs of the cycle.
+        let lean = self.mood_lean().await?;
+        let weigh = lean.map(|(mood, strength, links)| {
+            move |id: i64| mix::mood_weight(links.energy.get(&id).copied(), mood, strength)
+        });
+        let weigh = weigh.as_ref().map(|f| f as &dyn Fn(i64) -> f32);
+        Ok(self
+            .bag
+            .draw_leaning(pool, &recent, window, weigh, &mut self.rng))
     }
 
     /// Wild play and radio: by weight, after the party's history, never a
@@ -383,8 +391,14 @@ impl Jukebox {
     ) -> anyhow::Result<Option<i64>> {
         let (recent, window) = self.recent(ahead).await?;
         let recent: HashSet<i64> = recent.into_iter().take(window).collect();
-        let party = self.party_weights().await?;
-        Ok(mix::weighted_draw(pool, &recent, &party, &mut self.rng))
+        let mut weights = self.party_weights().await?;
+        if let Some((mood, strength, links)) = self.mood_lean().await? {
+            for &(id, _) in pool {
+                let fit = mix::mood_weight(links.energy.get(&id).copied(), mood, strength);
+                *weights.entry(id).or_insert(1.0) *= fit;
+            }
+        }
+        Ok(mix::weighted_draw(pool, &recent, &weights, &mut self.rng))
     }
 
     /// Songs played recently, newest first, and how many of them count:

@@ -21,6 +21,8 @@ pub enum ServerEvent {
     },
     QueueChanged(Vec<QueueItem>),
     PlayerState(PlayerState),
+    /// The mood dial: where it is and each person's setting.
+    Mood(crate::jukebox::MoodState),
     OutputStatus(OutputStatus),
     ScanProgress(ScanProgress),
     /// Artists, albums, or pictures changed; cached lists are stale.
@@ -50,6 +52,7 @@ impl ServerEvent {
             Self::Position { .. } => "position",
             Self::QueueChanged(_) => "queue_changed",
             Self::PlayerState(_) => "player_state",
+            Self::Mood(_) => "mood",
             Self::OutputStatus(_) => "output_status",
             Self::ScanProgress(_) => "scan_progress",
             Self::LibraryChanged => "library_changed",

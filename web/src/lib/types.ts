@@ -490,6 +490,39 @@ export interface PlayerState {
   skip_resting: number[]
 }
 
+/** The mood dial: everyone nudges the auto mix from chill (-1) to hype (1). */
+export interface MoodState {
+  /** In use (Admin > Smart play). */
+  on: boolean
+  /** Where it is now. */
+  value: number
+  /** Where it rests without anyone's setting (the party schedule's). */
+  base: number
+  /** Each person's setting, by user id. */
+  votes: Record<string, number>
+  /** Songs have been listened to (sound analysis), so it has something to go by. */
+  works: boolean
+}
+
+/** One party schedule rule: from when to when, and what to set as it starts. */
+export interface ScheduleRule {
+  /** 0 Monday to 6 Sunday; empty for every day. */
+  days: number[]
+  /** Minutes after midnight. */
+  from: number
+  until: number
+  play: { kind: 'keep' } | { kind: 'wild' } | { kind: 'playlist'; id: number }
+  mood: number | null
+  volume: number | null
+}
+
+export interface PartySchedule {
+  on: boolean
+  rules: ScheduleRule[]
+  /** The rule holding now. */
+  holding?: number | null
+}
+
 export interface OutputStatus {
   /** The devices playing, joined. */
   device: string | null
@@ -1193,6 +1226,8 @@ export interface SmartPlay extends SmartPlaySettings {
   /** The style in use. */
   active: number | null
   styles: PartyStyle[]
+  /** The mood dial's switches. */
+  mood: { on: boolean; strength: number }
 }
 
 /** The most favored and most avoided, strongest first. */

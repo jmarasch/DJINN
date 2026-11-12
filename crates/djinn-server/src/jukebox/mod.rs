@@ -12,6 +12,7 @@ mod auto;
 mod bag;
 mod gain;
 mod mix;
+mod mood;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
@@ -37,6 +38,7 @@ pub use self::gain::{
     ReplayGain, ReplayGainMode, MAX_PREAMP_DB, REPLAY_GAIN_MODE, REPLAY_GAIN_PREAMP,
 };
 pub use self::mix::{Copies, Learned, Mixer, Radio, RadioSeed, SongLinks};
+pub use self::mood::{MoodError, MoodState, DEFAULT_MOOD_STRENGTH, MOOD_DIAL, MOOD_STRENGTH};
 use crate::events::{
     Entry, NowPlaying, OutputStatus, PlayState, PlayerState, PlaylistRef, ServerEvent,
 };
@@ -266,6 +268,10 @@ pub struct Jukebox {
     saved_second: Option<u64>,
     /// Songs planned ahead that nodes asked for, and when they last asked.
     plan_wish: Option<(usize, Instant)>,
+    /// The mood dial is in use.
+    mood_on: bool,
+    /// Where the mood dial is.
+    mood: mood::Mood,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -352,6 +358,7 @@ impl Jukebox {
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(0.0),
         };
+        let mood_on = settings::flag(&store, MOOD_DIAL, true).await?;
         let saved_equalizer = store.get_setting(EQUALIZER_SETTING).await?;
         let equalizer = parse_equalizer(saved_equalizer.as_deref());
         let mut seed = [0u8; 8];
@@ -392,6 +399,8 @@ impl Jukebox {
             resuming: None,
             saved_second: None,
             plan_wish: None,
+            mood_on,
+            mood: mood::Mood::default(),
         };
         (jukebox.engine)(Command::SetVolume(gain(volume)));
         (jukebox.engine)(Command::SetCrossfade(u32::from(crossfade)));

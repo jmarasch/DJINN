@@ -680,13 +680,49 @@ fun NameDialog(title: String, start: String, onDone: (String?) -> Unit) {
 }
 
 @UnstableApi
-private fun LazyListScope.songSection(title: String, songs: List<Track>, nav: Nav) {
+private fun LazyListScope.songSection(title: String, songs: List<Track>, nav: Nav, saveAs: String? = null) {
     if (songs.isEmpty()) return
     item { Heading(title) }
+    // Search results: play them all, or keep them as a playlist.
+    if (saveAs != null) item { SearchActions(saveAs, songs, nav) }
     itemsIndexed(songs) { index, song ->
         SongRow(song, nav) { nav.player.play(songs, index) }
     }
 }
+
+/** Play all and Save as playlist, under a search's songs. */
+@UnstableApi
+@Composable
+private fun SearchActions(name: String, songs: List<Track>, nav: Nav) {
+    var saving by remember { mutableStateOf(false) }
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        FilledTonalButton(onClick = { nav.player.play(songs, 0) }) {
+            Icon(Icons.Default.PlayArrow, contentDescription = null)
+            Text(t("go.play_all"))
+        }
+        TextButton(enabled = !saving, onClick = {
+            saving = true
+            nav.scope.launch {
+                try {
+                    val list = nav.api.createPlaylist(playlistName(name), songs.map { it.id })
+                    nav.message = t("search.made_playlist", "name" to list.name)
+                    nav.push(Screen.Playlist(list.id))
+                } catch (e: IOException) {
+                    nav.message = if (e is ApiException) e.message else t("common.no_server")
+                } finally {
+                    saving = false
+                }
+            }
+        }) { Text(t("search.save_playlist")) }
+    }
+}
+
+/** A search as a playlist's name: trimmed, first letter capital, short enough. */
+internal fun playlistName(search: String): String =
+    search.trim().replace(Regex("\\s+"), " ").take(60).replaceFirstChar { it.titlecase() }
 
 @UnstableApi
 @Composable
@@ -1610,7 +1646,7 @@ fun SearchScreen(nav: Nav) {
                 item { Heading(t("library.albums")) }
                 items(found.albums) { AlbumRow(it, nav) }
             }
-            songSection(t("library.songs"), found.tracks, nav)
+            songSection(t("library.songs"), found.tracks, nav, saveAs = query)
             if (found.lyrics.isNotEmpty()) {
                 item { Heading(t("search.lyric_matches")) }
                 val songs = found.lyrics.map { it.track }
@@ -1618,7 +1654,7 @@ fun SearchScreen(nav: Nav) {
                     SongRow(hit.track, nav, note = "\u201c${hit.line}\u201d") { nav.player.play(songs, index) }
                 }
             }
-            found.described?.let { songSection(it.summary.joinToString(", "), it.tracks, nav) }
+            found.described?.let { songSection(it.summary.joinToString(", "), it.tracks, nav, saveAs = it.summary.joinToString(" ")) }
             if (canWish) item { AskForSong(query.trim(), nav) }
         }
     }

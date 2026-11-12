@@ -17,6 +17,7 @@
   import SongTile from '../SongTile.svelte'
   import NotInLibrary from '../../lib/NotInLibrary.svelte'
   import { toast } from '../../lib/state.svelte'
+  import { playlistName } from '../../lib/format'
 
   let searchBar = $state<HTMLElement>()
 
@@ -76,16 +77,14 @@
    * nothing by that name leads with what fits. */
   const describedFirst = $derived(!!described && !results?.tracks.length && !results?.artists.length)
 
-  async function savePlaylist() {
-    if (!described) return
-    const label = described.summary.join(' ')
-    const name = label.charAt(0).toUpperCase() + label.slice(1)
+  /** Keeps a search's songs as one of your playlists. */
+  async function savePlaylist(search: string, tracks: Track[]) {
     try {
-      const list = await api.goCreatePlaylist(name, described.tracks.map((t) => t.id))
-      toast(`Made the playlist ${list.name}`)
+      const list = await api.goCreatePlaylist(playlistName(search), tracks.map((t) => t.id))
+      toast(t('search.made_playlist', { name: list.name }))
       location.hash = `/playlist/${list.id}`
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not make the playlist', true)
+      toast(e instanceof Error ? e.message : t('search.playlist_failed'), true)
     }
   }
 
@@ -112,7 +111,7 @@
         </p>
         <div class="actions">
           <button onclick={() => playList(described.tracks)}>{t('go.play_all')}</button>
-          <button onclick={savePlaylist}>{t('search.save_playlist')}</button>
+          <button onclick={() => described && savePlaylist(described.summary.join(' '), described.tracks)}>{t('search.save_playlist')}</button>
         </div>
       {:else}
         <p class="small muted">{t('search.nothing_fits')}</p>
@@ -188,6 +187,10 @@
   {/if}
   {#if results.tracks.length}
     <h2>{t('library.songs')}</h2>
+    <div class="actions">
+      <button onclick={() => results && playList(results.tracks)}>{t('go.play_all')}</button>
+      <button onclick={() => results && savePlaylist(query, results.tracks)}>{t('search.save_playlist')}</button>
+    </div>
     <SongList tracks={results.tracks} />
   {:else if !described?.tracks.length && !results.lyrics?.length && !thinking}
     <h2>{t('library.songs')}</h2>

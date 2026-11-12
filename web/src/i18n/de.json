@@ -522,5 +522,42 @@
   "go.album_queued": {
     "one": "{n} Lied zur Warteschlange hinzugefügt",
     "other": "{n} Lieder zur Warteschlange hinzugefügt"
-  }
+  },
+  "search.made_playlist": "Playlist {name} erstellt",
+  "search.play_as_auto_mix": "Als Auto-Mix spielen",
+  "search.auto_mix_started": "{name} ist jetzt der Auto-Mix",
+  "search.playlist_failed": "Playlist konnte nicht erstellt werden",
+  "mood.title": "Stimmung",
+  "mood.your_setting": "Deine Stimmung, von entspannt bis Party",
+  "mood.party_is": "Die Party: {mood}",
+  "mood.people": {
+    "one": "{n} Person stellt ein",
+    "other": "{n} Personen stellen ein"
+  },
+  "mood.chill": "Entspannt",
+  "mood.easy": "Locker",
+  "mood.middle": "Dazwischen",
+  "mood.lively": "Lebhaft",
+  "mood.hype": "Party",
+  "mood.failed": "Stimmung konnte nicht gesetzt werden",
+  "eq.title": "Equalizer",
+  "eq.yours_note": "Passe den Klang für dein eigenes Hören auf diesem Gerät an. Auf iPhone und iPad kann die Musik bei gesperrtem Bildschirm stoppen, solange der Equalizer an ist.",
+  "eq.phone_note": "Passe den Klang für dein eigenes Hören auf diesem Handy an. Was die Party hört, bleibt gleich.",
+  "eq.on": "Equalizer an",
+  "eq.reset": "Neutral zurücksetzen",
+  "eq.presets": "Equalizer-Voreinstellungen",
+  "eq.bands": "Equalizer-Bänder",
+  "eq.flat": "Neutral",
+  "eq.bass": "Bass-Boost",
+  "eq.vocals": "Gesang",
+  "eq.rock": "Rock",
+  "eq.electronic": "Elektronisch",
+  "eq.bright": "Hell",
+  "eq.custom": "Eigene",
+  "eq.output_level": "Ausgangspegel",
+  "eq.saving": "Wird gespeichert…",
+  "eq.applies": "Änderungen gelten sofort beim Abspielen.",
+  "eq.turn_on": "Schalte ihn ein, um diese Einstellungen zu hören.",
+  "eq.load_failed": "Equalizer konnte nicht geladen werden",
+  "eq.save_failed": "Equalizer konnte nicht gespeichert werden"
 }

@@ -522,5 +522,42 @@
   "go.album_queued": {
     "one": "Se añadió {n} canción a la cola",
     "other": "Se añadieron {n} canciones a la cola"
-  }
+  },
+  "search.made_playlist": "Lista {name} creada",
+  "search.play_as_auto_mix": "Usar como mezcla automática",
+  "search.auto_mix_started": "{name} es ahora la mezcla automática",
+  "search.playlist_failed": "No se pudo crear la lista",
+  "mood.title": "Ambiente",
+  "mood.your_setting": "Tu ambiente, de tranquilo a fiesta",
+  "mood.party_is": "La fiesta: {mood}",
+  "mood.people": {
+    "one": "{n} persona ajustando",
+    "other": "{n} personas ajustando"
+  },
+  "mood.chill": "Tranquilo",
+  "mood.easy": "Suave",
+  "mood.middle": "Intermedio",
+  "mood.lively": "Animado",
+  "mood.hype": "Fiesta",
+  "mood.failed": "No se pudo cambiar el ambiente",
+  "eq.title": "Ecualizador",
+  "eq.yours_note": "Ajusta el sonido para tu propia escucha en este dispositivo. En iPhone y iPad, la música puede detenerse al bloquear la pantalla con el ecualizador activado.",
+  "eq.phone_note": "Ajusta el sonido para tu propia escucha en este teléfono. No cambia lo que oye la fiesta.",
+  "eq.on": "Ecualizador activado",
+  "eq.reset": "Restablecer plano",
+  "eq.presets": "Ajustes del ecualizador",
+  "eq.bands": "Bandas del ecualizador",
+  "eq.flat": "Plano",
+  "eq.bass": "Más graves",
+  "eq.vocals": "Voces",
+  "eq.rock": "Rock",
+  "eq.electronic": "Electrónica",
+  "eq.bright": "Brillante",
+  "eq.custom": "Personalizado",
+  "eq.output_level": "Nivel de salida",
+  "eq.saving": "Guardando…",
+  "eq.applies": "Los cambios se aplican mientras suena la música.",
+  "eq.turn_on": "Actívalo para oír estos ajustes.",
+  "eq.load_failed": "No se pudo cargar el ecualizador",
+  "eq.save_failed": "No se pudo guardar el ecualizador"
 }
