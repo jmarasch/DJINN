@@ -373,6 +373,13 @@
                   {album.artist}{album.year ? ` · ${album.year}` : ''}<Counts plays={album.plays} likes={album.likes} />
                 </span>
               </span>
+              {#if album.genres}
+                <span class="genre-chips">
+                  {#each album.genres.split(',').slice(0, 3) as genre (genre)}
+                    <span class="genre-chip">{genre.trim()}</span>
+                  {/each}
+                </span>
+              {/if}
             </a>
             {#if like}{@render like('album', album.id, album.title)}{/if}
           </div>
@@ -510,6 +517,49 @@
 
   .block {
     display: block;
+  }
+
+  /* Genres sit beside an album on wide screens only. */
+  .genre-chips {
+    display: none;
+  }
+
+  /* On wide screens each row is a neon card, like the concept's table. */
+  @media (min-width: 900px) {
+    .row-with-like {
+      margin-bottom: 8px;
+      padding: 0 12px 0 8px;
+      border: 1px solid var(--edge);
+      border-radius: 14px;
+      background: var(--card-bg);
+      box-shadow: var(--glow);
+    }
+
+    .row-with-like:hover {
+      border-color: var(--edge-strong);
+      box-shadow: var(--glow-strong);
+    }
+
+    .row {
+      gap: 16px;
+      padding: 6px 0;
+    }
+
+    .genre-chips {
+      display: flex;
+      flex: none;
+      gap: 6px;
+    }
+
+    .genre-chip {
+      padding: 4px 10px;
+      border: 1px solid var(--edge);
+      border-radius: 999px;
+      background: var(--surface-2);
+      color: var(--muted);
+      font-size: 0.8125rem;
+      white-space: nowrap;
+    }
   }
 
   .tile {
