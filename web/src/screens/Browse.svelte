@@ -272,6 +272,7 @@
     years={byYear}
     {newestFirst}
     below={lists}
+    minTop={stuckTop}
     bind:inside={stripInside}
     onjump={(offset) => {
       // Landing where it was asked to, not under the options.
