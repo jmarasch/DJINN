@@ -19,7 +19,7 @@ cargo run -p djinn-server -- --config config.example.toml
 cargo build --release                  # single binary: target/release/djinn
 ```
 
-**Branches: `dev` and `main`.** Work is committed straight to `dev` (no PRs); `main` is stable and only moves when `dev` is promoted to a stable release (PR `dev` to `main`, merge, tag). A cron job on the owner's computer starts the Release workflow each night to publish `dev` as a nightly pre-release (GitHub has no schedule of its own; see `docs/releasing.md`, "Stable and nightly"). Claude may commit and push to `dev`; pushing or merging to `main`, and tagging, need the owner's go-ahead every time.
+**Branches: `dev` and `main`.** Work is committed straight to `dev` (no PRs); `main` is stable and only moves when `dev` is promoted to a stable release (PR `dev` to `main`, merge, tag). A cron job on the owner's computer starts the Release workflow each night to publish `dev` as a nightly pre-release (GitHub has no schedule of its own; see `docs/releasing.md`, "Stable and nightly"). Claude may commit and push to `dev`, and may tag a release when the owner asks for one (the request is the go-ahead: the version bump and changelog first, then the tag as in `docs/releasing.md`; never on its own, since a `v*` tag publishes a stable release). Pushing or merging to `main` still needs the owner's go-ahead every time.
 
 **Weekly rhythm.** Thursday night is cleanup on `dev`, so that night's nightly gives a day of testing. Friday night `dev` goes to `main` as the weekly stable release, unless testing found something to fix first. Thursday cleanup is behavior-neutral only:
 
