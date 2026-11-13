@@ -448,9 +448,32 @@ data class Dial(
 @Serializable
 data class Because(val artist: ArtistSummary, val similar: List<ArtistSummary> = emptyList())
 
+/** A playlist idea from what you listen to: a mix around an artist or a genre. */
+@Serializable
+data class Mix(
+    /** "artist" or "genre". */
+    val kind: String,
+    val id: Long = 0,
+    val name: String,
+    @SerialName("art_hash") val artHash: String? = null,
+)
+
+/** A shelf that comes and goes: about a decade, a genre, an artist or a song. */
+@Serializable
+data class MoreShelf(
+    /** "decade", "genre", "listened" or "like_song". */
+    val kind: String,
+    val name: String,
+    val songs: List<Track> = emptyList(),
+    val albums: List<Album> = emptyList(),
+    val artists: List<ArtistSummary> = emptyList(),
+)
+
 /** Shelves to find something to play (GET /api/discover). */
 @Serializable
 data class Discover(
+    val mixes: List<Mix> = emptyList(),
+    val more: List<MoreShelf> = emptyList(),
     @SerialName("speed_dial") val speedDial: List<Dial> = emptyList(),
     val forgotten: List<Track> = emptyList(),
     val genres: List<GenreSummary> = emptyList(),

@@ -1919,6 +1919,33 @@ private fun LazyListScope.discoverItems(d: Discover, nav: Nav) {
         items(d.popularSongs.take(6)) { song -> SongRow(song, nav) { nav.startRadio(song) } }
     }
     if (d.forgotten.isNotEmpty()) shelf(t("discover.forgotten")) { items(d.forgotten) { SongShelfTile(it, nav) } }
+    if (d.mixes.isNotEmpty()) {
+        shelf(t("discover.mixes")) {
+            items(d.mixes) { mix ->
+                Box(Modifier.width(SHELF_TILE)) {
+                    Tile(
+                        art = { TileArt(nav.api.artUrl(mix.artHash, 256), RoundedCornerShape(16.dp)) },
+                        title = t("discover.mix_named", "name" to mix.name),
+                        subtitle = null,
+                        onClick = { nav.push(if (mix.kind == "artist") Screen.Artist(mix.id) else Screen.Genre(mix.name)) },
+                    )
+                }
+            }
+        }
+    }
+    d.more.forEach { more ->
+        val title = when (more.kind) {
+            "decade" -> t("discover.decade", "name" to more.name)
+            "genre" -> t("discover.genre_more", "name" to more.name)
+            "listened" -> t("discover.listened", "name" to more.name)
+            else -> t("discover.like_song", "name" to more.name)
+        }
+        shelf(title) {
+            items(more.songs) { SongShelfTile(it, nav) }
+            items(more.albums) { AlbumShelfTile(it, nav) }
+            items(more.artists) { ArtistShelfTile(it, nav) }
+        }
+    }
     if (d.throwbacks.isNotEmpty()) shelf(t("discover.throwbacks")) { items(d.throwbacks) { AlbumShelfTile(it, nav) } }
     d.because?.let { because ->
         shelf(t("discover.because", "name" to because.artist.name)) { items(because.similar) { ArtistShelfTile(it, nav) } }

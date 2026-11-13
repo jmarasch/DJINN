@@ -1470,6 +1470,10 @@ export interface RoomTiming {
 
 /** Shelves to find something to play (GET /api/discover). */
 export interface Discover {
+  /** Playlist ideas from what you listen to. */
+  mixes: { kind: 'artist' | 'genre'; id: number; name: string; art_hash: string | null }[]
+  /** Shelves that come and go. */
+  more: { kind: 'decade' | 'genre' | 'listened' | 'like_song'; name: string; songs: Track[]; albums: Album[]; artists: ArtistSummary[] }[]
   speed_dial: { kind: 'artist' | 'album'; id: number; name: string; art_hash: string | null }[]
   forgotten: Track[]
   genres: { name: string; songs: number }[]

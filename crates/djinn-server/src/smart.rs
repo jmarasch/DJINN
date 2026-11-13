@@ -1023,6 +1023,23 @@ async fn similar_artists(
     Ok(Json(state.store.artists_by_ids(&ids).await?))
 }
 
+/// Songs in a genre, in the order its page shows them (shuffled, favoring what's played).
+pub(crate) async fn genre_song_ids(state: &AppState, name: &str, count: usize) -> Vec<i64> {
+    match genre_pull(state, name, true).await {
+        Ok(pull) => pull.songs.iter().copied().take(count).collect(),
+        Err(_) => Vec::new(),
+    }
+}
+
+/// Songs that sound like this one, closest first.
+pub(crate) fn similar_track_ids(state: &AppState, id: i64, count: usize) -> Vec<i64> {
+    state
+        .sound
+        .read()
+        .map(|index| index.similar_tracks(id, count))
+        .unwrap_or_default()
+}
+
 /// The biggest genres with how many songs each has, biggest first.
 pub(crate) fn top_genres(state: &AppState, count: usize) -> Vec<(String, usize)> {
     let mut all = match (state.catalog.read(), state.sound.read()) {

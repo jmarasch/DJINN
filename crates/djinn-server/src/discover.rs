@@ -3,7 +3,7 @@
 //! albums, what's popular, artists like one you favorited, and a few to
 //! explore. The party app, DJINN GO's web app and the Android app all show it.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use axum::extract::State;
 use axum::routing::get;
@@ -52,8 +52,66 @@ struct Dial {
     art_hash: Option<String>,
 }
 
+/// A playlist idea drawn from what you listen to: a mix around an artist or a genre.
+#[derive(Serialize)]
+struct Mix {
+    /// `artist` or `genre`.
+    kind: &'static str,
+    /// The artist's id; 0 for a genre.
+    id: i64,
+    name: String,
+    art_hash: Option<String>,
+}
+
+/// Shelves that come and go: each one is about something (a decade, a genre,
+/// an artist, a song) and holds songs, albums or artists.
+#[derive(Serialize)]
+struct Shelf {
+    /// `decade`, `genre`, `listened` or `like_song`.
+    kind: &'static str,
+    name: String,
+    songs: Vec<Track>,
+    albums: Vec<Album>,
+    artists: Vec<ArtistSummary>,
+}
+
+/// A small shuffler: the same seed gives the same draws, so a page holds still
+/// until the refresh time comes round.
+struct Dice(u64);
+
+impl Dice {
+    fn new(seed: usize) -> Self {
+        Self((u64::try_from(seed).unwrap_or(1) ^ 0x9E37_79B9_7F4A_7C15) | 1)
+    }
+
+    fn next(&mut self) -> u64 {
+        // xorshift64*
+        self.0 ^= self.0 >> 12;
+        self.0 ^= self.0 << 25;
+        self.0 ^= self.0 >> 27;
+        self.0.wrapping_mul(0x2545_F491_4F6C_DD1D)
+    }
+
+    fn below(&mut self, len: usize) -> usize {
+        usize::try_from(self.next() % u64::try_from(len.max(1)).unwrap_or(1)).unwrap_or(0)
+    }
+
+    fn some<T>(&mut self, mut items: Vec<T>, count: usize) -> Vec<T> {
+        for i in (1..items.len()).rev() {
+            let j = self.below(i + 1);
+            items.swap(i, j);
+        }
+        items.truncate(count);
+        items
+    }
+}
+
 #[derive(Serialize)]
 struct Discover {
+    /// Playlist ideas from what you listen to.
+    mixes: Vec<Mix>,
+    /// Shelves that change from visit to visit.
+    more: Vec<Shelf>,
     /// Nine quick starts: your favorite artists and albums, then others to fill the grid.
     speed_dial: Vec<Dial>,
     /// Songs you favorited that you haven't played lately.
@@ -93,16 +151,31 @@ async fn discover(
         .map(|(name, songs)| GenreChip { name, songs })
         .collect();
 
-    let mut seen = HashSet::new();
-    let listen_again: Vec<Track> = state
+    // What you've played, a long way back, so one session doesn't fill the shelf.
+    let history: Vec<Track> = state
         .store
-        .go_history(user.id, 0, 60)
+        .go_history(user.id, 0, 600)
         .await?
         .into_iter()
         .map(|played| played.track)
-        .filter(|track| seen.insert(track.id))
-        .take(usize::try_from(SHELF).unwrap_or(14))
         .collect();
+    let mut dice = Dice::new(seed);
+    let listen_again: Vec<Track> = {
+        let mut seen = HashSet::new();
+        let mut per_artist: HashMap<Option<i64>, usize> = HashMap::new();
+        let spread: Vec<Track> = history
+            .iter()
+            .filter(|track| seen.insert(track.id))
+            // At most two songs by anyone, so two big blocks don't take over.
+            .filter(|track| {
+                let count = per_artist.entry(track.artist_id).or_insert(0);
+                *count += 1;
+                *count <= 2
+            })
+            .cloned()
+            .collect();
+        dice.some(spread, usize::try_from(SHELF).unwrap_or(14))
+    };
 
     let new_albums = state
         .store
@@ -202,13 +275,7 @@ async fn discover(
     }
 
     // Favorites that haven't come up lately.
-    let played: HashSet<i64> = state
-        .store
-        .go_history(user.id, 0, 200)
-        .await?
-        .into_iter()
-        .map(|p| p.track.id)
-        .collect();
+    let played: HashSet<i64> = history.iter().map(|t| t.id).collect();
     let candidates: Vec<&Track> = liked
         .tracks
         .iter()
@@ -222,7 +289,157 @@ async fn discover(
         .map(|t| (*t).clone())
         .collect();
 
+    // ---- What you listen to: ideas for what to play next ----
+    let shelf_len = usize::try_from(SHELF).unwrap_or(14);
+    let history_ids: Vec<i64> = history.iter().map(|t| t.id).collect();
+    let genres_of = crate::smart::list_genres(&state, history_ids.iter().copied());
+    // Plays per artist and per genre, and a song that shows each.
+    let mut artist_plays: HashMap<i64, (usize, &Track)> = HashMap::new();
+    let mut genre_plays: HashMap<String, (usize, &Track)> = HashMap::new();
+    for track in &history {
+        if let Some(artist) = track.artist_id {
+            artist_plays.entry(artist).or_insert((0, track)).0 += 1;
+        }
+        for genre in genres_of.get(&track.id).into_iter().flatten().take(2) {
+            genre_plays.entry(genre.clone()).or_insert((0, track)).0 += 1;
+        }
+    }
+    let mut top_artists: Vec<(i64, (usize, &Track))> = artist_plays.into_iter().collect();
+    top_artists.sort_by(|a, b| b.1 .0.cmp(&a.1 .0).then(a.0.cmp(&b.0)));
+    top_artists.truncate(10);
+    let mut top_genre_plays: Vec<(String, (usize, &Track))> = genre_plays.into_iter().collect();
+    top_genre_plays.sort_by(|a, b| b.1 .0.cmp(&a.1 .0).then_with(|| a.0.cmp(&b.0)));
+    top_genre_plays.truncate(8);
+
+    // Playlist ideas: a few artists and genres you keep coming back to.
+    let mut mixes: Vec<Mix> = Vec::new();
+    for (id, (_, track)) in dice.some(top_artists.clone(), 3) {
+        mixes.push(Mix {
+            kind: "artist",
+            id,
+            name: track.artist.clone().unwrap_or_default(),
+            art_hash: track.art_hash.clone(),
+        });
+    }
+    for (name, (_, track)) in dice.some(top_genre_plays.clone(), 3) {
+        mixes.push(Mix {
+            kind: "genre",
+            id: 0,
+            name,
+            art_hash: track.art_hash.clone(),
+        });
+    }
+    let mixes = dice.some(mixes, 6);
+
+    let mut candidates_more: Vec<Shelf> = Vec::new();
+    // A decade of albums.
+    let years = state
+        .store
+        .albums_page_filtered(AlbumSort::Year, AlbumFilter::All, 0, 400)
+        .await?
+        .items;
+    let mut by_decade: HashMap<i64, Vec<Album>> = HashMap::new();
+    for album in years {
+        if let Some(year) = album.year.filter(|y| *y > 1900) {
+            by_decade.entry(year / 10 * 10).or_default().push(album);
+        }
+    }
+    let mut decades: Vec<i64> = by_decade
+        .iter()
+        .filter(|(_, albums)| albums.len() >= 5)
+        .map(|(decade, _)| *decade)
+        .collect();
+    decades.sort_unstable();
+    if let Some(decade) = decades.get(dice.below(decades.len())).copied() {
+        let albums = dice.some(by_decade.remove(&decade).unwrap_or_default(), shelf_len);
+        candidates_more.push(Shelf {
+            kind: "decade",
+            name: format!("{decade}s"),
+            songs: Vec::new(),
+            albums,
+            artists: Vec::new(),
+        });
+    }
+    // More of a genre.
+    let genre_pool = crate::smart::top_genres(&state, 20);
+    if let Some((genre, _)) = genre_pool.get(dice.below(genre_pool.len())) {
+        let ids = crate::smart::genre_song_ids(&state, genre, 80).await;
+        let songs = state
+            .store
+            .tracks_by_ids(&dice.some(ids, shelf_len))
+            .await?;
+        if !songs.is_empty() {
+            candidates_more.push(Shelf {
+                kind: "genre",
+                name: genre.clone(),
+                songs,
+                albums: Vec::new(),
+                artists: Vec::new(),
+            });
+        }
+    }
+    // Artists like one you listen to.
+    if let Some((id, (_, track))) = top_artists.get(dice.below(top_artists.len().min(6))) {
+        let similar_ids: Vec<i64> = crate::smart::similar_artist_ids(&state, *id)
+            .into_iter()
+            .take(shelf_len)
+            .collect();
+        let artists = state.store.artists_by_ids(&similar_ids).await?;
+        if !artists.is_empty() {
+            candidates_more.push(Shelf {
+                kind: "listened",
+                name: track.artist.clone().unwrap_or_default(),
+                songs: Vec::new(),
+                albums: Vec::new(),
+                artists,
+            });
+        }
+    }
+    // Songs like one you played.
+    if let Some(track) = history.get(dice.below(history.len().min(40))) {
+        let similar_ids = crate::smart::similar_track_ids(&state, track.id, shelf_len);
+        let songs = state.store.tracks_by_ids(&similar_ids).await?;
+        if !songs.is_empty() {
+            candidates_more.push(Shelf {
+                kind: "like_song",
+                name: track.title.clone(),
+                songs,
+                albums: Vec::new(),
+                artists: Vec::new(),
+            });
+        }
+    }
+
+    // A few of the shelves that come and go, a different few each time.
+    let mut throwbacks = throwbacks;
+    let mut because = because;
+    let mut forgotten = forgotten;
+    let mut roster: Vec<&str> = Vec::new();
+    if !throwbacks.is_empty() {
+        roster.push("throwbacks");
+    }
+    if because.is_some() {
+        roster.push("because");
+    }
+    if !forgotten.is_empty() {
+        roster.push("forgotten");
+    }
+    roster.extend(candidates_more.iter().map(|shelf| shelf.kind));
+    let kept: HashSet<&str> = dice.some(roster, 5).into_iter().collect();
+    if !kept.contains("throwbacks") {
+        throwbacks.clear();
+    }
+    if !kept.contains("because") {
+        because = None;
+    }
+    if !kept.contains("forgotten") {
+        forgotten.clear();
+    }
+    candidates_more.retain(|shelf| kept.contains(shelf.kind));
+
     Ok(Json(Discover {
+        mixes,
+        more: candidates_more,
         speed_dial,
         forgotten,
         genres,

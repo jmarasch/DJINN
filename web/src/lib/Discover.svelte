@@ -8,7 +8,7 @@
   import Art from './Art.svelte'
   import { t } from './i18n.svelte'
   import ScrollRow from './ScrollRow.svelte'
-  import type { ArtistSummary, Discover, Track } from './types'
+  import type { Album, ArtistSummary, Discover, Track } from './types'
 
   let {
     songTile,
@@ -39,6 +39,7 @@
   const nothing = $derived(
     found &&
       !found.speed_dial.length &&
+      !found.mixes.length &&
       !found.genres.length &&
       !found.new_albums.length &&
       !found.popular_songs.length &&
@@ -54,6 +55,17 @@
       <span class="muted small ellipsis">{t('count.songs', { n: artist.track_count })}</span>
     </a>
     {#if like}<div class="corner">{@render like('artist', artist.id, artist.name)}</div>{/if}
+  </div>
+{/snippet}
+
+{#snippet albumTile(album: Album)}
+  <div class="tile">
+    <a href="#/album/{album.id}">
+      <span class="frame"><Art hash={album.art_hash} size={130} round={14} /></span>
+      <span class="name ellipsis">{album.title}</span>
+      <span class="muted small ellipsis">{album.artist}{album.year ? ` · ${album.year}` : ''}</span>
+    </a>
+    {#if like}<div class="corner">{@render like('album', album.id, album.title)}</div>{/if}
   </div>
 {/snippet}
 
@@ -140,6 +152,33 @@
       </ScrollRow>
     </section>
   {/if}
+
+  {#if found.mixes.length}
+    <section>
+      <h2>{t('discover.mixes')}</h2>
+      <ScrollRow>
+        {#each found.mixes as mix (mix.kind + mix.id + mix.name)}
+          <div class="tile">
+            <a href={mix.kind === 'artist' ? `#/artist/${mix.id}` : `#/genre/${encodeURIComponent(mix.name)}`}>
+              <span class="frame"><Art hash={mix.art_hash} size={130} round={14} letter={mix.name[0]} /></span>
+              <span class="name ellipsis">{t('discover.mix_named', { name: mix.name })}</span>
+            </a>
+          </div>
+        {/each}
+      </ScrollRow>
+    </section>
+  {/if}
+
+  {#each found.more as shelf (shelf.kind)}
+    <section>
+      <h2>{t(`discover.${shelf.kind === 'genre' ? 'genre_more' : shelf.kind}`, { name: shelf.name })}</h2>
+      <ScrollRow>
+        {#each shelf.songs as track (track.id)}{@render songTile(track)}{/each}
+        {#each shelf.albums as album (album.id)}{@render albumTile(album)}{/each}
+        {#each shelf.artists as artist (artist.id)}{@render artistTile(artist)}{/each}
+      </ScrollRow>
+    </section>
+  {/each}
 
   {#if found.throwbacks.length}
     <section>
