@@ -16,11 +16,12 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawOutline
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
@@ -83,8 +84,8 @@ class Neon(
 )
 
 private val DarkNeon = Neon(
-    edge = Color(0x9EBE96FF),
-    edgeStrong = Color(0xF2CDAAFF),
+    edge = Color(0xB8BE96FF),
+    edgeStrong = Color(0xFFCDAAFF),
     glow = Color(0xFFB48CFF),
     cardTop = Color(0xD1272139),
     cardBottom = Color(0xE61A1627),
@@ -185,9 +186,18 @@ private fun Modifier.djinnBackdrop(dark: Boolean): Modifier =
 @Composable
 fun Modifier.neon(shape: Shape = RoundedCornerShape(14.dp), strong: Boolean = false): Modifier {
     val neon = LocalNeon.current
-    val glow = neon.glow.copy(alpha = if (strong) 0.6f else 0.34f)
+    val glow = neon.glow
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val direction = androidx.compose.ui.platform.LocalLayoutDirection.current
     return this
-        .shadow(if (strong) 12.dp else 8.dp, shape, clip = false, ambientColor = glow, spotColor = glow)
+        // The glow: a few soft rings spreading outward from the edge.
+        .drawBehind {
+            val outline = shape.createOutline(size, direction, density)
+            val rings = if (strong) listOf(14f to 0.10f, 9f to 0.16f, 5f to 0.24f, 2.5f to 0.36f) else listOf(10f to 0.08f, 6f to 0.14f, 3f to 0.22f)
+            rings.forEach { (width, alpha) ->
+                drawOutline(outline, glow.copy(alpha = alpha), style = Stroke(width.dp.toPx() * 2))
+            }
+        }
         .background(Brush.verticalGradient(listOf(neon.cardTop, neon.cardBottom)), shape)
         .border(1.dp, if (strong) neon.edgeStrong else neon.edge, shape)
 }

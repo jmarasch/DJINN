@@ -87,6 +87,8 @@ fun Row2(
     onClick: () -> Unit,
     end: @Composable () -> Unit = {},
     titleMark: @Composable () -> Unit = {},
+    /** A second line of small print under the subtitle, such as counts. */
+    extra: String? = null,
 ) {
     // Each row is a neon card, like the web app's lists.
     val card = RoundedCornerShape(14.dp)
@@ -114,6 +116,15 @@ fun Row2(
                     overflow = TextOverflow.Ellipsis,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (!extra.isNullOrEmpty()) {
+                Text(
+                    extra,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
                 )
             }
         }
@@ -192,7 +203,10 @@ fun LyricsMark(lyrics: Int) {
 fun Heading(text: String) {
     Text(
         text,
-        style = MaterialTheme.typography.titleMedium,
+        style = MaterialTheme.typography.titleMedium.copy(
+            fontWeight = FontWeight.SemiBold,
+            shadow = Shadow(MaterialTheme.colorScheme.primary.copy(alpha = 0.55f), blurRadius = 18f),
+        ),
         modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp),
     )
 }
@@ -241,6 +255,64 @@ fun PageTitle(title: String, subtitle: String? = null) {
             Text(
                 subtitle.uppercase(),
                 style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 2.sp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+        }
+    }
+}
+
+/** A cover that fills its column, in a neon frame, for the library's picture tiles. */
+@Composable
+fun TileArt(url: String?, shape: Shape, modifier: Modifier = Modifier) {
+    androidx.compose.foundation.layout.BoxWithConstraints(modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        val side = this.maxWidth - 2.dp
+        Box(Modifier.neon(shape)) {
+            Art(url, side, shape, Modifier.padding(1.dp))
+        }
+    }
+}
+
+/** A tile in the library's picture view: the cover, a name, a line of small print, and a heart in the corner. */
+@Composable
+fun Tile(
+    art: @Composable () -> Unit,
+    title: String,
+    subtitle: String?,
+    onClick: () -> Unit,
+    corner: @Composable () -> Unit = {},
+) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp, vertical = 8.dp)
+            .clickable(onClick = onClick),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(Modifier.fillMaxWidth()) {
+            art()
+            Box(
+                Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(6.dp)
+                    .clip(androidx.compose.foundation.shape.CircleShape)
+                    .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.45f)),
+            ) { corner() }
+        }
+        Text(
+            title,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            style = MaterialTheme.typography.titleSmall,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(top = 8.dp),
+        )
+        if (!subtitle.isNullOrEmpty()) {
+            Text(
+                subtitle,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
             )

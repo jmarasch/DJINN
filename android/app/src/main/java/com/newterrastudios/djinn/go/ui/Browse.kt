@@ -98,6 +98,13 @@ import com.newterrastudios.djinn.go.data.Track
 import com.newterrastudios.djinn.go.data.GenreList
 import com.newterrastudios.djinn.go.data.GenrePage
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyGridState
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.material.icons.automirrored.filled.ViewList
+import androidx.compose.material.icons.filled.GridView
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
@@ -168,6 +175,9 @@ private fun <T : Any> PagedList(
     options: @Composable () -> Unit = {},
     /** The letters or years beside the list, for orders that have them. */
     jumps: suspend () -> List<JumpEntry> = { emptyList() },
+    /** Picture tiles instead of rows, when [grid] is on. */
+    grid: Boolean = false,
+    tile: (@Composable (T) -> Unit)? = null,
     row: @Composable (T) -> Unit,
 ) {
     val items = remember(key) { mutableStateMapOf<Int, T>() }
@@ -175,15 +185,28 @@ private fun <T : Any> PagedList(
     var failed by remember(key) { mutableStateOf(false) }
     var entries by remember(key) { mutableStateOf<List<JumpEntry>>(emptyList()) }
     var pressedLabel by remember(key) { mutableStateOf<String?>(null) }
+    val tiles = grid && tile != null
     // Each order starts from its top.
     val state = remember(key) { LazyListState() }
+    val gridState = remember(key) { LazyGridState() }
+    val columns = if (LocalConfiguration.current.screenWidthDp >= 600) 4 else 2
     val scope = rememberCoroutineScope()
-    val missing by remember(key) {
+    val missing by remember(key, tiles) {
         derivedStateOf {
             val known = total ?: return@derivedStateOf 0
-            val visible = state.layoutInfo.visibleItemsInfo
-            val first = (visible.firstOrNull()?.index ?: 0) - LOAD_AROUND_ROWS
-            val last = (visible.lastOrNull()?.index ?: 0) + LOAD_AROUND_ROWS
+            val visibleFirst: Int
+            val visibleLast: Int
+            if (tiles) {
+                val visible = gridState.layoutInfo.visibleItemsInfo
+                visibleFirst = visible.firstOrNull()?.index ?: 0
+                visibleLast = visible.lastOrNull()?.index ?: 0
+            } else {
+                val visible = state.layoutInfo.visibleItemsInfo
+                visibleFirst = visible.firstOrNull()?.index ?: 0
+                visibleLast = visible.lastOrNull()?.index ?: 0
+            }
+            val first = visibleFirst - LOAD_AROUND_ROWS
+            val last = visibleLast + LOAD_AROUND_ROWS
             (first.coerceAtLeast(0)..last.coerceAtMost(known - 1)).firstOrNull { it !in items }
         }
     }
@@ -210,12 +233,14 @@ private fun <T : Any> PagedList(
             emptyList()
         }
     }
-    val goingBack = state.canScrollBackward && state.lastScrolledBackward
+    val canBack = if (tiles) gridState.canScrollBackward else state.canScrollBackward
+    val goingBack = canBack && (if (tiles) gridState.lastScrolledBackward else state.lastScrolledBackward)
+    val firstShown = if (tiles) gridState.firstVisibleItemIndex else state.firstVisibleItemIndex
     val count = total ?: 0
     val showStrip = entries.size > 1 && count > 0
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
-            AnimatedVisibility(visible = !state.canScrollBackward || goingBack) { options() }
+            AnimatedVisibility(visible = !canBack || goingBack) { options() }
             if (failed) {
                 Column(Modifier.padding(16.dp)) {
                     Text(t("common.load_more_failed"), color = MaterialTheme.colorScheme.error)
@@ -227,42 +252,89 @@ private fun <T : Any> PagedList(
                     .fillMaxWidth()
                     .weight(1f),
             ) {
-                LazyColumn(
-                    Modifier
-                        .weight(1f)
-                        .fillMaxHeight(),
-                    state = state,
-                ) {
-                    items(count) { index ->
-                        val item = items[index]
-                        if (item != null) row(item) else Spacer(Modifier.height(UNLOADED_ROW))
+                if (tiles && tile != null) {
+                    LazyVerticalGrid(
+                        GridCells.Fixed(columns),
+                        Modifier
+                            .weight(1f)
+                            .fillMaxHeight(),
+                        state = gridState,
+                        contentPadding = PaddingValues(horizontal = 4.dp),
+                    ) {
+                        items(count) { index ->
+                            val item = items[index]
+                            if (item != null) tile(item) else Spacer(Modifier.height(UNLOADED_TILE))
+                        }
+                        if (total == null && !failed) {
+                            item(span = { GridItemSpan(maxLineSpan) }) { Note(t("common.loading")) }
+                        } else if (total == 0) {
+                            item(span = { GridItemSpan(maxLineSpan) }) { Note(t("common.nothing_yet")) }
+                        }
                     }
-                    if (total == null && !failed) {
-                        item { Note(t("common.loading")) }
-                    } else if (total == 0) {
-                        item { Note(t("common.nothing_yet")) }
+                } else {
+                    LazyColumn(
+                        Modifier
+                            .weight(1f)
+                            .fillMaxHeight(),
+                        state = state,
+                    ) {
+                        items(count) { index ->
+                            val item = items[index]
+                            if (item != null) row(item) else Spacer(Modifier.height(UNLOADED_ROW))
+                        }
+                        if (total == null && !failed) {
+                            item { Note(t("common.loading")) }
+                        } else if (total == 0) {
+                            item { Note(t("common.nothing_yet")) }
+                        }
                     }
                 }
                 if (showStrip) {
                     JumpStrip(
                         entries,
                         onPressed = { pressedLabel = it },
-                        onJump = { offset -> scope.launch { state.scrollToItem(offset.coerceAtMost(count - 1)) } },
+                        onJump = { offset ->
+                            val at = offset.coerceAtMost(count - 1)
+                            // A tile view jumps to the row the song, album or artist is in.
+                            scope.launch { if (tiles) gridState.scrollToItem(at) else state.scrollToItem(at) }
+                        },
                     )
                 }
             }
         }
         AnimatedVisibility(
-            visible = goingBack && state.firstVisibleItemIndex >= TO_TOP_AFTER_ROWS,
+            visible = goingBack && firstShown >= TO_TOP_AFTER_ROWS,
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(end = if (showStrip) 44.dp else 16.dp, bottom = 16.dp),
         ) {
-            SmallFloatingActionButton(onClick = { scope.launch { state.scrollToItem(0) } }) {
+            SmallFloatingActionButton(onClick = { scope.launch { if (tiles) gridState.scrollToItem(0) else state.scrollToItem(0) } }) {
                 Icon(Icons.Default.KeyboardArrowUp, contentDescription = t("common.back_to_top"))
             }
         }
         pressedLabel?.let { JumpBubble(it, Modifier.align(Alignment.Center)) }
+    }
+}
+
+/** Room for a tile not loaded yet. */
+private val UNLOADED_TILE = 190.dp
+
+/** List or picture tiles, for the library's lists. */
+@Composable
+private fun ViewToggle(nav: Nav) {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+        horizontalArrangement = Arrangement.End,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        val on = MaterialTheme.colorScheme.primary
+        val off = MaterialTheme.colorScheme.onSurfaceVariant
+        IconButton(onClick = { nav.libraryGrid = false; nav.prefs.libraryGrid = false }) {
+            Icon(Icons.AutoMirrored.Filled.ViewList, t("library.view_list"), tint = if (!nav.libraryGrid) on else off)
+        }
+        IconButton(onClick = { nav.libraryGrid = true; nav.prefs.libraryGrid = true }) {
+            Icon(Icons.Default.GridView, t("library.view_grid"), tint = if (nav.libraryGrid) on else off)
+        }
     }
 }
 
@@ -745,14 +817,28 @@ fun LibraryScreen(nav: Nav) {
                 PagedList<ArtistSummary>(
                     "artists-$sort",
                     { nav.api.artists(sort, it) },
-                    options = { Choices(ARTIST_SORTS, nav.artistSort) { nav.artistSort = it } },
+                    options = { Column { ViewToggle(nav); Choices(ARTIST_SORTS, nav.artistSort) { nav.artistSort = it } } },
                     jumps = { jumpEntries(nav.api.artistJumps(sort), sort) },
+                    grid = nav.libraryGrid,
+                    tile = { artist ->
+                        Tile(
+                            art = { TileArt(nav.api.artUrl(artist.artHash, 256), CircleShape) },
+                            title = artist.name,
+                            subtitle = (listOfNotNull(if (artist.albums > 0) "${artist.albums} albums" else null, "${artist.trackCount} songs")).joinToString(" · "),
+                            onClick = { nav.push(Screen.Artist(artist.id)) },
+                            corner = { LikeHeart(artist.id, nav.likedArtists, artist.name, nav.api::setArtistLike, nav) },
+                        )
+                    },
                 ) { artist ->
                     Row2(
                         title = artist.name,
-                        subtitle = (listOf("${artist.trackCount} songs") + countParts(artist.plays, artist.likes))
+                        subtitle = listOfNotNull(
+                            if (artist.albums > 0) "${artist.albums} albums" else null,
+                            "${artist.trackCount} songs",
+                        ).joinToString(" · "),
+                        extra = (listOfNotNull(artist.genres?.split(",")?.take(2)?.joinToString(", ") { it.trim() }) + countParts(artist.plays, artist.likes))
                             .joinToString(" · "),
-                        art = { Art(nav.api.artUrl(artist.artHash), 44.dp, CircleShape) },
+                        art = { Art(nav.api.artUrl(artist.artHash), 52.dp, CircleShape) },
                         onClick = { nav.push(Screen.Artist(artist.id)) },
                         end = { LikeHeart(artist.id, nav.likedArtists, artist.name, nav.api::setArtistLike, nav) },
                     )
@@ -766,11 +852,22 @@ fun LibraryScreen(nav: Nav) {
                     { nav.api.albums(sort, filter, it) },
                     options = {
                         Column {
+                            ViewToggle(nav)
                             Choices(ALBUM_FILTERS, nav.albumFilter) { nav.albumFilter = it }
                             Choices(ALBUM_SORTS, nav.albumSort) { nav.albumSort = it }
                         }
                     },
                     jumps = { jumpEntries(nav.api.albumJumps(sort, filter), sort) },
+                    grid = nav.libraryGrid,
+                    tile = { album ->
+                        Tile(
+                            art = { TileArt(nav.api.artUrl(album.artHash, 256), RoundedCornerShape(16.dp)) },
+                            title = album.title,
+                            subtitle = listOfNotNull(album.artist, album.year?.toString()).joinToString(" · "),
+                            onClick = { nav.push(Screen.Album(album.id)) },
+                            corner = { LikeHeart(album.id, nav.likedAlbums, album.title, nav.api::setAlbumLike, nav) },
+                        )
+                    },
                 ) { album ->
                     AlbumRow(album, nav)
                 }
@@ -780,8 +877,28 @@ fun LibraryScreen(nav: Nav) {
                 PagedList<Track>(
                     "songs-$sort",
                     { nav.api.songs(sort, it) },
-                    options = { Choices(SONG_SORTS, nav.songSort) { nav.songSort = it } },
+                    options = { Column { ViewToggle(nav); Choices(SONG_SORTS, nav.songSort) { nav.songSort = it } } },
                     jumps = { jumpEntries(nav.api.songJumps(sort), sort) },
+                    grid = nav.libraryGrid,
+                    tile = { song ->
+                        Tile(
+                            art = { TileArt(nav.api.artUrl(song.artHash, 256), RoundedCornerShape(16.dp)) },
+                            title = song.title,
+                            subtitle = song.artist,
+                            onClick = { nav.startRadio(song) },
+                            corner = {
+                                val liked = song.id in nav.liked
+                                IconButton(onClick = { nav.scope.launch { nav.setLiked(song.id, !liked) } }, modifier = Modifier.size(36.dp)) {
+                                    Icon(
+                                        if (liked) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                        contentDescription = if (liked) t("go.unlike_named", "name" to song.title) else t("go.like_named", "name" to song.title),
+                                        tint = if (liked) MaterialTheme.colorScheme.primary else androidx.compose.ui.graphics.Color.White,
+                                        modifier = Modifier.size(20.dp),
+                                    )
+                                }
+                            },
+                        )
+                    },
                 ) { song ->
                     SongRow(song, nav) { nav.startRadio(song) }
                 }
@@ -971,11 +1088,13 @@ private fun Choices(choices: List<Pair<String, String>>, chosen: String, choose:
 @UnstableApi
 @Composable
 private fun AlbumRow(album: Album, nav: Nav) {
+    // An album shows bigger cover art, its year and how many songs it has, so it doesn't read as a song.
     Row2(
         title = album.title,
-        subtitle = (listOfNotNull(album.artist, album.year?.toString(), album.label) + countParts(album.plays, album.likes))
+        subtitle = listOfNotNull(album.artist, album.year?.toString(), album.label).joinToString(" · "),
+        extra = (listOfNotNull(if (album.songs > 0) "${album.songs} songs" else null) + countParts(album.plays, album.likes))
             .joinToString(" · "),
-        art = { Art(nav.api.artUrl(album.artHash), 44.dp) },
+        art = { Art(nav.api.artUrl(album.artHash, 256), 68.dp, RoundedCornerShape(14.dp)) },
         onClick = { nav.push(Screen.Album(album.id)) },
         end = { LikeHeart(album.id, nav.likedAlbums, album.title, nav.api::setAlbumLike, nav) },
     )
@@ -1049,6 +1168,14 @@ fun ArtistScreen(id: Long, nav: Nav) {
         }
     }
     val scope = nav.scope
+    var similar by remember(id) { mutableStateOf<List<ArtistSummary>>(emptyList()) }
+    LaunchedEffect(id) {
+        similar = try {
+            nav.api.similarArtists(id)
+        } catch (_: IOException) {
+            emptyList()
+        }
+    }
     Loaded(key = id, load = { nav.api.artist(id) }) { artist: ArtistDetail ->
         val shown = artist.topTracks
         LazyColumn(Modifier.fillMaxSize()) {
@@ -1110,6 +1237,18 @@ fun ArtistScreen(id: Long, nav: Nav) {
             if (artist.appearsOn.isNotEmpty()) {
                 item { Heading(t("go.appears_on")) }
                 items(artist.appearsOn) { AlbumRow(it, nav) }
+            }
+            if (similar.isNotEmpty()) {
+                item { Heading(t("artist.similar")) }
+                items(similar) { other ->
+                    Row2(
+                        title = other.name,
+                        subtitle = listOfNotNull(other.genres?.split(",")?.take(3)?.joinToString(", ") { it.trim() }).firstOrNull(),
+                        art = { Art(nav.api.artUrl(other.artHash), 52.dp, CircleShape) },
+                        onClick = { nav.push(Screen.Artist(other.id)) },
+                        end = { LikeHeart(other.id, nav.likedArtists, other.name, nav.api::setArtistLike, nav) },
+                    )
+                }
             }
         }
     }

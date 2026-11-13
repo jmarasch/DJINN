@@ -31,7 +31,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import java.io.IOException
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -110,6 +112,10 @@ class Nav(
     var albumFilter by mutableStateOf(ALBUM_FILTERS.first().first)
     var songSort by mutableStateOf(SONG_SORTS.first().first)
     var keptView by mutableStateOf(KEPT_VIEWS.first().first)
+    /** Library lists as picture tiles rather than rows. */
+    var libraryGrid by mutableStateOf(prefs.libraryGrid)
+    /** The house's background picture. */
+    var appearance by mutableStateOf(com.newterrastudios.djinn.go.data.Appearance())
     /** A newer version of this app that the server carries. */
     var update by mutableStateOf<AppRelease?>(null)
     /** What the server calls itself. */
@@ -198,6 +204,15 @@ fun MainScreen(nav: Nav) {
         FullScreen(nav, cover = top == Screen.Cover)
         return
     }
+    // The house's own background picture, over the page's backdrop.
+    LaunchedEffect(Unit) {
+        try {
+            nav.appearance = nav.api.appearance()
+        } catch (_: IOException) {
+            // Keep the default picture.
+        }
+    }
+    HouseBackground(nav)
     Scaffold(
         // The page's backdrop shows through.
         containerColor = Color.Transparent,
@@ -384,3 +399,28 @@ private fun neonItemColors() = NavigationBarItemDefaults.colors(
     unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
     unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
 )
+
+/** The picture behind every screen: one of the built-in ones the server serves, or the admin's own. */
+@Composable
+private fun HouseBackground(nav: Nav) {
+    val url = nav.api.backgroundUrl(nav.appearance.background)
+    val strength = nav.appearance.strength / 100f
+    val neon = LocalNeon.current
+    when {
+        url != null -> coil3.compose.AsyncImage(
+            model = url,
+            contentDescription = null,
+            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+            alpha = strength,
+            modifier = Modifier.fillMaxSize(),
+        )
+        nav.appearance.background == "aurora" -> Box(
+            Modifier.fillMaxSize().drawBehind {
+                val a = strength
+                drawRect(Brush.radialGradient(listOf(neon.accent2.copy(alpha = 0.75f * a), Color.Transparent), Offset(size.width * 0.2f, size.height * 0.15f), size.width * 0.8f))
+                drawRect(Brush.radialGradient(listOf(neon.glow.copy(alpha = 0.85f * a), Color.Transparent), Offset(size.width * 0.8f, size.height * 0.25f), size.width * 0.8f))
+            },
+        )
+        else -> Unit
+    }
+}

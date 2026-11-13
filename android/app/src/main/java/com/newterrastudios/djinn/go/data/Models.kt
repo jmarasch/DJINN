@@ -49,6 +49,9 @@ data class ArtistSummary(
     /** In the library lists: plays (party and GO) and how many people favorited it. */
     val plays: Long = 0,
     val likes: Long = 0,
+    /** In the artist list: how many albums they have, and their genres, comma separated. */
+    val albums: Long = 0,
+    val genres: String? = null,
 )
 
 @Serializable
@@ -71,6 +74,9 @@ data class Album(
     /** In the library lists: plays (party and GO) and how many people favorited it. */
     val plays: Long = 0,
     val likes: Long = 0,
+    /** In the album list: how many songs it has, and its genres, comma separated. */
+    val songs: Long = 0,
+    val genres: String? = null,
 )
 
 @Serializable
@@ -415,4 +421,11 @@ data class ResumeSave(
     val queue: List<Long>,
     val position: Int,
     @SerialName("position_ms") val positionMs: Long,
+)
+
+/** The picture behind the pages, as the house chose it (Admin > System > Background). */
+@Serializable
+data class Appearance(
+    val background: String = "waves",
+    val strength: Int = 28,
 )

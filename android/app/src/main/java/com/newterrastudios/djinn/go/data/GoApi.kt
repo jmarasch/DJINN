@@ -221,6 +221,21 @@ class GoApi(private val account: Account) {
         get(genrePath(name) + "/artists?offset=$offset")
     suspend fun album(id: Long): AlbumDetail = get("/api/albums/$id")
     suspend fun artist(id: Long): ArtistDetail = get("/api/artists/$id")
+    /** Artists that sound like this one, or share its genres. */
+    suspend fun similarArtists(id: Long): List<ArtistSummary> = get("/api/artists/$id/similar")
+    suspend fun appearance(): Appearance = get("/api/appearance")
+    /** Where the house's own background picture is, with the version that keeps a changed one from being cached. */
+    fun backgroundUrl(background: String): String? {
+        val server = account.server ?: return null
+        return when {
+            background == "plain" || background == "aurora" || background == "grid" -> null
+            background.startsWith("custom:") -> "$server/api/appearance/image?v=${background.removePrefix("custom:")}"
+            background == "plum-vinyl" -> "$server/images/backgrounds/plum-vinyl.webp"
+            background == "violet-vinyl" -> "$server/images/backgrounds/violet-vinyl.webp"
+            background == "tv" -> "$server/images/tv-backdrop.webp"
+            else -> "$server/images/listening-waves.webp"
+        }
+    }
     suspend fun playlist(id: Long): GoPlaylistDetail = get("/api/go/playlists/$id")
     /** Songs like this one, leaving out any already lined up. */
     suspend fun radio(id: Long, exclude: Collection<Long> = emptyList()): List<Track> =
