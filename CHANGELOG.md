@@ -1,6 +1,27 @@
 # Changelog
 
-## Unreleased
+## 2026.11.12 (November 12, 2026)
+
+### New look
+
+- **A neon look across the party app, DJINN GO in the browser and the Android app:** the Outfit font, glowing switches, neon-edged cards and rows, a side menu on wide screens with your room and light or dark mode, bottom tabs on phones, and big page titles.
+- **Backgrounds.** Pick the picture behind every page in Admin > System > Background: a built-in one (waves, two vinyl records, stage lights, aurora, a grid, or plain) or your own upload, with a slider for how strongly it shows.
+- **Library lists** show genre chips, album and song counts, plays and how many people favorited each artist, album and song; phones show photo tiles by default. The A to Z strip no longer sits on the search box. Genre tags and the genre map are tidier.
+- **Playing.** Lyrics sit under the cover (a button that opens them full screen on phones), the host's controls are always shown, and there are a start over button and a thumbs-down for "skip, play less". The people-in-the-room count and the room are easier to see. The Add a song box moved to the Join button.
+- **Admin.** An overview with library totals, two-column cards with no gaps, tabs inside Library, Smart play (now with Party styles) and Audio (Sound, Outputs, Casting), and the build, status and credits on the System page.
+- **API key boxes are hidden** as dots with an eye button to show them.
+
+### Discover
+
+- **A new Discover page** in the party app and on DJINN GO's home, and a Discover home in the Android app: a speed dial, genres to dive into, listen again, new albums, quick picks, mixes, forgotten favorites, throwbacks, and artists like ones you listen to. Mixes and the "because you listen" shelves learn from your DJINN GO and phone plays and from what you asked the jukebox for. A few shelves change each time, as often as Admin > Library > Library settings says.
+
+### DJINN GO for Android
+
+- Restyled to match, with picture tiles and a switch between list and tiles, similar artists on an artist page, genre links, and the house background.
+
+### Updates
+
+- GitHub no longer starts nightlies on its own; the owner's computer does.
 
 ### DJINN GO
 
