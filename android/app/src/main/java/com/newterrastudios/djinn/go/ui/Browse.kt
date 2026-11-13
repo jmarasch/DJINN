@@ -317,14 +317,7 @@ fun HomeScreen(nav: Nav) {
 @UnstableApi
 @Composable
 private fun HomeBar(nav: Nav) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .padding(start = 16.dp, top = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text("DJINN GO", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
-    }
+    PageTitle(t("go.your_music"), t("go.home_hint"))
 }
 
 /** Everything on the phone, which needs no server. */
@@ -741,10 +734,10 @@ fun LibraryScreen(nav: Nav) {
         // Six words only share a phone evenly at small text sizes. Rather than break them, they scroll.
         val configuration = LocalConfiguration.current
         if (configuration.screenWidthDp / configuration.fontScale >= ROOM_FOR_EVEN_TABS_DP) {
-            SecondaryTabRow(selectedTabIndex = tab, tabs = tabs)
+            SecondaryTabRow(selectedTabIndex = tab, containerColor = Color.Transparent, tabs = tabs)
         } else {
             // No minimum width: each tab just fits its word, so the next one shows at the edge when they scroll.
-            SecondaryScrollableTabRow(selectedTabIndex = tab, edgePadding = 0.dp, minTabWidth = 0.dp, tabs = tabs)
+            SecondaryScrollableTabRow(selectedTabIndex = tab, edgePadding = 0.dp, minTabWidth = 0.dp, containerColor = Color.Transparent, tabs = tabs)
         }
         when (tab) {
             0 -> {
@@ -805,7 +798,8 @@ fun LibraryScreen(nav: Nav) {
 fun YourMusicScreen(nav: Nav) {
     var tab by rememberSaveable { mutableStateOf(0) }
     Column(Modifier.fillMaxSize()) {
-        SecondaryScrollableTabRow(selectedTabIndex = tab, edgePadding = 0.dp, minTabWidth = 0.dp) {
+        PageTitle(t("go.your_music"))
+        SecondaryScrollableTabRow(selectedTabIndex = tab, edgePadding = 0.dp, minTabWidth = 0.dp, containerColor = Color.Transparent) {
             MINE_TABS.forEachIndexed { index, label ->
                 Tab(
                     selected = tab == index,

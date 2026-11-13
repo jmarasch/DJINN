@@ -165,6 +165,7 @@
   },
   "go.home": "Start",
   "go.your_music": "Deine Musik",
+  "go.home_hint": "Wähle etwas zum Abspielen oder mach dort weiter, wo du aufgehört hast",
   "go.account": "Konto",
   "go.played_lately": "Zuletzt gehört",
   "go.new_in_library": "Neu in der Bibliothek",

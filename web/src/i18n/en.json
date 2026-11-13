@@ -165,6 +165,7 @@
   },
   "go.home": "Home",
   "go.your_music": "Your music",
+  "go.home_hint": "Pick something to play, or carry on where you left off",
   "go.account": "Account",
   "go.played_lately": "Played lately",
   "go.new_in_library": "New in the library",

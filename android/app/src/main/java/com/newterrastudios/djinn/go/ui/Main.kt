@@ -30,6 +30,11 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Snackbar
@@ -43,6 +48,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.util.UnstableApi
 import com.newterrastudios.djinn.go.data.GoApi
@@ -192,16 +199,22 @@ fun MainScreen(nav: Nav) {
         return
     }
     Scaffold(
+        // The page's backdrop shows through.
+        containerColor = Color.Transparent,
         bottomBar = {
             Column {
                 if (top != Screen.NowPlaying) MiniPlayer(nav)
                 // Icons only on phones; tablets (600 dp and wider) keep the words.
                 val labels = LocalConfiguration.current.screenWidthDp >= 600
-                NavigationBar {
+                NavigationBar(
+                    containerColor = MaterialTheme.colorScheme.background.copy(alpha = 0.88f),
+                    modifier = Modifier.neonTopEdge(),
+                ) {
                     // Playing first, left of Home.
                     NavigationBarItem(
                         selected = top == Screen.NowPlaying,
                         onClick = nav::showPlayer,
+                        colors = neonItemColors(),
                         icon = {
                             Icon(
                                 Icons.Default.PlayCircle,
@@ -221,6 +234,7 @@ fun MainScreen(nav: Nav) {
                                 nav.stack.clear()
                                 nav.tab = tab
                             },
+                            colors = neonItemColors(),
                             icon = {
                                 Icon(
                                     when (tab) {
@@ -306,11 +320,18 @@ fun MainScreen(nav: Nav) {
 private fun MiniPlayer(nav: Nav) {
     val player = nav.player
     val item = player.current ?: return
-    Column(Modifier.background(MaterialTheme.colorScheme.surfaceContainerHigh)) {
+    // A neon card floating over the page's bottom edge.
+    Column(
+        Modifier
+            .padding(horizontal = 8.dp, vertical = 6.dp)
+            .neon(RoundedCornerShape(16.dp)),
+    ) {
         if (player.durationMs > 0) {
             LinearProgressIndicator(
                 progress = { (player.positionMs.toFloat() / player.durationMs).coerceIn(0f, 1f) },
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().height(2.dp),
+                color = MaterialTheme.colorScheme.primary,
+                trackColor = Color.Transparent,
             )
         }
         Row(
@@ -344,3 +365,22 @@ private fun MiniPlayer(nav: Nav) {
         }
     }
 }
+
+/** The bottom bar's top edge: a thin neon line. */
+@Composable
+private fun Modifier.neonTopEdge(): Modifier {
+    val neon = LocalNeon.current
+    return this.drawBehind {
+        drawLine(neon.edge, Offset(0f, 0f), Offset(size.width, 0f), strokeWidth = 1.dp.toPx())
+    }
+}
+
+/** The chosen tab glows: lavender icon and name, a soft pill behind. */
+@Composable
+private fun neonItemColors() = NavigationBarItemDefaults.colors(
+    selectedIconColor = MaterialTheme.colorScheme.primary,
+    selectedTextColor = MaterialTheme.colorScheme.primary,
+    indicatorColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.22f),
+    unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+    unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+)

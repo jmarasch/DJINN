@@ -31,6 +31,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
@@ -45,7 +53,7 @@ fun duration(ms: Long?): String {
 
 /** A picture, or a disc until there is one. */
 @Composable
-fun Art(url: String?, size: Dp, shape: Shape = RoundedCornerShape(6.dp), modifier: Modifier = Modifier) {
+fun Art(url: String?, size: Dp, shape: Shape = RoundedCornerShape(10.dp), modifier: Modifier = Modifier) {
     Box(
         modifier
             .size(size)
@@ -80,11 +88,16 @@ fun Row2(
     end: @Composable () -> Unit = {},
     titleMark: @Composable () -> Unit = {},
 ) {
+    // Each row is a neon card, like the web app's lists.
+    val card = RoundedCornerShape(14.dp)
     Row(
         Modifier
             .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp)
+            .neon(card)
+            .clip(card)
             .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -187,4 +200,50 @@ fun Heading(text: String) {
 @Composable
 fun Note(text: String, modifier: Modifier = Modifier) {
     Text(text, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = modifier.padding(16.dp))
+}
+
+/** A screen's big title between two small waveforms, as on the web (PageTitle). */
+@Composable
+fun PageTitle(title: String, subtitle: String? = null) {
+    val accent = MaterialTheme.colorScheme.primary
+    val heights = listOf(3f, 6f, 10f, 15f, 9f, 13f, 6f, 4f)
+    @Composable
+    fun Wave(bars: List<Float>) {
+        Canvas(Modifier.size(width = 44.dp, height = 22.dp)) {
+            bars.forEachIndexed { i, h ->
+                val x = (i * 5.5f + 1f).dp.toPx()
+                val hh = (h + 2f).dp.toPx()
+                drawRoundRect(
+                    accent,
+                    topLeft = Offset(x, (size.height - hh) / 2),
+                    size = Size(2.4f.dp.toPx(), hh),
+                    cornerRadius = CornerRadius(1.2f.dp.toPx()),
+                )
+            }
+        }
+    }
+    Column(Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Wave(heights)
+            Text(
+                title,
+                style = MaterialTheme.typography.headlineMedium.copy(
+                    fontWeight = FontWeight.Bold,
+                    shadow = Shadow(accent.copy(alpha = 0.6f), blurRadius = 24f),
+                ),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            Wave(heights.reversed())
+        }
+        if (!subtitle.isNullOrEmpty()) {
+            Text(
+                subtitle.uppercase(),
+                style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 2.sp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+        }
+    }
 }

@@ -4,6 +4,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.filled.ThumbDown
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -161,7 +166,8 @@ fun NowPlayingScreen(nav: Nav) {
     /** Where the thumb is while being dragged. */
     var dragging by remember { mutableStateOf<Float?>(null) }
     var showVisuals by remember { mutableStateOf(nav.prefs.visualsOn) }
-    var showLyrics by remember { mutableStateOf(nav.prefs.lyricsOn) }
+    // Lyrics open full screen, so they don't start open.
+    var showLyrics by remember { mutableStateOf(false) }
     var lyrics by remember(id) { mutableStateOf<Lyrics?>(null) }
     var lyricsLoading by remember(id) { mutableStateOf(true) }
     LaunchedEffect(id, showLyrics) {
@@ -233,11 +239,15 @@ fun NowPlayingScreen(nav: Nav) {
                         modifier = Modifier.size(280.dp),
                     )
                 } else {
-                    Art(
-                        item.mediaMetadata.artworkUri?.toString(),
-                        280.dp,
-                        modifier = Modifier.clickable { nav.push(Screen.Cover) },
-                    )
+                    // The cover in a neon frame.
+                    Box(Modifier.neon(RoundedCornerShape(18.dp), strong = true)) {
+                        Art(
+                            item.mediaMetadata.artworkUri?.toString(),
+                            280.dp,
+                            shape = RoundedCornerShape(17.dp),
+                            modifier = Modifier.padding(1.dp).clickable { nav.push(Screen.Cover) },
+                        )
+                    }
                 }
                 if (casting != null) {
                     Text(
@@ -326,25 +336,36 @@ fun NowPlayingScreen(nav: Nav) {
                                 tint = if (liked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
-                        IconButton(onClick = {
-                            showLyrics = !showLyrics
-                            nav.prefs.lyricsOn = showLyrics
-                        }) {
+                        IconButton(onClick = { showLyrics = true }) {
                             Icon(
                                 Icons.Default.Lyrics,
-                                if (showLyrics) t("player.hide_lyrics") else t("player.show_lyrics"),
-                                tint = if (showLyrics) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                t("player.show_lyrics"),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                         if (casting == null) {
-                            TextButton(onClick = player::skipPlayLess) {
-                                Text(t("player.skip_play_less"))
+                            // Skip it, and play it (and songs like it) less.
+                            IconButton(onClick = player::skipPlayLess) {
+                                Icon(
+                                    Icons.Default.ThumbDown,
+                                    t("player.skip_play_less"),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
                             }
                         }
                     }
                 }
                 player.error?.let { Text(it, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center) }
-                if (showLyrics && id != null) LyricsBlock(lyrics, lyricsLoading, player::livePositionMs)
+                if (showLyrics && id != null) {
+                    LyricsScreen(
+                        title = item.mediaMetadata.title?.toString() ?: "",
+                        artist = item.mediaMetadata.artist?.toString() ?: "",
+                        lyrics = lyrics,
+                        loading = lyricsLoading,
+                        position = player::livePositionMs,
+                        onClose = { showLyrics = false },
+                    )
+                }
             }
         }
         if (player.upNext.isNotEmpty()) {
@@ -634,5 +655,45 @@ private fun MenuRow(label: String, icon: ImageVector, onClick: () -> Unit) {
         Text(label, modifier = Modifier
             .weight(1f)
             .padding(start = 16.dp))
+    }
+}
+
+/** The lyrics on a screen of their own: the song on top, the words filling the rest. */
+@Composable
+private fun LyricsScreen(
+    title: String,
+    artist: String,
+    lyrics: Lyrics?,
+    loading: Boolean,
+    position: () -> Long,
+    onClose: () -> Unit,
+) {
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onClose,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        androidx.compose.material3.Surface(
+            Modifier.fillMaxSize(),
+            color = MaterialTheme.colorScheme.background,
+        ) {
+            Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(horizontal = 16.dp)) {
+                Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = onClose) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, t("common.close"))
+                    }
+                    Column(Modifier.weight(1f).padding(start = 8.dp)) {
+                        Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            artist,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                LyricsBlock(lyrics, loading, position, big = true)
+            }
+        }
     }
 }

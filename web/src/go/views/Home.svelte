@@ -29,7 +29,7 @@
 
 {#if error}<p class="error">{error}</p>{/if}
 {#if home}
-  <PageTitle title="Your music" subtitle="Pick something to play, or carry on where you left off" />
+  <PageTitle title={t('go.your_music')} subtitle={t('go.home_hint')} />
   {#if home.resume && resumeSong && player.index < 0}
     {@const r = home.resume}
     <button class="carry-on card" onclick={() => carryOn(r.songs, r.queue, r.position, r.position_ms)}>

@@ -2,6 +2,7 @@ package com.newterrastudios.djinn.go.ui
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -48,7 +49,7 @@ fun lineAt(lines: List<LyricLine>, ms: Long): Int {
  * being sung is lit and kept in the middle of the box.
  */
 @Composable
-fun LyricsBlock(lyrics: Lyrics?, loading: Boolean, position: () -> Long) {
+fun LyricsBlock(lyrics: Lyrics?, loading: Boolean, position: () -> Long, big: Boolean = false) {
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
     when {
         loading -> Note(t("lyrics.loading"))
@@ -71,9 +72,7 @@ fun LyricsBlock(lyrics: Lyrics?, loading: Boolean, position: () -> Long) {
                 if (line < tops.size && boxHeight > 0) scroll.animateScrollTo((tops[line] - boxHeight / 2).coerceAtLeast(0))
             }
             Column(
-                Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 320.dp)
+                (if (big) Modifier.fillMaxSize() else Modifier.fillMaxWidth().heightIn(max = 320.dp))
                     .onGloballyPositioned { boxHeight = it.size.height }
                     .verticalScroll(scroll)
                     .padding(vertical = 8.dp),
@@ -87,7 +86,7 @@ fun LyricsBlock(lyrics: Lyrics?, loading: Boolean, position: () -> Long) {
                         line.text.ifEmpty { "♪" },
                         color = color,
                         fontWeight = if (i == at) FontWeight.Bold else FontWeight.Normal,
-                        style = MaterialTheme.typography.bodyLarge,
+                        style = if (big) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.bodyLarge,
                         textAlign = TextAlign.Center,
                         modifier = Modifier
                             .fillMaxWidth()
@@ -102,7 +101,7 @@ fun LyricsBlock(lyrics: Lyrics?, loading: Boolean, position: () -> Long) {
             color = muted,
             style = MaterialTheme.typography.bodyLarge,
             textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            modifier = Modifier.fillMaxWidth().padding(16.dp).then(if (big) Modifier.verticalScroll(rememberScrollState()) else Modifier),
         )
         else -> Note(t("lyrics.none"))
     }
