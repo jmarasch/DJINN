@@ -1466,3 +1466,16 @@ export interface RoomTiming {
   speakers: TimingSpeaker[]
   max_ms: number
 }
+
+/** Shelves to find something to play (GET /api/discover). */
+export interface Discover {
+  speed_dial: { kind: 'artist' | 'album'; id: number; name: string; art_hash: string | null }[]
+  forgotten: Track[]
+  genres: { name: string; songs: number }[]
+  listen_again: Track[]
+  new_albums: Album[]
+  throwbacks: Album[]
+  popular_songs: Track[]
+  because: { artist: ArtistSummary; similar: ArtistSummary[] } | null
+  explore: ArtistSummary[]
+}

@@ -9,7 +9,12 @@
   import { duration } from '../../lib/format'
   import type { GoHome } from '../../lib/types'
   import { carryOn, player } from '../player.svelte'
-  import SongList from '../SongList.svelte'
+  import Discover from '../../lib/Discover.svelte'
+  import LikeButton from '../LikeButton.svelte'
+  import SongRow from '../SongRow.svelte'
+  import SongTile from '../SongTile.svelte'
+  import { playList, playRadio, tapSong } from '../player.svelte'
+  import type { Track } from '../../lib/types'
 
   let home = $state<GoHome | null>(null)
   let error = $state('')
@@ -51,13 +56,17 @@
     </div>
   {/if}
 
-  {#if home.recent.length}
-    <h2>{t('go.played_lately')}</h2>
-    <SongList tracks={home.recent} />
-  {/if}
-
-  <h2>{t('go.new_in_library')}</h2>
-  <SongList tracks={home.newest} />
+  <Discover playAll={(tracks) => playList(tracks, 0)}>
+    {#snippet songRow(track: Track)}
+      <SongRow {track} onplay={() => tapSong(track, () => playRadio(track))} />
+    {/snippet}
+    {#snippet songTile(track: Track)}
+      <div class="song"><SongTile {track} onplay={() => tapSong(track, () => playRadio(track))} /></div>
+    {/snippet}
+    {#snippet like(kind: 'artist' | 'album', id: number, name: string)}
+      <LikeButton {kind} {id} {name} size={18} />
+    {/snippet}
+  </Discover>
 {:else if !error}
   <p class="muted">Loading...</p>
 {/if}
@@ -80,6 +89,11 @@
   h2 {
     margin: 20px 0 8px;
     font-size: 1.05rem;
+  }
+
+  .song {
+    flex: none;
+    width: 150px;
   }
 
   .chips {

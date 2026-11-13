@@ -27,6 +27,7 @@
   import NowPlaying from './screens/NowPlaying.svelte'
   import Playlists from './screens/Playlists.svelte'
   import Favorites from './screens/Favorites.svelte'
+  import DiscoverScreen from './screens/DiscoverScreen.svelte'
   import PlaylistView from './screens/PlaylistView.svelte'
   import Queue from './screens/Queue.svelte'
   import Search from './screens/Search.svelte'
@@ -104,7 +105,9 @@
   const tab = $derived(
     route.path.startsWith('/search') || albumId || artistId || artistSongsId || similarId || genreName
       ? 'search'
-      : route.path.startsWith('/queue')
+      : route.path === '/discover'
+        ? 'discover'
+        : route.path.startsWith('/queue')
         ? 'queue'
         : route.path === '/favorites'
           ? 'favorites'
@@ -195,6 +198,7 @@
     </a>
     <div class="tabs">
       <a href="#/" class:active={tab === 'now'}><Icon name="playing" /><span>{t('nav.playing')}</span></a>
+      <a href="#/discover" class:active={tab === 'discover'}><Icon name="similar" /><span>{t('nav.discover')}</span></a>
       <a href="#/search" class:active={tab === 'search'}><Icon name="library" /><span>{t('nav.library')}</span></a>
       {#if hasPlaylists()}
         <a href="#/favorites" class:active={tab === 'favorites'}><Icon name="heart-outline" /><span>{t('nav.favorites')}</span></a>
@@ -234,7 +238,7 @@
     class="app-main"
     class:playing={route.path === '/'}
     class:wide={tab === 'admin'}
-    class:library={tab === 'search' || tab === 'favorites'}
+    class:library={tab === 'search' || tab === 'favorites' || tab === 'discover'}
     class:has-back={showBack}
     style:--nav-height="{wide ? 0 : navHeight}px"
   >
@@ -250,6 +254,8 @@
       <ArtistSongs id={artistSongsId} />
     {:else if playlistId && hasPlaylists()}
       <PlaylistView id={playlistId} />
+    {:else if tab === 'discover'}
+      <DiscoverScreen />
     {:else if route.path === '/favorites' && hasPlaylists()}
       <Favorites />
     {:else if tab === 'search'}

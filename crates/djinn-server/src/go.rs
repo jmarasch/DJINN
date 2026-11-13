@@ -396,6 +396,7 @@ const ROUTES: &[(Method, &str, Access)] = &[
     (Method::GET, "/api/health", Access::Public),
     (Method::GET, "/api/go/hello", Access::Public),
     (Method::GET, "/api/language", Access::Public),
+    (Method::GET, "/api/discover", Access::Listener),
     (Method::GET, "/api/appearance", Access::Public),
     (Method::GET, "/api/appearance/image", Access::Public),
     (Method::GET, "/api/go/app", Access::Public),

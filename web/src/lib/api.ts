@@ -40,6 +40,7 @@ import type {
   AiOptions,
   AiStatus,
   Album,
+  Discover,
   AlbumDetail,
   AlbumFilter,
   AlbumSort,
@@ -355,6 +356,7 @@ export const api = {
     put<void>(`/party/schedule?room=${room}`, { on: schedule.on, rules: schedule.rules }),
   /** The live stream for Play here; null when the host turned it off. */
   listen: () => get<{ url: string | null }>('/listen'),
+  discover: () => get<Discover>('/discover'),
   appearance: () => get<{ background: string; strength: number }>('/appearance'),
   saveAppearance: (value: { background: string; strength: number }) =>
     put<{ background: string; strength: number }>('/appearance', value),

@@ -20,6 +20,7 @@ mod config;
 mod convert;
 mod cpu;
 mod desktop;
+mod discover;
 mod download;
 mod duplicates;
 mod error;
