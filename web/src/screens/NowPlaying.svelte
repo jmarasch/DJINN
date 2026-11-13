@@ -58,6 +58,19 @@
     }
   })
 
+  // Narrow screens show the lyrics as a button that opens them full screen.
+  let narrow = $state(matchMedia('(max-width: 899px)').matches)
+  let lyricsFull = $state(false)
+  $effect(() => {
+    const query = matchMedia('(max-width: 899px)')
+    const update = () => (narrow = query.matches)
+    query.addEventListener('change', update)
+    return () => query.removeEventListener('change', update)
+  })
+  $effect(() => {
+    if (!hasLyrics || !narrow) lyricsFull = false
+  })
+
   // How many people have the app open in this room.
   let people = $state(0)
   async function loadPeople() {
@@ -135,6 +148,27 @@
 
 </script>
 
+<svelte:window
+  onkeydown={(e) => {
+    if (lyricsFull && e.key === 'Escape') lyricsFull = false
+  }}
+/>
+
+{#if lyricsFull && current}
+  <div class="lyrics-screen" role="dialog" aria-modal="true" aria-label={t('playing.lyrics')}>
+    <header>
+      <button class="close" aria-label={t('nav.back')} onclick={() => (lyricsFull = false)}>
+        <Icon name="back" size={24} />
+      </button>
+      <div class="who">
+        <strong class="ellipsis">{current.track.title}</strong>
+        <span class="muted small ellipsis">{byline(current.track.artist)}</span>
+      </div>
+    </header>
+    <div class="body"><LyricsView {lyrics} position={currentPosition} big /></div>
+  </div>
+{/if}
+
 <div class="playing-page">
 <div class="top">
   {#if app.player.playlist}
@@ -188,7 +222,13 @@
         {@render wave('right')}
       </div>
       {#if hasLyrics}
-        <div class="lyrics-card"><LyricsView {lyrics} position={currentPosition} /></div>
+        {#if narrow}
+          <button class="lyrics-button" onclick={() => (lyricsFull = true)}>
+            <Icon name="book" size={22} /> {t('playing.lyrics')}
+          </button>
+        {:else}
+          <div class="lyrics-card"><LyricsView {lyrics} position={currentPosition} /></div>
+        {/if}
       {/if}
     </div>
   {/if}
@@ -557,6 +597,65 @@
     gap: 14px;
     width: min(28vw, 330px);
     margin-right: min(4vw, 44px);
+  }
+
+  .lyrics-button {
+    gap: 8px;
+    min-height: 48px;
+    border: 1px solid var(--edge);
+    border-radius: 14px;
+    background: var(--card-bg);
+    box-shadow: var(--glow);
+    color: var(--text);
+    font-weight: 600;
+  }
+
+  /* Lyrics full screen on narrow screens. */
+  .lyrics-screen {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    display: flex;
+    flex-direction: column;
+    padding: calc(10px + env(safe-area-inset-top)) 16px calc(10px + env(safe-area-inset-bottom));
+    background: color-mix(in srgb, var(--bg) 94%, transparent);
+    backdrop-filter: blur(14px);
+  }
+
+  .lyrics-screen header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--edge);
+  }
+
+  .lyrics-screen .close {
+    flex: none;
+    width: 40px;
+    min-height: 40px;
+    padding: 0;
+    border: 1px solid var(--edge);
+    border-radius: 12px;
+    background: var(--surface-2);
+  }
+
+  .lyrics-screen .who {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  .lyrics-screen .ellipsis {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .lyrics-screen .body {
+    flex: 1;
+    min-height: 0;
+    padding-top: 8px;
   }
 
   .lyrics-card {
