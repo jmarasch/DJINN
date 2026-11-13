@@ -99,6 +99,17 @@ DJINN is free for personal and other noncommercial use under the
 open source: you may use, study, change and share it, but not sell it or use it
 commercially.
 
+**In plain words**
+
+- Free to use at home, for hobbies, at school, for research, and for charities
+  and other nonprofits.
+- You can read the code, change it, and share it (with the license and credit).
+- Not allowed without a separate agreement: selling DJINN, putting it in
+  something you sell, or using it to make money (a bar, a venue or a paid
+  service, for example). If that's you, get in touch first.
+
+The license text is the final word; this is just a summary.
+
 Questions or ideas: DJINN@newterrastudios.com, or open an issue.
 
 Copyright (c) 2026 New Terra Studios.

@@ -24,8 +24,12 @@
     <p class="small muted">
       A party jukebox by New Terra Studios.{#if about.commit}{' '}Build {about.commit}{about.commit_date ? `, ${about.commit_date}` : ''}.{/if}
     </p>
+    <p class="small">
+      Free to use at home, for hobbies, at school, for research and for charities. If you want to use it to make
+      money, such as in a bar or venue, ask first.
+    </p>
     <p class="small muted">
-      Free for any non-commercial use under the
+      The full terms: free for any non-commercial use under the
       <a href="https://polyformproject.org/licenses/noncommercial/1.0.0" target="_blank" rel="noopener noreferrer"
         >PolyForm Noncommercial License 1.0.0</a
       >. Nobody may sell it or use it to make money.
