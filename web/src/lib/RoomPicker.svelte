@@ -5,6 +5,9 @@
   import Icon from './Icon.svelte'
   import { app, switchRoom, toast } from './state.svelte'
 
+  /** Opens the list above the button, for the left bar where there's nothing below. */
+  let { up = false }: { up?: boolean } = $props()
+
   let open = $state(false)
   let box = $state<HTMLElement>()
   const current = $derived(app.rooms.find((r) => r.id === app.room))
@@ -53,7 +56,7 @@
       <Icon name={open ? 'up' : 'down'} size={20} />
     </button>
     {#if open}
-      <ul class="room-list" role="listbox" aria-label={t('rooms.your_room')}>
+      <ul class="room-list" class:up role="listbox" aria-label={t('rooms.your_room')}>
         {#each app.rooms as room (room.id)}
           <li>
             <button
@@ -73,9 +76,9 @@
 
 <style>
   .room {
+    position: relative;
     display: flex;
     flex-direction: column;
-    gap: 6px;
     min-width: 0;
   }
 
@@ -124,14 +127,26 @@
     text-overflow: ellipsis;
   }
 
+  /* Floats over what's below, so opening it moves nothing. */
   .room-list {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    right: 0;
+    z-index: 30;
+    min-width: 200px;
     margin: 0;
     padding: 4px;
     list-style: none;
     border: 1px solid var(--edge);
     border-radius: 12px;
-    background: var(--card-bg);
-    box-shadow: var(--glow);
+    background: var(--surface);
+    box-shadow: var(--glow-strong);
+  }
+
+  .room-list.up {
+    top: auto;
+    bottom: calc(100% + 6px);
   }
 
   .room-list button {

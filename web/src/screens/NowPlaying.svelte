@@ -392,16 +392,6 @@
     min-height: calc(100dvh - 120px);
   }
 
-  .playing-page::before {
-    content: '';
-    position: fixed;
-    z-index: -1;
-    inset: 0;
-    background: url('/images/listening-waves.webp') center / cover no-repeat;
-    opacity: 0.18;
-    pointer-events: none;
-  }
-
   .stage {
     display: grid;
     grid-template-columns: minmax(0, 1.9fr) minmax(280px, 1fr);

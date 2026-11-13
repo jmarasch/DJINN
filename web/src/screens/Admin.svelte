@@ -37,6 +37,7 @@
   import NodesPanel from '../lib/NodesPanel.svelte'
   import VisualsPanel from '../lib/VisualsPanel.svelte'
   import HouseLanguage from '../lib/HouseLanguage.svelte'
+  import AppearancePanel from '../lib/AppearancePanel.svelte'
   import RoomsPanel from '../lib/RoomsPanel.svelte'
   import { app, toast } from '../lib/state.svelte'
   import type { LibraryRoot, RequestLogEntry, Settings } from '../lib/types'
@@ -548,6 +549,7 @@
   <div class="cards-2">
     <AboutPanel part="build" />
     <SystemStatus />
+    <AppearancePanel />
     <HouseLanguage />
     <UpdatePanel />
     <BackupPanel />

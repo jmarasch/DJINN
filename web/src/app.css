@@ -91,11 +91,17 @@
   scrollbar-color: var(--surface-3) transparent;
 }
 
+/* The page's own backdrop is on the root, so the house background (a fixed
+   layer behind the page) shows above it rather than being covered by the body. */
+html {
+  min-height: 100%;
+  background: var(--page-bg);
+  background-attachment: fixed;
+}
+
 body {
   margin: 0;
   min-height: 100dvh;
-  background: var(--page-bg);
-  background-attachment: fixed;
 }
 
 h1 {

@@ -8,6 +8,7 @@ mod accounts;
 mod address;
 mod ai;
 mod api;
+mod appearance;
 mod audio_api;
 mod auth;
 mod background;

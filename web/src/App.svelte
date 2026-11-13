@@ -15,6 +15,8 @@
   import Admin from './screens/Admin.svelte'
   import { adminTabFor } from './lib/adminTabs'
   import { cycleTheme, theme } from './lib/theme.svelte'
+  import BackgroundArt from './lib/BackgroundArt.svelte'
+  import { appearance, loadAppearance } from './lib/appearance.svelte'
   import Account from './screens/Account.svelte'
   import AlbumView from './screens/AlbumView.svelte'
   import ArtistView from './screens/ArtistView.svelte'
@@ -52,6 +54,9 @@
   const onLyricsPage = location.pathname === '/lyrics'
   const onNodePage = location.pathname === '/node'
   const onVisualizerPage = location.pathname === '/visualizer'
+  /** Pages that draw their own backdrop (the TV, lyrics, node and visualizer pages) skip the house background. */
+  const ownBackdrop = onTvPage || onLyricsPage || onNodePage || onVisualizerPage
+  if (!ownBackdrop) void loadAppearance()
   let showJoin = $state(false)
   let showMenu = $state(false)
   /** Phones keep Playlists, your account, Admin and the theme in a menu. */
@@ -112,6 +117,10 @@
   /** Not on the Playing screen or in Admin, where there's nowhere to go back to. */
   const showBack = $derived(navigation.canGoBack && tab !== 'admin' && route.path !== '/')
 </script>
+
+{#if !ownBackdrop}
+  <BackgroundArt name={appearance.background} strength={appearance.strength} fixed />
+{/if}
 
 {#if onTvPage}
   <Tv />
@@ -209,7 +218,7 @@
       <button class="theme-toggle" onclick={cycleTheme} aria-label="Theme: {themeLabel}" title="Theme: {themeLabel}">
         <Icon name="theme" /><span>{themeLabel}</span>
       </button>
-      {#if tab !== 'admin'}<div class="side-room"><RoomPicker /></div>{/if}
+      {#if tab !== 'admin'}<div class="side-room"><RoomPicker up /></div>{/if}
       <button class="tune-in" onclick={() => (showJoin = true)}>
         <Icon name="qr" size={26} />
         <span>

@@ -355,6 +355,17 @@ export const api = {
     put<void>(`/party/schedule?room=${room}`, { on: schedule.on, rules: schedule.rules }),
   /** The live stream for Play here; null when the host turned it off. */
   listen: () => get<{ url: string | null }>('/listen'),
+  appearance: () => get<{ background: string; strength: number }>('/appearance'),
+  saveAppearance: (value: { background: string; strength: number }) =>
+    put<{ background: string; strength: number }>('/appearance', value),
+  /** Sets the picture behind the pages from an image file. */
+  uploadBackground: async (file: File) => {
+    const res = await fetch('/api/appearance/image', { method: 'POST', body: file })
+    const data = await res.json().catch(() => null)
+    if (!res.ok) throw new ApiError(res.status, data?.error ?? `Upload failed (${res.status})`)
+    return data as { background: string; strength: number }
+  },
+  removeBackground: () => del<{ background: string; strength: number }>('/appearance/image'),
   trackEdit: (id: number) => get<TrackEdit>(`/tracks/${id}/edit`),
   editTracks: (change: TagChange) => put<void>('/tracks/edit', change),
   /** Renames an artist on all their songs and sets the genres of the songs

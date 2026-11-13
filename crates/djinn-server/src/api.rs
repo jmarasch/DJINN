@@ -38,6 +38,7 @@ pub fn router() -> Router<AppState> {
         .merge(nodes::router())
         .merge(crate::visuals::router())
         .merge(crate::language::router())
+        .merge(crate::appearance::router())
         .merge(rooms_api::router())
         .merge(problems_api::router())
         .merge(duplicates::router())
