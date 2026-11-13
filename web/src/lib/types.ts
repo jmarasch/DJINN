@@ -1336,7 +1336,7 @@ export interface LogSettings {
 }
 
 /** What Admin > System can clear out. */
-export type SystemReset = 'queue' | 'tag_edits' | 'analysis' | 'listening' | 'history' | 'settings' | 'everything'
+export type SystemReset = 'queue' | 'tag_edits' | 'imported_lyrics' | 'analysis' | 'listening' | 'history' | 'settings' | 'everything'
 
 /** A picture of an artist for slideshows. */
 export interface ArtistPicture {
@@ -1377,8 +1377,41 @@ export interface LyricsStatus {
   instrumental: number
   unread: number
   not_looked_up: number
+  /** Songs whose lyrics came from an imported zip. */
+  imported: number
   running: boolean
   phase: '' | 'reading' | 'looking up'
+}
+
+/** What the last lyrics zip import did. */
+export interface LyricsImportReport {
+  file: string
+  replace: boolean
+  even_if_unasked: boolean
+  started_at: number
+  finished_at: number | null
+  total: number
+  done: number
+  saved_timed: number
+  saved_plain: number
+  had_lyrics: number
+  kept_import: number
+  waiting_lrclib: number
+  instrumental: number
+  empty: number
+  too_big: number
+  ignored: number
+  not_matched: number
+  ambiguous: number
+  mismatched: number
+  warning_count: number
+  warnings: { entry: string; reason: string }[]
+  error: string | null
+}
+
+export interface LyricsImportStatus {
+  running: boolean
+  report: LyricsImportReport | null
 }
 
 export interface LyricsSettings {

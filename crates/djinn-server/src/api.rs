@@ -14,9 +14,9 @@ use crate::error::ApiResult;
 use crate::state::AppState;
 use crate::{
     accounts, ai, audio_api, auth, backup, cast_api, convert, duplicates, folders, go, go_library,
-    identify_api, library_api, likes_api, lyrics, mood_api, nodes, party_api, player_api,
-    playlist_api, playlist_import, problems_api, rooms_api, scheduled_check, smart, sse, stats_api,
-    submissions, system_api, tv_api, two_step, update, wishes_api,
+    identify_api, library_api, likes_api, lyrics, lyrics_import, mood_api, nodes, party_api,
+    player_api, playlist_api, playlist_import, problems_api, rooms_api, scheduled_check, smart,
+    sse, stats_api, submissions, system_api, tv_api, two_step, update, wishes_api,
 };
 
 pub fn router() -> Router<AppState> {
@@ -35,6 +35,7 @@ pub fn router() -> Router<AppState> {
         .merge(library_api::router())
         .merge(likes_api::router())
         .merge(lyrics::router())
+        .merge(lyrics_import::router())
         .merge(nodes::router())
         .merge(crate::visuals::router())
         .merge(crate::language::router())

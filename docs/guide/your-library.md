@@ -147,3 +147,19 @@ that favors what's been played, by anyone, on the jukebox, GO or a phone app.
 The same order stays for a while, so you can come back to it. **Admin > Library**
 sets how many load at a time and how many hours until it's shuffled again.
 
+
+## Importing lyrics from a zip
+
+Admin > Library > Lyrics can load lyrics from a zip of files. DJINN keeps them in its database and never writes to your music folders.
+
+**The zip.** Lay the files out like your music folders, the same way Export .lrc files does: under the name of the library folder, at the song's place, named like the song. For example, `Music/Artist/Album/01 Song.lrc` for `/srv/music/Artist/Album/01 Song.flac`. Use `.lrc` or `.txt`, as UTF-8 text.
+
+- A `.lrc` file may start with the header lines `[ar:Artist]`, `[ti:Title]`, `[al:Album]` and `[length:mm:ss]`. DJINN matches the song by artist and title first, using album and length when several songs fit. When those lines are missing, and for every `.txt`, it matches by the path.
+- Timed lines (`[mm:ss.xx]words`) make timed lyrics; anything else is plain lyrics. A file holding only `[Instrumental]` is ignored.
+- A zip may hold up to 250 MB and 150,000 files, and each file up to 200 KB. For a bigger library, send several zips: the import is safe to repeat and any order works.
+
+**What it does.** It only fills songs that have no lyrics. Lyrics from a `.lrc` beside the song, from the song's tags or from LRCLIB always win. By default it skips songs LRCLIB hasn't been asked about yet (while the LRCLIB lookup is on), so LRCLIB gets the first go; a tick box imports them anyway. Songs that already hold lyrics from an earlier import keep them unless you tick "Replace lyrics from an earlier import".
+
+**Safety.** Files are read only as text. A file that looks like code or markup (SQL, script or HTML tags, shell commands, binary data) is thrown out and listed as a warning, and program or data files in the zip (`.exe`, `.sql`, `.zip` and so on) are never read. Admin Home reminds you until you clear the report. The rest of the zip still imports.
+
+When it finishes, the panel shows what was saved and skipped, and the full report can be downloaded. **Remove all imported lyrics** in Admin > System takes back everything that came from zips and leaves other lyrics alone.

@@ -599,6 +599,8 @@ async fn quit(_: AdminUser, State(state): State<AppState>) -> StatusCode {
 enum Reset {
     Queue,
     TagEdits,
+    /// Lyrics that came from an imported zip.
+    ImportedLyrics,
     Analysis,
     Listening,
     History,
@@ -636,6 +638,13 @@ async fn reset(
             if !paths.is_empty() {
                 library_api::reread(&state, &paths).await?;
             }
+            false
+        }
+        Reset::ImportedLyrics => {
+            let removed = state.store.remove_bulk_lyrics().await?;
+            tracing::info!(removed, "imported lyrics removed");
+            // The songs can be looked up again.
+            crate::lyrics::start(&state);
             false
         }
         // These change what's loaded in memory all over; a restart picks

@@ -4,15 +4,21 @@
   import { onMount } from 'svelte'
   import { api } from './api'
   import { toast } from './state.svelte'
-  import type { LyricsSettings, LyricsStatus } from './types'
+  import type { LyricsImportStatus, LyricsSettings, LyricsStatus } from './types'
 
   let settings = $state<LyricsSettings | null>(null)
   let status = $state<LyricsStatus | null>(null)
+  let importing = $state<LyricsImportStatus | null>(null)
+  let files = $state<FileList | null>(null)
+  let replace = $state(false)
+  let unasked = $state(false)
+  let sending = $state(false)
   const n = (x: number) => x.toLocaleString()
 
   async function refresh() {
     try {
       status = await api.lyricsStatus()
+      importing = await api.lyricsImport()
     } catch {
       // Shown next time.
     }
@@ -51,6 +57,39 @@
     }
   }
 
+  /** Sends the chosen zips one after another; DJINN imports one at a time. */
+  async function sendZips() {
+    if (!files?.length || sending) return
+    sending = true
+    try {
+      for (const file of Array.from(files)) {
+        await api.importLyrics(file, replace, unasked)
+        // Wait for it to finish before the next.
+        for (;;) {
+          await new Promise((r) => setTimeout(r, 1500))
+          await refresh()
+          if (!importing?.running) break
+        }
+      }
+      files = null
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not import', true)
+    } finally {
+      sending = false
+      void refresh()
+    }
+  }
+
+  async function dismissImport() {
+    try {
+      await api.dismissLyricsImport()
+      importing = null
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not clear it', true)
+    }
+  }
+
+  const report = $derived(importing?.report ?? null)
   const withWords = $derived(status ? status.synced + status.plain : 0)
   const pageUrl = `${location.origin}/lyrics`
 </script>
@@ -69,7 +108,7 @@
       {/if}
       {n(withWords)} of {n(status.songs)} songs have lyrics ({n(status.synced)} timed){#if status.instrumental}, {n(
           status.instrumental,
-        )} instrumental{/if}.
+        )} instrumental{/if}{#if status.imported}; {n(status.imported)} imported from zips{/if}.
     </p>
   {/if}
   {#if settings}
@@ -101,7 +140,95 @@
   </p>
 </section>
 
+<section class="card">
+  <h3>Import lyrics from a zip</h3>
+  <p class="small muted">
+    A zip of .lrc or .txt files laid out like your music folders (the same layout as the export above). Each file is
+    matched to a song by the artist and title in its [ar:] and [ti:] lines, or by its place in the zip when those are
+    missing. It only fills songs that have no lyrics: lyrics from song files, tags and LRCLIB always win. Files that
+    look like code or markup are thrown out and listed. Up to 250 MB and 150,000 files per zip; send several zips for a
+    bigger library.
+  </p>
+  <label class="switch">
+    <input type="checkbox" bind:checked={replace} />
+    Replace lyrics from an earlier import
+  </label>
+  <label class="switch">
+    <input type="checkbox" bind:checked={unasked} />
+    Import even if LRCLIB has not been asked about the song yet
+  </label>
+  <p class="small muted sub">
+    Unless this is ticked, songs LRCLIB hasn't been asked about are skipped (and counted), so it gets the first go.
+  </p>
+  <div class="actions">
+    <input type="file" accept=".zip,application/zip" multiple bind:files disabled={sending || importing?.running} />
+    <button onclick={sendZips} disabled={!files?.length || sending || importing?.running}>Import</button>
+  </div>
+  {#if report}
+    <div class="report">
+      <p class="small">
+        {#if importing?.running}<span class="spinner" aria-hidden="true"></span>
+          Importing {report.file}: {n(report.done)} of {n(report.total)} files.
+        {:else}
+          {report.file || 'The last import'}: {n(report.saved_timed + report.saved_plain)} saved ({n(report.saved_timed)}
+          timed, {n(report.saved_plain)} plain).
+        {/if}
+      </p>
+      {#if report.error}<p class="small bad">Stopped: {report.error}</p>{/if}
+      {#if report.warning_count}
+        <div class="warn">
+          <p class="small">
+            <strong>{n(report.warning_count)} {report.warning_count === 1 ? 'file was' : 'files were'} thrown out</strong>
+            because {report.warning_count === 1 ? 'it looked' : 'they looked'} like code or markup, not lyrics:
+          </p>
+          <ul class="small">
+            {#each report.warnings.slice(0, 20) as w (w.entry)}
+              <li>{w.entry}: {w.reason}</li>
+            {/each}
+          </ul>
+          {#if report.warning_count > 20}<p class="small muted">The rest are in the full report.</p>{/if}
+        </div>
+      {/if}
+      <p class="small muted">
+        Skipped: {n(report.had_lyrics)} already had lyrics, {n(report.kept_import)} kept an earlier import, {n(
+          report.waiting_lrclib,
+        )} waiting for LRCLIB, {n(report.instrumental + report.empty)} empty or instrumental. No song found for {n(
+          report.not_matched,
+        )}{#if report.ambiguous}; {n(report.ambiguous)} fit more than one song{/if}.
+      </p>
+      {#if !importing?.running}
+        <div class="actions">
+          <a class="button" href="/api/lyrics/import/report" download>Download the full report</a>
+          <button onclick={dismissImport}>Clear</button>
+        </div>
+      {/if}
+    </div>
+  {/if}
+</section>
+
 <style>
+  .report {
+    margin-top: 12px;
+    padding-top: 8px;
+    border-top: 1px solid var(--line);
+  }
+
+  .warn {
+    border: 1px solid var(--warn, #c80);
+    border-radius: 8px;
+    padding: 8px 12px;
+    margin: 6px 0;
+  }
+
+  .warn ul {
+    margin: 4px 0 0;
+    padding-left: 18px;
+  }
+
+  .bad {
+    color: var(--danger, #d33);
+  }
+
   .sub {
     margin: 2px 0 10px;
   }

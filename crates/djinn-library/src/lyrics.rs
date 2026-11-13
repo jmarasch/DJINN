@@ -26,6 +26,8 @@ pub enum Source {
     File,
     /// LRCLIB.
     Lrclib,
+    /// An imported zip of lyrics files.
+    Bulk,
 }
 
 impl Source {
@@ -34,6 +36,7 @@ impl Source {
             Source::Lrc => "lrc",
             Source::File => "file",
             Source::Lrclib => "lrclib",
+            Source::Bulk => "bulk",
         }
     }
 }
@@ -50,7 +53,7 @@ pub struct Found {
 
 impl Found {
     /// Sorts text into timed or plain. Blank text is nothing.
-    fn from_text(text: &str, source: Source) -> Option<Found> {
+    pub(crate) fn from_text(text: &str, source: Source) -> Option<Found> {
         let text = text.trim_start_matches('\u{feff}').trim();
         if text.is_empty() {
             return None;
@@ -182,7 +185,7 @@ fn skip_markup<'a>(text: &'a str, out: &mut String) -> Option<&'a str> {
 
 /// `[mm:ss]`, `[mm:ss.x]`, `[mm:ss.xx]` or `[mm:ss.xxx]` (also with `:` before
 /// the fraction), as milliseconds.
-fn timestamp(tag: &str) -> Option<u64> {
+pub(crate) fn timestamp(tag: &str) -> Option<u64> {
     let (minutes, rest) = tag.split_once(':')?;
     let minutes: u64 = minutes.trim().parse().ok()?;
     let (seconds, fraction) = match rest.find(['.', ':']) {
@@ -203,7 +206,7 @@ fn timestamp(tag: &str) -> Option<u64> {
 }
 
 /// Splits a line's leading `[...]` tags from its words.
-fn leading_tags(line: &str) -> (Vec<&str>, &str) {
+pub(crate) fn leading_tags(line: &str) -> (Vec<&str>, &str) {
     let mut tags = Vec::new();
     let mut rest = line.trim_start();
     while let Some(after) = rest.strip_prefix('[') {

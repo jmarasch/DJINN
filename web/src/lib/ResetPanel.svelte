@@ -20,6 +20,13 @@
       confirm: 'Undo every tag correction made in DJINN?',
     },
     {
+      what: 'imported_lyrics',
+      label: 'Remove all imported lyrics',
+      about:
+        'Takes back every lyric that came from an imported zip. Lyrics from song files, tags and LRCLIB stay, and those songs can be looked up on LRCLIB again.',
+      confirm: 'Remove every lyric that came from an imported zip?',
+    },
+    {
       what: 'analysis',
       label: 'Analyze all songs again',
       about:

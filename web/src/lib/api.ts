@@ -11,6 +11,7 @@ import type {
   NodeList,
   Lyrics,
   LyricsSettings,
+  LyricsImportStatus,
   LyricsStatus,
   ConvertSettings,
   Submission,
@@ -261,6 +262,15 @@ export const api = {
   lyricsSettings: () => get<LyricsSettings>('/lyrics/settings'),
   setLyricsSettings: (settings: LyricsSettings) => put<void>('/lyrics/settings', settings),
   recheckLyrics: () => post<void>('/lyrics/recheck'),
+  lyricsImport: () => get<LyricsImportStatus>('/lyrics/import'),
+  dismissLyricsImport: () => post<void>('/lyrics/import/dismiss'),
+  /** Sends one zip of lyrics files; it's imported in the background. */
+  async importLyrics(file: File, replace: boolean, unasked: boolean): Promise<void> {
+    const query = new URLSearchParams({ name: file.name, replace: String(replace), unasked: String(unasked) })
+    const res = await fetch(`/api/lyrics/import?${query}`, { method: 'POST', body: file })
+    const data = res.ok ? null : await res.json().catch(() => null)
+    if (!res.ok) throw new ApiError(res.status, data?.error ?? `Upload failed (${res.status})`)
+  },
   rooms: () => get<RoomList>('/rooms'),
   roomPeople: () => get<{ count: number }>('/me/room/people'),
   chooseRoom: (roomId: number) => put<void>('/me/room', { room_id: roomId }),

@@ -4,7 +4,7 @@
   import { api } from './api'
   import Icon from './Icon.svelte'
   import { toast } from './state.svelte'
-  import type { About, ProblemSummary, ScheduledCheck, SystemStatus } from './types'
+  import type { About, LyricsImportReport, ProblemSummary, ScheduledCheck, SystemStatus } from './types'
 
   type Level = 'ok' | 'warn' | 'bad'
   type Line = { level: Level; label: string; detail: string; href?: string }
@@ -13,6 +13,7 @@
   let problems = $state<ProblemSummary | null>(null)
   let nightly = $state<ScheduledCheck | null>(null)
   let about = $state<About | null>(null)
+  let lyricsImport = $state<LyricsImportReport | null>(null)
 
   async function load() {
     try {
@@ -27,6 +28,7 @@
     api.libraryProblems().then((p) => (problems = p)).catch(() => {})
     api.scheduledCheck().then((c) => (nightly = c)).catch(() => {})
     api.about().then((a) => (about = a)).catch(() => {})
+    api.lyricsImport().then((i) => (lyricsImport = i.report)).catch(() => {})
     const timer = setInterval(() => void load(), 10_000)
     return () => clearInterval(timer)
   })
@@ -128,6 +130,14 @@
         label: 'Problems',
         detail: problems.trouble ? `${n(problems.trouble)} need a look` : 'Nothing needs a look',
         href: '#/admin/problems',
+      })
+    }
+    if (lyricsImport?.warning_count) {
+      lines.push({
+        level: 'warn',
+        label: 'Lyrics import',
+        detail: `${n(lyricsImport.warning_count)} ${lyricsImport.warning_count === 1 ? 'file' : 'files'} thrown out for looking like code`,
+        href: '#/admin/library',
       })
     }
     if (nightly?.on && nightly.last) {

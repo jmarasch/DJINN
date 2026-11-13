@@ -40,6 +40,7 @@ mod library_api;
 mod likes_api;
 mod logs;
 mod lyrics;
+mod lyrics_import;
 mod mood_api;
 mod network;
 mod node_audio;

@@ -45,9 +45,19 @@ pub struct LyricsCounts {
     pub unread: i64,
     /// Songs without lyrics LRCLIB hasn't been asked about.
     pub not_looked_up: i64,
+    /// Songs whose lyrics came from an imported zip.
+    pub imported: i64,
 }
 
-/// Lyrics to save: found (`source` 'lrc', 'file' or 'lrclib') or not ('none').
+/// What a song has now, for an import deciding whether to fill it.
+#[derive(Clone, Debug, PartialEq, Eq, FromRow)]
+pub struct LyricsState {
+    pub track_id: i64,
+    pub source: String,
+    pub online_checked_at: Option<i64>,
+}
+
+/// Lyrics to save: found (`source` 'lrc', 'file', 'lrclib' or 'bulk') or not ('none').
 pub struct NewLyrics<'a> {
     pub synced: Option<&'a str>,
     pub plain: Option<&'a str>,
@@ -94,7 +104,8 @@ impl Store {
     }
 
     /// What reading a song's file found. Nothing found keeps an earlier
-    /// LRCLIB check, so it isn't asked again early.
+    /// LRCLIB check, so it isn't asked again early, and keeps imported
+    /// lyrics; anything found beside the song wins over them.
     pub async fn save_read_lyrics(
         &self,
         track_id: i64,
@@ -105,8 +116,14 @@ impl Store {
             "INSERT INTO lyrics (track_id, synced, plain, instrumental, source, file_mtime, updated_at)
              SELECT id, ?, ?, ?, ?, ?, ? FROM tracks WHERE id = ?
              ON CONFLICT (track_id) DO UPDATE SET
-               synced = excluded.synced, plain = excluded.plain,
-               instrumental = excluded.instrumental, source = excluded.source,
+               synced = CASE WHEN lyrics.source = 'bulk' AND excluded.source = 'none'
+                             THEN lyrics.synced ELSE excluded.synced END,
+               plain = CASE WHEN lyrics.source = 'bulk' AND excluded.source = 'none'
+                            THEN lyrics.plain ELSE excluded.plain END,
+               instrumental = CASE WHEN lyrics.source = 'bulk' AND excluded.source = 'none'
+                                   THEN lyrics.instrumental ELSE excluded.instrumental END,
+               source = CASE WHEN lyrics.source = 'bulk' AND excluded.source = 'none'
+                             THEN lyrics.source ELSE excluded.source END,
                file_mtime = excluded.file_mtime, updated_at = excluded.updated_at",
         )
         .bind(found.synced)
@@ -186,6 +203,60 @@ impl Store {
         Ok(())
     }
 
+    /// Where each of these songs' lyrics stand (songs never read have no row).
+    pub async fn lyrics_states(&self, ids: &[i64]) -> Result<Vec<LyricsState>> {
+        Ok(sqlx::query_as(
+            "SELECT track_id, source, online_checked_at FROM lyrics
+             WHERE track_id IN (SELECT value FROM json_each(?))",
+        )
+        .bind(crate::library::json_ids(ids))
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
+    /// Saves imported lyrics for a song with none (no row, or source 'none');
+    /// with `replace`, also over earlier imported lyrics. Lyrics from files,
+    /// tags or LRCLIB are never touched. True when saved.
+    pub async fn save_bulk_lyrics(
+        &self,
+        track_id: i64,
+        found: &NewLyrics<'_>,
+        replace: bool,
+    ) -> Result<bool> {
+        let done = sqlx::query(
+            "INSERT INTO lyrics (track_id, synced, plain, instrumental, source, file_mtime, updated_at)
+             SELECT id, ?, ?, ?, 'bulk', NULL, ? FROM tracks WHERE id = ?
+             ON CONFLICT (track_id) DO UPDATE SET
+               synced = excluded.synced, plain = excluded.plain,
+               instrumental = excluded.instrumental, source = 'bulk',
+               file_mtime = NULL, updated_at = excluded.updated_at
+             WHERE lyrics.source = 'none' OR (? AND lyrics.source = 'bulk')",
+        )
+        .bind(found.synced)
+        .bind(found.plain)
+        .bind(found.instrumental)
+        .bind(now_ms())
+        .bind(track_id)
+        .bind(replace)
+        .execute(&self.pool)
+        .await?;
+        Ok(done.rows_affected() > 0)
+    }
+
+    /// Takes back every imported lyric; those songs can be looked up again.
+    /// How many there were.
+    pub async fn remove_bulk_lyrics(&self) -> Result<u64> {
+        let done = sqlx::query(
+            "UPDATE lyrics SET synced = NULL, plain = NULL, instrumental = 0, source = 'none',
+                    file_mtime = NULL, online_checked_at = NULL, updated_at = ?
+             WHERE source = 'bulk'",
+        )
+        .bind(now_ms())
+        .execute(&self.pool)
+        .await?;
+        Ok(done.rows_affected())
+    }
+
     pub async fn lyrics_counts(&self) -> Result<LyricsCounts> {
         Ok(sqlx::query_as(
             "SELECT
@@ -198,7 +269,8 @@ impl Store {
                   AND (x.track_id IS NULL OR (x.source != 'lrclib' AND x.file_mtime IS NOT t.mtime))) AS unread,
                count(CASE WHEN l.source = 'none'
                            AND (l.online_checked_at IS NULL OR l.online_checked_at < ?) THEN 1 END)
-                 AS not_looked_up
+                 AS not_looked_up,
+               count(CASE WHEN l.source = 'bulk' THEN 1 END) AS imported
              FROM lyrics l JOIN tracks t ON t.id = l.track_id WHERE t.removed_at IS NULL",
         )
         .bind(now_ms() - LYRICS_RECHECK_MS)
@@ -352,6 +424,88 @@ mod tests {
                 .as_deref(),
             Some("Sing along")
         );
+    }
+
+    #[tokio::test]
+    async fn imported_lyrics_fill_gaps_only_and_give_way_to_files() {
+        let (store, ids) = store_with(&["One", "Two", "Three"]).await;
+        let own = NewLyrics {
+            synced: None,
+            plain: Some("From a tag"),
+            instrumental: false,
+            source: "file",
+        };
+        store.save_read_lyrics(ids[0], 7, &own).await.unwrap();
+        store
+            .save_read_lyrics(ids[1], 7, &NewLyrics::NONE)
+            .await
+            .unwrap();
+        let bulk = |text: &'static str| NewLyrics {
+            synced: None,
+            plain: Some(text),
+            instrumental: false,
+            source: "bulk",
+        };
+        // A song with lyrics keeps them; an empty one and an unread one are filled.
+        assert!(!store
+            .save_bulk_lyrics(ids[0], &bulk("Imported"), false)
+            .await
+            .unwrap());
+        assert!(store
+            .save_bulk_lyrics(ids[1], &bulk("Imported two"), false)
+            .await
+            .unwrap());
+        assert!(store
+            .save_bulk_lyrics(ids[2], &bulk("Imported three"), false)
+            .await
+            .unwrap());
+        assert_eq!(
+            store
+                .lyrics(ids[0])
+                .await
+                .unwrap()
+                .unwrap()
+                .plain
+                .as_deref(),
+            Some("From a tag")
+        );
+        // Imported lyrics are kept unless asked to replace them.
+        assert!(!store
+            .save_bulk_lyrics(ids[1], &bulk("Newer"), false)
+            .await
+            .unwrap());
+        assert!(store
+            .save_bulk_lyrics(ids[1], &bulk("Newer"), true)
+            .await
+            .unwrap());
+        assert_eq!(store.lyrics_counts().await.unwrap().imported, 2);
+        assert_eq!(
+            store.search_lyrics("newer thing", 5).await.unwrap().len(),
+            0
+        );
+        assert_eq!(
+            store
+                .search_lyrics("imported three", 5)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+        // Reading the files finds nothing: the imported words stay, and a
+        // file's own lyrics win when there are some.
+        store
+            .save_read_lyrics(ids[2], 7, &NewLyrics::NONE)
+            .await
+            .unwrap();
+        assert_eq!(store.lyrics(ids[2]).await.unwrap().unwrap().source, "bulk");
+        store.save_read_lyrics(ids[2], 7, &own).await.unwrap();
+        assert_eq!(store.lyrics(ids[2]).await.unwrap().unwrap().source, "file");
+        // Taking the rest back leaves other lyrics alone and frees the song.
+        assert_eq!(store.remove_bulk_lyrics().await.unwrap(), 1);
+        assert_eq!(store.lyrics(ids[1]).await.unwrap(), None);
+        assert!(store.lyrics(ids[0]).await.unwrap().is_some());
+        assert!(store.search_lyrics("newer", 5).await.unwrap().is_empty());
+        assert_eq!(store.lyrics_to_look_up(10).await.unwrap().len(), 1);
     }
 
     #[tokio::test]

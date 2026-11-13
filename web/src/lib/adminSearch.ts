@@ -141,6 +141,8 @@ export const adminEntries: AdminEntry[] = [
   { label: 'Look up missing lyrics on LRCLIB', tab: 'library', keywords: 'lyrics words lrclib online synced', key: 'lyrics_lookup' },
   { label: 'Lyrics page', tab: 'library', keywords: 'lyrics tv screen /lyrics karaoke', key: 'lyrics_page' },
   { label: 'Export .lrc files', tab: 'library', keywords: 'lyrics export zip lrc download' },
+  { label: 'Import lyrics from a zip', tab: 'library', keywords: 'lyrics import zip lrc txt bulk upload' },
+  { label: 'Remove all imported lyrics', tab: 'system', keywords: 'lyrics imported zip bulk reset clear remove' },
   { label: 'Recheck lyrics', tab: 'library', keywords: 'lyrics reread lrc' },
   { label: 'More pictures, as a slideshow', tab: 'library', keywords: 'artist pictures slideshow', key: 'artist_pictures' },
   { label: 'Picture download limits', tab: 'library', keywords: 'image cache size pixels' },
