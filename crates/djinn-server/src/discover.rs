@@ -118,7 +118,7 @@ struct Discover {
     forgotten: Vec<Track>,
     /// The biggest genres, to dive into.
     genres: Vec<GenreChip>,
-    /// What you played lately (DJINN GO's history), newest first, each song once.
+    /// What you played lately, each song once.
     listen_again: Vec<Track>,
     new_albums: Vec<Album>,
     /// The oldest albums, for a look back.
@@ -152,13 +152,13 @@ async fn discover(
         .collect();
 
     // What you've played, a long way back, so one session doesn't fill the shelf.
-    let history: Vec<Track> = state
-        .store
-        .go_history(user.id, 0, 600)
-        .await?
-        .into_iter()
-        .map(|played| played.track)
-        .collect();
+    let history: Vec<Track> = {
+        // DJINN GO and the phone app, and what you asked the jukebox for.
+        let mut played = state.store.go_history(user.id, 0, 600).await?;
+        played.extend(state.store.requested_history(user.id, 600).await?);
+        played.sort_by_key(|p| std::cmp::Reverse(p.played_at));
+        played.into_iter().take(600).map(|p| p.track).collect()
+    };
     let mut dice = Dice::new(seed);
     let listen_again: Vec<Track> = {
         let mut seen = HashSet::new();
