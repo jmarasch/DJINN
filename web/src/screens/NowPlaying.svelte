@@ -901,6 +901,30 @@
     text-decoration: underline;
   }
 
+  /* Wide screens: the pills sit over the right column so the cover starts at the top. */
+  @media (min-width: 951px) {
+    .top {
+      position: absolute;
+      top: 0;
+      right: 0;
+      z-index: 2;
+      justify-content: flex-end;
+      gap: 12px;
+    }
+
+    .stage {
+      margin-top: 0;
+    }
+
+    .now {
+      padding-top: 0;
+    }
+
+    .side {
+      margin-top: 52px;
+    }
+  }
+
   @media (max-width: 950px) {
     .stage {
       grid-template-columns: 1fr;
