@@ -183,7 +183,6 @@
         </button>
       {/if}
     </div>
-    {#if tab !== 'admin'}<div class="phone-room"><RoomPicker /></div>{/if}
   </header>
 
   <nav class="side" class:rail={tab === 'admin'} aria-label="Main navigation">
@@ -270,6 +269,7 @@
 
   {#if showMenu}
     <Sheet title={t('nav.menu')} onclose={() => (showMenu = false)}>
+      {#if tab !== 'admin'}<div class="menu-room"><RoomPicker inline /></div>{/if}
       <div class="menu-list" onclick={() => (showMenu = false)} role="presentation">
         {#if hasPlaylists()}
           <a href="#/playlists"><Icon name="playlist" /><span>{t('nav.playlists')}</span></a>
@@ -385,6 +385,9 @@
     backdrop-filter: blur(14px);
     border-bottom: 1px solid var(--edge);
     box-shadow: var(--glow);
+    /* Its own layer, so a phone's address bar sliding away doesn't make it jitter. */
+    transform: translateZ(0);
+    will-change: transform;
   }
 
   .topbar-row {
@@ -399,10 +402,8 @@
     flex: 1;
   }
 
-  .phone-room:has(:global(.room)) {
-    display: flex;
-    justify-content: center;
-    margin-top: 8px;
+  .menu-room {
+    margin-bottom: 10px;
   }
 
   .back {
@@ -433,6 +434,8 @@
     backdrop-filter: blur(14px);
     border-top: 1px solid var(--edge);
     box-shadow: 0 0 18px rgb(180 140 255 / 0.18);
+    transform: translateZ(0);
+    will-change: transform;
   }
 
   .side-brand,
@@ -660,8 +663,7 @@
 
     .topbar .brand,
     .top-join,
-    .top-menu,
-    .phone-room {
+    .top-menu {
       display: none !important;
     }
 

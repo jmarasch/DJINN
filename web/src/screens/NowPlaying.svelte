@@ -970,9 +970,20 @@
       background: linear-gradient(90deg, var(--accent), transparent);
     }
 
+    /* The record behind the cover reaches past it, so leave room before the lyrics. */
     .left {
-      width: min(62vw, 280px);
+      width: min(54vw, 280px);
       margin-right: 0;
+      gap: 40px;
+    }
+
+    .wave {
+      width: 40px;
+    }
+
+    .lyrics-card {
+      position: relative;
+      z-index: 2;
     }
 
     .disc {

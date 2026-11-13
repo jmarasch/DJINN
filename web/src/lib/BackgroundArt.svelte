@@ -39,9 +39,16 @@
     pointer-events: none;
   }
 
+  /* The tallest the window gets, so it doesn't resize (and repaint) as a phone's address bar comes and goes. */
   .art.fixed {
     position: fixed;
+    inset: auto;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100lvh;
     z-index: -1;
+    will-change: transform;
   }
 
   /* Soft northern lights drawn in colors alone. */

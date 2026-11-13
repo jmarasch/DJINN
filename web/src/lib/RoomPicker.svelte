@@ -6,7 +6,7 @@
   import { app, switchRoom, toast } from './state.svelte'
 
   /** Opens the list above the button, for the left bar where there's nothing below. */
-  let { up = false }: { up?: boolean } = $props()
+  let { up = false, inline = false }: { up?: boolean; inline?: boolean } = $props()
 
   let open = $state(false)
   let box = $state<HTMLElement>()
@@ -56,7 +56,7 @@
       <Icon name={open ? 'up' : 'down'} size={20} />
     </button>
     {#if open}
-      <ul class="room-list" class:up role="listbox" aria-label={t('rooms.your_room')}>
+      <ul class="room-list" class:up class:inline role="listbox" aria-label={t('rooms.your_room')}>
         {#each app.rooms as room (room.id)}
           <li>
             <button
@@ -142,6 +142,13 @@
     border-radius: 12px;
     background: var(--surface);
     box-shadow: var(--glow-strong);
+  }
+
+  /* In the phone menu the list just opens in place. */
+  .room-list.inline {
+    position: static;
+    margin-top: 6px;
+    box-shadow: none;
   }
 
   .room-list.up {
