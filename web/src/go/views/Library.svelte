@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageTitle from '../../lib/PageTitle.svelte'
   import { t } from '../../lib/i18n.svelte'
   // Your library: liked songs, albums and artists, playlists, history.
   import { api } from '../../lib/api'
@@ -79,6 +80,7 @@
     new Date(ms).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 </script>
 
+<PageTitle title={t('go.your_music')} />
 <nav class="sections">
   <a href="#/library" class:active={section === 'liked'}>{t('go.liked')}</a>
   <a href="#/library/playlists" class:active={section === 'playlists'}>{t('nav.playlists')}</a>

@@ -869,8 +869,9 @@
 
   .controls {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: 20px;
+    gap: 14px;
     margin-top: 14px;
   }
 
@@ -991,7 +992,7 @@
   }
 
   /* Wide screens: the pills sit over the right column so the cover starts at the top. */
-  @media (min-width: 951px) {
+  @media (min-width: 1280px) {
     .top {
       position: absolute;
       top: 0;
@@ -1014,7 +1015,7 @@
     }
   }
 
-  @media (max-width: 950px) {
+  @media (max-width: 1279px) {
     .stage {
       grid-template-columns: 1fr;
       min-height: 0;

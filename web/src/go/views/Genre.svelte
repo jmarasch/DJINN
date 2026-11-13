@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageTitle from '../../lib/PageTitle.svelte'
   // One genre: its songs, artists and related genres.
   import { api } from '../../lib/api'
   import Art from '../../lib/Art.svelte'
@@ -65,7 +66,7 @@
   }
 </script>
 
-<h1>{title}</h1>
+<PageTitle {title} />
 {#if error}
   <p class="error">{error}</p>
 {:else if page}
@@ -112,9 +113,6 @@
 {/if}
 
 <style>
-  h1 {
-    margin: 0;
-  }
 
   h2 {
     margin: 18px 0 8px;

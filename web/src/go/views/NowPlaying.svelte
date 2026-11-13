@@ -31,7 +31,15 @@
   const song = $derived(current())
 
   // Lyrics under the controls, opened or closed on this device.
-  let lyricsOpen = $state(readLyricsOpen())
+  // Narrow screens open the lyrics full screen, and don't start that way.
+  let narrow = $state(matchMedia('(max-width: 899px)').matches)
+  $effect(() => {
+    const query = matchMedia('(max-width: 899px)')
+    const update = () => (narrow = query.matches)
+    query.addEventListener('change', update)
+    return () => query.removeEventListener('change', update)
+  })
+  let lyricsOpen = $state(readLyricsOpen() && !matchMedia('(max-width: 899px)').matches)
   let lyrics = $state<Lyrics | null | undefined>(undefined)
   function readLyricsOpen(): boolean {
     try {
@@ -43,7 +51,7 @@
   function toggleLyrics() {
     lyricsOpen = !lyricsOpen
     try {
-      localStorage.setItem('go-lyrics-open', lyricsOpen ? '1' : '0')
+      if (!narrow) localStorage.setItem('go-lyrics-open', lyricsOpen ? '1' : '0')
     } catch {
       // Not remembered.
     }
@@ -110,8 +118,26 @@
   const time = (s: number) => duration(s * 1000)
 </script>
 
+<svelte:window
+  onkeydown={(e) => {
+    if (lyricsOpen && narrow && e.key === 'Escape') toggleLyrics()
+  }}
+/>
+
+{#if lyricsOpen && narrow && song}
+  <div class="lyrics-screen" role="dialog" aria-modal="true" aria-label="Lyrics">
+    <header>
+      <button class="close" aria-label="Back" onclick={toggleLyrics}><Icon name="back" size={24} /></button>
+      <div class="who">
+        <strong class="ellipsis">{song.title}</strong>
+        <span class="muted small ellipsis">{song.artist ?? ''}</span>
+      </div>
+    </header>
+    <div class="body"><LyricsView {lyrics} position={livePosition} big /></div>
+  </div>
+{/if}
+
 <div class="playing-page">
-  <h1>Now playing</h1>
   {#if song}
     <section class="now">
       <Art hash={song.art_hash} size={300} round={12} />
@@ -172,13 +198,13 @@
           title="Skip it, and play it (and songs like it) less in radio and the mix"
           onclick={nextPlayLess}
         >
-          Skip, play less
+          <Icon name="thumb-down" size={18} /> Play less like this
         </button>
         <button class="small-button" onclick={() => (ui.menu = song)}>More</button>
         {#if player.downloadUrl}<a class="button small-button" href={player.downloadUrl} download>Download</a>{/if}
       </div>
-      {#if lyricsOpen}
-        <LyricsView {lyrics} position={livePosition} />
+      {#if lyricsOpen && !narrow}
+        <div class="lyrics-card"><LyricsView {lyrics} position={livePosition} /></div>
       {/if}
     </section>
 
@@ -234,23 +260,6 @@
     padding: 18px 0 36px;
   }
 
-  .playing-page::before {
-    content: '';
-    position: absolute;
-    z-index: -1;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 440px;
-    background: linear-gradient(to bottom, transparent, var(--bg)), url('/images/listening-waves.webp') center top / cover no-repeat;
-    opacity: 0.55;
-    pointer-events: none;
-  }
-
-  h1 {
-    margin: 0 0 20px;
-    font-size: 1.4rem;
-  }
 
   .now {
     display: flex;
@@ -391,5 +400,62 @@
   .empty img {
     width: min(240px, 70vw);
     height: auto;
+  }
+
+  .lyrics-card {
+    margin-top: 8px;
+    padding: 12px;
+    border: 1px solid var(--edge);
+    border-radius: 14px;
+    background: var(--card-bg);
+    box-shadow: var(--glow);
+  }
+
+  /* Lyrics full screen on narrow screens. */
+  .lyrics-screen {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    display: flex;
+    flex-direction: column;
+    padding: calc(10px + env(safe-area-inset-top)) 16px calc(10px + env(safe-area-inset-bottom));
+    background: color-mix(in srgb, var(--bg) 94%, transparent);
+    backdrop-filter: blur(14px);
+  }
+
+  .lyrics-screen header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--edge);
+  }
+
+  .lyrics-screen .close {
+    flex: none;
+    width: 40px;
+    min-height: 40px;
+    padding: 0;
+    border: 1px solid var(--edge);
+    border-radius: 12px;
+    background: var(--surface-2);
+  }
+
+  .lyrics-screen .who {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  .lyrics-screen .ellipsis {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .lyrics-screen .body {
+    flex: 1;
+    min-height: 0;
+    padding-top: 8px;
   }
 </style>

@@ -221,14 +221,32 @@
 
   .search-bar {
     position: sticky;
-    top: var(--nav-height, 60px);
+    top: calc(var(--nav-height, 0px) + 8px);
     z-index: 5;
-    padding: 4px 0 8px;
-    background: var(--bg);
+    padding: 0 0 10px;
   }
 
+  /* A neon box, level with the back button on wide screens. */
   .search {
     width: 100%;
+    min-height: 48px;
+    padding: 0 16px;
+    border: 1px solid var(--edge);
+    border-radius: 16px;
+    background: var(--surface-2);
+    box-shadow: var(--glow);
+    font-size: 1.0625rem;
+  }
+
+  .search:focus-visible {
+    border-color: var(--edge-strong);
+    box-shadow: var(--glow-strong);
+  }
+
+  @media (min-width: 900px) {
+    .search-bar {
+      top: 8px;
+    }
   }
 
   h2 {

@@ -323,10 +323,10 @@
               </span>
               <span class="muted small counts wide-only">
                 {#if artist.albums}{plural(artist.albums, 'albums')} · {/if}{plural(artist.track_count, 'songs')}{#if artist.plays}
-                  · {plural(artist.plays, 'plays')}{/if}
+                  · {plural(artist.plays, 'plays')}{/if}{#if like && artist.likes} · ♥ {artist.likes}{/if}
               </span>
             </a>
-            <span class="wide-only"><LikeCount kind="artist" id={artist.id} name={artist.name} likes={artist.likes} /></span>
+            {#if !like}<span class="wide-only"><LikeCount kind="artist" id={artist.id} name={artist.name} likes={artist.likes} /></span>{/if}
             <a class="row fill" href="#/artist/{artist.id}" tabindex="-1" aria-hidden="true">
               {#if artist.genres}
                 <span class="genre-chips">
@@ -336,7 +336,7 @@
                 </span>
               {/if}
             </a>
-            {#if like}<span class="narrow-only">{@render like('artist', artist.id, artist.name)}</span>{/if}
+            {#if like}<span>{@render like('artist', artist.id, artist.name)}</span>{/if}
           </div>
         {/if}
       {/snippet}
@@ -397,10 +397,10 @@
               </span>
               <span class="muted small counts wide-only">
                 {#if album.songs}{plural(album.songs, 'songs')}{/if}{#if album.plays}
-                  · {plural(album.plays, 'plays')}{/if}
+                  · {plural(album.plays, 'plays')}{/if}{#if like && album.likes} · ♥ {album.likes}{/if}
               </span>
             </a>
-            <span class="wide-only"><LikeCount kind="album" id={album.id} name={album.title} likes={album.likes} /></span>
+            {#if !like}<span class="wide-only"><LikeCount kind="album" id={album.id} name={album.title} likes={album.likes} /></span>{/if}
             <a class="row fill" href="#/album/{album.id}" tabindex="-1" aria-hidden="true">
               {#if album.genres}
                 <span class="genre-chips">
@@ -410,7 +410,7 @@
                 </span>
               {/if}
             </a>
-            {#if like}<span class="narrow-only">{@render like('album', album.id, album.title)}</span>{/if}
+            {#if like}<span>{@render like('album', album.id, album.title)}</span>{/if}
           </div>
         {/if}
       {/snippet}

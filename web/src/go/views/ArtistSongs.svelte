@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageTitle from '../../lib/PageTitle.svelte'
   // Every song by an artist, on a page of its own (from Show all on the
   // artist's page).
   import { api } from '../../lib/api'
@@ -48,7 +49,7 @@
   }
 </script>
 
-<h1>{name ? `Songs by ${name}` : 'Songs'}</h1>
+<PageTitle title={name ? `Songs by ${name}` : 'Songs'} />
 {#if total !== null}<p class="small muted">{total.toLocaleString()} {total === 1 ? 'song' : 'songs'}</p>{/if}
 <div class="buttons">
   <button class="primary" onclick={playAll} disabled={!total}><Icon name="play" /> Play all</button>
@@ -60,9 +61,6 @@
 </InfiniteList>
 
 <style>
-  h1 {
-    margin: 0 0 4px;
-  }
 
   .buttons {
     display: flex;

@@ -27,26 +27,40 @@
 {/if}
 
 <style>
+  /* A neon bar above the tabs (or the page's bottom edge on wide screens). */
   .bar {
     position: fixed;
-    left: 0;
-    right: 0;
-    bottom: 0;
+    left: 8px;
+    right: 8px;
+    bottom: calc(var(--tabs-height) + 8px + env(safe-area-inset-bottom));
     z-index: 20;
     display: flex;
     align-items: center;
     gap: 4px;
-    padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
-    border-top: 1px solid var(--line);
-    background: var(--surface);
+    padding: 8px 12px;
+    border: 1px solid var(--edge);
+    border-radius: 16px;
+    background: var(--card-bg);
+    backdrop-filter: blur(14px);
+    box-shadow: var(--glow);
+  }
+
+  @media (min-width: 900px) {
+    .bar {
+      left: calc(var(--side-width) + 16px);
+      right: 16px;
+      bottom: 16px;
+    }
   }
 
   .progress {
     position: absolute;
-    top: -1px;
-    left: 0;
+    left: 14px;
+    bottom: 0;
     height: 2px;
+    border-radius: 2px;
     background: var(--accent);
+    box-shadow: 0 0 8px var(--accent);
   }
 
   .info {
