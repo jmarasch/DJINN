@@ -41,6 +41,7 @@ export const adminEntries: AdminEntry[] = [
   { label: 'How much the dial counts', tab: 'smart', keywords: 'mood strength', key: 'mood_strength' },
   { label: 'Party schedule', tab: 'smart', keywords: 'schedule time rules quiet dance evening timer' },
   { label: 'Party styles', tab: 'smart', keywords: 'style learning forget' },
+  { label: 'Background', tab: 'system', keywords: 'wallpaper picture image theme look appearance' },
   // Audio
   { label: 'Crossfade', tab: 'audio', keywords: 'blend gapless fade transition', key: 'crossfade_secs' },
   { label: 'Outputs', tab: 'audio', keywords: 'speakers sound card devices delay volume drift' },
@@ -116,6 +117,12 @@ export const adminEntries: AdminEntry[] = [
     tab: 'library',
     keywords: 'genre refresh shuffle',
     key: 'genre_refresh_hours',
+  },
+  {
+    label: "How often Discover's shelves change",
+    tab: 'library',
+    keywords: 'discover shelves refresh recommendations suggestions',
+    key: 'discover_refresh_minutes',
   },
   {
     label: 'A play counts once this much of the song is heard',

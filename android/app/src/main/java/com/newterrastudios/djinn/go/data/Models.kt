@@ -49,6 +49,9 @@ data class ArtistSummary(
     /** In the library lists: plays (party and GO) and how many people favorited it. */
     val plays: Long = 0,
     val likes: Long = 0,
+    /** In the artist list: how many albums they have, and their genres, comma separated. */
+    val albums: Long = 0,
+    val genres: String? = null,
 )
 
 @Serializable
@@ -71,6 +74,9 @@ data class Album(
     /** In the library lists: plays (party and GO) and how many people favorited it. */
     val plays: Long = 0,
     val likes: Long = 0,
+    /** In the album list: how many songs it has, and its genres, comma separated. */
+    val songs: Long = 0,
+    val genres: String? = null,
 )
 
 @Serializable
@@ -83,6 +89,8 @@ data class AlbumDetail(
     @SerialName("art_hash") val artHash: String? = null,
     val label: String? = null,
     val tracks: List<Track> = emptyList(),
+    /** Comma separated. */
+    val genres: String? = null,
 )
 
 @Serializable
@@ -95,6 +103,8 @@ data class ArtistDetail(
     val albums: List<Album> = emptyList(),
     @SerialName("appears_on") val appearsOn: List<Album> = emptyList(),
     @SerialName("other_tracks") val otherTracks: List<Track> = emptyList(),
+    /** Comma separated. */
+    val genres: String? = null,
 )
 
 @Serializable
@@ -415,4 +425,62 @@ data class ResumeSave(
     val queue: List<Long>,
     val position: Int,
     @SerialName("position_ms") val positionMs: Long,
+)
+
+/** The picture behind the pages, as the house chose it (Admin > System > Background). */
+@Serializable
+data class Appearance(
+    val background: String = "waves",
+    val strength: Int = 28,
+)
+
+/** One of the speed dial's quick starts. */
+@Serializable
+data class Dial(
+    /** "artist" or "album". */
+    val kind: String,
+    val id: Long,
+    val name: String,
+    @SerialName("art_hash") val artHash: String? = null,
+)
+
+/** Artists like one you favorited. */
+@Serializable
+data class Because(val artist: ArtistSummary, val similar: List<ArtistSummary> = emptyList())
+
+/** A playlist idea from what you listen to: a mix around an artist or a genre. */
+@Serializable
+data class Mix(
+    /** "artist" or "genre". */
+    val kind: String,
+    val id: Long = 0,
+    val name: String,
+    @SerialName("art_hash") val artHash: String? = null,
+)
+
+/** A shelf that comes and goes: about a decade, a genre, an artist or a song. */
+@Serializable
+data class MoreShelf(
+    /** "decade", "genre", "listened" or "like_song". */
+    val kind: String,
+    val name: String,
+    val songs: List<Track> = emptyList(),
+    val albums: List<Album> = emptyList(),
+    val artists: List<ArtistSummary> = emptyList(),
+)
+
+/** Shelves to find something to play (GET /api/discover). */
+@Serializable
+data class Discover(
+    val mixes: List<Mix> = emptyList(),
+    val more: List<MoreShelf> = emptyList(),
+    @SerialName("speed_dial") val speedDial: List<Dial> = emptyList(),
+    val forgotten: List<Track> = emptyList(),
+    val genres: List<GenreSummary> = emptyList(),
+    @SerialName("listen_again") val listenAgain: List<Track> = emptyList(),
+    @SerialName("new_albums") val newAlbums: List<Album> = emptyList(),
+    val throwbacks: List<Album> = emptyList(),
+    @SerialName("popular_songs") val popularSongs: List<Track> = emptyList(),
+    val because: Because? = null,
+    val explore: List<ArtistSummary> = emptyList(),
 )

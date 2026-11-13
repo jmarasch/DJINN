@@ -277,6 +277,10 @@ struct Status {
     /// Windows has the network set to Public, which blocks phones.
     public_network: bool,
     songs: i64,
+    artists: i64,
+    albums: i64,
+    /// The music files' size together.
+    library_bytes: i64,
     library_folders: usize,
     scanning: bool,
     last_scan: Option<ScanProgress>,
@@ -386,6 +390,27 @@ async fn status(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json<S
         },
         public_network: state.network.public(),
         songs: state.store.track_count().await?,
+        artists: state
+            .store
+            .artists_page_filtered(
+                djinn_store::ArtistSort::Name,
+                settings::flag(&state.store, "show_collaboration_artists", true).await?,
+                0,
+                0,
+            )
+            .await?
+            .total,
+        albums: state
+            .store
+            .albums_page_filtered(
+                djinn_store::AlbumSort::default(),
+                djinn_store::AlbumFilter::All,
+                0,
+                0,
+            )
+            .await?
+            .total,
+        library_bytes: state.store.library_bytes().await?,
         library_folders: folders::library_roots(&state).await?.len(),
         scanning: state
             .scan

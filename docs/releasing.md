@@ -17,14 +17,12 @@ There are two branches and two kinds of release:
 - **`main`** is stable. It only moves when `dev` is ready to become a
   stable release: open a pull request from `dev` to `main`, merge it, and
   tag it (below).
-- **Nightly builds.** Each night at 08:13 UTC (about 3 AM Eastern in winter,
-  4 AM in summer) the Release workflow looks at `dev`. If it moved since
-  the last nightly or stable release, it builds everything a stable release
+- **Nightly builds.** GitHub has no schedule for these; the owner's own
+  computer starts them (a cron job). A nightly builds `dev`: everything a stable release
   has, numbered by the date (`2027.1.5-nightly` in Cargo, tag
   `v2027.01.05-nightly`), signs it with the same key, and publishes it as a
-  GitHub **pre-release**. If `dev` hasn't moved, it stops after a few
-  seconds and builds nothing. The newest 7 nightlies are kept and older
-  ones are deleted. Nothing is committed: the version is set in the
+  GitHub **pre-release**. The newest 7 nightlies are kept and older ones
+  are deleted. Nothing is committed: the version is set in the
   workflow's checkout by `.github/scripts/set-version.sh`.
 
 Admin > System > Updates has an **Update channel**. On Stable (the
@@ -43,11 +41,9 @@ Phones get the app their server carries, so a nightly server offers its
 phones the nightly app. A phone can't go back to an older number without
 uninstalling, so it stays on that app until its server carries a newer one.
 
-The schedule always uses `main`'s copy of `release.yml`, so changes to the
-workflow only take effect once they're on `main`. To publish a nightly
-straight away, even if `dev` hasn't moved, run the Release workflow from
-the Actions tab with **Publish a nightly** ticked. Run it from the same day
-again and it replaces that day's nightly.
+To publish a nightly, run the Release workflow from the Actions tab (or
+`gh workflow run release.yml -f nightly=true`) with **Publish a nightly**
+ticked. Run it again on the same day and it replaces that day's nightly.
 
 ## The release key
 

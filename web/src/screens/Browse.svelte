@@ -11,6 +11,7 @@
   import Icon from '../lib/Icon.svelte'
   import InfiniteList from '../lib/InfiniteList.svelte'
   import Counts from '../lib/Counts.svelte'
+  import LikeCount from '../lib/LikeCount.svelte'
   import JumpStrip from '../lib/JumpStrip.svelte'
   import { watchScroll } from '../lib/scrollWatch.svelte'
   import { jumpCache } from '../lib/listCache'
@@ -141,7 +142,10 @@
   })
 
   function readView(): View {
-    return readStored('djinn-browse-view') === 'grid' ? 'grid' : 'list'
+    const saved = readStored('djinn-browse-view')
+    if (saved === 'grid' || saved === 'list') return saved
+    // Photo tiles on a phone until the person picks a layout.
+    return window.matchMedia('(max-width: 899px)').matches ? 'grid' : 'list'
   }
 
   function readStored(key: string): string | null {
@@ -268,6 +272,7 @@
     years={byYear}
     {newestFirst}
     below={lists}
+    minTop={stuckTop}
     bind:inside={stripInside}
     onjump={(offset) => {
       // Landing where it was asked to, not under the options.
@@ -299,7 +304,7 @@
         {#if grid}
           <div class="with-like">
             <a class="tile" href="#/artist/{artist.id}">
-              <div class="cover"><Art hash={artist.art_hash} size={160} round={999} letter={initial(artist.name)} /></div>
+              <div class="cover"><Art hash={artist.art_hash} size={160} round={13} letter={initial(artist.name)} /></div>
               <span class="ellipsis center-text">{artist.name}</span>
               <span class="muted small center-text"
                 >{plural(artist.track_count, 'songs')}<Counts plays={artist.plays} likes={artist.likes} /></span
@@ -309,14 +314,30 @@
           </div>
         {:else}
           <div class="row-with-like">
-            <a class="row" href="#/artist/{artist.id}">
+            <a class="row lead" href="#/artist/{artist.id}">
               <Art hash={artist.art_hash} size={44} round={999} letter={initial(artist.name)} />
-              <span class="name ellipsis">{artist.name}</span>
-              <span class="muted small counts"
-                >{plural(artist.track_count, 'songs')}<Counts plays={artist.plays} likes={artist.likes} /></span
-              >
+              <span class="name">
+                <span class="ellipsis block">{artist.name}</span>
+                <span class="muted small ellipsis block narrow-only">
+                  {plural(artist.track_count, 'songs')}<Counts plays={artist.plays} likes={artist.likes} />
+                </span>
+              </span>
+              <span class="muted small counts wide-only">
+                {#if artist.albums}{plural(artist.albums, 'albums')} · {/if}{plural(artist.track_count, 'songs')}{#if artist.plays}
+                  · {plural(artist.plays, 'plays')}{/if}{#if like && artist.likes} · ♥ {artist.likes}{/if}
+              </span>
             </a>
-            {#if like}{@render like('artist', artist.id, artist.name)}{/if}
+            {#if !like}<span class="wide-only"><LikeCount kind="artist" id={artist.id} name={artist.name} likes={artist.likes} /></span>{/if}
+            <a class="row fill" href="#/artist/{artist.id}" tabindex="-1" aria-hidden="true">
+              {#if artist.genres}
+                <span class="genre-chips">
+                  {#each artist.genres.split(',').slice(0, 3) as genre (genre)}
+                    <span class="genre-chip">{genre.trim()}</span>
+                  {/each}
+                </span>
+              {/if}
+            </a>
+            {#if like}<span>{@render like('artist', artist.id, artist.name)}</span>{/if}
           </div>
         {/if}
       {/snippet}
@@ -365,16 +386,32 @@
           </div>
         {:else}
           <div class="row-with-like">
-            <a class="row" href="#/album/{album.id}">
+            <a class="row lead" href="#/album/{album.id}">
               <Art hash={album.art_hash} size={52} />
               <span class="name">
                 <span class="ellipsis block">{album.title}</span>
                 <span class="muted small ellipsis block">
-                  {album.artist}{album.year ? ` · ${album.year}` : ''}<Counts plays={album.plays} likes={album.likes} />
+                  {album.artist}{album.year ? ` · ${album.year}` : ''}<span class="narrow-only"
+                    ><Counts plays={album.plays} likes={album.likes} /></span
+                  >
                 </span>
               </span>
+              <span class="muted small counts wide-only">
+                {#if album.songs}{plural(album.songs, 'songs')}{/if}{#if album.plays}
+                  · {plural(album.plays, 'plays')}{/if}{#if like && album.likes} · ♥ {album.likes}{/if}
+              </span>
             </a>
-            {#if like}{@render like('album', album.id, album.title)}{/if}
+            {#if !like}<span class="wide-only"><LikeCount kind="album" id={album.id} name={album.title} likes={album.likes} /></span>{/if}
+            <a class="row fill" href="#/album/{album.id}" tabindex="-1" aria-hidden="true">
+              {#if album.genres}
+                <span class="genre-chips">
+                  {#each album.genres.split(',').slice(0, 3) as genre (genre)}
+                    <span class="genre-chip">{genre.trim()}</span>
+                  {/each}
+                </span>
+              {/if}
+            </a>
+            {#if like}<span>{@render like('album', album.id, album.title)}</span>{/if}
           </div>
         {/if}
       {/snippet}
@@ -395,7 +432,7 @@
         {:else if song}
           {@render song(track)}
         {:else}
-          <TrackRow {track} note={byYear && track.year ? String(track.year) : null} />
+          <TrackRow {track} note={byYear && track.year ? String(track.year) : null} rich />
         {/if}
       {/snippet}
     </InfiniteList>
@@ -414,7 +451,8 @@
     display: flex;
     gap: 4px;
     padding: 4px;
-    border-radius: 12px;
+    border: 1px solid var(--edge);
+    border-radius: 14px;
     background: var(--surface);
   }
 
@@ -450,9 +488,10 @@
 
   .tabs button.active,
   .views button.active {
-    background: var(--surface-3);
-    color: var(--text);
+    background: var(--accent);
+    color: var(--accent-text);
     font-weight: 600;
+    box-shadow: var(--glow-strong);
   }
 
   /* An artist's song and play counts stay on one line beside the name. */
@@ -488,6 +527,11 @@
     border-bottom: none;
   }
 
+  /* The second link only fills the rest of the row (it holds the genres). */
+  .fill {
+    display: none;
+  }
+
   .with-like {
     position: relative;
     min-width: 0;
@@ -510,6 +554,77 @@
     display: block;
   }
 
+  /* Details that only phones or only wide screens show. */
+  .wide-only {
+    display: none;
+  }
+
+  /* Genres sit beside an album or artist on wide screens only. */
+  .genre-chips {
+    display: none;
+  }
+
+  /* On wide screens each row is a neon card, like the concept's table. */
+  @media (min-width: 900px) {
+    .row-with-like {
+      margin-bottom: 8px;
+      padding: 0 12px 0 8px;
+      border: 1px solid var(--edge);
+      border-radius: 14px;
+      background: var(--card-bg);
+      box-shadow: var(--glow);
+    }
+
+    .row-with-like:hover {
+      border-color: var(--edge-strong);
+      box-shadow: var(--glow-strong);
+    }
+
+    .row {
+      gap: 16px;
+      padding: 6px 0;
+    }
+
+    /* The picture, name and counts stay together; the genres go to the far end. */
+    .row-with-like .lead {
+      flex: none;
+    }
+
+    .lead .name {
+      flex: none;
+      width: 260px;
+    }
+
+    .row-with-like .fill {
+      display: flex;
+      justify-content: flex-end;
+    }
+
+    .wide-only {
+      display: inline;
+    }
+
+    .narrow-only {
+      display: none;
+    }
+
+    .genre-chips {
+      display: flex;
+      flex: none;
+      gap: 6px;
+    }
+
+    .genre-chip {
+      padding: 4px 10px;
+      border: 1px solid var(--edge);
+      border-radius: 999px;
+      background: var(--surface-2);
+      color: var(--muted);
+      font-size: 0.8125rem;
+      white-space: nowrap;
+    }
+  }
+
   .tile {
     display: flex;
     flex-direction: column;
@@ -530,6 +645,9 @@
     aspect-ratio: 1;
     min-height: 0;
     overflow: hidden;
+    border: 1px solid var(--edge);
+    border-radius: 14px;
+    box-shadow: var(--glow);
   }
 
   .cover :global(.art) {

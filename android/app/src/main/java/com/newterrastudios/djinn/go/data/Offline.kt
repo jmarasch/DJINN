@@ -328,6 +328,10 @@ class Prefs(context: Context, private val scope: () -> String = { "" }) {
     var visualsOn: Boolean
         get() = prefs.getBoolean("visuals_on", false)
         set(value) = prefs.edit { putBoolean("visuals_on", value) }
+    /** Library lists as picture tiles rather than rows. */
+    var libraryGrid: Boolean
+        get() = prefs.getBoolean("library_grid", true)
+        set(value) = prefs.edit { putBoolean("library_grid", value) }
     /** Lyrics open under the player's controls. */
     var lyricsOn: Boolean
         get() = prefs.getBoolean("lyrics_on", false)

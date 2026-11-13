@@ -24,6 +24,7 @@
   import ReplayGainPanel from '../lib/ReplayGainPanel.svelte'
   import SmartPlayPanel from '../lib/SmartPlayPanel.svelte'
   import SchedulePanel from '../lib/SchedulePanel.svelte'
+  import PageTitle from '../lib/PageTitle.svelte'
   import { adminGroups, adminTabLabel, type AdminTab } from '../lib/adminTabs'
   import { adminEntries, searchAdmin, type AdminEntry } from '../lib/adminSearch'
   import AdminHome from '../lib/AdminHome.svelte'
@@ -36,8 +37,9 @@
   import NodesPanel from '../lib/NodesPanel.svelte'
   import VisualsPanel from '../lib/VisualsPanel.svelte'
   import HouseLanguage from '../lib/HouseLanguage.svelte'
+  import AppearancePanel from '../lib/AppearancePanel.svelte'
   import RoomsPanel from '../lib/RoomsPanel.svelte'
-  import { app, logout, toast } from '../lib/state.svelte'
+  import { app, toast } from '../lib/state.svelte'
   import type { LibraryRoot, RequestLogEntry, Settings } from '../lib/types'
 
   let { tab = 'home' }: { tab?: AdminTab } = $props()
@@ -183,6 +185,16 @@
         .filter((el) => (el.textContent ?? '').toLowerCase().includes(want))
         .sort((a, b) => (a.textContent ?? '').length - (b.textContent ?? '').length)[0]
       if (found) {
+        const holder = found.closest<HTMLElement>('[data-subtab]')
+        if (holder?.hidden) {
+          const group = holder.closest('.admin-content')?.querySelector('.subtabs')
+            ? Object.keys(sub).find((g) => entry.tab === g)
+            : undefined
+          if (group && holder.dataset.subtab) {
+            openSub(group, holder.dataset.subtab)
+            await tick()
+          }
+        }
         found.scrollIntoView({ behavior: 'smooth', block: 'center' })
         found.classList.add('found')
         setTimeout(() => found.classList.remove('found'), 2500)
@@ -190,6 +202,14 @@
       }
       await new Promise((r) => setTimeout(r, 100))
     }
+  }
+
+  // Tabs inside the longest sections; the others stay in the page, hidden,
+  // so Find a setting can still reach them.
+  let sub = $state<Record<string, string>>({ library: 'folders', smart: 'play', audio: 'sound' })
+
+  function openSub(group: string, id: string) {
+    sub[group] = id
   }
 
   let roots = $state<LibraryRoot[]>([])
@@ -278,11 +298,19 @@
     new Date(ms).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 </script>
 
+{#snippet subtabs(group: string, items: [string, string][])}
+  <div class="subtabs" role="tablist">
+    {#each items as [id, label] (id)}
+      <button role="tab" aria-selected={sub[group] === id} class:active={sub[group] === id} onclick={() => openSub(group, id)}>
+        {label}
+      </button>
+    {/each}
+  </div>
+{/snippet}
+
 {#snippet sectionContent(t: AdminTab)}
 {#if t === 'home'}
   <AdminHome />
-  <SystemStatus />
-  <AboutPanel />
 {:else if t === 'stats'}
   <StatsPanel />
   <SearchesWishes />
@@ -291,6 +319,13 @@
   <LibraryProblems />
   <LibraryDuplicates />
 {:else if t === 'library'}
+  {@render subtabs('library', [
+    ['folders', 'Folders and checks'],
+    ['settings', 'Library settings'],
+    ['online', 'Online info'],
+  ])}
+  <div data-subtab="folders" hidden={sub.library !== 'folders'}>
+  <div class="cards-2">
   <section class="card">
     <h2>Music folders</h2>
     {#each roots as root (root.path)}
@@ -321,10 +356,21 @@
     <button disabled={scanning} onclick={checkForChanges}>Check for changes</button>
   </section>
 
+  <section class="card">
+    <h2>Image cache</h2>
+    <p class="small muted">
+      Covers and artist photos DJINN finds are kept here, on this computer. Your music folders are never changed.
+    </p>
+    <p class="path small mono">{artDir}</p>
+    <button onclick={() => attempt(api.openArtFolder)}>Open image folder</button>
+  </section>
+  </div>
   <p class="small muted">Files that didn't make it in, copies of songs and the nightly check are under <a href="#/admin/problems">Problems</a>.</p>
+  </div>
 
+  <div data-subtab="settings" hidden={sub.library !== 'settings'}>
   {#if settings}
-    <section class="card">
+    <section class="card wide">
       <h2>Artist library</h2>
       <form class="settings" onsubmit={saveSettings}>
         <label class="switch big">
@@ -352,6 +398,18 @@
           <span class="small muted">Genre pages show everything in a shuffled order, with what's been played most nearer the top. 0 shuffles on every visit.</span>
         </label>
         <label>
+          How often Discover's shelves change
+          <select bind:value={settings.discover_refresh_minutes}>
+            <option value={0}>Every time it's opened</option>
+            <option value={1}>Every minute</option>
+            <option value={5}>Every 5 minutes</option>
+            <option value={15}>Every 15 minutes</option>
+            <option value={60}>Every hour</option>
+            <option value={1440}>Every day</option>
+          </select>
+          <span class="small muted">The Discover page picks which favorites, albums and artists to show. Refreshing the page shows the same ones until this long has passed.</span>
+        </label>
+        <label>
           A play counts once this much of the song is heard: {settings.play_count_percent}%
           <input type="range" min="0" max="100" step="5" bind:value={settings.play_count_percent} />
           <span class="small muted">For the play counts in the library lists. A song started again for a moment isn't a play. 0 counts every play.</span>
@@ -367,18 +425,15 @@
         <button class="primary">Save</button>
       </form>
     </section>
-
-    <LibraryExtras bind:settings />
   {/if}
+  </div>
 
-  <section class="card">
-    <h2>Image cache</h2>
-    <p class="small muted">
-      Covers and artist photos DJINN finds are kept here, on this computer. Your music folders are never changed.
-    </p>
-    <p class="path small mono">{artDir}</p>
-    <button onclick={() => attempt(api.openArtFolder)}>Open image folder</button>
-  </section>
+  <div data-subtab="online" hidden={sub.library !== 'online'}>
+  {#if settings}
+    <div class="cards-2"><LibraryExtras bind:settings /></div>
+  {/if}
+  </div>
+
 
   {#if picking}
     <Sheet title="Pick a music folder" onclose={() => (picking = false)}>
@@ -386,26 +441,41 @@
     </Sheet>
   {/if}
 {:else if t === 'audio'}
-  <CrossfadePanel />
-  <OutputsPanel />
-  <CastPanel />
-  <ReplayGainPanel />
-  <EqualizerPanel />
+  {@render subtabs('audio', [
+    ['sound', 'Sound'],
+    ['outputs', 'Outputs'],
+    ['casting', 'Casting'],
+  ])}
+  <div data-subtab="sound" hidden={sub.audio !== 'sound'}>
+    <div class="cards-2">
+      <div class="wide"><EqualizerPanel /></div>
+      <CrossfadePanel />
+      <ReplayGainPanel />
+    </div>
+  </div>
+  <div data-subtab="outputs" hidden={sub.audio !== 'outputs'}><OutputsPanel /></div>
+  <div data-subtab="casting" hidden={sub.audio !== 'casting'}><CastPanel /></div>
 {:else if t === 'smart'}
-  <SmartPlayPanel />
-  <SchedulePanel />
+  {@render subtabs('smart', [
+    ['play', 'Smart play'],
+    ['styles', 'Party styles'],
+    ['schedule', 'Party schedule'],
+  ])}
+  <div data-subtab="play" hidden={sub.smart !== 'play'}><div class="cards-2"><SmartPlayPanel part="play" /></div></div>
+  <div data-subtab="styles" hidden={sub.smart !== 'styles'}><SmartPlayPanel part="styles" /></div>
+  <div data-subtab="schedule" hidden={sub.smart !== 'schedule'}><SchedulePanel /></div>
 {:else if t === 'ai'}
-  <AiPanel />
+  <div class="cards-2"><AiPanel /></div>
 {:else if t === 'users'}
-  <UsersPanel />
+  <div class="cards-2"><UsersPanel /></div>
 {:else if t === 'go'}
-  <GoPanel />
+  <div class="cards-2"><GoPanel /></div>
 {:else if t === 'nodes'}
-  <NodesPanel />
+  <div class="cards-2"><NodesPanel /></div>
 {:else if t === 'visuals'}
   <VisualsPanel />
 {:else if t === 'rooms'}
-  <RoomsPanel />
+  <div class="cards-2"><RoomsPanel /></div>
 {:else if t === 'log'}
   <section class="card">
     <div class="log-head">
@@ -488,10 +558,16 @@
     </form>
   </section>
 {:else if t === 'system'}
-  <HouseLanguage />
-  <UpdatePanel />
-  <BackupPanel />
-  <ResetPanel />
+  <div class="cards-2">
+    <AboutPanel part="build" />
+    <SystemStatus />
+    <AppearancePanel />
+    <HouseLanguage />
+    <UpdatePanel />
+    <BackupPanel />
+    <ResetPanel />
+    <AboutPanel part="credits" />
+  </div>
 {:else if t === 'serverlog'}
   <LogViewer />
 {:else if t === 'signins'}
@@ -507,7 +583,22 @@
       <button class:active={layout === 'sections'} aria-pressed={layout === 'sections'} onclick={() => setLayout('sections')}>Sections</button>
     </div>
   {/if}
-  <input class="find" type="search" placeholder="Find a setting" aria-label="Find a setting" bind:value={query} />
+  <label class="find">
+    <Icon name="search" size={20} />
+    <input type="search" placeholder="Find a setting" aria-label="Find a setting" bind:value={query} />
+  </label>
+  <select
+    class="phone-sections"
+    aria-label="Admin section"
+    value={tab}
+    onchange={(e) => (location.hash = `#/admin/${e.currentTarget.value}`)}
+  >
+    {#each adminGroups as group (group.label)}
+      <optgroup label={group.label}>
+        {#each group.tabs as t (t.id)}<option value={t.id}>{t.label}</option>{/each}
+      </optgroup>
+    {/each}
+  </select>
   {#if query.trim()}
     <ul class="results">
       {#each results.slice(0, 12) as entry (entry.tab + entry.label)}
@@ -543,6 +634,7 @@
                 {/if}
               {:else}
                 <a href="#/admin/{t.id}" class:active={tab === t.id} aria-current={tab === t.id ? 'page' : undefined}>
+                  <Icon name={t.icon} size={20} />
                   {t.label}
                   {#if t.id === 'problems' && trouble > 0}<span class="badge">{trouble.toLocaleString()}</span>{/if}
                   {#if changedTabs.has(t.id)}<span class="changed-dot" title="Has settings changed from the default"></span>{/if}
@@ -574,7 +666,10 @@
 </aside>
 
 <div class="admin-content" bind:this={content}>
-{#if layout === 'sections'}<h1>{adminTabLabel(tab)}</h1>{/if}
+{#if layout === 'sections'}
+  <div class="crumbs small muted"><Icon name="home" size={16} /> Admin <Icon name="chevron-right" size={16} /> {adminTabLabel(tab)}</div>
+  <PageTitle title={adminTabLabel(tab)} />
+{/if}
 <PublicNetworkNote />
 
 {#if layout === 'page'}
@@ -588,12 +683,36 @@
   {@render sectionContent(tab)}
 {/if}
 
-<a class="button account-link" href="#/account">Your account (password, two-step sign-in)</a>
-<button class="signout" onclick={logout}>Sign out</button>
 </div>
 </div>
 
 <style>
+  .subtabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin: 0 0 14px;
+    padding: 4px;
+    border: 1px solid var(--edge);
+    border-radius: 14px;
+    background: var(--surface);
+  }
+
+  .subtabs button {
+    flex: 1;
+    min-height: 40px;
+    padding: 0 12px;
+    background: transparent;
+    color: var(--muted);
+  }
+
+  .subtabs button.active {
+    background: var(--accent);
+    color: var(--accent-text);
+    font-weight: 600;
+    box-shadow: var(--glow-strong);
+  }
+
   .admin {
     display: block;
   }
@@ -602,7 +721,7 @@
   @media (min-width: 900px) {
     .admin {
       display: grid;
-      grid-template-columns: 220px minmax(0, 1fr);
+      grid-template-columns: 240px minmax(0, 1fr);
       gap: 24px;
       align-items: start;
     }
@@ -628,13 +747,64 @@
     flex-direction: column;
     gap: 10px;
     margin-bottom: 14px;
-    padding: 10px;
-    border-radius: 12px;
-    background: var(--surface);
+    padding: 12px;
+    border: 1px solid var(--edge);
+    border-radius: 18px;
+    background: var(--card-bg);
+    box-shadow: var(--glow);
+  }
+
+  .crumbs {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 4px;
+  }
+
+  .phone-sections {
+    width: 100%;
+    border-color: var(--edge);
+  }
+
+  /* Phones pick a section from the list; wide screens have the menu. */
+  .side nav {
+    display: none;
+  }
+
+  @media (min-width: 900px) {
+    .phone-sections {
+      display: none;
+    }
+
+    .side nav {
+      display: block;
+    }
   }
 
   .find {
-    width: 100%;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    padding: 0 0 0 12px;
+    border: 1px solid var(--edge);
+    border-radius: 12px;
+    background: var(--surface-2);
+    color: var(--muted);
+  }
+
+  .find:focus-within {
+    border-color: var(--edge-strong);
+    box-shadow: var(--glow-strong);
+  }
+
+  .find input,
+  .find input:focus-visible {
+    flex: 1;
+    min-width: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
   }
 
   .layout {
@@ -739,13 +909,22 @@
     border-top: 0;
   }
 
+  .group {
+    padding: 8px 0 6px;
+    border-top: 1px solid var(--edge);
+  }
+
+  .group:first-child {
+    border-top: 0;
+  }
+
   .group-label {
-    margin: 4px 4px 2px;
+    margin: 4px 10px 6px;
     color: var(--muted);
-    font-size: 0.75rem;
+    font-size: 0.7rem;
     font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.04em;
+    letter-spacing: 0.14em;
   }
 
   .links {
@@ -758,18 +937,34 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 6px;
-    min-height: 38px;
+    gap: 10px;
+    min-height: 40px;
     padding: 0 12px;
-    border-radius: 8px;
-    color: var(--muted);
+    border: 1px solid transparent;
+    border-radius: 12px;
+    color: var(--text);
     text-decoration: none;
   }
 
+  .links a :global(svg) {
+    flex: none;
+    color: var(--accent);
+  }
+
+  .links a:hover {
+    color: var(--text);
+  }
+
   .links a.active {
-    background: var(--surface-3);
+    border-color: var(--edge-strong);
+    background: linear-gradient(90deg, rgb(180 140 255 / 0.5), rgb(180 140 255 / 0.28));
+    box-shadow: var(--glow-strong);
     color: var(--text);
     font-weight: 600;
+  }
+
+  .links a.active :global(svg) {
+    color: var(--text);
   }
 
   .badge {
@@ -920,13 +1115,4 @@
     width: 100px;
   }
 
-  .account-link {
-    width: 100%;
-    margin-top: 8px;
-  }
-
-  .signout {
-    width: 100%;
-    margin: 8px 0 24px;
-  }
 </style>

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageTitle from '../../lib/PageTitle.svelte'
   // One of your playlists (or one someone shared).
   import { api } from '../../lib/api'
   import Icon from '../../lib/Icon.svelte'
@@ -105,7 +106,7 @@
 
 {#if error}<p class="error">{error}</p>{/if}
 {#if list}
-  <h1>{list.name}</h1>
+  <PageTitle title={list.name} />
   <p class="muted small">
     {list.songs.length}
     {list.songs.length === 1 ? 'song' : 'songs'}{#if !mine}, shared by {list.owner}{:else if list.shared}, shared{/if}{#if flagged.length},
@@ -163,9 +164,6 @@
 {/if}
 
 <style>
-  h1 {
-    margin: 0;
-  }
 
   .buttons {
     display: flex;

@@ -130,7 +130,7 @@ fun SettingsScreen(nav: Nav) {
 
     LazyColumn(Modifier.fillMaxSize()) {
         item {
-            Text(t("settings.title"), style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(16.dp))
+            PageTitle(t("settings.title"))
             Text(
                 t("settings.signed_in_to", "server" to (nav.serverName?.let { "$it (${nav.address})" } ?: nav.address)),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,

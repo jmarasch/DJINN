@@ -10,6 +10,7 @@
     years = false,
     newestFirst = false,
     below,
+    minTop = 84,
     inside = $bindable(false),
     onjump,
   }: {
@@ -20,20 +21,20 @@
     /** The strip starts no higher than the top of this (the list), so it
      * doesn't cover what's above the list until that scrolls away. */
     below?: HTMLElement
+    /** The strip never starts higher than this: just under what's stuck to the top of the page. */
+    minTop?: number
     /** No room beside the list, so the strip is over its right edge: the
      * list should keep clear of it. */
     inside?: boolean
     onjump: (offset: number) => void
   } = $props()
 
-  /** Below the search box stuck to the top of the page. */
-  const TOP_PX = 84
   /** Room each label needs, in pixels. */
   const LABEL_PX = 16
   const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('')
 
   let height = $state(0)
-  let top = $state(TOP_PX)
+  let top = $state(84)
   /** Where the strip's left edge goes, just right of the list; null for
    * the screen's edge when there's no room. */
   let left = $state<number | null>(null)
@@ -96,7 +97,7 @@
       cancelAnimationFrame(frame)
       frame = requestAnimationFrame(() => {
         const box = el.getBoundingClientRect()
-        top = Math.max(TOP_PX, box.top)
+        top = Math.max(minTop + 6, box.top)
         const width = years ? 36 : 24
         // Beside the list when the screen has room for it, whatever the
         // page's width.
@@ -183,12 +184,17 @@
 <style>
   .strip {
     position: fixed;
-    bottom: calc(76px + env(safe-area-inset-bottom));
+    /* Above the tabs and, in DJINN GO, the player bar. */
+    bottom: calc(max(var(--tabs-height, 64px), var(--clear-of-player, 0px)) + 12px + env(safe-area-inset-bottom));
     z-index: 6;
     width: 24px;
     touch-action: none;
     user-select: none;
     -webkit-user-select: none;
+    border: 1px solid var(--edge);
+    border-radius: 999px;
+    background: var(--card-bg);
+    box-shadow: var(--glow);
   }
 
   /* No room beside the list (a phone): on the screen's edge. */
@@ -214,6 +220,7 @@
     font-weight: 600;
     line-height: 1.2;
     font-variant-numeric: tabular-nums;
+    text-shadow: 0 0 8px var(--accent);
   }
 
   .years button {

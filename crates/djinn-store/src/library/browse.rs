@@ -147,14 +147,14 @@ impl Store {
         }
         let sql = match (sort, show_collaborations) {
             (ArtistSort::Name, true) => concat!(
-                "SELECT id, name, art_hash, track_count, ",
+                "SELECT id, name, art_hash, track_count, about, genres, ",
                 sort_key!("name"),
                 artist_browse!(),
                 " ORDER BY ",
                 sort_key!("name")
             ),
             (ArtistSort::Name, false) => concat!(
-                "SELECT id, name, art_hash, track_count, ",
+                "SELECT id, name, art_hash, track_count, about, genres, ",
                 sort_key!("name"),
                 artist_browse!(),
                 primary_artists!(),
@@ -162,30 +162,40 @@ impl Store {
                 sort_key!("name")
             ),
             (ArtistSort::Added, true) => concat!(
-                "SELECT id, name, art_hash, track_count, NULL",
+                "SELECT id, name, art_hash, track_count, about, genres, NULL",
                 artist_browse!(),
                 artists_by_added!()
             ),
             (ArtistSort::Added, false) => concat!(
-                "SELECT id, name, art_hash, track_count, NULL",
+                "SELECT id, name, art_hash, track_count, about, genres, NULL",
                 artist_browse!(),
                 primary_artists!(),
                 artists_by_added!()
             ),
         };
-        type Row = (i64, String, Option<String>, i64, Option<String>);
+        type Row = (
+            i64,
+            String,
+            Option<String>,
+            i64,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+        );
         let mut browse = TimedBrowse::acquire(&self.pool).await?;
         let rows: std::result::Result<Vec<Row>, _> =
             sqlx::query_as(sql).fetch_all(&mut *browse.conn).await;
         browse.finish().await?;
         let (items, keys) = rows?
             .into_iter()
-            .map(|(id, name, art_hash, track_count, key)| {
+            .map(|(id, name, art_hash, track_count, about, genres, key)| {
                 let artist = ArtistSummary {
                     id,
                     name,
                     art_hash,
                     track_count,
+                    about,
+                    genres,
                 };
                 (artist, key)
             })

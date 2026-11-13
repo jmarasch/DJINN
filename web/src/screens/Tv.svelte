@@ -386,7 +386,7 @@
     padding: clamp(96px, 9vh, 140px) 3vw 4vh;
     overflow: hidden;
     color: #fff;
-    background: #0d0b14;
+    background: #0d0b14 url('/images/tv-backdrop.webp') center / cover no-repeat;
     font-size: clamp(14px, 1.6vw, 40px);
   }
 

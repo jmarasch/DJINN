@@ -2,6 +2,7 @@
   // Admin > Home: how DJINN is doing at a glance. Each line says whether
   // it's fine, worth a look, or wrong, and links to where to fix it.
   import { api } from './api'
+  import Icon from './Icon.svelte'
   import { toast } from './state.svelte'
   import type { About, ProblemSummary, ScheduledCheck, SystemStatus } from './types'
 
@@ -114,10 +115,10 @@
     const lines: Line[] = [
       {
         level: status.library_folders ? 'ok' : 'bad',
-        label: 'Songs',
+        label: 'Music folders',
         detail: status.scanning
-          ? `${n(status.songs)}, checking for changes now`
-          : `${n(status.songs)} in ${status.library_folders} ${status.library_folders === 1 ? 'folder' : 'folders'}`,
+          ? 'Checking for changes now'
+          : `${status.library_folders} ${status.library_folders === 1 ? 'folder' : 'folders'}`,
         href: '#/admin/library',
       },
     ]
@@ -167,10 +168,10 @@
   })
 </script>
 
-{#snippet block(title: string, lines: Line[])}
+{#snippet block(title: string, lines: Line[], icon: 'playing' | 'library' | 'settings' | 'cloud')}
   {#if lines.length}
     <section class="card">
-      <h2>{title}</h2>
+      <h2><Icon name={icon} size={20} /> {title}</h2>
       <ul>
         {#each lines as line, i (i)}
           <li>
@@ -190,13 +191,68 @@
 {#if !status}
   <p class="small muted">Loading...</p>
 {:else}
-  {@render block('Music', music)}
-  {@render block('Library', library)}
-  {@render block('This computer', computer)}
-  {@render block('Upkeep', upkeep)}
+  <div class="stats">
+    <div class="stat">
+      <Icon name="library" size={22} />
+      <strong>{n(status.songs)}</strong>
+      <span class="small muted">Songs</span>
+    </div>
+    <div class="stat">
+      <Icon name="person" size={22} />
+      <strong>{n(status.artists)}</strong>
+      <span class="small muted">Artists</span>
+    </div>
+    <div class="stat">
+      <Icon name="playlist" size={22} />
+      <strong>{n(status.albums)}</strong>
+      <span class="small muted">Albums</span>
+    </div>
+    <div class="stat">
+      <Icon name="folder" size={22} />
+      <strong>{size(status.library_bytes)}</strong>
+      <span class="small muted">Music on disk</span>
+    </div>
+  </div>
+  <div class="cards-2">
+    {@render block('Music', music, 'playing')}
+    {@render block('Library', library, 'library')}
+    {@render block('This computer', computer, 'settings')}
+    {@render block('Upkeep', upkeep, 'cloud')}
+  </div>
 {/if}
 
 <style>
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  .stat {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 14px 16px;
+    border: 1px solid var(--edge);
+    border-radius: 16px;
+    background: var(--card-bg);
+    box-shadow: var(--glow);
+    color: var(--accent);
+  }
+
+  .stat strong {
+    color: var(--text);
+    font-size: 1.5rem;
+    line-height: 1.2;
+  }
+
+  h2 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
   ul {
     margin: 0;
     padding: 0;

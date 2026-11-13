@@ -80,7 +80,11 @@
   }
 
   const size = (bytes: number) =>
-    bytes >= 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : `${(bytes / 1e6).toFixed(bytes >= 1e7 ? 0 : 1)} MB`
+    bytes >= 1e12
+      ? `${(bytes / 1e12).toFixed(2)} TB`
+      : bytes >= 1e9
+        ? `${(bytes / 1e9).toFixed(1)} GB`
+        : `${(bytes / 1e6).toFixed(bytes >= 1e7 ? 0 : 1)} MB`
 
   function uptime(since: number): string {
     const minutes = Math.floor((Date.now() - since) / 60_000)
@@ -121,7 +125,8 @@
 
       <dt>Library</dt>
       <dd>
-        {status.songs.toLocaleString()} songs in {status.library_folders}
+        {status.songs.toLocaleString()} songs, {status.artists.toLocaleString()} artists,
+        {status.albums.toLocaleString()} albums: {size(status.library_bytes)} of music in {status.library_folders}
         {status.library_folders === 1 ? 'folder' : 'folders'}{#if status.scanning}, checking for changes...{/if}
       </dd>
 

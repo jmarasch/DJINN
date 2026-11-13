@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageTitle from '../../lib/PageTitle.svelte'
   // Sending songs for the library, and what happened to them.
   import { onMount } from 'svelte'
   import { api } from '../../lib/api'
@@ -78,7 +79,7 @@
   const when = (ms: number) => new Date(ms).toLocaleDateString([], { month: 'short', day: 'numeric' })
 </script>
 
-<h1>Submit music</h1>
+<PageTitle title="Submit music" />
 {#if !app.me?.permissions?.submit_music}
   <p class="muted">Your account can't submit music. Ask the host if you'd like to.</p>
 {:else}
@@ -127,9 +128,6 @@
 {/if}
 
 <style>
-  h1 {
-    margin: 0 0 4px;
-  }
 
   h2 {
     margin: 20px 0 8px;

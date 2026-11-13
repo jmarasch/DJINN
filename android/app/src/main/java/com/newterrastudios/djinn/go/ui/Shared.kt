@@ -31,6 +31,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
@@ -45,7 +53,7 @@ fun duration(ms: Long?): String {
 
 /** A picture, or a disc until there is one. */
 @Composable
-fun Art(url: String?, size: Dp, shape: Shape = RoundedCornerShape(6.dp), modifier: Modifier = Modifier) {
+fun Art(url: String?, size: Dp, shape: Shape = RoundedCornerShape(10.dp), modifier: Modifier = Modifier) {
     Box(
         modifier
             .size(size)
@@ -79,12 +87,19 @@ fun Row2(
     onClick: () -> Unit,
     end: @Composable () -> Unit = {},
     titleMark: @Composable () -> Unit = {},
+    /** A second line of small print under the subtitle, such as counts. */
+    extra: String? = null,
 ) {
+    // Each row is a neon card, like the web app's lists.
+    val card = RoundedCornerShape(14.dp)
     Row(
         Modifier
             .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp)
+            .neon(card)
+            .clip(card)
             .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -101,6 +116,15 @@ fun Row2(
                     overflow = TextOverflow.Ellipsis,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (!extra.isNullOrEmpty()) {
+                Text(
+                    extra,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
                 )
             }
         }
@@ -179,7 +203,10 @@ fun LyricsMark(lyrics: Int) {
 fun Heading(text: String) {
     Text(
         text,
-        style = MaterialTheme.typography.titleMedium,
+        style = MaterialTheme.typography.titleMedium.copy(
+            fontWeight = FontWeight.SemiBold,
+            shadow = Shadow(MaterialTheme.colorScheme.primary.copy(alpha = 0.55f), blurRadius = 18f),
+        ),
         modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp),
     )
 }
@@ -187,4 +214,108 @@ fun Heading(text: String) {
 @Composable
 fun Note(text: String, modifier: Modifier = Modifier) {
     Text(text, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = modifier.padding(16.dp))
+}
+
+/** A screen's big title between two small waveforms, as on the web (PageTitle). */
+@Composable
+fun PageTitle(title: String, subtitle: String? = null) {
+    val accent = MaterialTheme.colorScheme.primary
+    val heights = listOf(3f, 6f, 10f, 15f, 9f, 13f, 6f, 4f)
+    @Composable
+    fun Wave(bars: List<Float>) {
+        Canvas(Modifier.size(width = 44.dp, height = 22.dp)) {
+            bars.forEachIndexed { i, h ->
+                val x = (i * 5.5f + 1f).dp.toPx()
+                val hh = (h + 2f).dp.toPx()
+                drawRoundRect(
+                    accent,
+                    topLeft = Offset(x, (size.height - hh) / 2),
+                    size = Size(2.4f.dp.toPx(), hh),
+                    cornerRadius = CornerRadius(1.2f.dp.toPx()),
+                )
+            }
+        }
+    }
+    Column(Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Wave(heights)
+            Text(
+                title,
+                style = MaterialTheme.typography.headlineMedium.copy(
+                    fontWeight = FontWeight.Bold,
+                    shadow = Shadow(accent.copy(alpha = 0.6f), blurRadius = 24f),
+                ),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            Wave(heights.reversed())
+        }
+        if (!subtitle.isNullOrEmpty()) {
+            Text(
+                subtitle.uppercase(),
+                style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 2.sp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+        }
+    }
+}
+
+/** A cover that fills its column, in a neon frame, for the library's picture tiles. */
+@Composable
+fun TileArt(url: String?, shape: Shape, modifier: Modifier = Modifier) {
+    androidx.compose.foundation.layout.BoxWithConstraints(modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        val side = this.maxWidth - 2.dp
+        Box(Modifier.neon(shape)) {
+            Art(url, side, shape, Modifier.padding(1.dp))
+        }
+    }
+}
+
+/** A tile in the library's picture view: the cover, a name, a line of small print, and a heart in the corner. */
+@Composable
+fun Tile(
+    art: @Composable () -> Unit,
+    title: String,
+    subtitle: String?,
+    onClick: () -> Unit,
+    corner: @Composable () -> Unit = {},
+) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp, vertical = 8.dp)
+            .clickable(onClick = onClick),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(Modifier.fillMaxWidth()) {
+            art()
+            Box(
+                Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(6.dp)
+                    .clip(androidx.compose.foundation.shape.CircleShape)
+                    .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.45f)),
+            ) { corner() }
+        }
+        Text(
+            title,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            style = MaterialTheme.typography.titleSmall,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(top = 8.dp),
+        )
+        if (!subtitle.isNullOrEmpty()) {
+            Text(
+                subtitle,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+        }
+    }
 }

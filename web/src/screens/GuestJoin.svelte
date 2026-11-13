@@ -1,5 +1,6 @@
 <script lang="ts">
   import { t } from '../lib/i18n.svelte'
+  import Brand from '../lib/Brand.svelte'
   import LanguagePicker from '../lib/LanguagePicker.svelte'
   import { api } from '../lib/api'
   import { app, connect } from '../lib/state.svelte'
@@ -26,7 +27,7 @@
 </script>
 
 <div class="card">
-  <h1>DJINN</h1>
+  <Brand />
   {#if !changing && welcomeBack}
     <p class="welcome">{t('join.welcome_back', { name: welcomeBack })}</p>
     {#if error}<p class="error">{error}</p>{/if}

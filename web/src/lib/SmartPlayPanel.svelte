@@ -4,6 +4,9 @@
   import { toast } from './state.svelte'
   import type { Learned, PartyStyle, SmartPlaySettings } from './types'
 
+  // Which cards: the smart play settings, or the party styles.
+  let { part = 'play' }: { part?: 'play' | 'styles' } = $props()
+
   let settings = $state<SmartPlaySettings | null>(null)
   let mood = $state<{ on: boolean; strength: number } | null>(null)
   let styles = $state<PartyStyle[]>([])
@@ -116,6 +119,7 @@
 </script>
 
 {#if settings}
+  {#if part === 'play'}
   <section class="card">
     <h2>Smart play</h2>
     <p class="small muted">
@@ -168,7 +172,9 @@
       </label>
     </section>
   {/if}
+  {/if}
 
+  {#if part === 'styles'}
   <section class="card">
     <h2>Party styles</h2>
     <p class="small muted">
@@ -246,6 +252,7 @@
       <button class="primary">Add</button>
     </form>
   </section>
+  {/if}
 {/if}
 
 <style>

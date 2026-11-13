@@ -396,6 +396,9 @@ const ROUTES: &[(Method, &str, Access)] = &[
     (Method::GET, "/api/health", Access::Public),
     (Method::GET, "/api/go/hello", Access::Public),
     (Method::GET, "/api/language", Access::Public),
+    (Method::GET, "/api/discover", Access::Listener),
+    (Method::GET, "/api/appearance", Access::Public),
+    (Method::GET, "/api/appearance/image", Access::Public),
     (Method::GET, "/api/go/app", Access::Public),
     (Method::GET, "/api/auth/mode", Access::Public),
     (Method::POST, "/api/auth/login", Access::Public),
@@ -521,6 +524,8 @@ fn carries_sign_in(path: &str) -> bool {
         "/api/go/hello",
         "/api/go/app",
         "/api/auth/mode",
+        "/api/appearance",
+        "/api/appearance/image",
     ];
     path.starts_with("/rest/")
         || (path.starts_with("/api/") && !SAYS_NOTHING_PRIVATE.contains(&path))

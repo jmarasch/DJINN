@@ -83,6 +83,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.util.UnstableApi
 import com.newterrastudios.djinn.go.data.Album
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import com.newterrastudios.djinn.go.data.Discover
+import com.newterrastudios.djinn.go.data.Dial
 import com.newterrastudios.djinn.go.data.AlbumDetail
 import com.newterrastudios.djinn.go.data.ApiException
 import com.newterrastudios.djinn.go.data.CertificateChanged
@@ -98,6 +102,13 @@ import com.newterrastudios.djinn.go.data.Track
 import com.newterrastudios.djinn.go.data.GenreList
 import com.newterrastudios.djinn.go.data.GenrePage
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyGridState
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.material.icons.automirrored.filled.ViewList
+import androidx.compose.material.icons.filled.GridView
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
@@ -168,6 +179,9 @@ private fun <T : Any> PagedList(
     options: @Composable () -> Unit = {},
     /** The letters or years beside the list, for orders that have them. */
     jumps: suspend () -> List<JumpEntry> = { emptyList() },
+    /** Picture tiles instead of rows, when [grid] is on. */
+    grid: Boolean = false,
+    tile: (@Composable (T) -> Unit)? = null,
     row: @Composable (T) -> Unit,
 ) {
     val items = remember(key) { mutableStateMapOf<Int, T>() }
@@ -175,15 +189,28 @@ private fun <T : Any> PagedList(
     var failed by remember(key) { mutableStateOf(false) }
     var entries by remember(key) { mutableStateOf<List<JumpEntry>>(emptyList()) }
     var pressedLabel by remember(key) { mutableStateOf<String?>(null) }
+    val tiles = grid && tile != null
     // Each order starts from its top.
     val state = remember(key) { LazyListState() }
+    val gridState = remember(key) { LazyGridState() }
+    val columns = if (LocalConfiguration.current.screenWidthDp >= 600) 4 else 2
     val scope = rememberCoroutineScope()
-    val missing by remember(key) {
+    val missing by remember(key, tiles) {
         derivedStateOf {
             val known = total ?: return@derivedStateOf 0
-            val visible = state.layoutInfo.visibleItemsInfo
-            val first = (visible.firstOrNull()?.index ?: 0) - LOAD_AROUND_ROWS
-            val last = (visible.lastOrNull()?.index ?: 0) + LOAD_AROUND_ROWS
+            val visibleFirst: Int
+            val visibleLast: Int
+            if (tiles) {
+                val visible = gridState.layoutInfo.visibleItemsInfo
+                visibleFirst = visible.firstOrNull()?.index ?: 0
+                visibleLast = visible.lastOrNull()?.index ?: 0
+            } else {
+                val visible = state.layoutInfo.visibleItemsInfo
+                visibleFirst = visible.firstOrNull()?.index ?: 0
+                visibleLast = visible.lastOrNull()?.index ?: 0
+            }
+            val first = visibleFirst - LOAD_AROUND_ROWS
+            val last = visibleLast + LOAD_AROUND_ROWS
             (first.coerceAtLeast(0)..last.coerceAtMost(known - 1)).firstOrNull { it !in items }
         }
     }
@@ -210,12 +237,14 @@ private fun <T : Any> PagedList(
             emptyList()
         }
     }
-    val goingBack = state.canScrollBackward && state.lastScrolledBackward
+    val canBack = if (tiles) gridState.canScrollBackward else state.canScrollBackward
+    val goingBack = canBack && (if (tiles) gridState.lastScrolledBackward else state.lastScrolledBackward)
+    val firstShown = if (tiles) gridState.firstVisibleItemIndex else state.firstVisibleItemIndex
     val count = total ?: 0
     val showStrip = entries.size > 1 && count > 0
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
-            AnimatedVisibility(visible = !state.canScrollBackward || goingBack) { options() }
+            AnimatedVisibility(visible = !canBack || goingBack) { options() }
             if (failed) {
                 Column(Modifier.padding(16.dp)) {
                     Text(t("common.load_more_failed"), color = MaterialTheme.colorScheme.error)
@@ -227,38 +256,63 @@ private fun <T : Any> PagedList(
                     .fillMaxWidth()
                     .weight(1f),
             ) {
-                LazyColumn(
-                    Modifier
-                        .weight(1f)
-                        .fillMaxHeight(),
-                    state = state,
-                ) {
-                    items(count) { index ->
-                        val item = items[index]
-                        if (item != null) row(item) else Spacer(Modifier.height(UNLOADED_ROW))
+                if (tiles && tile != null) {
+                    LazyVerticalGrid(
+                        GridCells.Fixed(columns),
+                        Modifier
+                            .weight(1f)
+                            .fillMaxHeight(),
+                        state = gridState,
+                        contentPadding = PaddingValues(horizontal = 4.dp),
+                    ) {
+                        items(count) { index ->
+                            val item = items[index]
+                            if (item != null) tile(item) else Spacer(Modifier.height(UNLOADED_TILE))
+                        }
+                        if (total == null && !failed) {
+                            item(span = { GridItemSpan(maxLineSpan) }) { Note(t("common.loading")) }
+                        } else if (total == 0) {
+                            item(span = { GridItemSpan(maxLineSpan) }) { Note(t("common.nothing_yet")) }
+                        }
                     }
-                    if (total == null && !failed) {
-                        item { Note(t("common.loading")) }
-                    } else if (total == 0) {
-                        item { Note(t("common.nothing_yet")) }
+                } else {
+                    LazyColumn(
+                        Modifier
+                            .weight(1f)
+                            .fillMaxHeight(),
+                        state = state,
+                    ) {
+                        items(count) { index ->
+                            val item = items[index]
+                            if (item != null) row(item) else Spacer(Modifier.height(UNLOADED_ROW))
+                        }
+                        if (total == null && !failed) {
+                            item { Note(t("common.loading")) }
+                        } else if (total == 0) {
+                            item { Note(t("common.nothing_yet")) }
+                        }
                     }
                 }
                 if (showStrip) {
                     JumpStrip(
                         entries,
                         onPressed = { pressedLabel = it },
-                        onJump = { offset -> scope.launch { state.scrollToItem(offset.coerceAtMost(count - 1)) } },
+                        onJump = { offset ->
+                            val at = offset.coerceAtMost(count - 1)
+                            // A tile view jumps to the row the song, album or artist is in.
+                            scope.launch { if (tiles) gridState.scrollToItem(at) else state.scrollToItem(at) }
+                        },
                     )
                 }
             }
         }
         AnimatedVisibility(
-            visible = goingBack && state.firstVisibleItemIndex >= TO_TOP_AFTER_ROWS,
+            visible = goingBack && firstShown >= TO_TOP_AFTER_ROWS,
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(end = if (showStrip) 44.dp else 16.dp, bottom = 16.dp),
         ) {
-            SmallFloatingActionButton(onClick = { scope.launch { state.scrollToItem(0) } }) {
+            SmallFloatingActionButton(onClick = { scope.launch { if (tiles) gridState.scrollToItem(0) else state.scrollToItem(0) } }) {
                 Icon(Icons.Default.KeyboardArrowUp, contentDescription = t("common.back_to_top"))
             }
         }
@@ -266,9 +320,40 @@ private fun <T : Any> PagedList(
     }
 }
 
+/** Room for a tile not loaded yet. */
+private val UNLOADED_TILE = 190.dp
+
+/** List or picture tiles, for the library's lists. */
+@Composable
+private fun ViewToggle(nav: Nav) {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+        horizontalArrangement = Arrangement.End,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        val on = MaterialTheme.colorScheme.primary
+        val off = MaterialTheme.colorScheme.onSurfaceVariant
+        IconButton(onClick = { nav.libraryGrid = false; nav.prefs.libraryGrid = false }) {
+            Icon(Icons.AutoMirrored.Filled.ViewList, t("library.view_list"), tint = if (!nav.libraryGrid) on else off)
+        }
+        IconButton(onClick = { nav.libraryGrid = true; nav.prefs.libraryGrid = true }) {
+            Icon(Icons.Default.GridView, t("library.view_grid"), tint = if (nav.libraryGrid) on else off)
+        }
+    }
+}
+
 @UnstableApi
 @Composable
 fun HomeScreen(nav: Nav) {
+    // The shelves load beside the rest of Home, so a slow one doesn't hold it up.
+    var discover by remember { mutableStateOf<Discover?>(null) }
+    LaunchedEffect(Unit) {
+        discover = try {
+            nav.api.discover()
+        } catch (_: IOException) {
+            null
+        }
+    }
     Loaded(
         key = "home",
         load = { nav.api.home() },
@@ -308,8 +393,13 @@ fun HomeScreen(nav: Nav) {
                     )
                 }
             }
-            songSection(t("go.played_lately"), home.recent, nav)
-            songSection(t("go.new_in_library"), home.newest, nav)
+            val shelves = discover
+            if (shelves != null) {
+                discoverItems(shelves, nav)
+            } else {
+                songSection(t("go.played_lately"), home.recent, nav)
+                songSection(t("go.new_in_library"), home.newest, nav)
+            }
         }
     }
 }
@@ -317,14 +407,7 @@ fun HomeScreen(nav: Nav) {
 @UnstableApi
 @Composable
 private fun HomeBar(nav: Nav) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .padding(start = 16.dp, top = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text("DJINN GO", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
-    }
+    PageTitle(t("go.your_music"), t("go.home_hint"))
 }
 
 /** Everything on the phone, which needs no server. */
@@ -741,10 +824,10 @@ fun LibraryScreen(nav: Nav) {
         // Six words only share a phone evenly at small text sizes. Rather than break them, they scroll.
         val configuration = LocalConfiguration.current
         if (configuration.screenWidthDp / configuration.fontScale >= ROOM_FOR_EVEN_TABS_DP) {
-            SecondaryTabRow(selectedTabIndex = tab, tabs = tabs)
+            SecondaryTabRow(selectedTabIndex = tab, containerColor = Color.Transparent, tabs = tabs)
         } else {
             // No minimum width: each tab just fits its word, so the next one shows at the edge when they scroll.
-            SecondaryScrollableTabRow(selectedTabIndex = tab, edgePadding = 0.dp, minTabWidth = 0.dp, tabs = tabs)
+            SecondaryScrollableTabRow(selectedTabIndex = tab, edgePadding = 0.dp, minTabWidth = 0.dp, containerColor = Color.Transparent, tabs = tabs)
         }
         when (tab) {
             0 -> {
@@ -752,14 +835,28 @@ fun LibraryScreen(nav: Nav) {
                 PagedList<ArtistSummary>(
                     "artists-$sort",
                     { nav.api.artists(sort, it) },
-                    options = { Choices(ARTIST_SORTS, nav.artistSort) { nav.artistSort = it } },
+                    options = { Column { ViewToggle(nav); Choices(ARTIST_SORTS, nav.artistSort) { nav.artistSort = it } } },
                     jumps = { jumpEntries(nav.api.artistJumps(sort), sort) },
+                    grid = nav.libraryGrid,
+                    tile = { artist ->
+                        Tile(
+                            art = { TileArt(nav.api.artUrl(artist.artHash, 256), CircleShape) },
+                            title = artist.name,
+                            subtitle = (listOfNotNull(if (artist.albums > 0) "${artist.albums} albums" else null, "${artist.trackCount} songs")).joinToString(" · "),
+                            onClick = { nav.push(Screen.Artist(artist.id)) },
+                            corner = { LikeHeart(artist.id, nav.likedArtists, artist.name, nav.api::setArtistLike, nav) },
+                        )
+                    },
                 ) { artist ->
                     Row2(
                         title = artist.name,
-                        subtitle = (listOf("${artist.trackCount} songs") + countParts(artist.plays, artist.likes))
+                        subtitle = listOfNotNull(
+                            if (artist.albums > 0) "${artist.albums} albums" else null,
+                            "${artist.trackCount} songs",
+                        ).joinToString(" · "),
+                        extra = (listOfNotNull(artist.genres?.split(",")?.take(2)?.joinToString(", ") { it.trim() }) + countParts(artist.plays, artist.likes))
                             .joinToString(" · "),
-                        art = { Art(nav.api.artUrl(artist.artHash), 44.dp, CircleShape) },
+                        art = { Art(nav.api.artUrl(artist.artHash), 52.dp, CircleShape) },
                         onClick = { nav.push(Screen.Artist(artist.id)) },
                         end = { LikeHeart(artist.id, nav.likedArtists, artist.name, nav.api::setArtistLike, nav) },
                     )
@@ -773,11 +870,22 @@ fun LibraryScreen(nav: Nav) {
                     { nav.api.albums(sort, filter, it) },
                     options = {
                         Column {
+                            ViewToggle(nav)
                             Choices(ALBUM_FILTERS, nav.albumFilter) { nav.albumFilter = it }
                             Choices(ALBUM_SORTS, nav.albumSort) { nav.albumSort = it }
                         }
                     },
                     jumps = { jumpEntries(nav.api.albumJumps(sort, filter), sort) },
+                    grid = nav.libraryGrid,
+                    tile = { album ->
+                        Tile(
+                            art = { TileArt(nav.api.artUrl(album.artHash, 256), RoundedCornerShape(16.dp)) },
+                            title = album.title,
+                            subtitle = listOfNotNull(album.artist, album.year?.toString()).joinToString(" · "),
+                            onClick = { nav.push(Screen.Album(album.id)) },
+                            corner = { LikeHeart(album.id, nav.likedAlbums, album.title, nav.api::setAlbumLike, nav) },
+                        )
+                    },
                 ) { album ->
                     AlbumRow(album, nav)
                 }
@@ -787,8 +895,28 @@ fun LibraryScreen(nav: Nav) {
                 PagedList<Track>(
                     "songs-$sort",
                     { nav.api.songs(sort, it) },
-                    options = { Choices(SONG_SORTS, nav.songSort) { nav.songSort = it } },
+                    options = { Column { ViewToggle(nav); Choices(SONG_SORTS, nav.songSort) { nav.songSort = it } } },
                     jumps = { jumpEntries(nav.api.songJumps(sort), sort) },
+                    grid = nav.libraryGrid,
+                    tile = { song ->
+                        Tile(
+                            art = { TileArt(nav.api.artUrl(song.artHash, 256), RoundedCornerShape(16.dp)) },
+                            title = song.title,
+                            subtitle = song.artist,
+                            onClick = { nav.startRadio(song) },
+                            corner = {
+                                val liked = song.id in nav.liked
+                                IconButton(onClick = { nav.scope.launch { nav.setLiked(song.id, !liked) } }, modifier = Modifier.size(36.dp)) {
+                                    Icon(
+                                        if (liked) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                        contentDescription = if (liked) t("go.unlike_named", "name" to song.title) else t("go.like_named", "name" to song.title),
+                                        tint = if (liked) MaterialTheme.colorScheme.primary else androidx.compose.ui.graphics.Color.White,
+                                        modifier = Modifier.size(20.dp),
+                                    )
+                                }
+                            },
+                        )
+                    },
                 ) { song ->
                     SongRow(song, nav) { nav.startRadio(song) }
                 }
@@ -805,7 +933,8 @@ fun LibraryScreen(nav: Nav) {
 fun YourMusicScreen(nav: Nav) {
     var tab by rememberSaveable { mutableStateOf(0) }
     Column(Modifier.fillMaxSize()) {
-        SecondaryScrollableTabRow(selectedTabIndex = tab, edgePadding = 0.dp, minTabWidth = 0.dp) {
+        PageTitle(t("go.your_music"))
+        SecondaryScrollableTabRow(selectedTabIndex = tab, edgePadding = 0.dp, minTabWidth = 0.dp, containerColor = Color.Transparent) {
             MINE_TABS.forEachIndexed { index, label ->
                 Tab(
                     selected = tab == index,
@@ -977,11 +1106,13 @@ private fun Choices(choices: List<Pair<String, String>>, chosen: String, choose:
 @UnstableApi
 @Composable
 private fun AlbumRow(album: Album, nav: Nav) {
+    // An album shows bigger cover art, its year and how many songs it has, so it doesn't read as a song.
     Row2(
         title = album.title,
-        subtitle = (listOfNotNull(album.artist, album.year?.toString(), album.label) + countParts(album.plays, album.likes))
+        subtitle = listOfNotNull(album.artist, album.year?.toString(), album.label).joinToString(" · "),
+        extra = (listOfNotNull(if (album.songs > 0) "${album.songs} songs" else null) + countParts(album.plays, album.likes))
             .joinToString(" · "),
-        art = { Art(nav.api.artUrl(album.artHash), 44.dp) },
+        art = { Art(nav.api.artUrl(album.artHash, 256), 68.dp, RoundedCornerShape(14.dp)) },
         onClick = { nav.push(Screen.Album(album.id)) },
         end = { LikeHeart(album.id, nav.likedAlbums, album.title, nav.api::setAlbumLike, nav) },
     )
@@ -1003,10 +1134,17 @@ fun AlbumScreen(id: Long, nav: Nav) {
                 Column(Modifier.padding(16.dp)) {
                     Art(nav.api.artUrl(album.artHash, 512), 200.dp)
                     Text(album.title, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(top = 12.dp))
+                    // The artist's name opens their page; the rest is small print.
                     Text(
-                        listOfNotNull(album.artist, album.year?.toString(), album.label).joinToString(" · "),
+                        album.artist,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.clickable { nav.push(Screen.Artist(album.artistId)) },
+                    )
+                    Text(
+                        listOfNotNull(album.year?.toString(), album.label).joinToString(" · "),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    GenreLinks(album.genres, nav)
                     Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                         FilledTonalButton(
                             onClick = { nav.player.play(album.tracks) },
@@ -1055,6 +1193,14 @@ fun ArtistScreen(id: Long, nav: Nav) {
         }
     }
     val scope = nav.scope
+    var similar by remember(id) { mutableStateOf<List<ArtistSummary>>(emptyList()) }
+    LaunchedEffect(id) {
+        similar = try {
+            nav.api.similarArtists(id)
+        } catch (_: IOException) {
+            emptyList()
+        }
+    }
     Loaded(key = id, load = { nav.api.artist(id) }) { artist: ArtistDetail ->
         val shown = artist.topTracks
         LazyColumn(Modifier.fillMaxSize()) {
@@ -1062,6 +1208,7 @@ fun ArtistScreen(id: Long, nav: Nav) {
                 Column(Modifier.padding(16.dp)) {
                     Art(nav.api.artUrl(artist.artHash, 512), 160.dp, CircleShape)
                     Text(artist.name, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(top = 12.dp))
+                    GenreLinks(artist.genres, nav)
                     Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                         FilledTonalButton(
                             enabled = total > 0,
@@ -1116,6 +1263,18 @@ fun ArtistScreen(id: Long, nav: Nav) {
             if (artist.appearsOn.isNotEmpty()) {
                 item { Heading(t("go.appears_on")) }
                 items(artist.appearsOn) { AlbumRow(it, nav) }
+            }
+            if (similar.isNotEmpty()) {
+                item { Heading(t("artist.similar")) }
+                items(similar) { other ->
+                    Row2(
+                        title = other.name,
+                        subtitle = listOfNotNull(other.genres?.split(",")?.take(3)?.joinToString(", ") { it.trim() }).firstOrNull(),
+                        art = { Art(nav.api.artUrl(other.artHash), 52.dp, CircleShape) },
+                        onClick = { nav.push(Screen.Artist(other.id)) },
+                        end = { LikeHeart(other.id, nav.likedArtists, other.name, nav.api::setArtistLike, nav) },
+                    )
+                }
             }
         }
     }
@@ -1713,5 +1872,207 @@ private fun AskForSong(query: String, nav: Nav) {
             },
             dismissButton = { TextButton(onClick = { asking = false }) { Text(t("common.cancel")) } },
         )
+    }
+}
+
+// ---- Discover: shelves to find something to play ----
+
+/** A shelf: a heading and a row that scrolls sideways. */
+private fun LazyListScope.shelf(title: String, content: LazyListScope.() -> Unit) {
+    item { Heading(title) }
+    item {
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) { content() }
+    }
+}
+
+@UnstableApi
+private fun LazyListScope.discoverItems(d: Discover, nav: Nav) {
+    if (d.speedDial.isNotEmpty()) {
+        item { Heading(t("discover.speed_dial")) }
+        item { SpeedDial(d.speedDial, nav) }
+    }
+    if (d.genres.isNotEmpty()) {
+        item { Heading(t("discover.genres")) }
+        item {
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                items(d.genres) { genre -> GenrePill(genre.name, genre.songs) { nav.push(Screen.Genre(genre.name)) } }
+            }
+        }
+    }
+    if (d.listenAgain.isNotEmpty()) shelf(t("discover.listen_again")) { items(d.listenAgain) { SongShelfTile(it, nav) } }
+    if (d.newAlbums.isNotEmpty()) shelf(t("discover.new_albums")) { items(d.newAlbums) { AlbumShelfTile(it, nav) } }
+    if (d.popularSongs.isNotEmpty()) {
+        item {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.weight(1f)) { Heading(t("discover.quick_picks")) }
+                TextButton(onClick = { nav.player.play(d.popularSongs) }, modifier = Modifier.padding(end = 8.dp)) {
+                    Text(t("discover.play_all"))
+                }
+            }
+        }
+        items(d.popularSongs.take(6)) { song -> SongRow(song, nav) { nav.startRadio(song) } }
+    }
+    if (d.forgotten.isNotEmpty()) shelf(t("discover.forgotten")) { items(d.forgotten) { SongShelfTile(it, nav) } }
+    if (d.mixes.isNotEmpty()) {
+        shelf(t("discover.mixes")) {
+            items(d.mixes) { mix ->
+                Box(Modifier.width(SHELF_TILE)) {
+                    Tile(
+                        art = { TileArt(nav.api.artUrl(mix.artHash, 256), RoundedCornerShape(16.dp)) },
+                        title = t("discover.mix_named", "name" to mix.name),
+                        subtitle = null,
+                        onClick = { nav.push(if (mix.kind == "artist") Screen.Artist(mix.id) else Screen.Genre(mix.name)) },
+                    )
+                }
+            }
+        }
+    }
+    d.more.forEach { more ->
+        val title = when (more.kind) {
+            "decade" -> t("discover.decade", "name" to more.name)
+            "genre" -> t("discover.genre_more", "name" to more.name)
+            "listened" -> t("discover.listened", "name" to more.name)
+            else -> t("discover.like_song", "name" to more.name)
+        }
+        shelf(title) {
+            items(more.songs) { SongShelfTile(it, nav) }
+            items(more.albums) { AlbumShelfTile(it, nav) }
+            items(more.artists) { ArtistShelfTile(it, nav) }
+        }
+    }
+    if (d.throwbacks.isNotEmpty()) shelf(t("discover.throwbacks")) { items(d.throwbacks) { AlbumShelfTile(it, nav) } }
+    d.because?.let { because ->
+        shelf(t("discover.because", "name" to because.artist.name)) { items(because.similar) { ArtistShelfTile(it, nav) } }
+    }
+    if (d.explore.isNotEmpty()) shelf(t("discover.explore")) { items(d.explore) { ArtistShelfTile(it, nav) } }
+}
+
+/** The shelves' tiles are this wide. */
+private val SHELF_TILE = 140.dp
+
+@UnstableApi
+@Composable
+private fun SongShelfTile(song: Track, nav: Nav) {
+    Box(Modifier.width(SHELF_TILE)) {
+        Tile(
+            art = { TileArt(nav.api.artUrl(song.artHash, 256), RoundedCornerShape(16.dp)) },
+            title = song.title,
+            subtitle = song.artist,
+            onClick = { nav.startRadio(song) },
+            corner = {
+                val liked = song.id in nav.liked
+                IconButton(onClick = { nav.scope.launch { nav.setLiked(song.id, !liked) } }, modifier = Modifier.size(34.dp)) {
+                    Icon(
+                        if (liked) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                        contentDescription = if (liked) t("go.unlike_named", "name" to song.title) else t("go.like_named", "name" to song.title),
+                        tint = if (liked) MaterialTheme.colorScheme.primary else Color.White,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            },
+        )
+    }
+}
+
+@UnstableApi
+@Composable
+private fun AlbumShelfTile(album: Album, nav: Nav) {
+    Box(Modifier.width(SHELF_TILE)) {
+        Tile(
+            art = { TileArt(nav.api.artUrl(album.artHash, 256), RoundedCornerShape(16.dp)) },
+            title = album.title,
+            subtitle = listOfNotNull(album.artist, album.year?.toString()).joinToString(" · "),
+            onClick = { nav.push(Screen.Album(album.id)) },
+            corner = { LikeHeart(album.id, nav.likedAlbums, album.title, nav.api::setAlbumLike, nav) },
+        )
+    }
+}
+
+@UnstableApi
+@Composable
+private fun ArtistShelfTile(artist: ArtistSummary, nav: Nav) {
+    Box(Modifier.width(SHELF_TILE)) {
+        Tile(
+            art = { TileArt(nav.api.artUrl(artist.artHash, 256), CircleShape) },
+            title = artist.name,
+            subtitle = "${artist.trackCount} songs",
+            onClick = { nav.push(Screen.Artist(artist.id)) },
+            corner = { LikeHeart(artist.id, nav.likedArtists, artist.name, nav.api::setArtistLike, nav) },
+        )
+    }
+}
+
+/** Nine quick starts in a grid, each a cover with its name along the bottom. */
+@UnstableApi
+@Composable
+private fun SpeedDial(items: List<Dial>, nav: Nav) {
+    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
+        val side = (this.maxWidth - 16.dp) / 3
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            items.chunked(3).forEach { row ->
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    row.forEach { item ->
+                        val shape = RoundedCornerShape(14.dp)
+                        Box(
+                            Modifier
+                                .size(side)
+                                .neon(shape)
+                                .clip(shape)
+                                .clickable {
+                                    nav.push(if (item.kind == "artist") Screen.Artist(item.id) else Screen.Album(item.id))
+                                },
+                        ) {
+                            Art(nav.api.artUrl(item.artHash, 256), side, shape)
+                            Text(
+                                item.name,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                style = MaterialTheme.typography.labelLarge,
+                                color = Color.White,
+                                modifier = Modifier
+                                    .align(Alignment.BottomStart)
+                                    .fillMaxWidth()
+                                    .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.75f))))
+                                    .padding(start = 8.dp, end = 8.dp, top = 16.dp, bottom = 6.dp),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** A genre as a neon pill that opens its page. */
+@Composable
+private fun GenrePill(name: String, songs: Long, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(999.dp)
+    Row(
+        Modifier
+            .neon(shape)
+            .clip(shape)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(name)
+        if (songs > 0) Text("%,d".format(songs), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+/** An artist's or album's genres, each opening its page. */
+@Composable
+private fun GenreLinks(genres: String?, nav: Nav) {
+    val names = genres?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }.orEmpty()
+    if (names.isEmpty()) return
+    FlowRow(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        names.take(6).forEach { name -> GenrePill(name, 0) { nav.push(Screen.Genre(name)) } }
     }
 }

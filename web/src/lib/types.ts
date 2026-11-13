@@ -375,6 +375,8 @@ export interface Album {
   plays?: number
   /** In the library lists: how many people favorited it. */
   likes?: number
+  /** In the album list: how many songs it has. */
+  songs?: number
 }
 
 export interface Artist {
@@ -701,6 +703,7 @@ export interface Settings {
   genre_page_size: number
   /** Hours before a genre's shuffled order is made again; 0 for every visit. */
   genre_refresh_hours: number
+  discover_refresh_minutes: number
   /** How much of a song a play must hear to count in the library lists, in percent. */
   play_count_percent: number
   /** The TV page (/tv) works without signing in. */
@@ -760,10 +763,16 @@ export interface ArtistSummary {
   name: string
   art_hash: string | null
   track_count: number
+  /** In the library lists: the start of their bio. */
+  about?: string
+  /** In the library lists: comma separated. */
+  genres?: string
   /** In the library lists: plays, party and GO, skipped or not. */
   plays?: number
   /** In the library lists: how many people favorited it. */
   likes?: number
+  /** In the artist list: how many albums they have. */
+  albums?: number
 }
 
 /** Year is newest first, oldest is by year oldest first. */
@@ -1286,6 +1295,10 @@ export interface SystemStatus {
   /** Windows has the network set to Public, which blocks phones. */
   public_network: boolean
   songs: number
+  artists: number
+  albums: number
+  /** The music files' size together. */
+  library_bytes: number
   library_folders: number
   scanning: boolean
   last_scan: { found: number; to_read: number; read: number; removed: number; done: boolean } | null
@@ -1453,4 +1466,21 @@ export interface TimingSpeaker {
 export interface RoomTiming {
   speakers: TimingSpeaker[]
   max_ms: number
+}
+
+/** Shelves to find something to play (GET /api/discover). */
+export interface Discover {
+  /** Playlist ideas from what you listen to. */
+  mixes: { kind: 'artist' | 'genre'; id: number; name: string; art_hash: string | null }[]
+  /** Shelves that come and go. */
+  more: { kind: 'decade' | 'genre' | 'listened' | 'like_song'; name: string; songs: Track[]; albums: Album[]; artists: ArtistSummary[] }[]
+  speed_dial: { kind: 'artist' | 'album'; id: number; name: string; art_hash: string | null }[]
+  forgotten: Track[]
+  genres: { name: string; songs: number }[]
+  listen_again: Track[]
+  new_albums: Album[]
+  throwbacks: Album[]
+  popular_songs: Track[]
+  because: { artist: ArtistSummary; similar: ArtistSummary[] } | null
+  explore: ArtistSummary[]
 }

@@ -12,10 +12,23 @@
   --ok: #6fdc9b;
   --bad: #ff7a85;
   --bad-surface: #5a2430;
+  /* The second color, from the logo's waveform. */
+  --accent-2: #3fe0cf;
+  /* Neon edges: a thin lavender line with a soft glow around it. */
+  --edge: rgb(190 150 255 / 0.62);
+  --edge-strong: rgb(205 170 255 / 0.95);
+  --glow:
+    0 0 0 1px rgb(180 140 255 / 0.14), 0 0 14px rgb(180 140 255 / 0.34), inset 0 0 18px rgb(180 140 255 / 0.07);
+  --glow-strong:
+    0 0 0 1px rgb(200 165 255 / 0.3), 0 0 22px rgb(180 140 255 / 0.62), inset 0 0 20px rgb(180 140 255 / 0.12);
+  --card-bg: linear-gradient(180deg, rgb(39 33 58 / 0.82), rgb(26 22 39 / 0.9));
+  --page-bg:
+    radial-gradient(1100px 600px at 85% -10%, rgb(124 64 200 / 0.22), transparent 60%),
+    radial-gradient(900px 600px at -10% 110%, rgb(90 40 150 / 0.2), transparent 60%), #14111f;
 
   color-scheme: dark;
 
-  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-family: 'Outfit Variable', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   line-height: 1.45;
   color: var(--text);
   background: var(--bg);
@@ -39,6 +52,13 @@
     --ok: #1d8a4c;
     --bad: #c9303f;
     --bad-surface: #f9d7db;
+    --accent-2: #0d9488;
+    --edge: rgb(111 63 214 / 0.26);
+    --edge-strong: rgb(111 63 214 / 0.6);
+    --glow: 0 0 12px rgb(111 63 214 / 0.08);
+    --glow-strong: 0 0 14px rgb(111 63 214 / 0.25);
+    --card-bg: #ffffff;
+    --page-bg: radial-gradient(1100px 600px at 85% -10%, rgb(180 140 255 / 0.18), transparent 60%), #f6f4fb;
     color-scheme: light;
   }
 }
@@ -56,21 +76,39 @@
   --ok: #1d8a4c;
   --bad: #c9303f;
   --bad-surface: #f9d7db;
+  --accent-2: #0d9488;
+  --edge: rgb(111 63 214 / 0.26);
+  --edge-strong: rgb(111 63 214 / 0.6);
+  --glow: 0 0 12px rgb(111 63 214 / 0.08);
+  --glow-strong: 0 0 14px rgb(111 63 214 / 0.25);
+  --card-bg: #ffffff;
+  --page-bg: radial-gradient(1100px 600px at 85% -10%, rgb(180 140 255 / 0.18), transparent 60%), #f6f4fb;
   color-scheme: light;
 }
 
 * {
   box-sizing: border-box;
+  scrollbar-color: var(--surface-3) transparent;
+}
+
+/* The page's own backdrop is on the root, so the house background (a fixed
+   layer behind the page) shows above it rather than being covered by the body. */
+html {
+  min-height: 100%;
+  background: var(--page-bg);
+  background-attachment: fixed;
 }
 
 body {
   margin: 0;
   min-height: 100dvh;
-  background: var(--bg);
 }
 
 h1 {
-  font-size: 1.625rem;
+  text-shadow: 0 0 16px rgb(180 140 255 / 0.55);
+  font-size: 1.75rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
   margin: 8px 0 12px;
 }
 
@@ -112,6 +150,7 @@ button.primary,
   background: var(--accent);
   color: var(--accent-text);
   font-weight: 600;
+  box-shadow: var(--glow-strong);
 }
 
 /* Something that deletes or stops things for everyone. */
@@ -134,6 +173,7 @@ button.round.big {
   height: 72px;
   background: var(--accent);
   color: var(--accent-text);
+  box-shadow: var(--glow-strong);
 }
 
 /* Icon-only buttons inside rows stay flat. */
@@ -162,6 +202,16 @@ select {
   background: var(--surface-2);
   color: var(--text);
   font: inherit;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
+}
+
+input:focus-visible,
+select:focus-visible {
+  outline: none;
+  border-color: var(--edge-strong);
+  box-shadow: var(--glow-strong);
 }
 
 .search-box input {
@@ -190,11 +240,61 @@ label {
   gap: 8px;
 }
 
-.switch input {
+.switch input[type='checkbox'] {
+  appearance: none;
   flex: none;
-  width: 20px;
-  min-height: 20px;
-  accent-color: var(--accent);
+  position: relative;
+  width: 42px;
+  min-height: 24px;
+  height: 24px;
+  margin: 0;
+  border: 1px solid var(--edge);
+  border-radius: 999px;
+  background: var(--surface-2);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
+}
+
+.switch input[type='checkbox']::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--text);
+  opacity: 0.6;
+  transition: transform 0.15s, opacity 0.15s, background 0.15s;
+}
+
+.switch input[type='checkbox']:checked {
+  border-color: var(--edge-strong);
+  background: color-mix(in srgb, var(--accent) 35%, var(--surface-2));
+  box-shadow: var(--glow-strong);
+}
+
+.switch input[type='checkbox']:checked::after {
+  transform: translateX(18px);
+  background: var(--accent);
+  opacity: 1;
+}
+
+.switch input[type='checkbox']:focus-visible {
+  outline: 2px solid var(--accent-2);
+  outline-offset: 2px;
+}
+
+.switch input[type='checkbox']:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .switch input[type='checkbox'],
+  .switch input[type='checkbox']::after {
+    transition: none;
+  }
 }
 
 /* A row of rounded links, such as artists in search results. */
@@ -206,6 +306,7 @@ label {
 
 .chip {
   padding: 10px 16px;
+  border: 1px solid var(--edge);
   border-radius: 999px;
   background: var(--surface-2);
   color: var(--text);
@@ -245,13 +346,30 @@ label {
   gap: 12px;
   margin: 0 0 16px;
   padding: 16px;
-  border-radius: 14px;
-  background: var(--surface);
+  border: 1px solid var(--edge);
+  border-radius: 16px;
+  background: var(--card-bg);
+  box-shadow:
+    var(--glow),
+    inset 0 1px 0 rgb(255 255 255 / 0.04);
+}
+
+/* A panel with the neon edge but no card spacing, for lists and bars. */
+.neon {
+  border: 1px solid var(--edge);
+  background: var(--card-bg);
+  box-shadow: var(--glow);
 }
 
 .card h1,
 .card h2 {
   margin: 0;
+}
+
+.card h2 {
+  color: var(--text);
+  font-size: 1.125rem;
+  text-shadow: 0 0 12px rgb(180 140 255 / 0.65);
 }
 
 .muted {
@@ -294,4 +412,38 @@ label {
   to {
     transform: rotate(360deg);
   }
+}
+
+/* Cards in two columns where there is room, filled top to bottom so no gaps
+   open between them; a card with `wide` spans both. */
+.cards-2 {
+  display: block;
+}
+
+@media (min-width: 1100px) {
+  .cards-2 {
+    columns: 2;
+    column-gap: 16px;
+  }
+
+  .cards-2 > * {
+    break-inside: avoid;
+  }
+
+  .cards-2 > .wide {
+    column-span: all;
+  }
+}
+
+/* Glowing text is for the dark theme; on light it only smudges. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme='dark']) h1,
+  :root:not([data-theme='dark']) .card h2 {
+    text-shadow: none;
+  }
+}
+
+:root[data-theme='light'] h1,
+:root[data-theme='light'] .card h2 {
+  text-shadow: none;
 }

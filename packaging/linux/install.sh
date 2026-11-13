@@ -135,7 +135,7 @@ fi
 install -Dm755 "$built" "$bin"
 install -Dm644 "$png" "$icon"
 mkdir -p "$(dirname "$desktop")"
-sed -e "s|@BIN@|$bin|" -e "s|@LOG@|$conf/djinn/djinn.log|" \
+sed -e "s|@BIN@|$bin|" -e "s|@LOG@|$conf/djinn/djinn.log|" -e "s|@ICON@|$icon|" \
     "$template" > "$desktop"
 echo "Installed $("$bin" --version 2>/dev/null || echo DJINN) to $bin and added DJINN to the app menu."
 
@@ -147,6 +147,19 @@ fi
 if command -v update-desktop-database >/dev/null 2>&1; then
     update-desktop-database "$data/applications" >/dev/null 2>&1 || true
 fi
+# Desktops keep icons cached; tell them this one may have changed.
+touch "$data/icons/hicolor"
+if [ -f "$data/icons/hicolor/index.theme" ] && command -v gtk-update-icon-cache >/dev/null 2>&1; then
+    gtk-update-icon-cache -q -t "$data/icons/hicolor" >/dev/null 2>&1 || true
+fi
+# Plasma also keeps a cache of drawn icons.
+rm -f "${XDG_CACHE_HOME:-$HOME/.cache}/icon-cache.kcache"
+for rebuild in kbuildsycoca6 kbuildsycoca5; do
+    if command -v "$rebuild" >/dev/null 2>&1; then
+        "$rebuild" >/dev/null 2>&1 || true
+        break
+    fi
+done
 
 if $running; then
     echo "DJINN is running: quit it from its tray icon and start it again to use this version."

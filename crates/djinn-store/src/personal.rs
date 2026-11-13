@@ -309,6 +309,23 @@ impl Store {
         Ok(played)
     }
 
+    /// Songs the party played because this person asked for them (and that
+    /// weren't skipped), newest first: their listening at the jukebox.
+    pub async fn requested_history(&self, user_id: i64, limit: i64) -> Result<Vec<Played>> {
+        let played = sqlx::query_as(concat!(
+            "SELECT ",
+            track_columns!(),
+            ", pe.started_at AS played_at FROM play_events pe JOIN tracks t ON t.id = pe.track_id
+             WHERE pe.requested_by = ? AND pe.skipped = 0 AND t.removed_at IS NULL
+             ORDER BY pe.started_at DESC, pe.id DESC LIMIT ?"
+        ))
+        .bind(user_id)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(played)
+    }
+
     /// Different songs played lately, most recent first.
     pub async fn recently_played(&self, user_id: i64, limit: i64) -> Result<Vec<Track>> {
         let ids: Vec<i64> = sqlx::query_scalar(
@@ -522,6 +539,47 @@ mod tests {
             .collect();
         ids.sort_unstable();
         ids
+    }
+
+    #[tokio::test]
+    async fn songs_the_party_played_for_someone_are_their_listening() {
+        let store = Store::open_in_memory().await.unwrap();
+        let ids = library(&store).await;
+        let sam = store.create_user("sam", "h", Role::User).await.unwrap().id;
+        let jo = store.create_user("jo", "h", Role::User).await.unwrap().id;
+        // Sam's request, heard through.
+        let heard = store
+            .start_play_event(1, ids[0], crate::PlaySource::Request, Some(sam))
+            .await
+            .unwrap();
+        store
+            .finish_play_event(heard, 200_000, false, None, 0)
+            .await
+            .unwrap();
+        // Sam's request, skipped; Jo's request; a song nobody asked for.
+        let skipped = store
+            .start_play_event(1, ids[1], crate::PlaySource::Request, Some(sam))
+            .await
+            .unwrap();
+        store
+            .finish_play_event(skipped, 2_000, true, Some(jo), 0)
+            .await
+            .unwrap();
+        store
+            .start_play_event(1, ids[2], crate::PlaySource::Request, Some(jo))
+            .await
+            .unwrap();
+        store
+            .start_play_event(1, ids[2], crate::PlaySource::Pool, None)
+            .await
+            .unwrap();
+
+        let history = store.requested_history(sam, 10).await.unwrap();
+        assert_eq!(
+            history.iter().map(|p| p.track.id).collect::<Vec<_>>(),
+            [ids[0]]
+        );
+        assert_eq!(store.requested_history(jo, 10).await.unwrap().len(), 1);
     }
 
     #[tokio::test]

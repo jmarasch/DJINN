@@ -1,4 +1,5 @@
 <script lang="ts">
+  import SecretInput from './SecretInput.svelte'
   // Admin > Library: what a library check does beyond reading folders and
   // tags. Each extra is off until switched on; switches save right away,
   // text fields with their own Save.
@@ -199,12 +200,12 @@
     <label class="switch sub"><input type="checkbox" bind:checked={settings.picture_settings.wikipedia} /> Wikipedia (artist bios, no key)</label>
     <label class="switch sub"><input type="checkbox" bind:checked={settings.picture_settings.commons} /> Wikimedia Commons (local copy, no key)</label>
     <label class="switch sub"><input type="checkbox" bind:checked={settings.picture_settings.fanart} /> fanart.tv (local copy, MusicBrainz match)</label>
-    <label class="field">fanart.tv API key<input type="password" bind:value={settings.picture_settings.fanart_key} autocomplete="off" placeholder="Your API key" /></label>
+    <label class="field">fanart.tv API key<SecretInput bind:value={settings.picture_settings.fanart_key} label="fanart.tv API key" placeholder="Your API key" /></label>
     <label class="switch sub"><input type="checkbox" bind:checked={settings.picture_settings.audiodb} /> TheAudioDB (local copy)</label>
-    <label class="field">TheAudioDB API key<input type="password" bind:value={settings.picture_settings.audiodb_key} autocomplete="off" placeholder="123 is the free key" /></label>
+    <label class="field">TheAudioDB API key<SecretInput bind:value={settings.picture_settings.audiodb_key} label="TheAudioDB API key" placeholder="123 is the free key" /></label>
     <label class="switch sub"><input type="checkbox" bind:checked={settings.picture_settings.allow_remote} /> Allow remote image display (visitors load images from the provider)</label>
     <label class="switch sub"><input type="checkbox" bind:checked={settings.picture_settings.unsplash} disabled={!settings.picture_settings.allow_remote} /> Unsplash (browse and select, remote display only)</label>
-    <label class="field">Unsplash access key<input type="password" bind:value={settings.picture_settings.unsplash_key} autocomplete="off" placeholder="Your Unsplash application access key" /></label>
+    <label class="field">Unsplash access key<SecretInput bind:value={settings.picture_settings.unsplash_key} label="Unsplash access key" placeholder="Your Unsplash application access key" /></label>
     <button onclick={() => save('Picture sources saved')}>Save picture sources</button>
     <h3>Browse and import</h3>
     <p class="small muted">Open these libraries to find artist photos. For licensed images, use Manage pictures on an artist page to upload a copy you are allowed to use, with its credit.</p>
@@ -299,14 +300,7 @@
   >
     <label>
       AcoustID key
-      <input
-        type="text"
-        bind:value={settings.acoustid_key}
-        placeholder="Leave empty to skip"
-        maxlength="64"
-        autocapitalize="none"
-        spellcheck="false"
-      />
+      <SecretInput bind:value={settings.acoustid_key} label="AcoustID key" placeholder="Leave empty to skip" maxlength={64} />
     </label>
     <button>Save</button>
   </form>
@@ -334,7 +328,7 @@
   >
     <label>
       YouTube Data API key
-      <input type="password" autocomplete="off" placeholder={hasYoutubeKey ? 'Saved. Paste a new key to replace it' : 'Your API key'} bind:value={youtubeKey} />
+      <SecretInput bind:value={youtubeKey} label="YouTube API key" placeholder={hasYoutubeKey ? 'Saved. Paste a new key to replace it' : 'Your API key'} />
     </label>
     <button disabled={!youtubeKey.trim()}>Save</button>
     {#if hasYoutubeKey}<button type="button" onclick={() => saveYoutubeKey('')}>Remove</button>{/if}
@@ -370,7 +364,7 @@
     width: 100%;
   }
   .field { display: grid; gap: 4px; max-width: 440px; margin: 10px 0; }
-  .field input { width: 100%; }
+  .field :global(input) { width: 100%; }
   .source-links { display: flex; flex-wrap: wrap; gap: 6px 12px; margin: 10px 0; }
 
   progress {

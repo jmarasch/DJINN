@@ -4,6 +4,7 @@
   import Art from '../lib/Art.svelte'
   import ScrollRow from '../lib/ScrollRow.svelte'
   import Browse from './Browse.svelte'
+  import PageTitle from '../lib/PageTitle.svelte'
   import Icon from '../lib/Icon.svelte'
   import TrackRow from '../lib/TrackRow.svelte'
   import NotInLibrary from '../lib/NotInLibrary.svelte'
@@ -139,6 +140,8 @@
   {/if}
 {/snippet}
 
+<PageTitle title={t('nav.library')} subtitle={t('library.subtitle')} />
+
 <div class="search-box" bind:this={searchBox}>
   <Icon name="search" />
   <div class="field">
@@ -169,7 +172,10 @@
 </div>
 
 {#if empty && !loading && !thinking && !described}
-  <p class="muted center">{t('search.no_matches', { query: query.trim() })}</p>
+  <div class="nothing">
+    <img src="/images/nothing-found.webp" alt="" />
+    <p class="muted">{t('search.no_matches', { query: query.trim() })}</p>
+  </div>
 {/if}
 
 {#if results}
@@ -217,6 +223,19 @@
 {/if}
 
 <style>
+  .nothing {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin-top: 24px;
+    text-align: center;
+  }
+
+  .nothing img {
+    width: min(170px, 50vw);
+    height: auto;
+  }
+
   /* The lyric line a search matched, under its song. */
   .quote {
     margin: -4px 0 10px 56px;
@@ -257,15 +276,37 @@
 
   .search-box {
     position: sticky;
-    top: var(--nav-height, 0px);
+    top: calc(var(--nav-height, 0px) + 8px);
     z-index: 5;
     display: flex;
     align-items: center;
     gap: 10px;
-    margin: 0 -16px;
-    padding: 12px 16px;
-    background: var(--bg);
+    margin: 0 0 12px;
+    padding: 2px 6px 2px 16px;
+    border: 1px solid var(--edge);
+    border-radius: 16px;
+    background: var(--surface-2);
+    box-shadow: var(--glow);
     color: var(--muted);
+  }
+
+  /* On wide screens the search sits beside the back button, not under it. */
+  @media (min-width: 900px) {
+    .search-box {
+      top: 8px;
+    }
+  }
+
+  .search-box:focus-within {
+    border-color: var(--edge-strong);
+    box-shadow: var(--glow-strong);
+  }
+
+  .search-box :global(input),
+  .search-box :global(input:focus-visible) {
+    border: 0;
+    background: transparent;
+    box-shadow: none;
   }
 
   .field {

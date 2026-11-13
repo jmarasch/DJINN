@@ -5,10 +5,16 @@
   import { onMount } from 'svelte'
   import { api } from '../../lib/api'
   import Art from '../../lib/Art.svelte'
+  import PageTitle from '../../lib/PageTitle.svelte'
   import { duration } from '../../lib/format'
   import type { GoHome } from '../../lib/types'
   import { carryOn, player } from '../player.svelte'
-  import SongList from '../SongList.svelte'
+  import Discover from '../../lib/Discover.svelte'
+  import LikeButton from '../LikeButton.svelte'
+  import SongRow from '../SongRow.svelte'
+  import SongTile from '../SongTile.svelte'
+  import { playList, playRadio, tapSong } from '../player.svelte'
+  import type { Track } from '../../lib/types'
 
   let home = $state<GoHome | null>(null)
   let error = $state('')
@@ -28,10 +34,7 @@
 
 {#if error}<p class="error">{error}</p>{/if}
 {#if home}
-  <div class="hero">
-    <h1>Your music</h1>
-    <p>Pick something to play, or carry on where you left off.</p>
-  </div>
+  <PageTitle title={t('go.your_music')} subtitle={t('go.home_hint')} />
   {#if home.resume && resumeSong && player.index < 0}
     {@const r = home.resume}
     <button class="carry-on card" onclick={() => carryOn(r.songs, r.queue, r.position, r.position_ms)}>
@@ -53,35 +56,22 @@
     </div>
   {/if}
 
-  {#if home.recent.length}
-    <h2>{t('go.played_lately')}</h2>
-    <SongList tracks={home.recent} />
-  {/if}
-
-  <h2>{t('go.new_in_library')}</h2>
-  <SongList tracks={home.newest} />
+  <Discover playAll={(tracks) => playList(tracks, 0)}>
+    {#snippet songRow(track: Track)}
+      <SongRow {track} onplay={() => tapSong(track, () => playRadio(track))} />
+    {/snippet}
+    {#snippet songTile(track: Track)}
+      <div class="song"><SongTile {track} onplay={() => tapSong(track, () => playRadio(track))} /></div>
+    {/snippet}
+    {#snippet like(kind: 'artist' | 'album', id: number, name: string)}
+      <LikeButton {kind} {id} {name} size={18} />
+    {/snippet}
+  </Discover>
 {:else if !error}
   <p class="muted">Loading...</p>
 {/if}
 
 <style>
-  .hero {
-    min-height: 150px;
-    padding: 28px 24px;
-    border-radius: 16px;
-    background: linear-gradient(90deg, rgb(20 17 31 / 0.9), rgb(20 17 31 / 0.3)), url('/images/listening-waves.webp') center / cover;
-    color: #ece8f6;
-  }
-
-  .hero h1 {
-    margin: 0 0 6px;
-  }
-
-  .hero p {
-    margin: 0;
-    max-width: 28ch;
-  }
-
   .carry-on {
     flex-direction: row;
     align-items: center;
@@ -99,6 +89,11 @@
   h2 {
     margin: 20px 0 8px;
     font-size: 1.05rem;
+  }
+
+  .song {
+    flex: none;
+    width: 150px;
   }
 
   .chips {

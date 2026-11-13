@@ -73,6 +73,8 @@ pub struct AppState {
     pub node_audio: Arc<crate::node_audio::Hub>,
     /// Players for the other rooms, and who follows whom.
     pub rooms: Arc<crate::rooms_rt::Rooms>,
+    /// Who has the party app open, per room.
+    pub presence: Arc<crate::presence::Presence>,
     /// First-time setup without the setup link (`server.open_setup`).
     pub open_setup: Arc<AtomicBool>,
 }
@@ -122,6 +124,7 @@ impl AppState {
             shutdown_request: Arc::new(Notify::new()),
             session_ending: Arc::new(AtomicBool::new(false)),
             roots_changed: Arc::new(Notify::new()),
+            presence: Arc::default(),
             join_url: Arc::default(),
             found_mains: Arc::default(),
             network: Arc::default(),

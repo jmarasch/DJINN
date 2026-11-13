@@ -855,6 +855,36 @@ async fn crossfade_setting_reaches_the_engine() {
 }
 
 #[tokio::test]
+async fn start_over_sends_the_same_song_again_and_skips_to_it() {
+    let mut h = Harness::new(0).await;
+    let user = h.user.clone();
+    h.jukebox
+        .add_request(&user, h.tracks[0], &origin())
+        .await
+        .unwrap();
+    h.event(EngineEvent::NextNeeded { after: None }).await;
+    let first = h.play_next().await;
+    h.event(EngineEvent::Position {
+        id: TrackId(first),
+        ms: 30_000,
+    })
+    .await;
+
+    let admin = h.admin.clone();
+    assert!(h.jukebox.restart_song(&admin).await.unwrap());
+    let sent = h.sent.lock().unwrap();
+    let again = sent.iter().rev().find_map(|c| match c {
+        Command::SetNext(Some(t)) => Some((t.id.0, t.start_ms)),
+        _ => None,
+    });
+    assert_eq!(again, Some((first, 0)), "the same song from the start");
+    assert!(
+        matches!(sent.last(), Some(Command::Skip)),
+        "then skipped to"
+    );
+}
+
+#[tokio::test]
 async fn a_restart_carries_on_with_the_song_playing() {
     let mut h = Harness::new(0).await;
     let user = h.user.clone();

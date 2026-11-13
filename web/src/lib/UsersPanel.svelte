@@ -316,7 +316,7 @@
   </section>
 {/if}
 
-<section class="card">
+<section class="card wide">
   <h2>Accounts</h2>
   {#each accounts as user (user.id)}
     <div class="user" class:off={user.status === 'disabled'}>
@@ -377,7 +377,7 @@
   </form>
 </section>
 
-<section class="card">
+<section class="card wide">
   <h2>Roles</h2>
   <p class="small muted">What each kind of account can do. Admins can do everything.</p>
   {#each roles as role (role.id)}

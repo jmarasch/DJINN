@@ -1,6 +1,7 @@
 // DJINN GO: personal listening, served on its own port.
 import '../polyfills'
 import { mount } from 'svelte'
+import '@fontsource-variable/outfit'
 import '../app.css'
 import GoApp from './GoApp.svelte'
 import { applyTheme } from '../lib/theme.svelte'

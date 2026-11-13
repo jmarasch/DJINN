@@ -3,6 +3,9 @@
   import { toast } from './state.svelte'
   import type { About } from './types'
 
+  // Which card: the build, or the credits. Both when not said.
+  let { part = 'both' }: { part?: 'both' | 'build' | 'credits' } = $props()
+
   let about = $state<About | null>(null)
 
   $effect(() => {
@@ -14,14 +17,19 @@
 </script>
 
 {#if about}
+  {#if part !== 'credits'}
   <section class="card">
+    <img class="shiny" src="/images/logo.webp" alt="" />
     <h2>DJINN {about.version}</h2>
     <p class="small muted">
-      A party jukebox by New Terra Studios.{#if about.commit}
-        Build {about.commit}{about.commit_date ? `, ${about.commit_date}` : ''}.{/if}
+      A party jukebox by New Terra Studios.{#if about.commit}{' '}Build {about.commit}{about.commit_date ? `, ${about.commit_date}` : ''}.{/if}
+    </p>
+    <p class="small">
+      Free to use at home, for hobbies, at school, for research and for charities. If you want to use it to make
+      money, such as in a bar or venue, ask first.
     </p>
     <p class="small muted">
-      Free for any non-commercial use under the
+      The full terms: free for any non-commercial use under the
       <a href="https://polyformproject.org/licenses/noncommercial/1.0.0" target="_blank" rel="noopener noreferrer"
         >PolyForm Noncommercial License 1.0.0</a
       >. Nobody may sell it or use it to make money.
@@ -33,7 +41,9 @@
       <a href="mailto:{about.contact}">{about.contact}</a>
     </div>
   </section>
+  {/if}
 
+  {#if part !== 'build'}
   <section class="card">
     <h2>Credits</h2>
     <ul class="small credits">
@@ -43,9 +53,16 @@
       <li>Built with Rust, Svelte, and many open source libraries, including Hugging Face's candle (MIT or Apache-2.0).</li>
     </ul>
   </section>
+  {/if}
 {/if}
 
 <style>
+  .shiny {
+    align-self: center;
+    width: 120px;
+    height: 120px;
+  }
+
   .links {
     display: flex;
     flex-wrap: wrap;

@@ -12,6 +12,24 @@ use std::collections::HashMap;
 pub struct Counts {
     pub plays: i64,
     pub likes: i64,
+    /// An artist's albums, in the artist list only.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub albums: i64,
+    /// An album's songs, in the album list only.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub songs: i64,
+}
+
+fn is_zero(n: &i64) -> bool {
+    *n == 0
+}
+
+/// Which list the counts are for, which says what the fourth column is.
+#[derive(Clone, Copy)]
+enum Of {
+    Songs,
+    Albums,
+    Artists,
 }
 
 /// The play heard enough of song `t`: `$ms` is its heard time, `?2` the percent.
@@ -38,9 +56,10 @@ impl Store {
                 ") + (SELECT count(*) FROM go_plays g JOIN tracks t ON t.id = g.track_id \
                     WHERE g.track_id = j.value AND ",
                 heard!("g.ms_played"),
-                "), (SELECT count(*) FROM go_likes l WHERE l.kind = 'track' AND l.ref_id = j.value) \
+                "), (SELECT count(*) FROM go_likes l WHERE l.kind = 'track' AND l.ref_id = j.value), 0 \
                  FROM json_each(?1) j"
             ),
+            Of::Songs,
             ids,
             percent,
         )
@@ -57,9 +76,11 @@ impl Store {
                 ") + (SELECT count(*) FROM tracks t JOIN go_plays g ON g.track_id = t.id \
                     WHERE t.album_id = j.value AND ",
                 heard!("g.ms_played"),
-                "), (SELECT count(*) FROM go_likes l WHERE l.kind = 'album' AND l.ref_id = j.value) \
+                "), (SELECT count(*) FROM go_likes l WHERE l.kind = 'album' AND l.ref_id = j.value), \
+                   (SELECT count(*) FROM tracks t WHERE t.album_id = j.value AND t.removed_at IS NULL) \
                  FROM json_each(?1) j"
             ),
+            Of::Albums,
             ids,
             percent,
         )
@@ -82,9 +103,12 @@ impl Store {
                 artist_songs!("j.value"),
                 " AND ",
                 heard!("g.ms_played"),
-                "), (SELECT count(*) FROM go_likes l WHERE l.kind = 'artist' AND l.ref_id = j.value) \
+                "), (SELECT count(*) FROM go_likes l WHERE l.kind = 'artist' AND l.ref_id = j.value), \
+                   (SELECT count(*) FROM albums a WHERE a.artist_id = j.value AND EXISTS \
+                     (SELECT 1 FROM tracks t WHERE t.album_id = a.id AND t.removed_at IS NULL)) \
                  FROM json_each(?1) j"
             ),
+            Of::Artists,
             ids,
             percent,
         )
@@ -94,20 +118,29 @@ impl Store {
     async fn counts(
         &self,
         sql: &'static str,
+        of: Of,
         ids: &[i64],
         percent: i64,
     ) -> Result<HashMap<i64, Counts>> {
         if ids.is_empty() {
             return Ok(HashMap::new());
         }
-        let rows: Vec<(i64, i64, i64)> = sqlx::query_as(sql)
+        let rows: Vec<(i64, i64, i64, i64)> = sqlx::query_as(sql)
             .bind(json_ids(ids))
             .bind(percent.clamp(0, 100))
             .fetch_all(&self.pool)
             .await?;
         Ok(rows
             .into_iter()
-            .map(|(id, plays, likes)| (id, Counts { plays, likes }))
+            .map(|(id, plays, likes, extra)| {
+                let counts = Counts {
+                    plays,
+                    likes,
+                    albums: if matches!(of, Of::Artists) { extra } else { 0 },
+                    songs: if matches!(of, Of::Albums) { extra } else { 0 },
+                };
+                (id, counts)
+            })
             .collect())
     }
 }

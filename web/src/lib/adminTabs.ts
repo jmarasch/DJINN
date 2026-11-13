@@ -2,33 +2,46 @@
 
 export const adminGroups = [
   {
-    label: 'Dashboard',
-    tabs: [{ id: 'home', label: 'Dashboard' }],
+    label: 'Overview',
+    tabs: [{ id: 'home', label: 'Overview', icon: 'home' }],
   },
   {
-    label: 'Settings',
+    label: 'Music and playback',
     tabs: [
-      { id: 'rules', label: 'Party' },
-      { id: 'smart', label: 'Smart play' },
-      { id: 'audio', label: 'Audio' },
-      { id: 'users', label: 'Users' },
-      { id: 'go', label: 'DJINN GO' },
-      { id: 'rooms', label: 'Rooms' },
-      { id: 'nodes', label: 'Nodes' },
-      { id: 'visuals', label: 'Visualizers' },
-      { id: 'library', label: 'Library' },
-      { id: 'ai', label: 'AI' },
-      { id: 'system', label: 'System' },
+      { id: 'library', label: 'Library', icon: 'library' },
+      { id: 'rules', label: 'Party and queue', icon: 'queue-play' },
+      { id: 'smart', label: 'Smart play', icon: 'similar' },
+      { id: 'audio', label: 'Audio', icon: 'playing' },
     ],
   },
   {
-    label: 'Metrics and logs',
+    label: 'House and devices',
     tabs: [
-      { id: 'stats', label: 'Stats' },
-      { id: 'log', label: 'Request log' },
-      { id: 'serverlog', label: 'Server log' },
-      { id: 'signins', label: 'Sign-in log' },
-      { id: 'problems', label: 'Library problems' },
+      { id: 'rooms', label: 'Rooms', icon: 'home' },
+      { id: 'nodes', label: 'Nodes', icon: 'radio' },
+      { id: 'go', label: 'DJINN GO', icon: 'headphones' },
+      { id: 'visuals', label: 'Visualizers', icon: 'grid' },
+    ],
+  },
+  {
+    label: 'Access',
+    tabs: [{ id: 'users', label: 'Users and roles', icon: 'person' }],
+  },
+  {
+    label: 'System',
+    tabs: [
+      { id: 'ai', label: 'AI', icon: 'cloud' },
+      { id: 'system', label: 'System', icon: 'settings' },
+    ],
+  },
+  {
+    label: 'Activity and logs',
+    tabs: [
+      { id: 'stats', label: 'Stats', icon: 'list' },
+      { id: 'log', label: 'Request log', icon: 'clock' },
+      { id: 'serverlog', label: 'Server log', icon: 'book' },
+      { id: 'signins', label: 'Sign-in log', icon: 'person' },
+      { id: 'problems', label: 'Library problems', icon: 'warning' },
     ],
   },
 ] as const

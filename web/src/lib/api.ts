@@ -40,6 +40,7 @@ import type {
   AiOptions,
   AiStatus,
   Album,
+  Discover,
   AlbumDetail,
   AlbumFilter,
   AlbumSort,
@@ -261,6 +262,7 @@ export const api = {
   setLyricsSettings: (settings: LyricsSettings) => put<void>('/lyrics/settings', settings),
   recheckLyrics: () => post<void>('/lyrics/recheck'),
   rooms: () => get<RoomList>('/rooms'),
+  roomPeople: () => get<{ count: number }>('/me/room/people'),
   chooseRoom: (roomId: number) => put<void>('/me/room', { room_id: roomId }),
   createRoom: (name: string) => post<Room>('/rooms', { name }),
   renameRoom: (id: number, name: string) => patch<void>(`/rooms/${id}`, { name }),
@@ -354,6 +356,18 @@ export const api = {
     put<void>(`/party/schedule?room=${room}`, { on: schedule.on, rules: schedule.rules }),
   /** The live stream for Play here; null when the host turned it off. */
   listen: () => get<{ url: string | null }>('/listen'),
+  discover: () => get<Discover>('/discover'),
+  appearance: () => get<{ background: string; strength: number }>('/appearance'),
+  saveAppearance: (value: { background: string; strength: number }) =>
+    put<{ background: string; strength: number }>('/appearance', value),
+  /** Sets the picture behind the pages from an image file. */
+  uploadBackground: async (file: File) => {
+    const res = await fetch('/api/appearance/image', { method: 'POST', body: file })
+    const data = await res.json().catch(() => null)
+    if (!res.ok) throw new ApiError(res.status, data?.error ?? `Upload failed (${res.status})`)
+    return data as { background: string; strength: number }
+  },
+  removeBackground: () => del<{ background: string; strength: number }>('/appearance/image'),
   trackEdit: (id: number) => get<TrackEdit>(`/tracks/${id}/edit`),
   editTracks: (change: TagChange) => put<void>('/tracks/edit', change),
   /** Renames an artist on all their songs and sets the genres of the songs
@@ -370,6 +384,8 @@ export const api = {
   play: () => post<void>('/player/play'),
   pause: () => post<void>('/player/pause'),
   skip: () => post<void>('/player/skip'),
+  /** Plays the song again from its start. */
+  startOver: () => post<void>('/player/restart'),
   /** Skips and counts it against the song, so the mix plays it less. */
   skipLess: () => post<void>('/player/skip?less=1'),
   setVolume: (volume: number) => put<void>('/player/volume', { volume }),

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { api } from '../lib/api'
+  import Brand from '../lib/Brand.svelte'
   import { app, connect } from '../lib/state.svelte'
   import type { User } from '../lib/types'
 
@@ -59,7 +60,7 @@
 </script>
 
 <form class="card" onsubmit={submit}>
-  <h1>{title}</h1>
+  <Brand name={title} />
   {#if ticket}
     <p class="muted">Type the 6-digit code from your authenticator app. Lost your phone? Use one of your recovery codes.</p>
     <label>
