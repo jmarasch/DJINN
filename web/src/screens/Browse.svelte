@@ -313,7 +313,7 @@
           </div>
         {:else}
           <div class="row-with-like">
-            <a class="row" href="#/artist/{artist.id}">
+            <a class="row lead" href="#/artist/{artist.id}">
               <Art hash={artist.art_hash} size={44} round={999} letter={initial(artist.name)} />
               <span class="name">
                 <span class="ellipsis block">{artist.name}</span>
@@ -321,6 +321,13 @@
                   {plural(artist.track_count, 'songs')}<Counts plays={artist.plays} likes={artist.likes} />
                 </span>
               </span>
+              <span class="muted small counts wide-only">
+                {#if artist.albums}{plural(artist.albums, 'albums')} · {/if}{plural(artist.track_count, 'songs')}{#if artist.plays}
+                  · {plural(artist.plays, 'plays')}{/if}
+              </span>
+            </a>
+            <span class="wide-only"><LikeCount kind="artist" id={artist.id} name={artist.name} likes={artist.likes} /></span>
+            <a class="row fill" href="#/artist/{artist.id}" tabindex="-1" aria-hidden="true">
               {#if artist.genres}
                 <span class="genre-chips">
                   {#each artist.genres.split(',').slice(0, 3) as genre (genre)}
@@ -328,12 +335,7 @@
                   {/each}
                 </span>
               {/if}
-              <span class="muted small counts wide-only">
-                {#if artist.albums}{plural(artist.albums, 'albums')} · {/if}{plural(artist.track_count, 'songs')}{#if artist.plays}
-                  · {plural(artist.plays, 'plays')}{/if}
-              </span>
             </a>
-            <span class="wide-only"><LikeCount kind="artist" id={artist.id} name={artist.name} likes={artist.likes} /></span>
             {#if like}<span class="narrow-only">{@render like('artist', artist.id, artist.name)}</span>{/if}
           </div>
         {/if}
@@ -383,7 +385,7 @@
           </div>
         {:else}
           <div class="row-with-like">
-            <a class="row" href="#/album/{album.id}">
+            <a class="row lead" href="#/album/{album.id}">
               <Art hash={album.art_hash} size={52} />
               <span class="name">
                 <span class="ellipsis block">{album.title}</span>
@@ -393,6 +395,13 @@
                   >
                 </span>
               </span>
+              <span class="muted small counts wide-only">
+                {#if album.songs}{plural(album.songs, 'songs')}{/if}{#if album.plays}
+                  · {plural(album.plays, 'plays')}{/if}
+              </span>
+            </a>
+            <span class="wide-only"><LikeCount kind="album" id={album.id} name={album.title} likes={album.likes} /></span>
+            <a class="row fill" href="#/album/{album.id}" tabindex="-1" aria-hidden="true">
               {#if album.genres}
                 <span class="genre-chips">
                   {#each album.genres.split(',').slice(0, 3) as genre (genre)}
@@ -400,12 +409,7 @@
                   {/each}
                 </span>
               {/if}
-              <span class="muted small counts wide-only">
-                {#if album.songs}{plural(album.songs, 'songs')}{/if}{#if album.plays}
-                  · {plural(album.plays, 'plays')}{/if}
-              </span>
             </a>
-            <span class="wide-only"><LikeCount kind="album" id={album.id} name={album.title} likes={album.likes} /></span>
             {#if like}<span class="narrow-only">{@render like('album', album.id, album.title)}</span>{/if}
           </div>
         {/if}
@@ -522,6 +526,11 @@
     border-bottom: none;
   }
 
+  /* The second link only fills the rest of the row (it holds the genres). */
+  .fill {
+    display: none;
+  }
+
   .with-like {
     position: relative;
     min-width: 0;
@@ -573,6 +582,21 @@
     .row {
       gap: 16px;
       padding: 6px 0;
+    }
+
+    /* The picture, name and counts stay together; the genres go to the far end. */
+    .row-with-like .lead {
+      flex: none;
+    }
+
+    .lead .name {
+      flex: none;
+      width: 260px;
+    }
+
+    .row-with-like .fill {
+      display: flex;
+      justify-content: flex-end;
     }
 
     .wide-only {

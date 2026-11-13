@@ -37,28 +37,13 @@
   let position = $state(0)
   let volume = $state(app.player.volume)
 
-  // Lyrics under the song, opened or closed per browser.
-  let lyricsOpen = $state(readLyricsOpen())
+  // Lyrics under the cover whenever the song has some.
   let lyrics = $state<Lyrics | null | undefined>(undefined)
-  function readLyricsOpen(): boolean {
-    try {
-      return localStorage.getItem('djinn-lyrics-open') === '1'
-    } catch {
-      return false
-    }
-  }
-  function toggleLyrics() {
-    lyricsOpen = !lyricsOpen
-    try {
-      localStorage.setItem('djinn-lyrics-open', lyricsOpen ? '1' : '0')
-    } catch {
-      // Not remembered.
-    }
-  }
+  const hasLyrics = $derived(!!lyrics && !lyrics.instrumental && !!(lyrics.lines?.length || lyrics.plain))
   $effect(() => {
     const id = current?.track.id
-    if (!lyricsOpen || id == null) return
     lyrics = undefined
+    if (id == null) return
     let live = true
     api
       .trackLyrics(id)
@@ -195,11 +180,16 @@
 <div class="stage">
 <section class="now">
   {#if current}
-    <div class="cover">
-      <span class="disc" aria-hidden="true"></span>
-      {@render wave('left')}
-      <Art hash={current.track.art_hash} size={420} round={16} />
-      {@render wave('right')}
+    <div class="left">
+      <div class="cover">
+        <span class="disc" aria-hidden="true"></span>
+        {@render wave('left')}
+        <Art hash={current.track.art_hash} size={420} round={16} />
+        {@render wave('right')}
+      </div>
+      {#if hasLyrics}
+        <div class="lyrics-card"><LyricsView {lyrics} position={currentPosition} /></div>
+      {/if}
     </div>
   {/if}
   <div class="song-info">
@@ -226,11 +216,8 @@
       <span>{duration(position)}</span>
       <span>{duration(total)}</span>
     </div>
-    <div class="actions">
-    <button class="lyrics-toggle" class:on={lyricsOpen} aria-pressed={lyricsOpen} onclick={toggleLyrics}>
-      <Icon name="book" size={22} /> {t('playing.lyrics')}
-    </button>
     {#if canVote}
+    <div class="actions">
       <button class="skip-vote" disabled={voted || resting} onclick={voteSkip}>
         <Icon name="skip" size={18} />
         {#if soleRequester}
@@ -245,10 +232,7 @@
             : ''}
         {/if}
       </button>
-    {/if}
     </div>
-    {#if lyricsOpen}
-      <div class="lyrics-card"><LyricsView {lyrics} position={currentPosition} /></div>
     {/if}
   {:else}
     <div class="idle">
@@ -293,8 +277,7 @@
   {/if}
 
   {#if isAdmin()}
-    <details class="admin-controls">
-    <summary>{t('playing.controls')}</summary>
+    <div class="admin-controls">
     <div class="controls">
       {#if app.player.state !== 'playing'}
         <button class="round big" aria-label="Play" onclick={() => control(api.play)}>
@@ -305,16 +288,26 @@
           <Icon name="pause" size={32} />
         </button>
       {/if}
-      <button class="round" aria-label="Skip" disabled={!current} onclick={() => control(api.skip)}>
+      <button
+        class="round"
+        aria-label="Start over"
+        title="Start this song again from the beginning"
+        disabled={!current}
+        onclick={() => control(api.startOver)}
+      >
+        <Icon name="previous" size={26} />
+      </button>
+      <button class="round" aria-label="Skip" title="Skip" disabled={!current} onclick={() => control(api.skip)}>
         <Icon name="skip" size={26} />
       </button>
       <button
-        class="small-button"
-        disabled={!current}
+        class="round dislike"
+        aria-label="Skip and play less like this"
         title="Skip it, and the auto mix plays it (and songs like it) less"
+        disabled={!current}
         onclick={() => control(api.skipLess)}
       >
-        Skip, play less
+        <Icon name="thumb-down" size={24} />
       </button>
     </div>
     <div class="audio">
@@ -332,7 +325,7 @@
         {/if}
       </p>
     </div>
-    </details>
+    </div>
   {/if}
   </div>
 </section>
@@ -393,25 +386,6 @@
 </div>
 
 <style>
-  .lyrics-toggle {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    min-height: 52px;
-    padding: 0 18px;
-    border: 1px solid var(--edge);
-    border-radius: 14px;
-    background: var(--surface-2);
-    color: var(--text);
-    font-size: 1.05rem;
-    font-weight: 600;
-  }
-
-  .lyrics-toggle.on {
-    color: var(--accent);
-  }
-
   .playing-page {
     position: relative;
     isolation: isolate;
@@ -586,8 +560,18 @@
     }
   }
 
+  .left {
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    width: min(28vw, 330px);
+    margin-right: min(4vw, 44px);
+  }
+
   .lyrics-card {
-    margin-top: 8px;
+    max-height: 360px;
+    overflow: hidden;
     padding: 12px;
     border: 1px solid var(--edge);
     border-radius: 14px;
@@ -595,22 +579,22 @@
     box-shadow: var(--glow);
   }
 
-  /* The host's buttons and volume stay folded away until wanted. */
+  /* The host's buttons and volume, in a neon card. */
   .admin-controls {
     margin-top: 14px;
+    padding: 4px 16px 14px;
     border: 1px solid var(--edge);
-    border-radius: 14px;
-    background: var(--surface);
-    padding: 0 14px 10px;
+    border-radius: 16px;
+    background: var(--card-bg);
+    box-shadow: var(--glow);
   }
 
-  .admin-controls summary {
-    min-height: 44px;
-    display: flex;
-    align-items: center;
-    cursor: pointer;
+  .dislike {
     color: var(--muted);
-    font-weight: 600;
+  }
+
+  .dislike:hover:not(:disabled) {
+    color: var(--bad);
   }
 
   .display-actions .button {
@@ -705,10 +689,8 @@
 
   .cover {
     position: relative;
-    flex: none;
-    width: min(28vw, 330px);
+    width: 100%;
     aspect-ratio: 1;
-    margin-right: min(4vw, 44px);
   }
 
   .cover :global(.art) {
@@ -974,11 +956,8 @@
       background: linear-gradient(90deg, var(--accent), transparent);
     }
 
-    .cover {
+    .left {
       width: min(62vw, 280px);
-    }
-
-    .cover {
       margin-right: 0;
     }
 

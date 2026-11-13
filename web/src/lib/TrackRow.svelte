@@ -67,14 +67,14 @@
     </div>
   </div>
   {#if rich}
+    {#if track.plays}<span class="plays muted small">{t('count.plays', { n: track.plays })}</span>{/if}
+    <span class="wide-only"><LikeCount kind="track" id={track.id} name={track.title} likes={track.likes} /></span>
+    <span class="narrow-only"><Heart kind="track" id={track.id} name={track.title} /></span>
     <span class="genre-chips">
       {#each (track.genres ?? []).slice(0, 3) as genre (genre)}
         <a class="genre-chip" href="#/genre/{encodeURIComponent(genre)}">{genre}</a>
       {/each}
     </span>
-    {#if track.plays}<span class="plays muted small">{t('count.plays', { n: track.plays })}</span>{/if}
-    <span class="wide-only"><LikeCount kind="track" id={track.id} name={track.title} likes={track.likes} /></span>
-    <span class="narrow-only"><Heart kind="track" id={track.id} name={track.title} /></span>
   {:else}
     <Heart kind="track" id={track.id} name={track.title} />
   {/if}
@@ -147,9 +147,16 @@
       display: none;
     }
 
+    /* The title and its counts stay together; the genres go to the far end. */
+    .row.rich .text {
+      flex: none;
+      width: 340px;
+    }
+
     .row.rich .genre-chips {
       display: flex;
-      flex: none;
+      flex: 1;
+      justify-content: flex-end;
       gap: 6px;
     }
 

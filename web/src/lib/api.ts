@@ -371,6 +371,8 @@ export const api = {
   play: () => post<void>('/player/play'),
   pause: () => post<void>('/player/pause'),
   skip: () => post<void>('/player/skip'),
+  /** Plays the song again from its start. */
+  startOver: () => post<void>('/player/restart'),
   /** Skips and counts it against the song, so the mix plays it less. */
   skipLess: () => post<void>('/player/skip?less=1'),
   setVolume: (volume: number) => put<void>('/player/volume', { volume }),

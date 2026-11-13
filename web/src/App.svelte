@@ -87,6 +87,14 @@
   const playlistId = $derived(param('/playlist'))
   const similarId = $derived(param('/similar'))
   const adminTab = $derived(adminTabFor(route.path))
+  /** Wide screens have the side menu; the header only holds the back button. */
+  let wide = $state(matchMedia('(min-width: 900px)').matches)
+  $effect(() => {
+    const query = matchMedia('(min-width: 900px)')
+    const update = () => (wide = query.matches)
+    query.addEventListener('change', update)
+    return () => query.removeEventListener('change', update)
+  })
   const themeLabel = $derived({ auto: 'Auto', light: 'Light', dark: 'Dark' }[theme.mode])
   const tab = $derived(
     route.path.startsWith('/search') || albumId || artistId || artistSongsId || similarId || genreName
@@ -101,6 +109,8 @@
             ? 'admin'
             : 'now',
   )
+  /** Not on the Playing screen or in Admin, where there's nowhere to go back to. */
+  const showBack = $derived(navigation.canGoBack && tab !== 'admin' && route.path !== '/')
 </script>
 
 {#if onTvPage}
@@ -142,7 +152,7 @@
        on wide screens a side menu with the same tabs and the rest below. -->
   <header class="topbar" bind:offsetHeight={navHeight}>
     <div class="topbar-row">
-      {#if navigation.canGoBack && tab !== 'admin'}
+      {#if showBack}
         <button class="back" onclick={goBack} aria-label={t('nav.back')} title={t('nav.back')}>
           <Icon name="back" size={24} />
         </button>
@@ -175,7 +185,6 @@
         <small>{t('brand.tagline')}</small>
       </span>
     </a>
-    {#if tab !== 'admin'}<div class="side-room"><RoomPicker /></div>{/if}
     <div class="tabs">
       <a href="#/" class:active={tab === 'now'}><Icon name="playing" /><span>{t('nav.playing')}</span></a>
       <a href="#/search" class:active={tab === 'search'}><Icon name="library" /><span>{t('nav.library')}</span></a>
@@ -200,7 +209,8 @@
       <button class="theme-toggle" onclick={cycleTheme} aria-label="Theme: {themeLabel}" title="Theme: {themeLabel}">
         <Icon name="theme" /><span>{themeLabel}</span>
       </button>
-      <button class="tune-in neon" onclick={() => (showJoin = true)}>
+      {#if tab !== 'admin'}<div class="side-room"><RoomPicker /></div>{/if}
+      <button class="tune-in" onclick={() => (showJoin = true)}>
         <Icon name="qr" size={26} />
         <span>
           <strong>{t('nav.join')}</strong>
@@ -217,7 +227,8 @@
     class:playing={route.path === '/'}
     class:wide={tab === 'admin'}
     class:library={tab === 'search' || tab === 'favorites'}
-    style:--nav-height="{navHeight}px"
+    class:has-back={showBack}
+    style:--nav-height="{wide ? 0 : navHeight}px"
   >
     {#if similarId}
       <Similar id={similarId} />
@@ -542,17 +553,6 @@
       display: block;
     }
 
-    .side-room :global(.room) {
-      display: flex;
-      justify-content: space-between;
-      padding: 0 6px;
-    }
-
-    .side-room :global(select) {
-      flex: 1;
-      min-width: 0;
-    }
-
     .extras .theme-toggle {
       display: flex;
       align-items: center;
@@ -609,11 +609,16 @@
     .tune-in {
       justify-content: flex-start;
       gap: 12px;
-      margin-top: 8px;
-      padding: 12px 14px;
-      border-radius: 14px;
+      padding: 10px 14px;
+      border: 1px solid transparent;
+      border-radius: 12px;
+      background: transparent;
       color: var(--accent);
       text-align: left;
+    }
+
+    .tune-in:hover {
+      border-color: var(--edge);
     }
 
     .tune-in span {
@@ -623,6 +628,7 @@
 
     .tune-in strong {
       color: var(--text);
+      font-weight: 400;
     }
 
     .tune-in small {
@@ -691,10 +697,16 @@
       padding: 10px 0;
     }
 
+    /* The back button sits in a gutter beside the page, so the page starts at the top. */
     main.app-main {
-      max-width: calc(var(--main-max) + var(--side-width) + 40px);
-      padding-left: calc(var(--side-width) + 24px);
+      --gutter: 0px;
+      max-width: calc(var(--main-max) + var(--side-width) + 40px + var(--gutter));
+      padding-left: calc(var(--side-width) + 24px + var(--gutter));
       padding-right: 24px;
+    }
+
+    main.app-main.has-back {
+      --gutter: 52px;
     }
   }
 

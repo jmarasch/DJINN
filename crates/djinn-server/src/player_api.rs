@@ -27,6 +27,7 @@ pub fn router() -> Router<AppState> {
         .route("/player/play", post(play))
         .route("/player/pause", post(pause))
         .route("/player/skip", post(skip))
+        .route("/player/restart", post(restart))
         .route("/player/skip-vote", post(skip_vote))
         .route("/player/volume", put(set_volume))
         .route("/player/crossfade", put(set_crossfade))
@@ -210,6 +211,17 @@ async fn play(AdminUser(admin): AdminUser, State(state): State<AppState>) -> Sta
 async fn pause(AdminUser(admin): AdminUser, State(state): State<AppState>) -> StatusCode {
     state.jukebox_of(admin.id).await.lock().await.pause();
     StatusCode::NO_CONTENT
+}
+
+/// Plays the song again from its start.
+async fn restart(
+    AdminUser(admin): AdminUser,
+    State(state): State<AppState>,
+) -> ApiResult<StatusCode> {
+    let jukebox = state.jukebox_of(admin.id).await;
+    let mut jukebox = jukebox.lock().await;
+    jukebox.restart_song(&admin).await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(serde::Deserialize)]

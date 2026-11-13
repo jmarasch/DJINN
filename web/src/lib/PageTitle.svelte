@@ -52,7 +52,7 @@
   h1 {
     margin: 0;
     font-size: 2.25rem;
-    text-shadow: 0 0 18px rgb(180 140 255 / 0.35);
+    text-shadow: 0 0 10px rgb(190 150 255 / 0.8), 0 0 28px rgb(180 140 255 / 0.55);
   }
 
   .wave {

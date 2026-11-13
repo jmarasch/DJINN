@@ -697,6 +697,23 @@ impl Jukebox {
         (self.engine)(Command::Skip);
     }
 
+    /// Plays the song again from its start: it goes next and the one
+    /// playing is sent away. False when nothing is playing.
+    pub async fn restart_song(&mut self, by: &User) -> anyhow::Result<bool> {
+        let Some(playing) = self.playing.as_ref() else {
+            return Ok(false);
+        };
+        let mut again = playing.pending.clone();
+        again.resume = None;
+        // Its request was taken off the queue when it started.
+        again.request_id = None;
+        if !self.send_next(again).await? {
+            return Ok(false);
+        }
+        self.skip(by);
+        Ok(true)
+    }
+
     /// Skips and counts it against the song: the auto mix and radio play it
     /// (and, in radio, songs like it) less. A plain skip doesn't.
     pub fn skip_play_less(&mut self, by: &User) {

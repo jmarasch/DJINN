@@ -99,6 +99,7 @@ body {
 }
 
 h1 {
+  text-shadow: 0 0 16px rgb(180 140 255 / 0.55);
   font-size: 1.75rem;
   font-weight: 700;
   letter-spacing: 0.01em;
@@ -334,6 +335,7 @@ label {
 }
 
 .card {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -345,6 +347,23 @@ label {
   box-shadow:
     var(--glow),
     inset 0 1px 0 rgb(255 255 255 / 0.04);
+}
+
+/* A bright line along a card's top edge, like a neon tube. */
+.card::before {
+  content: '';
+  position: absolute;
+  top: -1px;
+  left: 24px;
+  right: 24px;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent) 20%, var(--accent-2) 80%, transparent);
+  box-shadow:
+    0 0 8px var(--accent),
+    0 0 18px rgb(180 140 255 / 0.5);
+  opacity: 0.85;
+  pointer-events: none;
 }
 
 /* A panel with the neon edge but no card spacing, for lists and bars. */
@@ -362,6 +381,7 @@ label {
 .card h2 {
   color: var(--text);
   font-size: 1.125rem;
+  text-shadow: 0 0 12px rgb(180 140 255 / 0.65);
 }
 
 .muted {
@@ -425,4 +445,25 @@ label {
   .cards-2 > .wide {
     column-span: all;
   }
+}
+
+/* Glowing text is for the dark theme; on light it only smudges. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme='dark']) h1,
+  :root:not([data-theme='dark']) .card h2 {
+    text-shadow: none;
+  }
+
+  :root:not([data-theme='dark']) .card::before {
+    box-shadow: 0 0 6px rgb(111 63 214 / 0.35);
+  }
+}
+
+:root[data-theme='light'] h1,
+:root[data-theme='light'] .card h2 {
+  text-shadow: none;
+}
+
+:root[data-theme='light'] .card::before {
+  box-shadow: 0 0 6px rgb(111 63 214 / 0.35);
 }

@@ -435,9 +435,9 @@
   ])}
   <div data-subtab="sound" hidden={sub.audio !== 'sound'}>
     <div class="cards-2">
+      <div class="wide"><EqualizerPanel /></div>
       <CrossfadePanel />
       <ReplayGainPanel />
-      <div class="wide"><EqualizerPanel /></div>
     </div>
   </div>
   <div data-subtab="outputs" hidden={sub.audio !== 'outputs'}><OutputsPanel /></div>
@@ -445,9 +445,11 @@
 {:else if t === 'smart'}
   {@render subtabs('smart', [
     ['play', 'Smart play'],
+    ['styles', 'Party styles'],
     ['schedule', 'Party schedule'],
   ])}
-  <div data-subtab="play" hidden={sub.smart !== 'play'}><div class="cards-2"><SmartPlayPanel /></div></div>
+  <div data-subtab="play" hidden={sub.smart !== 'play'}><div class="cards-2"><SmartPlayPanel part="play" /></div></div>
+  <div data-subtab="styles" hidden={sub.smart !== 'styles'}><SmartPlayPanel part="styles" /></div>
   <div data-subtab="schedule" hidden={sub.smart !== 'schedule'}><SchedulePanel /></div>
 {:else if t === 'ai'}
   <div class="cards-2"><AiPanel /></div>
