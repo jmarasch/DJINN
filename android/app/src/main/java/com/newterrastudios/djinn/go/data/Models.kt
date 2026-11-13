@@ -89,6 +89,8 @@ data class AlbumDetail(
     @SerialName("art_hash") val artHash: String? = null,
     val label: String? = null,
     val tracks: List<Track> = emptyList(),
+    /** Comma separated. */
+    val genres: String? = null,
 )
 
 @Serializable
@@ -101,6 +103,8 @@ data class ArtistDetail(
     val albums: List<Album> = emptyList(),
     @SerialName("appears_on") val appearsOn: List<Album> = emptyList(),
     @SerialName("other_tracks") val otherTracks: List<Track> = emptyList(),
+    /** Comma separated. */
+    val genres: String? = null,
 )
 
 @Serializable
@@ -428,4 +432,32 @@ data class ResumeSave(
 data class Appearance(
     val background: String = "waves",
     val strength: Int = 28,
+)
+
+/** One of the speed dial's quick starts. */
+@Serializable
+data class Dial(
+    /** "artist" or "album". */
+    val kind: String,
+    val id: Long,
+    val name: String,
+    @SerialName("art_hash") val artHash: String? = null,
+)
+
+/** Artists like one you favorited. */
+@Serializable
+data class Because(val artist: ArtistSummary, val similar: List<ArtistSummary> = emptyList())
+
+/** Shelves to find something to play (GET /api/discover). */
+@Serializable
+data class Discover(
+    @SerialName("speed_dial") val speedDial: List<Dial> = emptyList(),
+    val forgotten: List<Track> = emptyList(),
+    val genres: List<GenreSummary> = emptyList(),
+    @SerialName("listen_again") val listenAgain: List<Track> = emptyList(),
+    @SerialName("new_albums") val newAlbums: List<Album> = emptyList(),
+    val throwbacks: List<Album> = emptyList(),
+    @SerialName("popular_songs") val popularSongs: List<Track> = emptyList(),
+    val because: Because? = null,
+    val explore: List<ArtistSummary> = emptyList(),
 )

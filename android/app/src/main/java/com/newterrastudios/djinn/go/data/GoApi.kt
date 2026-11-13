@@ -223,6 +223,7 @@ class GoApi(private val account: Account) {
     suspend fun artist(id: Long): ArtistDetail = get("/api/artists/$id")
     /** Artists that sound like this one, or share its genres. */
     suspend fun similarArtists(id: Long): List<ArtistSummary> = get("/api/artists/$id/similar")
+    suspend fun discover(): Discover = get("/api/discover")
     suspend fun appearance(): Appearance = get("/api/appearance")
     /** Where the house's own background picture is, with the version that keeps a changed one from being cached. */
     fun backgroundUrl(background: String): String? {

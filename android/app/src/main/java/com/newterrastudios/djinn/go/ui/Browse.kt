@@ -83,6 +83,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.util.UnstableApi
 import com.newterrastudios.djinn.go.data.Album
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import com.newterrastudios.djinn.go.data.Discover
+import com.newterrastudios.djinn.go.data.Dial
 import com.newterrastudios.djinn.go.data.AlbumDetail
 import com.newterrastudios.djinn.go.data.ApiException
 import com.newterrastudios.djinn.go.data.CertificateChanged
@@ -341,6 +345,15 @@ private fun ViewToggle(nav: Nav) {
 @UnstableApi
 @Composable
 fun HomeScreen(nav: Nav) {
+    // The shelves load beside the rest of Home, so a slow one doesn't hold it up.
+    var discover by remember { mutableStateOf<Discover?>(null) }
+    LaunchedEffect(Unit) {
+        discover = try {
+            nav.api.discover()
+        } catch (_: IOException) {
+            null
+        }
+    }
     Loaded(
         key = "home",
         load = { nav.api.home() },
@@ -380,8 +393,13 @@ fun HomeScreen(nav: Nav) {
                     )
                 }
             }
-            songSection(t("go.played_lately"), home.recent, nav)
-            songSection(t("go.new_in_library"), home.newest, nav)
+            val shelves = discover
+            if (shelves != null) {
+                discoverItems(shelves, nav)
+            } else {
+                songSection(t("go.played_lately"), home.recent, nav)
+                songSection(t("go.new_in_library"), home.newest, nav)
+            }
         }
     }
 }
@@ -1116,10 +1134,17 @@ fun AlbumScreen(id: Long, nav: Nav) {
                 Column(Modifier.padding(16.dp)) {
                     Art(nav.api.artUrl(album.artHash, 512), 200.dp)
                     Text(album.title, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(top = 12.dp))
+                    // The artist's name opens their page; the rest is small print.
                     Text(
-                        listOfNotNull(album.artist, album.year?.toString(), album.label).joinToString(" · "),
+                        album.artist,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.clickable { nav.push(Screen.Artist(album.artistId)) },
+                    )
+                    Text(
+                        listOfNotNull(album.year?.toString(), album.label).joinToString(" · "),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    GenreLinks(album.genres, nav)
                     Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                         FilledTonalButton(
                             onClick = { nav.player.play(album.tracks) },
@@ -1183,6 +1208,7 @@ fun ArtistScreen(id: Long, nav: Nav) {
                 Column(Modifier.padding(16.dp)) {
                     Art(nav.api.artUrl(artist.artHash, 512), 160.dp, CircleShape)
                     Text(artist.name, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(top = 12.dp))
+                    GenreLinks(artist.genres, nav)
                     Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                         FilledTonalButton(
                             enabled = total > 0,
@@ -1846,5 +1872,180 @@ private fun AskForSong(query: String, nav: Nav) {
             },
             dismissButton = { TextButton(onClick = { asking = false }) { Text(t("common.cancel")) } },
         )
+    }
+}
+
+// ---- Discover: shelves to find something to play ----
+
+/** A shelf: a heading and a row that scrolls sideways. */
+private fun LazyListScope.shelf(title: String, content: LazyListScope.() -> Unit) {
+    item { Heading(title) }
+    item {
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) { content() }
+    }
+}
+
+@UnstableApi
+private fun LazyListScope.discoverItems(d: Discover, nav: Nav) {
+    if (d.speedDial.isNotEmpty()) {
+        item { Heading(t("discover.speed_dial")) }
+        item { SpeedDial(d.speedDial, nav) }
+    }
+    if (d.genres.isNotEmpty()) {
+        item { Heading(t("discover.genres")) }
+        item {
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                items(d.genres) { genre -> GenrePill(genre.name, genre.songs) { nav.push(Screen.Genre(genre.name)) } }
+            }
+        }
+    }
+    if (d.listenAgain.isNotEmpty()) shelf(t("discover.listen_again")) { items(d.listenAgain) { SongShelfTile(it, nav) } }
+    if (d.newAlbums.isNotEmpty()) shelf(t("discover.new_albums")) { items(d.newAlbums) { AlbumShelfTile(it, nav) } }
+    if (d.popularSongs.isNotEmpty()) {
+        item {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.weight(1f)) { Heading(t("discover.quick_picks")) }
+                TextButton(onClick = { nav.player.play(d.popularSongs) }, modifier = Modifier.padding(end = 8.dp)) {
+                    Text(t("discover.play_all"))
+                }
+            }
+        }
+        items(d.popularSongs.take(6)) { song -> SongRow(song, nav) { nav.startRadio(song) } }
+    }
+    if (d.forgotten.isNotEmpty()) shelf(t("discover.forgotten")) { items(d.forgotten) { SongShelfTile(it, nav) } }
+    if (d.throwbacks.isNotEmpty()) shelf(t("discover.throwbacks")) { items(d.throwbacks) { AlbumShelfTile(it, nav) } }
+    d.because?.let { because ->
+        shelf(t("discover.because", "name" to because.artist.name)) { items(because.similar) { ArtistShelfTile(it, nav) } }
+    }
+    if (d.explore.isNotEmpty()) shelf(t("discover.explore")) { items(d.explore) { ArtistShelfTile(it, nav) } }
+}
+
+/** The shelves' tiles are this wide. */
+private val SHELF_TILE = 140.dp
+
+@UnstableApi
+@Composable
+private fun SongShelfTile(song: Track, nav: Nav) {
+    Box(Modifier.width(SHELF_TILE)) {
+        Tile(
+            art = { TileArt(nav.api.artUrl(song.artHash, 256), RoundedCornerShape(16.dp)) },
+            title = song.title,
+            subtitle = song.artist,
+            onClick = { nav.startRadio(song) },
+            corner = {
+                val liked = song.id in nav.liked
+                IconButton(onClick = { nav.scope.launch { nav.setLiked(song.id, !liked) } }, modifier = Modifier.size(34.dp)) {
+                    Icon(
+                        if (liked) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                        contentDescription = if (liked) t("go.unlike_named", "name" to song.title) else t("go.like_named", "name" to song.title),
+                        tint = if (liked) MaterialTheme.colorScheme.primary else Color.White,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            },
+        )
+    }
+}
+
+@UnstableApi
+@Composable
+private fun AlbumShelfTile(album: Album, nav: Nav) {
+    Box(Modifier.width(SHELF_TILE)) {
+        Tile(
+            art = { TileArt(nav.api.artUrl(album.artHash, 256), RoundedCornerShape(16.dp)) },
+            title = album.title,
+            subtitle = listOfNotNull(album.artist, album.year?.toString()).joinToString(" · "),
+            onClick = { nav.push(Screen.Album(album.id)) },
+            corner = { LikeHeart(album.id, nav.likedAlbums, album.title, nav.api::setAlbumLike, nav) },
+        )
+    }
+}
+
+@UnstableApi
+@Composable
+private fun ArtistShelfTile(artist: ArtistSummary, nav: Nav) {
+    Box(Modifier.width(SHELF_TILE)) {
+        Tile(
+            art = { TileArt(nav.api.artUrl(artist.artHash, 256), CircleShape) },
+            title = artist.name,
+            subtitle = "${artist.trackCount} songs",
+            onClick = { nav.push(Screen.Artist(artist.id)) },
+            corner = { LikeHeart(artist.id, nav.likedArtists, artist.name, nav.api::setArtistLike, nav) },
+        )
+    }
+}
+
+/** Nine quick starts in a grid, each a cover with its name along the bottom. */
+@UnstableApi
+@Composable
+private fun SpeedDial(items: List<Dial>, nav: Nav) {
+    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
+        val side = (this.maxWidth - 16.dp) / 3
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            items.chunked(3).forEach { row ->
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    row.forEach { item ->
+                        val shape = RoundedCornerShape(14.dp)
+                        Box(
+                            Modifier
+                                .size(side)
+                                .neon(shape)
+                                .clip(shape)
+                                .clickable {
+                                    nav.push(if (item.kind == "artist") Screen.Artist(item.id) else Screen.Album(item.id))
+                                },
+                        ) {
+                            Art(nav.api.artUrl(item.artHash, 256), side, shape)
+                            Text(
+                                item.name,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                style = MaterialTheme.typography.labelLarge,
+                                color = Color.White,
+                                modifier = Modifier
+                                    .align(Alignment.BottomStart)
+                                    .fillMaxWidth()
+                                    .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.75f))))
+                                    .padding(start = 8.dp, end = 8.dp, top = 16.dp, bottom = 6.dp),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** A genre as a neon pill that opens its page. */
+@Composable
+private fun GenrePill(name: String, songs: Long, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(999.dp)
+    Row(
+        Modifier
+            .neon(shape)
+            .clip(shape)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(name)
+        if (songs > 0) Text("%,d".format(songs), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+/** An artist's or album's genres, each opening its page. */
+@Composable
+private fun GenreLinks(genres: String?, nav: Nav) {
+    val names = genres?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }.orEmpty()
+    if (names.isEmpty()) return
+    FlowRow(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        names.take(6).forEach { name -> GenrePill(name, 0) { nav.push(Screen.Genre(name)) } }
     }
 }
