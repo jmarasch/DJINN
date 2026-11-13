@@ -838,6 +838,7 @@ export type ProblemKind =
   | 'tags'
   | 'wont_play'
   | 'reported'
+  | 'reported_lyrics'
   | 'no_artist'
   | 'no_album'
   | 'album_no_cover'
@@ -1379,6 +1380,8 @@ export interface LyricsStatus {
   not_looked_up: number
   /** Songs whose lyrics came from an imported zip. */
   imported: number
+  /** Songs with lyrics an admin removed as bad. */
+  blocked: number
   running: boolean
   phase: '' | 'reading' | 'looking up'
 }
@@ -1397,6 +1400,7 @@ export interface LyricsImportReport {
   had_lyrics: number
   kept_import: number
   waiting_lrclib: number
+  blocked: number
   instrumental: number
   empty: number
   too_big: number

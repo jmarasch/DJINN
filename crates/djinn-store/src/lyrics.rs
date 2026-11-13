@@ -47,6 +47,30 @@ pub struct LyricsCounts {
     pub not_looked_up: i64,
     /// Songs whose lyrics came from an imported zip.
     pub imported: i64,
+    /// Songs with lyrics an admin removed as bad.
+    pub blocked: i64,
+}
+
+/// What saving imported lyrics did.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BulkSave {
+    Saved,
+    /// The song has lyrics already (or imported ones, kept).
+    Kept,
+    /// An admin removed exactly these lyrics before.
+    Blocked,
+}
+
+/// A fingerprint of lyrics' text, to tell whether a source gives the same
+/// words again (FNV-1a over the trimmed text, with its length).
+pub fn text_hash(synced: Option<&str>, plain: Option<&str>) -> String {
+    let text = synced.or(plain).unwrap_or("").trim();
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in text.bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0100_0000_01b3);
+    }
+    format!("{hash:016x}{:x}", text.len())
 }
 
 /// What a song has now, for an import deciding whether to fill it.
@@ -112,6 +136,16 @@ impl Store {
         file_mtime: i64,
         found: &NewLyrics<'_>,
     ) -> Result<()> {
+        // Lyrics an admin removed stay removed while the file says the same.
+        let found = if found.source != "none"
+            && self
+                .lyrics_blocked(track_id, found.source, found.synced, found.plain)
+                .await?
+        {
+            &NewLyrics::NONE
+        } else {
+            found
+        };
         sqlx::query(
             "INSERT INTO lyrics (track_id, synced, plain, instrumental, source, file_mtime, updated_at)
              SELECT id, ?, ?, ?, ?, ?, ? FROM tracks WHERE id = ?
@@ -162,6 +196,14 @@ impl Store {
         found: Option<&NewLyrics<'_>>,
     ) -> Result<()> {
         let now = now_ms();
+        let blocked = match found {
+            Some(f) => {
+                self.lyrics_blocked(track_id, f.source, f.synced, f.plain)
+                    .await?
+            }
+            None => false,
+        };
+        let found = found.filter(|_| !blocked);
         match found {
             Some(found) => {
                 sqlx::query(
@@ -214,15 +256,23 @@ impl Store {
         .await?)
     }
 
-    /// Saves imported lyrics for a song with none (no row, or source 'none');
-    /// with `replace`, also over earlier imported lyrics. Lyrics from files,
-    /// tags or LRCLIB are never touched. True when saved.
+    /// Saves imported lyrics for a song with none (no row, or source 'none').
+    /// Timed lyrics also take the place of imported plain ones; with
+    /// `replace`, imported lyrics are replaced by newer ones (but never timed
+    /// by plain). Lyrics from files, tags or LRCLIB are never touched, and
+    /// lyrics an admin removed aren't brought back.
     pub async fn save_bulk_lyrics(
         &self,
         track_id: i64,
         found: &NewLyrics<'_>,
         replace: bool,
-    ) -> Result<bool> {
+    ) -> Result<BulkSave> {
+        if self
+            .lyrics_blocked(track_id, "bulk", found.synced, found.plain)
+            .await?
+        {
+            return Ok(BulkSave::Blocked);
+        }
         let done = sqlx::query(
             "INSERT INTO lyrics (track_id, synced, plain, instrumental, source, file_mtime, updated_at)
              SELECT id, ?, ?, ?, 'bulk', NULL, ? FROM tracks WHERE id = ?
@@ -230,7 +280,10 @@ impl Store {
                synced = excluded.synced, plain = excluded.plain,
                instrumental = excluded.instrumental, source = 'bulk',
                file_mtime = NULL, updated_at = excluded.updated_at
-             WHERE lyrics.source = 'none' OR (? AND lyrics.source = 'bulk')",
+             WHERE lyrics.source = 'none'
+                OR (lyrics.source = 'bulk'
+                    AND ((excluded.synced IS NOT NULL AND lyrics.synced IS NULL)
+                         OR (? AND (excluded.synced IS NOT NULL OR lyrics.synced IS NULL))))",
         )
         .bind(found.synced)
         .bind(found.plain)
@@ -240,7 +293,96 @@ impl Store {
         .bind(replace)
         .execute(&self.pool)
         .await?;
-        Ok(done.rows_affected() > 0)
+        Ok(if done.rows_affected() > 0 {
+            BulkSave::Saved
+        } else {
+            BulkSave::Kept
+        })
+    }
+
+    /// True when an admin removed lyrics from this source with this text.
+    pub async fn lyrics_blocked(
+        &self,
+        track_id: i64,
+        source: &str,
+        synced: Option<&str>,
+        plain: Option<&str>,
+    ) -> Result<bool> {
+        let hash: Option<String> = sqlx::query_scalar(
+            "SELECT text_hash FROM lyrics_blocks WHERE track_id = ? AND source = ?",
+        )
+        .bind(track_id)
+        .bind(source)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(hash.is_some_and(|h| h == text_hash(synced, plain)))
+    }
+
+    /// Takes a song's lyrics away as wrong or bad and remembers where they
+    /// came from, so that source's same text isn't taken again. The source
+    /// removed, or None when the song has none.
+    pub async fn block_lyrics(
+        &self,
+        track_id: i64,
+        admin_id: i64,
+        reason: Option<&str>,
+    ) -> Result<Option<String>> {
+        let row: Option<(String, Option<String>, Option<String>)> = sqlx::query_as(
+            "SELECT source, synced, plain FROM lyrics WHERE track_id = ? AND source != 'none'",
+        )
+        .bind(track_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        let Some((source, synced, plain)) = row else {
+            return Ok(None);
+        };
+        let now = now_ms();
+        let mut tx = self.write().await?;
+        sqlx::query(
+            "INSERT OR REPLACE INTO lyrics_blocks
+               (track_id, source, text_hash, reason, blocked_by, created_at)
+             VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .bind(track_id)
+        .bind(&source)
+        .bind(text_hash(synced.as_deref(), plain.as_deref()))
+        .bind(reason)
+        .bind(admin_id)
+        .bind(now)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(
+            "UPDATE lyrics SET synced = NULL, plain = NULL, instrumental = 0, source = 'none',
+                    online_checked_at = ?, updated_at = ?
+             WHERE track_id = ?",
+        )
+        .bind(now)
+        .bind(now)
+        .bind(track_id)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(Some(source))
+    }
+
+    /// Lets removed lyrics come back (every song's, or one song's): the
+    /// songs are read and asked about again. How many blocks were lifted.
+    pub async fn allow_lyrics_again(&self, track_id: Option<i64>) -> Result<u64> {
+        let mut tx = self.write().await?;
+        sqlx::query(
+            "UPDATE lyrics SET file_mtime = NULL, online_checked_at = NULL
+             WHERE source = 'none'
+               AND track_id IN (SELECT track_id FROM lyrics_blocks WHERE ?1 IS NULL OR track_id = ?1)",
+        )
+        .bind(track_id)
+        .execute(&mut *tx)
+        .await?;
+        let done = sqlx::query("DELETE FROM lyrics_blocks WHERE ?1 IS NULL OR track_id = ?1")
+            .bind(track_id)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(done.rows_affected())
     }
 
     /// Takes back every imported lyric; those songs can be looked up again.
@@ -270,7 +412,8 @@ impl Store {
                count(CASE WHEN l.source = 'none'
                            AND (l.online_checked_at IS NULL OR l.online_checked_at < ?) THEN 1 END)
                  AS not_looked_up,
-               count(CASE WHEN l.source = 'bulk' THEN 1 END) AS imported
+               count(CASE WHEN l.source = 'bulk' THEN 1 END) AS imported,
+               (SELECT count(*) FROM lyrics_blocks) AS blocked
              FROM lyrics l JOIN tracks t ON t.id = l.track_id WHERE t.removed_at IS NULL",
         )
         .bind(now_ms() - LYRICS_RECHECK_MS)
@@ -447,18 +590,19 @@ mod tests {
             source: "bulk",
         };
         // A song with lyrics keeps them; an empty one and an unread one are filled.
-        assert!(!store
-            .save_bulk_lyrics(ids[0], &bulk("Imported"), false)
-            .await
-            .unwrap());
-        assert!(store
-            .save_bulk_lyrics(ids[1], &bulk("Imported two"), false)
-            .await
-            .unwrap());
-        assert!(store
-            .save_bulk_lyrics(ids[2], &bulk("Imported three"), false)
-            .await
-            .unwrap());
+        let save = |id: i64, text: &'static str, replace: bool| {
+            let store = &store;
+            async move {
+                store
+                    .save_bulk_lyrics(id, &bulk(text), replace)
+                    .await
+                    .unwrap()
+                    == BulkSave::Saved
+            }
+        };
+        assert!(!save(ids[0], "Imported", false).await);
+        assert!(save(ids[1], "Imported two", false).await);
+        assert!(save(ids[2], "Imported three", false).await);
         assert_eq!(
             store
                 .lyrics(ids[0])
@@ -470,14 +614,8 @@ mod tests {
             Some("From a tag")
         );
         // Imported lyrics are kept unless asked to replace them.
-        assert!(!store
-            .save_bulk_lyrics(ids[1], &bulk("Newer"), false)
-            .await
-            .unwrap());
-        assert!(store
-            .save_bulk_lyrics(ids[1], &bulk("Newer"), true)
-            .await
-            .unwrap());
+        assert!(!save(ids[1], "Newer", false).await);
+        assert!(save(ids[1], "Newer", true).await);
         assert_eq!(store.lyrics_counts().await.unwrap().imported, 2);
         assert_eq!(
             store.search_lyrics("newer thing", 5).await.unwrap().len(),
@@ -506,6 +644,127 @@ mod tests {
         assert!(store.lyrics(ids[0]).await.unwrap().is_some());
         assert!(store.search_lyrics("newer", 5).await.unwrap().is_empty());
         assert_eq!(store.lyrics_to_look_up(10).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn timed_imports_beat_plain_ones() {
+        let (store, ids) = store_with(&["One"]).await;
+        let plain = NewLyrics {
+            synced: None,
+            plain: Some("Words"),
+            instrumental: false,
+            source: "bulk",
+        };
+        let timed = NewLyrics {
+            synced: Some("[00:01.00]Words"),
+            plain: Some("Words"),
+            instrumental: false,
+            source: "bulk",
+        };
+        assert_eq!(
+            store.save_bulk_lyrics(ids[0], &plain, false).await.unwrap(),
+            BulkSave::Saved
+        );
+        // Timed takes the place of plain without being asked to replace.
+        assert_eq!(
+            store.save_bulk_lyrics(ids[0], &timed, false).await.unwrap(),
+            BulkSave::Saved
+        );
+        // Plain never takes the place of timed, even when replacing.
+        assert_eq!(
+            store.save_bulk_lyrics(ids[0], &plain, true).await.unwrap(),
+            BulkSave::Kept
+        );
+        assert!(store
+            .lyrics(ids[0])
+            .await
+            .unwrap()
+            .unwrap()
+            .synced
+            .is_some());
+    }
+
+    #[tokio::test]
+    async fn removed_lyrics_stay_removed_until_they_change() {
+        let (store, ids) = store_with(&["One"]).await;
+        sqlx::query("INSERT INTO users (username, password_hash, role, created_at) VALUES ('a', 'x', 'admin', 1)")
+            .execute(&store.pool)
+            .await
+            .ok();
+        let admin: i64 = sqlx::query_scalar("SELECT id FROM users LIMIT 1")
+            .fetch_one(&store.pool)
+            .await
+            .unwrap_or(1);
+        let words = NewLyrics {
+            synced: None,
+            plain: Some("Wrong song's words"),
+            instrumental: false,
+            source: "lrclib",
+        };
+        store
+            .save_read_lyrics(ids[0], 7, &NewLyrics::NONE)
+            .await
+            .unwrap();
+        store
+            .save_looked_up_lyrics(ids[0], Some(&words))
+            .await
+            .unwrap();
+        assert_eq!(
+            store
+                .block_lyrics(ids[0], admin, Some("wrong song"))
+                .await
+                .unwrap(),
+            Some("lrclib".to_owned())
+        );
+        assert_eq!(store.lyrics(ids[0]).await.unwrap(), None);
+        assert!(store
+            .search_lyrics("wrong song", 5)
+            .await
+            .unwrap()
+            .is_empty());
+        assert_eq!(store.lyrics_counts().await.unwrap().blocked, 1);
+        // The same text from that source is refused; different text is not.
+        store
+            .save_looked_up_lyrics(ids[0], Some(&words))
+            .await
+            .unwrap();
+        assert_eq!(store.lyrics(ids[0]).await.unwrap(), None);
+        // Imports and files are other sources.
+        let bulk = NewLyrics {
+            source: "bulk",
+            ..words_like(&words)
+        };
+        assert_eq!(
+            store.save_bulk_lyrics(ids[0], &bulk, false).await.unwrap(),
+            BulkSave::Saved
+        );
+        assert_eq!(
+            store.block_lyrics(ids[0], admin, None).await.unwrap(),
+            Some("bulk".into())
+        );
+        assert_eq!(
+            store.save_bulk_lyrics(ids[0], &bulk, false).await.unwrap(),
+            BulkSave::Blocked
+        );
+        let fixed = NewLyrics {
+            plain: Some("Right words"),
+            ..words_like(&bulk)
+        };
+        assert_eq!(
+            store.save_bulk_lyrics(ids[0], &fixed, false).await.unwrap(),
+            BulkSave::Saved
+        );
+        assert_eq!(store.allow_lyrics_again(None).await.unwrap(), 2);
+        assert_eq!(store.lyrics_counts().await.unwrap().blocked, 0);
+    }
+
+    fn words_like<'a>(l: &NewLyrics<'a>) -> NewLyrics<'a> {
+        NewLyrics {
+            synced: l.synced,
+            plain: l.plain,
+            instrumental: l.instrumental,
+            source: l.source,
+        }
     }
 
     #[tokio::test]

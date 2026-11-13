@@ -89,6 +89,17 @@
     }
   }
 
+  async function allowAgain() {
+    if (!confirm('Let every removed lyric come back? Songs are read and asked about again.')) return
+    try {
+      await api.allowAllLyrics()
+      toast('Done')
+      setTimeout(refresh, 500)
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not do that', true)
+    }
+  }
+
   const report = $derived(importing?.report ?? null)
   const withWords = $derived(status ? status.synced + status.plain : 0)
   const pageUrl = `${location.origin}/lyrics`
@@ -133,6 +144,13 @@
     <button onclick={recheck}>Recheck lyrics</button>
     {#if withWords}<a class="button" href="/api/lyrics/export" download>Export .lrc files</a>{/if}
   </div>
+  {#if status?.blocked}
+    <p class="small">
+      {n(status.blocked)} {status.blocked === 1 ? 'song has' : 'songs have'} lyrics you removed as bad, which won't be
+      taken from the same source again unless its text changes.
+      <button class="link" onclick={allowAgain}>Allow them again</button>
+    </p>
+  {/if}
   <p class="small muted">
     Recheck reads every song again (for .lrc files added since) and asks LRCLIB again. Export downloads a zip of .lrc
     files laid out like your music folders and named like the songs, so unzipping it over a music folder puts each one

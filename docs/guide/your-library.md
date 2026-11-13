@@ -162,4 +162,10 @@ Admin > Library > Lyrics can load lyrics from a zip of files. DJINN keeps them i
 
 **Safety.** Files are read only as text. A file that looks like code or markup (SQL, script or HTML tags, shell commands, binary data) is thrown out and listed as a warning, and program or data files in the zip (`.exe`, `.sql`, `.zip` and so on) are never read. Admin Home reminds you until you clear the report. The rest of the zip still imports.
 
+Timed lyrics are always preferred: if a song has both timed and plain imported lyrics, the timed ones are kept, and a later zip with timed lyrics takes the place of plain ones without asking.
+
 When it finishes, the panel shows what was saved and skipped, and the full report can be downloaded. **Remove all imported lyrics** in Admin > System takes back everything that came from zips and leaves other lyrics alone.
+
+## Reporting bad lyrics
+
+On the Playing tab and in DJINN GO, **Report these lyrics** under a song's lyrics lets anyone say they are another song's, out of time, garbled, or missing parts. Reports show in Admin > Library > Problems as **Lyrics listeners reported**, with a button to look at the lyrics. **Remove and block** takes the lyrics away and remembers which source they came from (a `.lrc` file, the song's tags, LRCLIB or an import): that source's same text is not used for the song again. If the source gives different text later, it is used. **Done** clears the reports and keeps the lyrics. **Allow them again** in Admin > Library > Lyrics lifts every block.

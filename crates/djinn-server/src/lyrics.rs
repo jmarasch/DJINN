@@ -47,6 +47,11 @@ pub fn router() -> Router<AppState> {
         .route("/lyrics/status", get(status))
         .route("/lyrics/settings", get(get_settings).put(put_settings))
         .route("/lyrics/recheck", post(recheck))
+        .route(
+            "/lyrics/{track_id}/block",
+            post(block_lyrics).delete(allow_lyrics),
+        )
+        .route("/lyrics/blocks", axum::routing::delete(allow_all_lyrics))
         .route("/lyrics/export", get(export))
         .route("/lyrics-page", get(page))
         .route("/lyrics-page/events", get(crate::sse::lyrics_events))
@@ -356,6 +361,53 @@ async fn put_settings(
     if body.lookup && !was {
         start(&state);
     }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize, Default)]
+struct BlockBody {
+    #[serde(default)]
+    reason: Option<String>,
+}
+
+/// Removes a song's lyrics as wrong or bad and remembers where they came
+/// from, so that source's same text isn't taken again.
+async fn block_lyrics(
+    admin: AdminUser,
+    State(state): State<AppState>,
+    UrlPath(track_id): UrlPath<i64>,
+    body: Option<Json<BlockBody>>,
+) -> ApiResult<StatusCode> {
+    let reason = body
+        .and_then(|b| b.0.reason)
+        .map(|r| r.trim().chars().take(200).collect::<String>())
+        .filter(|r| !r.is_empty());
+    let source = state
+        .store
+        .block_lyrics(track_id, admin.0.id, reason.as_deref())
+        .await?
+        .ok_or_else(|| ApiError::not_found_with("that song has no lyrics"))?;
+    state.store.clear_lyrics_reports(track_id).await?;
+    tracing::info!(track_id, source, "lyrics removed as bad");
+    // Open lyrics pages and the Library tab's numbers follow.
+    tell(&state, true).await;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Lets one song's removed lyrics come back (they're read and asked about again).
+async fn allow_lyrics(
+    _: AdminUser,
+    State(state): State<AppState>,
+    UrlPath(track_id): UrlPath<i64>,
+) -> ApiResult<StatusCode> {
+    state.store.allow_lyrics_again(Some(track_id)).await?;
+    start(&state);
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn allow_all_lyrics(_: AdminUser, State(state): State<AppState>) -> ApiResult<StatusCode> {
+    state.store.allow_lyrics_again(None).await?;
+    start(&state);
     Ok(StatusCode::NO_CONTENT)
 }
 

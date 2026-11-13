@@ -28,6 +28,8 @@ pub enum ProblemKind {
     WontPlay,
     /// Listeners said it needs fixing.
     Reported,
+    /// Listeners said its lyrics are wrong or bad.
+    ReportedLyrics,
     NoArtist,
     NoAlbum,
     AlbumNoCover,
@@ -36,7 +38,7 @@ pub enum ProblemKind {
 }
 
 impl ProblemKind {
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::MissingFolder,
         Self::Unreadable,
         Self::BadName,
@@ -44,6 +46,7 @@ impl ProblemKind {
         Self::Tags,
         Self::WontPlay,
         Self::Reported,
+        Self::ReportedLyrics,
         Self::NoArtist,
         Self::NoAlbum,
         Self::AlbumNoCover,
@@ -69,6 +72,7 @@ impl ProblemKind {
             Self::Tags => "tags",
             Self::WontPlay => "wont_play",
             Self::Reported => "reported",
+            Self::ReportedLyrics => "reported_lyrics",
             Self::NoArtist => "no_artist",
             Self::NoAlbum => "no_album",
             Self::AlbumNoCover => "album_no_cover",
@@ -143,7 +147,14 @@ macro_rules! wont_play_from {
 }
 macro_rules! reported_from {
     () => {
-        "FROM song_reports r JOIN tracks t ON t.id = r.track_id AND t.removed_at IS NULL"
+        "FROM song_reports r JOIN tracks t ON t.id = r.track_id AND t.removed_at IS NULL
+         WHERE substr(r.reason, 1, 7) != 'lyrics_'"
+    };
+}
+macro_rules! reported_lyrics_from {
+    () => {
+        "FROM song_reports r JOIN tracks t ON t.id = r.track_id AND t.removed_at IS NULL
+         WHERE substr(r.reason, 1, 7) = 'lyrics_'"
     };
 }
 macro_rules! no_artist_from {
@@ -200,12 +211,18 @@ macro_rules! album_columns {
 }
 
 /// Why a listener says a song needs fixing.
-pub const REPORT_REASONS: [&str; 5] = [
+pub const REPORT_REASONS: [&str; 10] = [
     "wrong_info",
     "wrong_cover",
     "sounds_bad",
     "wrong_song",
     "other",
+    // About the song's lyrics.
+    "lyrics_wrong_song",
+    "lyrics_out_of_sync",
+    "lyrics_garbled",
+    "lyrics_missing",
+    "lyrics_other",
 ];
 
 impl Store {
@@ -251,6 +268,17 @@ impl Store {
             .bind(track_id)
             .execute(&self.pool)
             .await?;
+        Ok(done.rows_affected())
+    }
+
+    /// Clears the reports about a song's lyrics only.
+    pub async fn clear_lyrics_reports(&self, track_id: i64) -> Result<u64> {
+        let done = sqlx::query(
+            "DELETE FROM song_reports WHERE track_id = ? AND substr(reason, 1, 7) = 'lyrics_'",
+        )
+        .bind(track_id)
+        .execute(&self.pool)
+        .await?;
         Ok(done.rows_affected())
     }
 
@@ -315,6 +343,10 @@ impl Store {
             K::Reported => {
                 sqlx::query_scalar(concat!("SELECT COUNT(DISTINCT t.id) ", reported_from!()))
             }
+            K::ReportedLyrics => sqlx::query_scalar(concat!(
+                "SELECT COUNT(DISTINCT t.id) ",
+                reported_lyrics_from!()
+            )),
             K::NoArtist => sqlx::query_scalar(concat!("SELECT COUNT(*) ", no_artist_from!())),
             K::NoAlbum => sqlx::query_scalar(concat!("SELECT COUNT(*) ", no_album_from!())),
             K::AlbumNoCover => sqlx::query_scalar(concat!(
@@ -370,6 +402,14 @@ impl Store {
                         t.id AS track_id, t.album_id, t.title, t.artist, t.album,
                         max(r.created_at) AS noticed_at ",
                 reported_from!(),
+                " GROUP BY t.id ORDER BY noticed_at DESC LIMIT ? OFFSET ?"
+            )),
+            K::ReportedLyrics => sqlx::query_as(concat!(
+                "SELECT t.path,
+                        group_concat(r.reason || char(31) || coalesce(r.note, ''), char(30)) AS detail,
+                        t.id AS track_id, t.album_id, t.title, t.artist, t.album,
+                        max(r.created_at) AS noticed_at ",
+                reported_lyrics_from!(),
                 " GROUP BY t.id ORDER BY noticed_at DESC LIMIT ? OFFSET ?"
             )),
             K::NoArtist => sqlx::query_as(concat!(
@@ -469,6 +509,34 @@ mod tests {
         store.replace_walk_problems(&[]).await.unwrap();
         let counts = store.problem_counts().await.unwrap();
         assert_eq!(count(&counts, ProblemKind::Unsupported), 0);
+    }
+
+    #[tokio::test]
+    async fn lyrics_reports_are_their_own_kind() {
+        let store = Store::open_in_memory().await.unwrap();
+        store.save_scanned(&[song("/m/x.mp3", "x")]).await.unwrap();
+        let id = store.problems(ProblemKind::NoArtist, 0, 1).await.unwrap();
+        assert!(id.is_empty());
+        let track: i64 = sqlx::query_scalar("SELECT id FROM tracks")
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO users (username, password_hash, role, created_at) VALUES ('a', 'x', 'admin', 1)")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        let user: i64 = sqlx::query_scalar("SELECT id FROM users")
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+        assert!(store
+            .report_song(track, user, "lyrics_out_of_sync", Some("late"))
+            .await
+            .unwrap());
+        let counts = store.problem_counts().await.unwrap();
+        assert_eq!(count(&counts, ProblemKind::ReportedLyrics), 1);
+        assert_eq!(count(&counts, ProblemKind::Reported), 0);
+        assert_eq!(store.clear_lyrics_reports(track).await.unwrap(), 1);
     }
 
     #[tokio::test]

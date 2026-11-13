@@ -2,12 +2,14 @@
   // A song's lyrics. Timed ones follow the music: the line being sung is lit
   // and kept in the middle of the box. Plain ones are just the words.
   import type { Lyrics } from './types'
+  import ReportSong from './ReportSong.svelte'
 
   let {
     lyrics,
     position,
     big = false,
     empty = 'No lyrics for this song.',
+    song,
   }: {
     /** Undefined while loading, null when there are none. */
     lyrics: Lyrics | null | undefined
@@ -16,7 +18,10 @@
     /** The full-screen lyrics page. */
     big?: boolean
     empty?: string
+    /** The song, to offer reporting its lyrics. */
+    song?: { id: number; title: string }
   } = $props()
+  let reporting = $state(false)
 
   let box = $state<HTMLElement>()
   let at = $state(-1)
@@ -78,8 +83,27 @@
     <p class="plain">{lyrics.plain}</p>
   {/if}
 </div>
+{#if song && lyrics && !lyrics.instrumental && (lines || lyrics.plain)}
+  <button class="report-link" onclick={() => (reporting = true)}>Report these lyrics</button>
+{/if}
+{#if reporting && song}
+  <ReportSong {song} about="lyrics" onclose={() => (reporting = false)} />
+{/if}
 
 <style>
+  .report-link {
+    display: block;
+    margin: 4px auto 0;
+    padding: 2px 8px;
+    background: none;
+    border: 0;
+    box-shadow: none;
+    color: var(--muted);
+    font-size: 0.8rem;
+    text-decoration: underline;
+    cursor: pointer;
+  }
+
   .lyrics {
     position: relative;
     max-height: 320px;

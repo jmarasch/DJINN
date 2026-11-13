@@ -165,7 +165,7 @@
         <span class="muted small ellipsis">{byline(current.track.artist)}</span>
       </div>
     </header>
-    <div class="body"><LyricsView {lyrics} position={currentPosition} big /></div>
+    <div class="body"><LyricsView {lyrics} position={currentPosition} big song={current.track} /></div>
   </div>
 {/if}
 
@@ -227,7 +227,7 @@
             <Icon name="book" size={22} /> {t('playing.lyrics')}
           </button>
         {:else}
-          <div class="lyrics-card"><LyricsView {lyrics} position={currentPosition} /></div>
+          <div class="lyrics-card"><LyricsView {lyrics} position={currentPosition} song={current.track} /></div>
         {/if}
       {/if}
     </div>

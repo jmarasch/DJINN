@@ -37,6 +37,10 @@
       label: 'Songs listeners reported',
       hint: 'Listeners said these need fixing. Fix the song (Edit tags, a better copy, or a cover in its folder), then select Done to clear the reports.',
     },
+    reported_lyrics: {
+      label: 'Lyrics listeners reported',
+      hint: 'Listeners said these lyrics are wrong or bad. Remove and block takes them away and remembers where they came from, so that source is not used again for the song unless its text changes. Done clears the reports and keeps the lyrics.',
+    },
     no_artist: {
       label: 'Songs with no artist',
       hint: 'Add the artist with Edit tags on the song, or in a tag editor.',
@@ -117,6 +121,38 @@
     }
   }
 
+  /** Lyrics shown for a reported song, by song id. */
+  let peeking = $state<Record<number, string>>({})
+
+  async function peek(item: ProblemItem) {
+    const id = item.track_id
+    if (id === null) return
+    if (id in peeking) {
+      const { [id]: _gone, ...rest } = peeking
+      peeking = rest
+      return
+    }
+    try {
+      const found = await api.trackLyrics(id)
+      const text = found?.lines ? found.lines.map((l) => l.text).join('\n') : (found?.plain ?? '')
+      peeking = { ...peeking, [id]: text || 'No lyrics.' }
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not load the lyrics', true)
+    }
+  }
+
+  async function removeLyrics(item: ProblemItem) {
+    if (item.track_id === null) return
+    if (!confirm(`Remove the lyrics of "${item.title}"? They won't be taken from the same source again.`)) return
+    try {
+      await api.blockLyrics(item.track_id)
+      items = items.filter((i) => i !== item)
+      await load()
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not remove the lyrics', true)
+    }
+  }
+
   async function done(item: ProblemItem) {
     if (item.track_id === null) return
     try {
@@ -186,6 +222,19 @@
                         >{/if}
                     </div>
                   {/each}
+                  <button class="small-button done" onclick={() => done(item)}>Done</button>
+                {:else if k.kind === 'reported_lyrics'}
+                  {#each parseReports(item.detail) as report, r (r)}
+                    <div class="small">
+                      {reportShort[report.reason] ?? report.reason}{#if report.note}: <span class="muted">{report.note}</span
+                        >{/if}
+                    </div>
+                  {/each}
+                  {#if item.track_id !== null && item.track_id in peeking}
+                    <pre class="peek small">{peeking[item.track_id]}</pre>
+                  {/if}
+                  <button class="small-button done" onclick={() => peek(item)}>Show lyrics</button>
+                  <button class="small-button done danger" onclick={() => removeLyrics(item)}>Remove and block</button>
                   <button class="small-button done" onclick={() => done(item)}>Done</button>
                 {:else if item.detail}<div class="small muted">{item.detail}</div>{/if}
               {:else}
@@ -335,6 +384,16 @@
   }
 
   /* List rows otherwise get plain buttons. */
+  .peek {
+    max-height: 200px;
+    overflow: auto;
+    margin: 6px 0;
+    padding: 6px 8px;
+    white-space: pre-wrap;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+  }
+
   .items .done {
     margin-top: 6px;
     background: var(--surface-2);

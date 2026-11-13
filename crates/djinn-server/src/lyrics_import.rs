@@ -8,7 +8,7 @@
 //! or markup are thrown out with a warning, and program or data files in the
 //! zip are never read.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -22,7 +22,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use djinn_library::lyrics_import::{self as lines, Content};
 use djinn_library::playlist_match::SongIndex;
-use djinn_store::{NewLyrics, SongFacts, WantedSong};
+use djinn_store::{BulkSave, NewLyrics, SongFacts, WantedSong};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
@@ -80,6 +80,8 @@ pub struct Report {
     pub had_lyrics: u64,
     /// The song has lyrics from an earlier import (kept unless replacing).
     pub kept_import: u64,
+    /// An admin removed exactly these lyrics before.
+    pub blocked: u64,
     /// Waiting for LRCLIB to be asked about the song first.
     pub waiting_lrclib: u64,
     pub instrumental: u64,
@@ -141,6 +143,10 @@ impl Report {
         line(format!(
             "Song kept lyrics from an earlier import: {}",
             self.kept_import
+        ));
+        line(format!(
+            "Removed as bad before, not brought back: {}",
+            self.blocked
         ));
         line(format!(
             "Waiting for LRCLIB to be asked first: {}",
@@ -659,7 +665,6 @@ async fn save_chunk(
         .into_iter()
         .map(|s| (s.track_id, s))
         .collect();
-    let mut saved: HashSet<i64> = HashSet::new();
     for m in matched {
         let current = states.get(&m.id);
         // LRCLIB gets the first go at songs it hasn't been asked about.
@@ -671,34 +676,32 @@ async fn save_chunk(
             update(|r| r.waiting_lrclib += 1);
             continue;
         }
-        if saved.contains(&m.id) {
-            update(|r| r.kept_import += 1);
-            continue;
-        }
         let new = NewLyrics {
             synced: m.found.synced.as_deref(),
             plain: m.found.plain.as_deref(),
             instrumental: false,
             source: "bulk",
         };
-        if state
+        match state
             .store
             .save_bulk_lyrics(m.id, &new, options.replace)
             .await?
         {
-            saved.insert(m.id);
-            let timed = m.found.synced.is_some();
-            update(|r| {
-                if timed {
-                    r.saved_timed += 1;
-                } else {
-                    r.saved_plain += 1;
-                }
-            });
-        } else if current.is_some_and(|s| s.source == "bulk") {
-            update(|r| r.kept_import += 1);
-        } else {
-            update(|r| r.had_lyrics += 1);
+            BulkSave::Saved => {
+                let timed = m.found.synced.is_some();
+                update(|r| {
+                    if timed {
+                        r.saved_timed += 1;
+                    } else {
+                        r.saved_plain += 1;
+                    }
+                });
+            }
+            BulkSave::Blocked => update(|r| r.blocked += 1),
+            BulkSave::Kept if current.is_some_and(|s| s.source != "bulk") => {
+                update(|r| r.had_lyrics += 1)
+            }
+            BulkSave::Kept => update(|r| r.kept_import += 1),
         }
     }
     Ok(())

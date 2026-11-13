@@ -262,6 +262,8 @@ export const api = {
   lyricsSettings: () => get<LyricsSettings>('/lyrics/settings'),
   setLyricsSettings: (settings: LyricsSettings) => put<void>('/lyrics/settings', settings),
   recheckLyrics: () => post<void>('/lyrics/recheck'),
+  blockLyrics: (trackId: number, reason?: string) => post<void>(`/lyrics/${trackId}/block`, { reason }),
+  allowAllLyrics: () => del<void>('/lyrics/blocks'),
   lyricsImport: () => get<LyricsImportStatus>('/lyrics/import'),
   dismissLyricsImport: () => post<void>('/lyrics/import/dismiss'),
   /** Sends one zip of lyrics files; it's imported in the background. */

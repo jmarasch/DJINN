@@ -133,7 +133,7 @@
         <span class="muted small ellipsis">{song.artist ?? ''}</span>
       </div>
     </header>
-    <div class="body"><LyricsView {lyrics} position={livePosition} big /></div>
+    <div class="body"><LyricsView {lyrics} position={livePosition} big {song} /></div>
   </div>
 {/if}
 
@@ -204,7 +204,7 @@
         {#if player.downloadUrl}<a class="button small-button" href={player.downloadUrl} download>Download</a>{/if}
       </div>
       {#if lyricsOpen && !narrow}
-        <div class="lyrics-card"><LyricsView {lyrics} position={livePosition} /></div>
+        <div class="lyrics-card"><LyricsView {lyrics} position={livePosition} {song} /></div>
       {/if}
     </section>
 
