@@ -106,6 +106,10 @@ pub const DEFAULTS: &[(&str, Default)] = &[
         crate::smart::GENRE_REFRESH_HOURS,
         Default::Number(crate::smart::GENRE_REFRESH_DEFAULT),
     ),
+    (
+        crate::discover::REFRESH_MINUTES,
+        Default::Number(crate::discover::REFRESH_DEFAULT),
+    ),
     (crate::scheduled_check::ON, Default::Flag(false)),
     (crate::scheduled_check::HOUR, Default::Number(4)),
     (crate::ai::GENRE_TAGS, Default::Flag(true)),

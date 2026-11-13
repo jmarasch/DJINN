@@ -18,6 +18,10 @@ use crate::error::ApiResult;
 use crate::settings;
 use crate::state::AppState;
 
+/// Setting key: minutes before the shelves are drawn again; 0 draws them on every visit.
+pub const REFRESH_MINUTES: &str = "discover_refresh_minutes";
+pub const REFRESH_DEFAULT: i64 = 1;
+
 /// Items on each shelf.
 const SHELF: i64 = 14;
 
@@ -70,8 +74,19 @@ async fn discover(
     CurrentUser(user): CurrentUser,
     State(state): State<AppState>,
 ) -> ApiResult<Json<Discover>> {
-    // Changes from visit to visit, without anyone having to ask.
-    let seed = usize::try_from(djinn_store::now_ms() / 60_000).unwrap_or(0);
+    // The shelves change as often as the admin chose: every visit, or every so many minutes.
+    let minutes = settings::number(&state.store, REFRESH_MINUTES, REFRESH_DEFAULT)
+        .await?
+        .clamp(0, 7 * 24 * 60);
+    let seed = if minutes == 0 {
+        // Every visit: whatever the clock's fine ticks say.
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(1, |d| d.as_nanos() % 1_000_000_007);
+        usize::try_from(nanos).unwrap_or(1)
+    } else {
+        usize::try_from(djinn_store::now_ms() / (minutes * 60_000)).unwrap_or(0)
+    };
 
     let genres = crate::smart::top_genres(&state, 18)
         .into_iter()

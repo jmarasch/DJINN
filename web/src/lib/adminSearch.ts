@@ -119,6 +119,12 @@ export const adminEntries: AdminEntry[] = [
     key: 'genre_refresh_hours',
   },
   {
+    label: "How often Discover's shelves change",
+    tab: 'library',
+    keywords: 'discover shelves refresh recommendations suggestions',
+    key: 'discover_refresh_minutes',
+  },
+  {
     label: 'A play counts once this much of the song is heard',
     tab: 'library',
     keywords: 'play count percent plays heard',

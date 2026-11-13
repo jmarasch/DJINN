@@ -370,6 +370,9 @@ struct Settings {
     /// Hours before a genre's shuffled order is made again.
     #[serde(default = "default_genre_refresh")]
     genre_refresh_hours: i64,
+    /// Minutes before Discover's shelves are drawn again (0: every visit).
+    #[serde(default = "default_discover_refresh")]
+    discover_refresh_minutes: i64,
     /// How much of a song a play must hear to count in the library lists, in percent.
     #[serde(default = "default_play_count_percent")]
     play_count_percent: i64,
@@ -396,6 +399,10 @@ fn default_genre_page() -> i64 {
 
 fn default_genre_refresh() -> i64 {
     crate::smart::GENRE_REFRESH_DEFAULT
+}
+
+fn default_discover_refresh() -> i64 {
+    crate::discover::REFRESH_DEFAULT
 }
 
 fn default_play_count_percent() -> i64 {
@@ -457,6 +464,12 @@ async fn settings(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json
             store,
             crate::smart::GENRE_REFRESH_HOURS,
             crate::smart::GENRE_REFRESH_DEFAULT,
+        )
+        .await?,
+        discover_refresh_minutes: settings::number(
+            store,
+            crate::discover::REFRESH_MINUTES,
+            crate::discover::REFRESH_DEFAULT,
         )
         .await?,
         play_count_percent: settings::number(
@@ -611,6 +624,15 @@ async fn update_settings(
         .set_setting(
             crate::smart::GENRE_REFRESH_HOURS,
             &body.genre_refresh_hours.clamp(0, 24 * 365).to_string(),
+        )
+        .await?;
+    store
+        .set_setting(
+            crate::discover::REFRESH_MINUTES,
+            &body
+                .discover_refresh_minutes
+                .clamp(0, 7 * 24 * 60)
+                .to_string(),
         )
         .await?;
     store

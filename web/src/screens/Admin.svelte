@@ -398,6 +398,18 @@
           <span class="small muted">Genre pages show everything in a shuffled order, with what's been played most nearer the top. 0 shuffles on every visit.</span>
         </label>
         <label>
+          How often Discover's shelves change
+          <select bind:value={settings.discover_refresh_minutes}>
+            <option value={0}>Every time it's opened</option>
+            <option value={1}>Every minute</option>
+            <option value={5}>Every 5 minutes</option>
+            <option value={15}>Every 15 minutes</option>
+            <option value={60}>Every hour</option>
+            <option value={1440}>Every day</option>
+          </select>
+          <span class="small muted">The Discover page picks which favorites, albums and artists to show. Refreshing the page shows the same ones until this long has passed.</span>
+        </label>
+        <label>
           A play counts once this much of the song is heard: {settings.play_count_percent}%
           <input type="range" min="0" max="100" step="5" bind:value={settings.play_count_percent} />
           <span class="small muted">For the play counts in the library lists. A song started again for a moment isn't a play. 0 counts every play.</span>
