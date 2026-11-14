@@ -278,7 +278,14 @@
                 <span class="muted"> · {item.artist}</span>
                 {#if item.path}<div class="path small mono">{folder(item.path)}</div>{/if}
                 {#if k.kind === 'duplicate_albums' && item.detail}<div class="small muted">{item.detail}</div>{/if}
-                {#if item.path}
+                {#if k.kind === 'duplicate_albums'}
+                  <button
+                    class="small-button done"
+                    title="Shows both albums' songs together in the library editor; Set aside the copy you don't keep"
+                    onclick={() => findInEditor([item.album ?? '', /Also filed as "([^"]+)"/.exec(item.detail)?.[1] ?? ''])}
+                    >Compare in the editor</button
+                  >
+                {:else if item.path}
                   <button class="small-button done" onclick={() => openInEditor(folder(item.path ?? ''))}>Fix in the editor</button>
                 {:else if item.artist}
                   <button class="small-button done" onclick={() => findInEditor([item.album ?? item.artist ?? ''])}>Fix in the editor</button>
@@ -313,6 +320,13 @@
                   <button class="small-button done danger" onclick={() => removeLyrics(item)}>Remove and block</button>
                   <button class="small-button done" onclick={() => done(item)}>Done</button>
                 {:else if item.detail}<div class="small muted">{item.detail}</div>{/if}
+                {#if k.kind === 'low_bitrate' && item.title}
+                  <button
+                    class="small-button done"
+                    title="Finds songs with this title in the library editor, to keep the better copy (Set aside the other) or Replace the file"
+                    onclick={() => findInEditor([item.title ?? ''])}>Look for a better copy</button
+                  >
+                {/if}
                 {#if k.kind === 'vanished' && item.title}
                   <button
                     class="small-button done"
