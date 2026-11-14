@@ -162,6 +162,29 @@ impl Store {
         .await?)
     }
 
+    /// An album's MusicBrainz id (its release group), once looked up.
+    pub async fn album_mbid(&self, album_id: i64) -> Result<Option<String>> {
+        Ok(sqlx::query_scalar("SELECT mbid FROM albums WHERE id = ?")
+            .bind(album_id)
+            .fetch_optional(&self.pool)
+            .await?
+            .flatten())
+    }
+
+    /// An album's songs: id, title and length.
+    pub async fn album_song_titles(
+        &self,
+        album_id: i64,
+    ) -> Result<Vec<(i64, String, Option<i64>)>> {
+        Ok(sqlx::query_as(
+            "SELECT id, title, duration_ms FROM tracks
+             WHERE album_id = ? AND removed_at IS NULL ORDER BY disc_no, track_no, path",
+        )
+        .bind(album_id)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
     /// These songs as the editor's grid shows them, by path.
     pub async fn editor_songs_by_id(&self, ids: &[i64]) -> Result<Vec<EditorSong>> {
         let list = format!(

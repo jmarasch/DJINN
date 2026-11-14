@@ -261,6 +261,31 @@
     }
   }
 
+  /** The chosen song's album's track numbers from MusicBrainz, as changes to approve. */
+  async function numbersFromMusicBrainz() {
+    const album = chosen?.album_id
+    if (album == null) return
+    try {
+      const list = await unlocked(() => api.editorTracklist(album))
+      const multiDisc = list.suggested.some((t) => t.disc_no > 1)
+      let set = 0
+      for (const t of list.suggested) {
+        const song = songs.find((s) => s.id === t.id)
+        if (!song || !rowEditable(song)) continue
+        setPending(song, 'track_no', String(t.track_no))
+        if (multiDisc || shown(song, 'disc_no')) setPending(song, 'disc_no', String(t.disc_no))
+        set++
+      }
+      toast(
+        `"${list.release}" on MusicBrainz (${list.tracks} tracks): ${set} songs numbered` +
+          (list.unmatched ? `, ${list.unmatched} with no matching track` : '') +
+          '. Check them under Changes.',
+      )
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not ask MusicBrainz', true)
+    }
+  }
+
   const JUNK =
     /\s*[([](official\s+(music\s+)?video|official\s+audio|official\s+lyric\s+video|lyric\s+video|lyrics?|audio|video|hd|hq|4k|visuali[sz]er)[)\]]/gi
 
@@ -635,6 +660,14 @@
               <div class="tool">
                 <button class="small-button" onclick={numberInOrder} title="Track numbers 1, 2, 3... in the grid's order, for each album and disc">
                   Number in order
+                </button>
+                <button
+                  class="small-button"
+                  disabled={chosen?.album_id == null}
+                  onclick={numbersFromMusicBrainz}
+                  title="Track and disc numbers for the chosen song's album, from its track list on MusicBrainz, matched by title"
+                >
+                  Numbers from MusicBrainz
                 </button>
                 <button
                   class="small-button"

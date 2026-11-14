@@ -40,6 +40,7 @@ pub fn router() -> Router<AppState> {
         .route("/editor/rename", post(rename))
         .route("/editor/move", post(move_songs))
         .route("/editor/mp3-length", post(mp3_length))
+        .route("/editor/tracklist", get(tracklist))
         .route(
             "/editor/replace/{id}",
             post(replace).layer(axum::extract::DefaultBodyLimit::max(REPLACE_MAX)),
@@ -1362,6 +1363,75 @@ async fn replace(
         songs: 1,
         failed: Vec::new(),
         batch: Some(batch),
+    }))
+}
+
+#[derive(Deserialize)]
+struct TracklistQuery {
+    album_id: i64,
+}
+
+#[derive(Serialize)]
+struct Suggested {
+    id: i64,
+    disc_no: i64,
+    track_no: i64,
+}
+
+#[derive(Serialize)]
+struct Tracklist {
+    /// The MusicBrainz release the numbers come from.
+    release: String,
+    tracks: usize,
+    /// Songs matched to a track, with its disc and number.
+    suggested: Vec<Suggested>,
+    /// Songs of the album with no matching track.
+    unmatched: usize,
+}
+
+/// Track and disc numbers for an album's songs from its MusicBrainz track
+/// list, to review and approve like any change.
+async fn tracklist(
+    _: Elevated,
+    State(state): State<AppState>,
+    Query(query): Query<TracklistQuery>,
+) -> ApiResult<Json<Tracklist>> {
+    let contact = crate::settings::musicbrainz(&state.store)
+        .await?
+        .ok_or_else(|| ApiError::conflict("set the MusicBrainz contact under Rules first"))?;
+    let mbid = state
+        .store
+        .album_mbid(query.album_id)
+        .await?
+        .ok_or_else(|| {
+            ApiError::new(
+                axum::http::StatusCode::NOT_FOUND,
+                "MusicBrainz doesn't know this album (yet): lookups run after a library check",
+            )
+        })?;
+    let songs = state.store.album_song_titles(query.album_id).await?;
+    let list = djinn_library::online::album_tracklist(&contact, &mbid, songs.len())
+        .await
+        .map_err(|e| ApiError::new(axum::http::StatusCode::BAD_GATEWAY, e.to_string()))?
+        .ok_or_else(|| {
+            ApiError::new(
+                axum::http::StatusCode::NOT_FOUND,
+                "MusicBrainz has no track list for this album",
+            )
+        })?;
+    let matched = djinn_library::online::match_tracks(&list, &songs);
+    Ok(Json(Tracklist {
+        release: list.release,
+        tracks: list.tracks.len(),
+        unmatched: songs.len() - matched.len(),
+        suggested: matched
+            .into_iter()
+            .map(|(id, disc_no, track_no)| Suggested {
+                id,
+                disc_no,
+                track_no,
+            })
+            .collect(),
     }))
 }
 

@@ -329,6 +329,14 @@ export const api = {
     post<{ files: EditorRenamed[]; batch: number | null }>('/editor/mp3-length', { ids, preview }),
   /** Starts measuring songs with no loudness data (with the sound analysis). */
   measureLoudness: () => post<{ started: boolean }>('/library/problems/measure'),
+  /** Track and disc numbers for an album's songs from MusicBrainz. */
+  editorTracklist: (albumId: number) =>
+    get<{
+      release: string
+      tracks: number
+      suggested: { id: number; disc_no: number; track_no: number }[]
+      unmatched: number
+    }>(`/editor/tracklist?album_id=${albumId}`),
   editableFolders: () => get<EditableFolder[]>('/library/editable'),
   setFolderEditable: (path: string, editable: boolean) => put<void>('/library/editable', { path, editable }),
   startLibraryCompare: () => post<void>('/library/compare'),
