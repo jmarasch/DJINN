@@ -182,15 +182,15 @@ Other checks on the Problems page (each can be hidden once you know about it):
 - **The same file twice in one album**: same size, length and title.
 - **Impossible numbers**: a track or disc number of 0 or less, or a length of 0.
 - **Very short or very long songs**: under 10 seconds or over 3 hours.
-- **Low-quality songs**: under 96 kbps.
-- **Titles with leftovers**: a track number in front, "(Official Video)", a web address, spaces around, all capitals.
-- **File names that don't match the title**: the file's name and folders don't contain the title.
+- **Low-quality songs**: under 96 kbps (a very low figure on an MP3 can also mean DJINN stored the wrong length).
+- **Titles with leftovers**: a track number and separator in front ("01 - "), "(Official Video)", a web address, spaces around, all capitals.
+- **File names that don't match the title**: the file's name and folders don't contain the title, ignoring spaces, dashes, colons, quotes and other punctuation.
 - **Artists spelled two ways**: "The Beatles" and "Beatles", "AC/DC" and "ACDC".
 - **Albums split across artist names**: an album's folder filed under two artists.
 - **Albums with different covers inside**.
 - **Albums with missing or repeated track numbers**.
 - **Songs with no lyrics**, and **songs with no loudness data** (only once other songs have it).
-- **Songs that went missing lately**: gone from the library in the last 30 days.
+- **Songs that went missing lately**: gone from the library in the last 30 days and not back under another path (a song you moved isn't listed).
 
 Not checked yet: covers that are tiny, huge or not square (DJINN doesn't measure pictures yet), and silent or very quiet files.
 

@@ -327,7 +327,8 @@ macro_rules! low_bitrate_from {
 }
 macro_rules! low_bitrate_detail {
     () => {
-        "(t.size * 8 / t.duration_ms) || ' kbps'"
+        "(t.size * 8 / t.duration_ms) || CASE WHEN t.size * 8 / t.duration_ms < 48
+              THEN ' kbps, and the length may be wrong' ELSE ' kbps' END"
     };
 }
 /// Titles with leftovers: a video tag, a web address, a track number in
@@ -338,9 +339,11 @@ macro_rules! junk_where {
           OR lower(t.title) LIKE '%(lyric%' OR lower(t.title) LIKE '%[lyric%'
           OR lower(t.title) LIKE '%(audio)%' OR lower(t.title) LIKE '%(video)%'
           OR lower(t.title) LIKE '%www.%' OR lower(t.title) LIKE '%.com%'
-          OR t.title GLOB '[0-9][0-9] *' OR t.title GLOB '[0-9][0-9]. *'
-          OR t.title GLOB '[0-9][0-9] - *' OR t.title <> trim(t.title)
-          OR (length(t.title) > 4 AND t.title = upper(t.title) AND t.title <> lower(t.title)))"
+          OR t.title GLOB '[0-9][0-9]. *' OR t.title GLOB '[0-9][0-9] - *'
+          OR t.title GLOB '[0-9][0-9]-*' OR t.title GLOB '[0-9][0-9]_*'
+          OR t.title <> trim(t.title)
+          OR (length(t.title) > 8 AND instr(t.title, ' ') > 0
+              AND t.title = upper(t.title) AND t.title <> lower(t.title)))"
     };
 }
 macro_rules! title_junk_from {
@@ -354,16 +357,34 @@ macro_rules! title_junk_from {
 macro_rules! title_junk_detail {
     () => {
         "CASE WHEN t.title <> trim(t.title) THEN 'Spaces around the title'
-              WHEN t.title GLOB '[0-9][0-9]*' THEN 'A track number in the title'
+              WHEN t.title GLOB '[0-9][0-9][.-_]*' THEN 'A track number in the title'
               WHEN lower(t.title) LIKE '%www.%' OR lower(t.title) LIKE '%.com%' THEN 'A web address in the title'
               WHEN t.title = upper(t.title) THEN 'All capitals'
               ELSE 'A video or lyrics tag in the title' END"
     };
 }
+/// An expression with what file names change (spaces, dashes, colons, slashes,
+/// question marks, quotes, dots, ...) taken out, so "11:00am" meets "11-00am".
+macro_rules! plain {
+    ($e:literal) => {
+        concat!(
+            "replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(",
+            "replace(replace(replace(replace(replace(replace(replace(", $e,
+            ", ' ', ''), '-', ''), '_', ''), ':', ''), '/', ''), '?', ''), '*', ''), '\"', ''), ",
+            "'<', ''), '>', ''), '|', ''), '''', ''), '.', ''), ',', ''), '!', ''), '’', ''), '&', '')"
+        )
+    };
+}
 macro_rules! name_mismatch_from {
     () => {
-        "FROM tracks t WHERE t.removed_at IS NULL AND length(trim(t.title)) > 1
-           AND instr(lower(t.path), lower(t.title)) = 0"
+        concat!(
+            "FROM tracks t WHERE t.removed_at IS NULL AND length(trim(t.title)) > 1
+               AND instr(",
+            plain!("lower(t.path)"),
+            ", ",
+            plain!("lower(t.title)"),
+            ") = 0"
+        )
     };
 }
 macro_rules! no_lyrics_from {
@@ -382,7 +403,9 @@ macro_rules! no_loudness_from {
 }
 macro_rules! vanished_from {
     () => {
-        "FROM tracks t WHERE t.removed_at IS NOT NULL AND t.removed_at > ?"
+        "FROM tracks t WHERE t.removed_at IS NOT NULL AND t.removed_at > ?
+           AND NOT EXISTS (SELECT 1 FROM tracks a WHERE a.removed_at IS NULL
+                           AND a.size = t.size AND lower(a.title) = lower(t.title))"
     };
 }
 /// A folder (path without the file name), same for `/` and `\` paths.

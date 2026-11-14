@@ -154,7 +154,10 @@ impl Store {
                  FROM tracks t JOIN albums a ON a.id = t.album_id
                  WHERE t.removed_at IS NULL
                  GROUP BY t.album_id, a.artist_id, k),
-             n AS (SELECT album_id, count(*) AS n FROM t GROUP BY album_id HAVING count(*) >= 3),
+             n AS (SELECT album_id, count(*) AS n,
+                          (SELECT coalesce(sum(x.duration_ms), 0) FROM tracks x
+                           WHERE x.album_id = t.album_id AND x.removed_at IS NULL) AS ms
+                   FROM t GROUP BY album_id HAVING count(*) >= 3),
              pairs AS (
                  SELECT x.album_id AS a, y.album_id AS b, count(*) AS shared
                  FROM t x JOIN t y
@@ -164,6 +167,7 @@ impl Store {
              FROM pairs p JOIN n na ON na.album_id = p.a JOIN n nb ON nb.album_id = p.b
              WHERE p.shared * 100 >= 85 * max(na.n, nb.n)
                AND min(na.n, nb.n) * 100 >= 85 * max(na.n, nb.n)
+               AND abs(na.ms - nb.ms) * 100 <= 5 * max(na.ms, nb.ms)
              ORDER BY p.a, p.b",
         )
         .fetch_all(&self.pool)
