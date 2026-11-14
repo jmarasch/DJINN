@@ -137,6 +137,24 @@ async fn tree(
     }))
 }
 
+/// A song's path inside its library folder, led by that folder's name.
+fn relative(roots: &[PathBuf], path: &str) -> String {
+    let file = Path::new(path);
+    roots
+        .iter()
+        .filter(|root| file.starts_with(root))
+        .max_by_key(|root| root.as_os_str().len())
+        .and_then(|root| {
+            let rel = file.strip_prefix(root).ok()?;
+            let name = root
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            Some(Path::new(&name).join(rel).to_string_lossy().into_owned())
+        })
+        .unwrap_or_else(|| path.to_owned())
+}
+
 #[derive(Deserialize)]
 struct SongsQuery {
     /// A folder's songs, at any depth.
@@ -161,6 +179,9 @@ struct Row {
     file: Option<FileTags>,
     /// Its folder allows changes to the file.
     editable: bool,
+    /// Where it is inside its library folder, starting with that folder's
+    /// name ("music-pool/R/R.E.M/Out Of Time/9 Texarkana.mp3").
+    rel_path: String,
 }
 
 #[derive(Serialize)]
@@ -177,6 +198,7 @@ async fn songs(
     Query(query): Query<SongsQuery>,
 ) -> ApiResult<Json<Songs>> {
     let roots = editable_roots(&state).await?;
+    let all_roots = crate::folders::library_roots(&state).await?;
     let (found, total) = if query.search.trim().is_empty() {
         inside_library(&state, &query.folder).await?;
         state
@@ -223,6 +245,7 @@ async fn songs(
                 editable: roots
                     .iter()
                     .any(|root| Path::new(&song.path).starts_with(root)),
+                rel_path: relative(&all_roots, &song.path),
                 song,
                 file,
             })
@@ -1611,6 +1634,13 @@ mod tests {
         assert_eq!(
             state.store.tag_edit(pool_song).await.unwrap().track_no,
             Some(4)
+        );
+        assert_eq!(
+            super::relative(
+                std::slice::from_ref(&pool),
+                &pool.join("song.flac").to_string_lossy()
+            ),
+            format!("pool{}song.flac", std::path::MAIN_SEPARATOR)
         );
         // Found by words across the library, each saying if its file may change.
         let (_, found) = get_body(

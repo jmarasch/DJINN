@@ -57,7 +57,11 @@
   }
 
   const fileName = (path: string) => path.slice(Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\')) + 1)
-  const folderOf = (path: string) => path.slice(0, Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\')))
+  /** The song's folder inside its library folder. */
+  const folderOf = (song: EditorSong) => {
+    const rel = song.rel_path || song.path
+    return rel.slice(0, Math.max(rel.lastIndexOf('/'), rel.lastIndexOf('\\')))
+  }
 
   onMount(async () => {
     const albumId = first?.album_id
@@ -242,11 +246,11 @@
                         carrying = carrying === song.id ? null : song.id
                       }}
                       onkeydown={(e) => e.key === 'Enter' && (carrying = song.id)}
-                      title={song.path}
+                      title={song.rel_path}
                     >
                       <span class="mono">{fileName(song.path)}</span>
                       <span class="small muted">{length(song.duration_ms)}{song.title !== track.title ? ` · now "${song.title}"` : ''}</span>
-                      <span class="small muted mono path">{folderOf(song.path)}</span>
+                      <span class="small muted mono path">{folderOf(song)}</span>
                     </div>
                   {:else}
                     <span class="small muted">{carrying !== null ? 'Put it here' : 'Drop a song here'}</span>
@@ -284,11 +288,11 @@
               carrying = carrying === song.id ? null : song.id
             }}
             onkeydown={(e) => e.key === 'Enter' && (carrying = song.id)}
-            title={song.path}
+            title={song.rel_path}
           >
             <span class="mono">{fileName(song.path)}</span>
             <span class="small muted">"{song.title}" {length(song.duration_ms)}</span>
-            <span class="small muted mono path">{folderOf(song.path)}</span>
+            <span class="small muted mono path">{folderOf(song)}</span>
           </div>
         {/each}
       </div>

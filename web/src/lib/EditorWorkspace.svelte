@@ -696,7 +696,7 @@
                         {/if}
                       </td>
                     {/each}
-                    <td class="mono muted" title={song.path}>{fileName(song.path)}</td>
+                    <td class="mono muted" title={song.rel_path}>{fileName(song.path)}</td>
                   </tr>
                 {/each}
               </tbody>

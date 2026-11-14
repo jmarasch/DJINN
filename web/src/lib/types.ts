@@ -1520,6 +1520,8 @@ export interface EditorSong {
   duration_ms: number | null
   /** Its folder allows changes to the file. */
   editable: boolean
+  /** Where it is inside its library folder, led by that folder's name. */
+  rel_path: string
   /** What the file says (editing the library); null if it couldn't be read. */
   file: {
     title: string
