@@ -99,6 +99,7 @@ import com.newterrastudios.djinn.go.data.ApiException
 import com.newterrastudios.djinn.go.data.GoPlaylist
 import com.newterrastudios.djinn.go.data.KIND_DOWNLOAD
 import com.newterrastudios.djinn.go.data.OfflineSong
+import com.newterrastudios.djinn.go.data.LYRICS_REPORT_REASONS
 import com.newterrastudios.djinn.go.data.REPORT_REASONS
 import com.newterrastudios.djinn.go.data.SoundKind
 import com.newterrastudios.djinn.go.data.Track
@@ -356,6 +357,25 @@ fun NowPlayingScreen(nav: Nav) {
                     }
                 }
                 player.error?.let { Text(it, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center) }
+                var reportingLyrics by remember { mutableStateOf(false) }
+                if (reportingLyrics && id != null) {
+                    ReportDialog(
+                        title = item.mediaMetadata.title?.toString() ?: "",
+                        reasons = LYRICS_REPORT_REASONS,
+                        onDismiss = { reportingLyrics = false },
+                        onSend = { reason, note ->
+                            reportingLyrics = false
+                            scope.launch {
+                                nav.message = try {
+                                    nav.api.reportSong(id, reason, note)
+                                    t("menu.report_thanks")
+                                } catch (e: IOException) {
+                                    if (e is ApiException) e.message else t("common.no_server")
+                                }
+                            }
+                        },
+                    )
+                }
                 if (showLyrics && id != null) {
                     LyricsScreen(
                         title = item.mediaMetadata.title?.toString() ?: "",
@@ -363,6 +383,7 @@ fun NowPlayingScreen(nav: Nav) {
                         lyrics = lyrics,
                         loading = lyricsLoading,
                         position = player::livePositionMs,
+                        onReport = { reportingLyrics = true },
                         onClose = { showLyrics = false },
                     )
                 }
@@ -611,7 +632,12 @@ fun SongMenu(track: Track, nav: Nav) {
 
 /** Asks what's wrong with a song: a reason and an optional note. */
 @Composable
-private fun ReportDialog(title: String, onDismiss: () -> Unit, onSend: (String, String?) -> Unit) {
+private fun ReportDialog(
+    title: String,
+    onDismiss: () -> Unit,
+    onSend: (String, String?) -> Unit,
+    reasons: List<Pair<String, String>> = REPORT_REASONS,
+) {
     var reason by remember { mutableStateOf<String?>(null) }
     var note by remember { mutableStateOf("") }
     AlertDialog(
@@ -620,7 +646,7 @@ private fun ReportDialog(title: String, onDismiss: () -> Unit, onSend: (String, 
         text = {
             Column {
                 Text(t("menu.whats_wrong", "title" to title), style = MaterialTheme.typography.bodyMedium)
-                REPORT_REASONS.forEach { (id, _) ->
+                reasons.forEach { (id, _) ->
                     Row(
                         verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
                         modifier = Modifier
@@ -666,6 +692,7 @@ private fun LyricsScreen(
     lyrics: Lyrics?,
     loading: Boolean,
     position: () -> Long,
+    onReport: () -> Unit,
     onClose: () -> Unit,
 ) {
     androidx.compose.ui.window.Dialog(
@@ -693,6 +720,9 @@ private fun LyricsScreen(
                     }
                 }
                 LyricsBlock(lyrics, loading, position, big = true)
+                if (lyrics != null && !lyrics.instrumental) {
+                    TextButton(onClick = onReport) { Text(t("lyrics.report")) }
+                }
             }
         }
     }

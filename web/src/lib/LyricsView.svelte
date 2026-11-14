@@ -3,6 +3,7 @@
   // and kept in the middle of the box. Plain ones are just the words.
   import type { Lyrics } from './types'
   import ReportSong from './ReportSong.svelte'
+  import { t } from './i18n.svelte'
 
   let {
     lyrics,
@@ -67,10 +68,10 @@
 </script>
 
 {#if lyrics?.ai === 'made'}
-  <p class="ai-note small">Made by an AI listening to the song, so it may have mistakes.</p>
+  <p class="ai-note small">{t('lyrics.ai_made_note')}</p>
 {:else if lyrics?.ai === 'synced'}
   <p class="ai-note small">
-    Timing made by an AI listening to the song{lyrics.ai_match != null ? ` (${lyrics.ai_match}% match)` : ''}.
+    {lyrics.ai_match != null ? t('lyrics.ai_synced_match', { match: lyrics.ai_match }) : t('lyrics.ai_synced_note')}
   </p>
 {/if}
 <div class="lyrics" class:big bind:this={box}>
@@ -91,7 +92,7 @@
   {/if}
 </div>
 {#if song && lyrics && !lyrics.instrumental && (lines || lyrics.plain)}
-  <button class="report-link" onclick={() => (reporting = true)}>Report these lyrics</button>
+  <button class="report-link" onclick={() => (reporting = true)}>{t('lyrics.report')}</button>
 {/if}
 {#if reporting && song}
   <ReportSong {song} about="lyrics" onclose={() => (reporting = false)} />
