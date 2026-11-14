@@ -1,12 +1,12 @@
 <script lang="ts">
-  // Admin > Library editor > Compare, and which folders can be changed.
+  // Admin > Library editor > Compare: DJINN's database against the files.
   // Compares what the database holds with what each file's own tags say,
   // field by field, and why they differ.
   // It only reads: nothing in the music folders or the database changes.
   // The editor sits behind the protected areas' lock.
   import { onMount } from 'svelte'
   import { ApiError, api } from './api'
-  import { askToUnlock, unlocked } from './protected.svelte'
+  import { askToUnlock } from './protected.svelte'
   import { toast } from './state.svelte'
   import type { CompareShown, CompareWhy, EditableFolder } from './types'
 
@@ -82,16 +82,6 @@
     return () => clearInterval(timer)
   })
 
-  async function allow(f: EditableFolder, on: boolean) {
-    try {
-      await unlocked(() => api.setFolderEditable(f.path, on))
-      folders = await api.editableFolders()
-    } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not change it', true)
-      folders = await api.editableFolders().catch(() => folders)
-    }
-  }
-
   const folderName = (path: string) => folders.find((f) => f.path === path)?.name ?? path
   const folderStats = (path: string) => run?.folders.find((x) => x.path === path)
 
@@ -105,33 +95,13 @@
 </script>
 
 <section class="card">
-  <h3>Compare and folders</h3>
+  <h3>Compare</h3>
   <p class="small muted">
     Compare sets DJINN's database against what each file's tags say. Nothing is changed.
   </p>
   {#if locked}
     <p class="small">The editor is locked. <button class="link" onclick={unlock}>Unlock</button></p>
   {:else}
-    <h4>Which folders can be changed</h4>
-    <p class="small muted">
-      Every library folder is view only until you allow changes in it. You can always see what's going on in a view-only
-      folder (the compare below and the Problems page read every folder), but nothing in it can be changed. Use this for
-      a folder someone else looks after. Allowing a folder checks that DJINN can write there.
-    </p>
-    <ul class="folders">
-      {#each folders as f (f.path)}
-        <li>
-          <div>
-            <strong>{f.name}</strong>
-            <span class="badge" class:on={f.editable}>{f.editable ? 'Can be changed' : 'View only'}</span>
-            <div class="small mono muted path">{f.path}</div>
-          </div>
-          <button class="small-button" onclick={() => allow(f, !f.editable)}>
-            {f.editable ? 'Make view only' : 'Allow changes'}
-          </button>
-        </li>
-      {/each}
-    </ul>
     <h4>Compare the database with the files</h4>
     <div class="actions">
       <button class="primary" onclick={start} disabled={busy || shown?.running}>
@@ -226,25 +196,6 @@
     margin: 8px 0;
   }
 
-  .folders {
-    list-style: none;
-    margin: 8px 0;
-    padding: 0;
-  }
-
-  .folders li {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 12px;
-    padding: 8px 0;
-    border-top: 1px solid var(--line);
-  }
-
-  .badge.on {
-    background: var(--accent);
-    color: var(--on-accent, #000);
-  }
 
   .counts {
     border-collapse: collapse;

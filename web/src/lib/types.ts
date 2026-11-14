@@ -1451,6 +1451,16 @@ export interface EditorBatch {
   /** tags, cover, rename, or undo-... */
   kinds: string
   undone_at: number | null
+  /** Its files went out with the trash: it can't be undone. */
+  final_at: number | null
+}
+
+/** What happens once files have moved. */
+export interface EditorAfterMove {
+  /** Folders left with no songs go to the trash, with what's left in them. */
+  remove_empty?: boolean
+  /** Each new folder gets a folder.jpg of its album's cover. */
+  folder_art?: boolean
 }
 
 export interface EditorRenamed {

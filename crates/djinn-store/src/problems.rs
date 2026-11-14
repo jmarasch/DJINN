@@ -421,7 +421,7 @@ macro_rules! ai_lyrics_detail {
 macro_rules! vanished_from {
     () => {
         "FROM tracks t WHERE t.removed_at IS NOT NULL AND t.removed_at > ?
-           AND instr(t.path, '.djinn-set-aside') = 0
+           AND instr(t.path, '.djinn-trash') = 0
            AND NOT EXISTS (SELECT 1 FROM tracks a WHERE a.removed_at IS NULL
                            AND a.size = t.size AND lower(a.title) = lower(t.title))"
     };

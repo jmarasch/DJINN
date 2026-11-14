@@ -1,27 +1,33 @@
 <script lang="ts">
-  // Admin > Library editor: the workspace, the compare, and which folders
-  // can be changed. The whole editor sits behind the protected areas' lock.
+  // Admin > Library editor: the workspace, the library folders (read only
+  // or read and write, and the trash), and the compare. The whole editor sits behind the protected areas' lock.
   import { takeEditorJump } from './editorJump.svelte'
   import EditorWorkspace from './EditorWorkspace.svelte'
   import LibraryCompare from './LibraryCompare.svelte'
+  import LibraryFolders from './LibraryFolders.svelte'
 
   /** A folder or search another page asked for. */
   const start = takeEditorJump()
 
-  let view = $state<'editor' | 'compare'>('editor')
+  let view = $state<'editor' | 'folders' | 'compare'>('editor')
 </script>
 
 <div class="tabs" role="tablist">
   <button role="tab" aria-selected={view === 'editor'} class:active={view === 'editor'} onclick={() => (view = 'editor')}>
     Editor
   </button>
+  <button role="tab" aria-selected={view === 'folders'} class:active={view === 'folders'} onclick={() => (view = 'folders')}>
+    Library folders
+  </button>
   <button role="tab" aria-selected={view === 'compare'} class:active={view === 'compare'} onclick={() => (view = 'compare')}>
-    Compare and folders
+    Compare
   </button>
 </div>
 
 {#if view === 'editor'}
   <EditorWorkspace startFolder={start.folder} startSearch={start.search} />
+{:else if view === 'folders'}
+  <LibraryFolders />
 {:else}
   <LibraryCompare />
 {/if}

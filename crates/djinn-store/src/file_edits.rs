@@ -35,6 +35,7 @@ pub struct FileEdit {
     pub after: String,
     pub made_at: i64,
     pub undone_at: Option<i64>,
+    pub final_at: Option<i64>,
 }
 
 /// One approval: when, by whom, how many files, and whether it was undone.
@@ -46,6 +47,8 @@ pub struct FileBatch {
     pub files: i64,
     pub kinds: String,
     pub undone_at: Option<i64>,
+    /// Its files went out with the trash: it can't be undone.
+    pub final_at: Option<i64>,
 }
 
 impl Store {
@@ -82,7 +85,8 @@ impl Store {
     pub async fn file_batches(&self, limit: i64) -> Result<Vec<FileBatch>> {
         Ok(sqlx::query_as(
             "SELECT f.batch, min(f.made_at) AS made_at, u.username AS made_by, count(*) AS files,
-                    group_concat(DISTINCT f.kind) AS kinds, max(f.undone_at) AS undone_at
+                    group_concat(DISTINCT f.kind) AS kinds, max(f.undone_at) AS undone_at,
+                    max(f.final_at) AS final_at
              FROM file_edits f LEFT JOIN users u ON u.id = f.made_by
              GROUP BY f.batch ORDER BY f.batch DESC LIMIT ?",
         )
@@ -94,7 +98,7 @@ impl Store {
     /// The files of one approval, last written first (the order to undo in).
     pub async fn file_batch(&self, batch: i64) -> Result<Vec<FileEdit>> {
         Ok(sqlx::query_as(
-            "SELECT id, batch, track_id, path, kind, before, after, made_at, undone_at
+            "SELECT id, batch, track_id, path, kind, before, after, made_at, undone_at, final_at
              FROM file_edits WHERE batch = ? ORDER BY id DESC",
         )
         .bind(batch)
@@ -109,6 +113,29 @@ impl Store {
             .execute(&self.pool)
             .await?;
         Ok(())
+    }
+
+    /// The trash under `trash` (a library folder's) was emptied: what went
+    /// there can't be undone any more.
+    pub async fn trash_emptied(&self, trash: &str) -> Result<()> {
+        sqlx::query(
+            "UPDATE file_edits SET final_at = ?1
+             WHERE final_at IS NULL AND undone_at IS NULL AND kind IN ('delete', 'folder')
+               AND substr(after, 1, length(?2)) = ?2",
+        )
+        .bind(now_ms())
+        .bind(trash)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// The song at `path`, if the library has one there.
+    pub async fn track_id_at(&self, path: &str) -> Result<Option<i64>> {
+        Ok(sqlx::query_scalar("SELECT id FROM tracks WHERE path = ?")
+            .bind(path)
+            .fetch_optional(&self.pool)
+            .await?)
     }
 
     /// A song set aside comes back.

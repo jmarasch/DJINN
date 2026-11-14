@@ -17,6 +17,7 @@ import type {
   EditorApplied,
   EditorBatch,
   EditorRenamed,
+  EditorAfterMove,
   EditorSong,
   EditableFolder,
   AiListenerStatus,
@@ -319,11 +320,19 @@ export const api = {
     if (!res.ok) throw new ApiError(res.status, data?.error ?? `Request failed (${res.status})`)
     return data as EditorApplied
   },
-  editorRename: (ids: number[], pattern: string, preview: boolean) =>
-    post<{ files: EditorRenamed[]; batch: number | null }>('/editor/rename', { ids, pattern, preview }),
+  editorRename: (ids: number[], pattern: string, preview: boolean, after: EditorAfterMove = {}) =>
+    post<{ files: EditorRenamed[]; batch: number | null }>('/editor/rename', { ids, pattern, preview, ...after }),
   /** Moves songs to a folder (keeping their names), or sets them aside out of the library. */
-  editorMove: (ids: number[], to: { folder: string } | { set_aside: true }, preview: boolean) =>
-    post<{ files: EditorRenamed[]; batch: number | null }>('/editor/move', { ids, ...to, preview }),
+  /** Moves songs to a folder (keeping their names), or deletes them to the trash. */
+  editorMove: (ids: number[], to: { folder: string } | { delete: true }, preview: boolean, after: EditorAfterMove = {}) =>
+    post<{ files: EditorRenamed[]; batch: number | null }>('/editor/move', { ids, ...to, preview, ...after }),
+  /** Copies songs to a folder, where they become songs of their own. */
+  editorCopy: (ids: number[], folder: string, preview: boolean) =>
+    post<{ files: EditorRenamed[]; batch: number | null }>('/editor/copy', { ids, folder, preview }),
+  editorTrash: () => get<{ files: number; bytes: number }>('/editor/trash'),
+  editorEmptyTrash: () => del<{ files: number; bytes: number }>('/editor/trash'),
+  /** Writes folder.jpg in these songs' folders from their album cover. */
+  editorFolderArt: (ids: number[], replace: boolean) => post<EditorApplied>('/editor/folder-art', { ids, replace }),
   /** Writes a length header into variable bit rate MP3s that have none. */
   editorMp3Length: (ids: number[], preview: boolean) =>
     post<{ files: EditorRenamed[]; batch: number | null }>('/editor/mp3-length', { ids, preview }),

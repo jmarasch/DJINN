@@ -53,11 +53,12 @@ pub const KEEP_WHOLE_KEY: &str = "artist_keep_whole";
 /// Whether a file's original release date wins over its own date.
 pub const ORIGINAL_YEARS_KEY: &str = "original_years";
 
-/// Whether years come from the original release, on unless turned off.
-/// The folder (in a library folder) where the library editor puts songs
-/// set aside; library checks skip it.
-pub const SET_ASIDE: &str = ".djinn-set-aside";
+/// The library editor's trash: a hidden folder in each library folder where
+/// deleted songs wait (keeping their place under it) until the trash is
+/// emptied. Library checks skip it.
+pub const TRASH: &str = ".djinn-trash";
 
+/// Whether years come from the original release, on unless turned off.
 pub async fn original_years(store: &Store) -> Result<bool, LibraryError> {
     Ok(store.get_setting(ORIGINAL_YEARS_KEY).await?.as_deref() != Some("0"))
 }
@@ -285,7 +286,7 @@ fn walk(roots: &[PathBuf]) -> (Vec<FoundFile>, Vec<PathBuf>, Vec<ScanProblem>) {
         let walk = WalkDir::new(root)
             .follow_links(true)
             .into_iter()
-            .filter_entry(|e| e.file_name() != SET_ASIDE);
+            .filter_entry(|e| e.file_name() != TRASH);
         for entry in walk {
             let entry = match entry {
                 Ok(entry) => entry,

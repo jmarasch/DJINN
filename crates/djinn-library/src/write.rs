@@ -222,6 +222,22 @@ pub fn write_cover(path: &Path, image: Option<&[u8]>) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+/// A picture as JPEG (for `folder.jpg`): a JPEG as it is, anything else
+/// the image library reads converted at quality 90.
+pub fn jpeg_of(bytes: &[u8]) -> Result<Vec<u8>, String> {
+    if bytes.starts_with(&[0xFF, 0xD8]) {
+        return Ok(bytes.to_vec());
+    }
+    let picture = image::load_from_memory(bytes).map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 90);
+    picture
+        .to_rgb8()
+        .write_with_encoder(encoder)
+        .map_err(|e| e.to_string())?;
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -240,6 +256,18 @@ mod tests {
         assert!(check(&v("year", Some("85"))).is_err());
         assert!(check(&v("path", Some("x"))).is_err());
         assert!(check(&v("artist", Some("a\nb"))).is_err());
+    }
+
+    #[test]
+    fn pictures_become_jpeg() {
+        let mut png = Vec::new();
+        image::RgbImage::new(4, 4)
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
+        let jpeg = jpeg_of(&png).unwrap();
+        assert!(jpeg.starts_with(&[0xFF, 0xD8]));
+        assert_eq!(jpeg_of(&jpeg).unwrap(), jpeg);
+        assert!(jpeg_of(b"nothing").is_err());
     }
 
     fn copy_of(fixture: &str, name: &str) -> std::path::PathBuf {

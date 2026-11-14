@@ -1,3 +1,7 @@
+<script lang="ts" module>
+  type MoveKind = 'rename' | 'move' | 'copy' | 'delete' | 'mp3'
+</script>
+
 <script lang="ts">
   // The library editor's workspace: the folders as they are on disk (left),
   // the songs of the chosen folder in a grid (middle), and the album's
@@ -43,7 +47,10 @@
   let pattern = $state('{track} {title}')
   let renames = $state<EditorRenamed[] | null>(null)
   /** What the list of new places is for. */
-  let moveKind = $state<'rename' | 'move' | 'aside' | 'mp3'>('rename')
+  let moveKind = $state<MoveKind>('rename')
+  /** After moving: folders left with no songs go to the trash; new folders get folder.jpg. */
+  let removeEmpty = $state(true)
+  let folderArt = $state(false)
   let moveTo = $state('')
   let history = $state<EditorBatch[]>([])
   let coverInput = $state<HTMLInputElement | null>(null)
@@ -421,11 +428,13 @@
     }
   }
 
-  function relocation(kind: 'rename' | 'move' | 'aside' | 'mp3', ids: number[], preview: boolean) {
-    if (kind === 'rename') return api.editorRename(ids, pattern, preview)
+  function relocation(kind: MoveKind, ids: number[], preview: boolean) {
+    const after = { remove_empty: removeEmpty, folder_art: folderArt }
+    if (kind === 'rename') return api.editorRename(ids, pattern, preview, after)
     if (kind === 'mp3') return api.editorMp3Length(ids, preview)
-    if (kind === 'move') return api.editorMove(ids, { folder: moveTo }, preview)
-    return api.editorMove(ids, { set_aside: true }, preview)
+    if (kind === 'copy') return api.editorCopy(ids, moveTo, preview)
+    if (kind === 'move') return api.editorMove(ids, { folder: moveTo }, preview, after)
+    return api.editorMove(ids, { delete: true }, preview, { remove_empty: removeEmpty })
   }
 
   async function replaceFile(song: EditorSong, file: File) {
@@ -445,10 +454,23 @@
     }
   }
 
-  async function previewMove(kind: 'rename' | 'move' | 'aside' | 'mp3') {
+  async function makeFolderArt() {
+    busy = true
+    try {
+      const done = await unlocked(() => api.editorFolderArt(coverSongs.map((s) => s.id), true))
+      toast(done.failed.length ? `${done.songs} written; ${done.failed[0].error}` : `folder.jpg written in ${done.songs} folders`)
+      await loadHistory()
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not write it', true)
+    } finally {
+      busy = false
+    }
+  }
+
+  async function previewMove(kind: MoveKind) {
     if (kind === 'rename' && changeCount && !confirm('Rename from the tags as they are now? Changes not approved yet are left out.'))
       return
-    if (kind === 'move' && !moveTo.trim()) return
+    if ((kind === 'move' || kind === 'copy') && !moveTo.trim()) return
     try {
       moveKind = kind
       const found = (await unlocked(() => relocation(kind, changeable.map((s) => s.id), true))).files
@@ -464,10 +486,15 @@
   }
 
   const renamable = $derived(renames?.filter((r) => !r.problem) ?? [])
-  const MOVE_WORDS = {
+  const MOVE_WORDS: Record<MoveKind, { title: string; verb: string; done: string }> = {
     rename: { title: 'New file names', verb: 'Rename', done: 'renamed' },
     move: { title: 'New places', verb: 'Move', done: 'moved' },
-    aside: { title: 'Set aside (out of the library, into a hidden folder beside it)', verb: 'Set aside', done: 'set aside' },
+    copy: { title: 'Copies to make (each becomes a song of its own)', verb: 'Copy', done: 'copied' },
+    delete: {
+      title: 'Delete (into the trash in their library folder; undo from the history until the trash is emptied)',
+      verb: 'Delete',
+      done: 'deleted',
+    },
     mp3: {
       title: 'MP3s other players show the wrong length for (DJINN counts it already)',
       verb: 'Fix',
@@ -499,7 +526,10 @@
     tags: 'tags',
     cover: 'cover',
     rename: 'names and places',
-    'set-aside': 'set aside',
+    delete: 'deleted',
+    copy: 'copies',
+    folder: 'empty folders',
+    'folder-art': 'folder.jpg',
     'mp3-length': 'MP3 lengths',
     replace: 'replaced file',
   }
@@ -681,17 +711,21 @@
                 <div class="tool">
                   <input bind:value={pattern} aria-label="File name pattern" class="pattern" />
                   <button class="small-button" onclick={() => previewMove('rename')}>Rename files...</button>
-                  <span class="small muted">{'{disc} {track} {title} {artist} {album} {album_artist} {year}'}</span>
+                  <span class="small muted"
+                    >{'{disc} {track} {title} {artist} {album} {album_artist} {year}'}; a / makes folders from the library
+                    folder, like {'{album_artist}/{album}/{track} {title}'}</span
+                  >
                 </div>
                 <div class="tool">
-                  <input bind:value={moveTo} aria-label="Folder to move to" class="pattern" placeholder="Folder to move to" />
-                  <button class="small-button" onclick={() => previewMove('move')} disabled={!moveTo.trim()}>Move files...</button>
+                  <input bind:value={moveTo} aria-label="Folder to move or copy to" class="pattern" placeholder="Folder to move or copy to" />
+                  <button class="small-button" onclick={() => previewMove('move')} disabled={!moveTo.trim()}>Move...</button>
+                  <button class="small-button" onclick={() => previewMove('copy')} disabled={!moveTo.trim()}>Copy...</button>
                   <button
                     class="small-button"
-                    onclick={() => previewMove('aside')}
-                    title="Takes them out of the library into a hidden .djinn-set-aside folder in the same library folder, like the copy you don't keep of an album filed twice. Undo brings them back."
+                    onclick={() => previewMove('delete')}
+                    title="Into the trash in their library folder; undo from the history until the trash is emptied (Library folders)"
                   >
-                    Set aside...
+                    Delete...
                   </button>
                   <button
                     class="small-button"
@@ -700,6 +734,10 @@
                   >
                     Fix MP3 lengths...
                   </button>
+                </div>
+                <div class="tool">
+                  <label class="check small"><input type="checkbox" bind:checked={removeEmpty} /> Remove folders left with no songs</label>
+                  <label class="check small"><input type="checkbox" bind:checked={folderArt} /> Make folder.jpg in new folders</label>
                 </div>
               {/if}
             </div>
@@ -771,6 +809,15 @@
             <button class="small-button" disabled={busy || !coverSongs.length} onclick={() => setCover('reset')}>
               Use the files' cover
             </button>
+          {:else}
+            <button
+              class="small-button"
+              disabled={busy || !coverSongs.length}
+              title="Saves the album's cover as folder.jpg in the songs' folders (replacing one that's there; undo from the history)"
+              onclick={makeFolderArt}
+            >
+              Make folder.jpg
+            </button>
           {/if}
         </div>
         {#if target === 'library' && chosen}
@@ -836,6 +883,8 @@
                       : ''}
                     {#if b.undone_at}
                       <span class="muted">(undone)</span>
+                    {:else if b.final_at}
+                      <span class="muted">(trash emptied)</span>
                     {:else if !b.kinds.startsWith('undo')}
                       <button class="link" disabled={busy} onclick={() => undo(b)}>Undo</button>
                     {/if}
@@ -1119,6 +1168,17 @@
 
   .pattern {
     min-width: 16ch;
+  }
+
+  .check {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .check input {
+    width: auto;
+    padding: 0;
   }
 
   .renames {

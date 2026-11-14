@@ -257,18 +257,18 @@ struct Apply {
 }
 
 #[derive(Serialize)]
-struct Failed {
-    id: i64,
-    error: String,
+pub(crate) struct Failed {
+    pub(crate) id: i64,
+    pub(crate) error: String,
 }
 
 #[derive(Default, Serialize)]
-struct Applied {
+pub(crate) struct Applied {
     /// Songs changed.
-    songs: usize,
-    failed: Vec<Failed>,
+    pub(crate) songs: usize,
+    pub(crate) failed: Vec<Failed>,
     /// The approval's number in the history (files written), to undo it.
-    batch: Option<i64>,
+    pub(crate) batch: Option<i64>,
 }
 
 /// Groups the changes by song, in the order first seen, checking each.
@@ -344,7 +344,7 @@ fn clear_corrections(fields: &[FieldValue]) -> TagChange {
 }
 
 /// A file's size and change time (ms), as the scanner sees them.
-fn stat(path: &Path) -> std::io::Result<(i64, i64)> {
+pub(crate) fn stat(path: &Path) -> std::io::Result<(i64, i64)> {
     let meta = std::fs::metadata(path)?;
     let mtime = meta
         .modified()?
@@ -355,7 +355,7 @@ fn stat(path: &Path) -> std::io::Result<(i64, i64)> {
 }
 
 /// Every file must be in a folder the admin allowed changes in.
-async fn all_editable(state: &AppState, paths: &[&str]) -> ApiResult<()> {
+pub(crate) async fn all_editable(state: &AppState, paths: &[&str]) -> ApiResult<()> {
     for path in paths {
         crate::editable::require(state, Path::new(path)).await?;
     }
@@ -483,7 +483,7 @@ async fn history(
 }
 
 /// Where a file's cover is kept before the editor replaces it, for undo.
-fn undo_dir(state: &AppState) -> PathBuf {
+pub(crate) fn undo_dir(state: &AppState) -> PathBuf {
     crate::backup::data_dir(state).join("editor-undo")
 }
 
@@ -500,6 +500,11 @@ async fn undo(
     }
     if edits.iter().any(|e| e.undone_at.is_some()) {
         return Err(ApiError::conflict("that was undone already"));
+    }
+    if edits.iter().any(|e| e.final_at.is_some()) {
+        return Err(ApiError::conflict(
+            "the trash was emptied since, so that can't be put back",
+        ));
     }
     if edits.iter().any(|e| e.kind.starts_with("undo")) {
         return Err(ApiError::bad_request(
@@ -567,7 +572,7 @@ async fn undo(
                 .map_err(|e| e.to_string())
                 .and_then(|r| r)
             }
-            "rename" | "set-aside" => {
+            "rename" | "delete" => {
                 let (old, new) = (edit.before.clone(), edit.after.clone());
                 if let Some(parent) = Path::new(&old).parent() {
                     let _ = std::fs::create_dir_all(parent);
@@ -581,7 +586,7 @@ async fn undo(
                         }
                         if let Some(track) = edit.track_id {
                             state.store.move_track_path(track, &old).await?;
-                            if edit.kind == "set-aside" {
+                            if edit.kind == "delete" {
                                 state.store.mark_restored(track).await?;
                             }
                         }
@@ -621,6 +626,7 @@ async fn undo(
                     Err(e) => Err(e),
                 }
             }
+            "copy" | "folder" | "folder-art" => crate::editor_files::undo_one(&state, &edit).await,
             "mp3-length" => {
                 let path = edit.path.clone();
                 tokio::task::spawn_blocking(move || {
@@ -635,7 +641,8 @@ async fn undo(
         };
         match result {
             Ok((path, before, after)) => {
-                let (size, mtime) = stat(Path::new(&path)).map_err(anyhow::Error::from)?;
+                // A copy taken back or a folder put back has no file to note.
+                let (size, mtime) = stat(Path::new(&path)).unwrap_or((0, 0));
                 state
                     .store
                     .record_file_edit(&NewFileEdit {
@@ -650,7 +657,9 @@ async fn undo(
                         made_by: Some(user.id),
                     })
                     .await?;
-                reread.push(path);
+                if !matches!(edit.kind.as_str(), "copy" | "folder" | "folder-art") {
+                    reread.push(path);
+                }
                 applied.songs += 1;
             }
             Err(error) => applied.failed.push(Failed { id, error }),
@@ -838,30 +847,45 @@ async fn cover(
 struct Rename {
     ids: Vec<i64>,
     /// Like "{track} {title}": {disc}, {track}, {title}, {artist}, {album},
-    /// {album_artist}, {year}; the extension is kept.
+    /// {album_artist} (the artist when there's none), {year}; the extension
+    /// is kept. With "/" it is the whole place under the song's library
+    /// folder, like "{album_artist}/{album}/{track} {title}".
     pattern: String,
     /// Only say what the names would be.
     #[serde(default)]
     preview: bool,
+    #[serde(flatten)]
+    after: AfterMove,
+}
+
+/// What to do once files have moved.
+#[derive(Clone, Copy, Default, Deserialize)]
+pub(crate) struct AfterMove {
+    /// Folders left with no songs go to the trash, with what's left in them.
+    #[serde(default)]
+    pub(crate) remove_empty: bool,
+    /// Each new folder gets a folder.jpg of its album's cover.
+    #[serde(default)]
+    pub(crate) folder_art: bool,
 }
 
 #[derive(Serialize)]
-struct Renamed {
-    id: i64,
-    from: String,
-    to: String,
+pub(crate) struct Renamed {
+    pub(crate) id: i64,
+    pub(crate) from: String,
+    pub(crate) to: String,
     /// Why it can't be renamed, if it can't.
-    problem: Option<String>,
+    pub(crate) problem: Option<String>,
 }
 
 #[derive(Serialize)]
-struct RenameResult {
-    files: Vec<Renamed>,
-    batch: Option<i64>,
+pub(crate) struct RenameResult {
+    pub(crate) files: Vec<Renamed>,
+    pub(crate) batch: Option<i64>,
 }
 
 /// Characters no file name may have, on any system DJINN runs on.
-fn safe_name(name: &str) -> String {
+pub(crate) fn safe_name(name: &str) -> String {
     let cleaned: String = name
         .chars()
         .map(|c| match c {
@@ -878,29 +902,51 @@ fn safe_name(name: &str) -> String {
         .collect()
 }
 
-/// A song's new file name from the pattern (without the extension).
-fn name_from(pattern: &str, song: &EditorSong) -> String {
+/// A song's new place from the pattern, as folder names then the file name
+/// (without the extension); one part for a name in the same folder.
+fn name_from(pattern: &str, song: &EditorSong) -> Vec<String> {
     let two = |n: Option<i64>| n.map(|n| format!("{n:02}")).unwrap_or_default();
     let text = |t: &Option<String>| t.clone().unwrap_or_default();
-    let name = pattern
-        .replace(
-            "{disc}",
-            &song.disc_no.map(|d| d.to_string()).unwrap_or_default(),
-        )
-        .replace("{track}", &two(song.track_no))
-        .replace("{title}", &song.title)
-        .replace("{artist}", &text(&song.artist))
-        .replace("{album_artist}", &text(&song.album_artist))
-        .replace("{album}", &text(&song.album))
-        .replace(
-            "{year}",
-            &song.year.map(|y| y.to_string()).unwrap_or_default(),
-        );
-    safe_name(&name)
+    let album_artist = song
+        .album_artist
+        .clone()
+        .filter(|a| !a.trim().is_empty())
+        .or_else(|| song.artist.clone())
+        .unwrap_or_default();
+    let parts: Vec<String> = pattern
+        .split(['/', '\\'])
+        .map(|part| {
+            safe_name(
+                &part
+                    .replace(
+                        "{disc}",
+                        &song.disc_no.map(|d| d.to_string()).unwrap_or_default(),
+                    )
+                    .replace("{track}", &two(song.track_no))
+                    .replace("{title}", &song.title)
+                    .replace("{artist}", &text(&song.artist))
+                    .replace("{album_artist}", &album_artist)
+                    .replace("{album}", &text(&song.album))
+                    .replace(
+                        "{year}",
+                        &song.year.map(|y| y.to_string()).unwrap_or_default(),
+                    ),
+            )
+        })
+        .collect();
+    // Empty folder names (a missing album) drop out; an empty file name stays,
+    // to be refused.
+    let last = parts.len().saturating_sub(1);
+    parts
+        .into_iter()
+        .enumerate()
+        .filter(|(i, p)| *i == last || !p.is_empty())
+        .map(|(_, p)| p)
+        .collect()
 }
 
 /// Moves a file, refusing to replace another.
-fn move_file(from: &str, to: &str) -> Result<(), String> {
+pub(crate) fn move_file(from: &str, to: &str) -> Result<(), String> {
     if Path::new(to).exists() {
         return Err("a file with that name is there already".into());
     }
@@ -922,6 +968,7 @@ async fn rename(
         ));
     }
     let songs = state.store.editor_songs_by_id(&body.ids).await?;
+    let roots = crate::folders::library_roots(&state).await?;
     let mut files = Vec::new();
     let mut taken = std::collections::HashSet::new();
     for song in &songs {
@@ -930,8 +977,18 @@ async fn rename(
             .extension()
             .map(|e| format!(".{}", e.to_string_lossy()))
             .unwrap_or_default();
-        let stem = name_from(&body.pattern, song);
-        let to = from.with_file_name(format!("{stem}{ext}"));
+        let mut parts = name_from(&body.pattern, song);
+        let stem = parts.pop().unwrap_or_default();
+        // Folders in the pattern start at the song's library folder.
+        let base = if parts.is_empty() {
+            from.parent().map(Path::to_path_buf).unwrap_or_default()
+        } else {
+            match roots.iter().find(|r| from.starts_with(r)) {
+                Some(root) => parts.iter().fold(root.clone(), |dir, part| dir.join(part)),
+                None => continue,
+            }
+        };
+        let to = base.join(format!("{stem}{ext}"));
         let to_text = to.to_string_lossy().into_owned();
         let problem = if stem.is_empty() {
             Some("the name would be empty".to_owned())
@@ -954,7 +1011,7 @@ async fn rename(
     if body.preview {
         return Ok(Json(RenameResult { files, batch: None }));
     }
-    let (batch, moved) = relocate(&state, &user, &mut files, "rename").await?;
+    let (batch, moved) = relocate(&state, &user, &mut files, "rename", body.after).await?;
     audit(
         &state,
         &user,
@@ -971,13 +1028,14 @@ async fn rename(
 
 /// Moves each file without a problem (with the `.lrc` beside it), points
 /// its song at the new place and records it as one approval of `kind`
-/// ("rename" or "set-aside", which also takes the song out of the
+/// ("rename" or "delete", which also takes the song out of the
 /// library). Returns the approval and how many moved.
 async fn relocate(
     state: &AppState,
     user: &djinn_store::User,
     files: &mut [Renamed],
     kind: &str,
+    after: AfterMove,
 ) -> ApiResult<(i64, usize)> {
     all_editable(
         state,
@@ -1028,7 +1086,7 @@ async fn relocate(
                 made_by: Some(user.id),
             })
             .await?;
-        if kind == "set-aside" {
+        if kind == "delete" {
             aside.push(file.id);
         } else {
             moved.push(file.to.clone());
@@ -1044,6 +1102,19 @@ async fn relocate(
     if !moved.is_empty() {
         crate::library_api::reread(state, &moved).await?;
     }
+    let done: Vec<&Renamed> = files.iter().filter(|f| f.problem.is_none()).collect();
+    if after.remove_empty {
+        let left: Vec<PathBuf> = done
+            .iter()
+            .filter_map(|f| Path::new(&f.from).parent().map(Path::to_path_buf))
+            .collect();
+        crate::editor_files::tidy(state, user, batch, left).await?;
+    }
+    if after.folder_art && kind != "delete" {
+        let ids: Vec<i64> = done.iter().map(|f| f.id).collect();
+        let folders = crate::editor_files::folders_with_covers(state, &ids).await?;
+        crate::editor_files::write_folder_art(state, user, batch, folders, false).await?;
+    }
     Ok((batch, moved.len() + aside.len()))
 }
 
@@ -1051,16 +1122,18 @@ async fn relocate(
 struct Move {
     ids: Vec<i64>,
     /// The folder to move them to (inside a library folder), keeping their
-    /// names; or none with `set_aside`.
+    /// names; or none with `delete`.
     #[serde(default)]
     folder: Option<String>,
-    /// Out of the library: into `.djinn-set-aside` in the song's own library
+    /// Out of the library: into `.djinn-trash` in the song's own library
     /// folder, keeping its place under it. A library check skips it, and
     /// undo brings it back.
     #[serde(default)]
-    set_aside: bool,
+    delete: bool,
     #[serde(default)]
     preview: bool,
+    #[serde(flatten)]
+    after: AfterMove,
 }
 
 async fn move_songs(
@@ -1073,7 +1146,7 @@ async fn move_songs(
         return Err(ApiError::bad_request("choose 1 to 5000 songs"));
     }
     let roots = crate::folders::library_roots(&state).await?;
-    let folder = match (&body.folder, body.set_aside) {
+    let folder = match (&body.folder, body.delete) {
         (_, true) => None,
         (Some(folder), false) if !folder.trim().is_empty() => {
             let folder = PathBuf::from(folder.trim());
@@ -1098,7 +1171,7 @@ async fn move_songs(
             None => roots.iter().find(|r| from.starts_with(r)).and_then(|root| {
                 from.strip_prefix(root)
                     .ok()
-                    .map(|rel| root.join(djinn_library::SET_ASIDE).join(rel))
+                    .map(|rel| root.join(djinn_library::TRASH).join(rel))
             }),
         };
         let Some(to) = to else { continue };
@@ -1122,18 +1195,14 @@ async fn move_songs(
     if body.preview {
         return Ok(Json(RenameResult { files, batch: None }));
     }
-    let kind = if body.set_aside {
-        "set-aside"
-    } else {
-        "rename"
-    };
-    let (batch, moved) = relocate(&state, &user, &mut files, kind).await?;
+    let kind = if body.delete { "delete" } else { "rename" };
+    let (batch, moved) = relocate(&state, &user, &mut files, kind, body.after).await?;
     audit(
         &state,
         &user,
         device.ip.as_deref(),
-        if body.set_aside {
-            "editor_set_aside"
+        if body.delete {
+            "editor_delete"
         } else {
             "editor_move"
         },
@@ -1255,7 +1324,7 @@ struct ReplaceQuery {
 }
 
 /// Copies a file where a rename can't go (another disk), else renames.
-fn move_across(from: &Path, to: &Path) -> std::io::Result<()> {
+pub(crate) fn move_across(from: &Path, to: &Path) -> std::io::Result<()> {
     if std::fs::rename(from, to).is_ok() {
         return Ok(());
     }
@@ -1692,11 +1761,11 @@ mod tests {
             post_json(&state, &format!("/api/editor/undo/{replaced}"), "", &admin).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(std::fs::read(&quar_file).unwrap(), before);
-        // Set aside: out of the library, into the hidden folder; undo brings it back.
-        let aside = format!(r#"{{"ids":[{quar_song}],"set_aside":true}}"#);
+        // Deleted: out of the library, into the trash; undo brings it back.
+        let aside = format!(r#"{{"ids":[{quar_song}],"delete":true}}"#);
         let (status, text) = post_json(&state, "/api/editor/move", &aside, &admin).await;
         assert_eq!(status, StatusCode::OK, "{text}");
-        let hidden = quar.join(djinn_library::SET_ASIDE).join("song.flac");
+        let hidden = quar.join(djinn_library::TRASH).join("song.flac");
         assert!(hidden.exists() && !quar_file.exists());
         let in_quar = |state: AppState, dir: std::path::PathBuf| async move {
             state
@@ -1711,11 +1780,11 @@ mod tests {
             0,
             "out of the library"
         );
-        let set_aside: i64 = serde_json::from_str::<serde_json::Value>(&text).unwrap()["batch"]
+        let delete: i64 = serde_json::from_str::<serde_json::Value>(&text).unwrap()["batch"]
             .as_i64()
             .unwrap();
         let (status, _) =
-            post_json(&state, &format!("/api/editor/undo/{set_aside}"), "", &admin).await;
+            post_json(&state, &format!("/api/editor/undo/{delete}"), "", &admin).await;
         assert_eq!(status, StatusCode::OK);
         assert!(quar_file.exists() && !hidden.exists());
         assert_eq!(in_quar(state.clone(), quar.clone()).await, 1, "back in");
