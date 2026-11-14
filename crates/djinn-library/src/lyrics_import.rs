@@ -30,22 +30,44 @@ pub struct Header {
     pub by: Option<String>,
 }
 
+/// What an AI did to a file's lyrics, from its `[by:]` line.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AiInfo {
+    /// 1: the AI made the words by listening (guesses). 2: a person's words
+    /// that the AI timed.
+    pub kind: i64,
+    pub model: String,
+    /// How well the timing matched the words, in percent, when it says.
+    pub match_pct: Option<i64>,
+}
+
 impl Header {
-    /// Set when the file says an AI made its lyrics (a `[by:]` line such as
-    /// `lyrics-listener (AI-generated; model=faster-whisper/medium)`): the
-    /// model it names, or a plain "AI". These are guesses at what is said
-    /// or sung, and rank below lyrics from anywhere else.
-    pub fn ai_model(&self) -> Option<String> {
+    /// Set when the file says an AI worked on its lyrics: a `[by:]` line like
+    /// `lyrics-listener (AI-generated; model=faster-whisper/medium)` (made
+    /// by listening) or `... (AI-synced; model=...; match=84%)` (a person's
+    /// words, timed by an AI).
+    pub fn ai_info(&self) -> Option<AiInfo> {
         let by = self.by.as_deref()?;
-        if !by.to_lowercase().contains("ai-generated") {
+        let lower = by.to_lowercase();
+        let kind = if lower.contains("ai-synced") {
+            2
+        } else if lower.contains("ai-generated") {
+            1
+        } else {
             return None;
-        }
-        Some(
-            by.split_once("model=")
-                .map(|(_, rest)| rest.trim_end_matches(')').trim().to_owned())
-                .filter(|m| !m.is_empty())
-                .unwrap_or_else(|| "AI".to_owned()),
-        )
+        };
+        let field = |name: &str| {
+            by.split(';')
+                .map(|p| p.trim().trim_end_matches(')').trim())
+                .find_map(|p| p.strip_prefix(name))
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+        };
+        Some(AiInfo {
+            kind,
+            model: field("model=").map_or_else(|| "AI".to_owned(), str::to_owned),
+            match_pct: field("match=").and_then(|m| m.trim_end_matches('%').trim().parse().ok()),
+        })
     }
 }
 
@@ -161,7 +183,11 @@ pub fn content(text: &str) -> Content {
 
 fn is_ai_notice(line: &str) -> bool {
     let (_, words) = leading_tags(line);
-    words.trim().eq_ignore_ascii_case("(AI-generated lyrics)")
+    {
+        let w = words.trim();
+        w.eq_ignore_ascii_case("(AI-generated lyrics)")
+            || w.eq_ignore_ascii_case("(AI-synced lyrics)")
+    }
 }
 
 /// Letters and digits only, lower case, so "Mot örhead" meets "Motörhead".
@@ -468,7 +494,14 @@ mod tests {
     fn ai_made_lyrics_are_told_apart_and_their_notice_is_not_a_lyric() {
         let text = "[ar:Band]\n[ti:Skit]\n[by:lyrics-listener (AI-generated; model=faster-whisper/medium)]\n\n[00:00.00](AI-generated lyrics)\n[00:00.00]Jack, leave him alone.\n[00:06.36]Or else.";
         let head = header(text);
-        assert_eq!(head.ai_model().as_deref(), Some("faster-whisper/medium"));
+        assert_eq!(
+            head.ai_info(),
+            Some(AiInfo {
+                kind: 1,
+                model: "faster-whisper/medium".into(),
+                match_pct: None
+            })
+        );
         let Content::Lyrics(found) = content(text) else {
             panic!("lyrics")
         };
@@ -481,15 +514,36 @@ mod tests {
             .unwrap_or_default()
             .contains("(AI-generated lyrics)"));
         // A person's file is not AI.
-        assert_eq!(
-            header("[ar:A]\n[by:someone]\n[00:01.00]Hi").ai_model(),
-            None
-        );
+        assert_eq!(header("[ar:A]\n[by:someone]\n[00:01.00]Hi").ai_info(), None);
         assert_eq!(
             header("[by:AI-generated]\n[00:01.00]Hi")
-                .ai_model()
-                .as_deref(),
-            Some("AI")
+                .ai_info()
+                .map(|i| (i.kind, i.model)),
+            Some((1, "AI".to_owned()))
+        );
+        // A person's words that an AI timed, with how well they matched.
+        let synced = header(
+            "[by:lyrics-listener (AI-synced; model=faster-whisper/medium; match=84%)]\n[00:01.00](AI-synced lyrics)\n[00:02.00]Words",
+        );
+        assert_eq!(
+            synced.ai_info(),
+            Some(AiInfo {
+                kind: 2,
+                model: "faster-whisper/medium".into(),
+                match_pct: Some(84)
+            })
+        );
+        let Content::Lyrics(found) = content(
+            "[by:lyrics-listener (AI-synced; model=m)]\n[00:01.00](AI-synced lyrics)\n[00:02.00]Words",
+        ) else {
+            panic!("lyrics")
+        };
+        assert_eq!(found.plain.as_deref(), Some("Words"));
+        assert_eq!(
+            header("[by:lyrics-listener (AI-synced; model=m)]")
+                .ai_info()
+                .map(|i| i.match_pct),
+            Some(None)
         );
     }
 

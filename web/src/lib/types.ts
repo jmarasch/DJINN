@@ -1382,9 +1382,11 @@ export interface Lyrics {
   instrumental: boolean
   /** lrc (a file beside the song), file (its tags), lrclib (online) or bulk (imported). */
   source: string
-  /** An AI made these by listening to the song: they may be wrong. */
-  ai?: boolean
+  /** 'made': an AI wrote the words by listening (they may be wrong); 'synced': a person's words that an AI timed. */
+  ai?: 'made' | 'synced' | null
   ai_model?: string | null
+  /** For 'synced': how well the timing matched the words, in percent. */
+  ai_match?: number | null
 }
 
 /** A song found by its words, with the line that matched. */

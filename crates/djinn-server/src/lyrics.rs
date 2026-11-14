@@ -238,9 +238,12 @@ pub struct LyricsView {
     plain: Option<String>,
     instrumental: bool,
     source: String,
-    /// An AI made these by listening: they may be wrong.
-    ai: bool,
+    /// "made" (an AI wrote the words by listening: they may be wrong) or
+    /// "synced" (a person's words that an AI timed), when an AI worked on them.
+    ai: Option<&'static str>,
     ai_model: Option<String>,
+    /// How well the AI's timing matched the words, in percent.
+    ai_match: Option<i64>,
 }
 
 impl From<StoredLyrics> for LyricsView {
@@ -255,8 +258,13 @@ impl From<StoredLyrics> for LyricsView {
             plain: l.plain,
             instrumental: l.instrumental,
             source: l.source,
-            ai: l.ai,
+            ai: match l.ai {
+                1 => Some("made"),
+                2 => Some("synced"),
+                _ => None,
+            },
             ai_model: l.ai_model,
+            ai_match: l.ai_match,
         }
     }
 }

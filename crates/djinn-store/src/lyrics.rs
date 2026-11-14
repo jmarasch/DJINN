@@ -13,10 +13,24 @@ pub struct StoredLyrics {
     pub plain: Option<String>,
     pub instrumental: bool,
     pub source: String,
-    /// An AI made these by listening to the song: guesses, not the words.
-    pub ai: bool,
+    /// 0 nothing, 1 an AI made the words by listening (guesses), 2 a
+    /// person's words timed by an AI.
+    pub ai: i64,
     /// What made them, when they say.
     pub ai_model: Option<String>,
+    /// For 2: how well the timing matched the words, in percent.
+    pub ai_match: Option<i64>,
+    /// The zip they came from, when imported.
+    pub import_name: Option<String>,
+}
+
+/// What an AI did to imported lyrics.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AiMark<'a> {
+    /// 1 made by listening, 2 timed by an AI.
+    pub kind: i64,
+    pub model: &'a str,
+    pub match_pct: Option<i64>,
 }
 
 /// A song whose file should be read for lyrics.
@@ -51,7 +65,7 @@ pub struct LyricsCounts {
     pub not_looked_up: i64,
     /// Songs whose lyrics came from an imported zip.
     pub imported: i64,
-    /// Songs whose lyrics an AI made by listening.
+    /// Songs whose lyrics an AI made or timed.
     pub ai: i64,
     /// Songs with lyrics an admin removed as bad.
     pub blocked: i64,
@@ -110,7 +124,7 @@ pub const LYRICS_RECHECK_MS: i64 = 90 * 24 * 60 * 60 * 1000;
 impl Store {
     pub async fn lyrics(&self, track_id: i64) -> Result<Option<StoredLyrics>> {
         Ok(sqlx::query_as(
-            "SELECT synced, plain, instrumental, source, ai, ai_model FROM lyrics
+            "SELECT synced, plain, instrumental, source, ai, ai_model, ai_match, import_name FROM lyrics
              WHERE track_id = ? AND source != 'none'",
         )
         .bind(track_id)
@@ -218,7 +232,7 @@ impl Store {
             Some(found) => {
                 sqlx::query(
                     "UPDATE lyrics SET synced = ?, plain = ?, instrumental = ?, source = ?,
-                            ai = 0, ai_model = NULL, online_checked_at = ?, updated_at = ?
+                            ai = 0, ai_model = NULL, ai_match = NULL, online_checked_at = ?, updated_at = ?
                      WHERE track_id = ? AND (source = 'none' OR ai = 1)",
                 )
                 .bind(found.synced)
@@ -276,7 +290,8 @@ impl Store {
         track_id: i64,
         found: &NewLyrics<'_>,
         replace: bool,
-        ai: Option<&str>,
+        ai: Option<&AiMark<'_>>,
+        import_name: &str,
     ) -> Result<BulkSave> {
         if self
             .lyrics_blocked(track_id, "bulk", found.synced, found.plain)
@@ -284,29 +299,43 @@ impl Store {
         {
             return Ok(BulkSave::Blocked);
         }
+        // Ranks: a person's timed lyrics 4, a person's words timed by an AI
+        // 3, a person's plain words 2, words an AI made by listening 1. A
+        // better one replaces a worse one; an equal one only when asked to.
+        let rank: i64 = match ai.map(|a| a.kind) {
+            Some(2) => 3,
+            Some(_) => 1,
+            None if found.synced.is_some() => 4,
+            None => 2,
+        };
         let done = sqlx::query(
-            "INSERT INTO lyrics (track_id, synced, plain, instrumental, source, ai, ai_model, file_mtime, updated_at)
-             SELECT id, ?1, ?2, ?3, 'bulk', ?4, ?5, NULL, ?6 FROM tracks WHERE id = ?7
+            "INSERT INTO lyrics (track_id, synced, plain, instrumental, source, ai, ai_model, ai_match,
+                                 import_name, imported_at, file_mtime, updated_at)
+             SELECT id, ?1, ?2, ?3, 'bulk', ?4, ?5, ?6, ?7, ?8, NULL, ?8 FROM tracks WHERE id = ?9
              ON CONFLICT (track_id) DO UPDATE SET
                synced = excluded.synced, plain = excluded.plain,
                instrumental = excluded.instrumental, source = 'bulk',
-               ai = excluded.ai, ai_model = excluded.ai_model,
+               ai = excluded.ai, ai_model = excluded.ai_model, ai_match = excluded.ai_match,
+               import_name = excluded.import_name, imported_at = excluded.imported_at,
                file_mtime = NULL, updated_at = excluded.updated_at
              WHERE lyrics.source = 'none'
                 OR (lyrics.source = 'bulk'
-                    AND ((lyrics.ai = 1 AND excluded.ai = 0)
-                         OR (lyrics.ai = excluded.ai
-                             AND ((excluded.synced IS NOT NULL AND lyrics.synced IS NULL)
-                                  OR (?8 AND (excluded.synced IS NOT NULL OR lyrics.synced IS NULL))))))",
+                    AND (?11 > CASE WHEN lyrics.ai = 2 THEN 3 WHEN lyrics.ai = 1 THEN 1
+                                    WHEN lyrics.synced IS NOT NULL THEN 4 ELSE 2 END
+                         OR (?11 = CASE WHEN lyrics.ai = 2 THEN 3 WHEN lyrics.ai = 1 THEN 1
+                                        WHEN lyrics.synced IS NOT NULL THEN 4 ELSE 2 END AND ?10)))",
         )
         .bind(found.synced)
         .bind(found.plain)
         .bind(found.instrumental)
-        .bind(ai.is_some())
-        .bind(ai)
+        .bind(ai.map_or(0, |a| a.kind))
+        .bind(ai.map(|a| a.model))
+        .bind(ai.and_then(|a| a.match_pct))
+        .bind(import_name)
         .bind(now_ms())
         .bind(track_id)
         .bind(replace)
+        .bind(rank)
         .execute(&self.pool)
         .await?;
         Ok(if done.rows_affected() > 0 {
@@ -406,7 +435,7 @@ impl Store {
     pub async fn remove_bulk_lyrics(&self) -> Result<u64> {
         let done = sqlx::query(
             "UPDATE lyrics SET synced = NULL, plain = NULL, instrumental = 0, source = 'none',
-                    ai = 0, ai_model = NULL,
+                    ai = 0, ai_model = NULL, ai_match = NULL, import_name = NULL, imported_at = NULL,
                     file_mtime = NULL, online_checked_at = NULL, updated_at = ?
              WHERE source = 'bulk'",
         )
@@ -430,7 +459,7 @@ impl Store {
                            AND (l.online_checked_at IS NULL OR l.online_checked_at < ?) THEN 1 END)
                  AS not_looked_up,
                count(CASE WHEN l.source = 'bulk' THEN 1 END) AS imported,
-               count(CASE WHEN l.ai = 1 THEN 1 END) AS ai,
+               count(CASE WHEN l.ai > 0 THEN 1 END) AS ai,
                (SELECT count(*) FROM lyrics_blocks) AS blocked
              FROM lyrics l JOIN tracks t ON t.id = l.track_id WHERE t.removed_at IS NULL",
         )
@@ -612,7 +641,7 @@ mod tests {
             let store = &store;
             async move {
                 store
-                    .save_bulk_lyrics(id, &bulk(text), replace, None)
+                    .save_bulk_lyrics(id, &bulk(text), replace, None, "z")
                     .await
                     .unwrap()
                     == BulkSave::Saved
@@ -681,7 +710,7 @@ mod tests {
         };
         assert_eq!(
             store
-                .save_bulk_lyrics(ids[0], &plain, false, None)
+                .save_bulk_lyrics(ids[0], &plain, false, None, "z")
                 .await
                 .unwrap(),
             BulkSave::Saved
@@ -689,7 +718,7 @@ mod tests {
         // Timed takes the place of plain without being asked to replace.
         assert_eq!(
             store
-                .save_bulk_lyrics(ids[0], &timed, false, None)
+                .save_bulk_lyrics(ids[0], &timed, false, None, "z")
                 .await
                 .unwrap(),
             BulkSave::Saved
@@ -697,7 +726,7 @@ mod tests {
         // Plain never takes the place of timed, even when replacing.
         assert_eq!(
             store
-                .save_bulk_lyrics(ids[0], &plain, true, None)
+                .save_bulk_lyrics(ids[0], &plain, true, None, "z")
                 .await
                 .unwrap(),
             BulkSave::Kept
@@ -763,7 +792,7 @@ mod tests {
         };
         assert_eq!(
             store
-                .save_bulk_lyrics(ids[0], &bulk, false, None)
+                .save_bulk_lyrics(ids[0], &bulk, false, None, "z")
                 .await
                 .unwrap(),
             BulkSave::Saved
@@ -774,7 +803,7 @@ mod tests {
         );
         assert_eq!(
             store
-                .save_bulk_lyrics(ids[0], &bulk, false, None)
+                .save_bulk_lyrics(ids[0], &bulk, false, None, "z")
                 .await
                 .unwrap(),
             BulkSave::Blocked
@@ -785,7 +814,7 @@ mod tests {
         };
         assert_eq!(
             store
-                .save_bulk_lyrics(ids[0], &fixed, false, None)
+                .save_bulk_lyrics(ids[0], &fixed, false, None, "z")
                 .await
                 .unwrap(),
             BulkSave::Saved
@@ -804,63 +833,122 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ai_lyrics_rank_below_every_other_source() {
+    async fn ai_lyrics_rank_below_a_persons_and_timing_beats_plain() {
         let (store, ids) = store_with(&["One", "Two"]).await;
-        let ai_words = NewLyrics {
-            synced: Some("[00:01.00]guess"),
-            plain: Some("guess"),
+        let lyr = |synced: Option<&'static str>, plain: &'static str| NewLyrics {
+            synced,
+            plain: Some(plain),
             instrumental: false,
             source: "bulk",
         };
-        let human = NewLyrics {
-            synced: None,
-            plain: Some("the real words"),
-            instrumental: false,
-            source: "bulk",
+        let made = AiMark {
+            kind: 1,
+            model: "faster-whisper/medium",
+            match_pct: None,
         };
-        let model = Some("faster-whisper/medium");
-        // An AI fills a gap, and says so.
+        let synced_by_ai = AiMark {
+            kind: 2,
+            model: "faster-whisper/medium",
+            match_pct: Some(84),
+        };
+        let save = |id: i64, l: NewLyrics<'static>, replace: bool, ai: Option<AiMark<'static>>| {
+            let store = &store;
+            async move {
+                store
+                    .save_bulk_lyrics(id, &l, replace, ai.as_ref(), "batch.zip")
+                    .await
+                    .unwrap()
+            }
+        };
+        // An AI fills a gap, and says so, with where it came from.
         assert_eq!(
-            store
-                .save_bulk_lyrics(ids[0], &ai_words, false, model)
-                .await
-                .unwrap(),
+            save(
+                ids[0],
+                lyr(Some("[00:01.00]guess"), "guess"),
+                false,
+                Some(made.clone())
+            )
+            .await,
             BulkSave::Saved
         );
         let got = store.lyrics(ids[0]).await.unwrap().unwrap();
-        assert!((got.ai, got.ai_model.as_deref()) == (true, model));
+        assert_eq!(
+            (got.ai, got.ai_model.as_deref()),
+            (1, Some("faster-whisper/medium"))
+        );
+        assert_eq!(got.import_name.as_deref(), Some("batch.zip"));
         assert_eq!(store.lyrics_counts().await.unwrap().ai, 1);
-        // Another AI file doesn't replace it (unless told to), but a person's
-        // plain words do, although the AI's are timed.
+        // Another AI file doesn't replace it unless told to.
         assert_eq!(
-            store
-                .save_bulk_lyrics(ids[0], &ai_words, false, model)
-                .await
-                .unwrap(),
+            save(
+                ids[0],
+                lyr(Some("[00:01.00]guess"), "guess"),
+                false,
+                Some(made.clone())
+            )
+            .await,
             BulkSave::Kept
         );
+        // A person's plain words replace it, although the AI's are timed.
         assert_eq!(
-            store
-                .save_bulk_lyrics(ids[0], &human, false, None)
-                .await
-                .unwrap(),
+            save(ids[0], lyr(None, "the real words"), false, None).await,
             BulkSave::Saved
         );
         let got = store.lyrics(ids[0]).await.unwrap().unwrap();
-        assert!(!got.ai && got.plain.as_deref() == Some("the real words"));
-        // The AI never replaces a person's.
+        assert!(got.ai == 0 && got.plain.as_deref() == Some("the real words"));
+        // The AI listening never replaces a person's words...
         assert_eq!(
-            store
-                .save_bulk_lyrics(ids[0], &ai_words, true, model)
-                .await
-                .unwrap(),
+            save(
+                ids[0],
+                lyr(Some("[00:01.00]guess"), "guess"),
+                true,
+                Some(made)
+            )
+            .await,
             BulkSave::Kept
         );
-        // LRCLIB is still asked about a song with AI lyrics, and wins.
-        store
-            .save_bulk_lyrics(ids[1], &ai_words, false, model)
-            .await
-            .unwrap();
+        // ...but the same words timed by an AI do replace plain ones: timing wins.
+        assert_eq!(
+            save(
+                ids[0],
+                lyr(Some("[00:01.00]the real words"), "the real words"),
+                false,
+                Some(synced_by_ai.clone())
+            )
+            .await,
+            BulkSave::Saved
+        );
+        let got = store.lyrics(ids[0]).await.unwrap().unwrap();
+        assert_eq!((got.ai, got.ai_match), (2, Some(84)));
+        // A person's timed lyrics beat the AI's timing; plain ones don't.
+        assert_eq!(
+            save(ids[0], lyr(None, "plain again"), false, None).await,
+            BulkSave::Kept
+        );
+        assert_eq!(
+            save(
+                ids[0],
+                lyr(Some("[00:02.00]by hand"), "by hand"),
+                false,
+                None
+            )
+            .await,
+            BulkSave::Saved
+        );
+        assert_eq!(store.lyrics(ids[0]).await.unwrap().unwrap().ai, 0);
+        // LRCLIB is still asked about a song with AI-made lyrics (not timed
+        // human words), and wins.
+        save(
+            ids[1],
+            lyr(Some("[00:01.00]guess"), "guess"),
+            false,
+            Some(AiMark {
+                kind: 1,
+                model: "m",
+                match_pct: None,
+            }),
+        )
+        .await;
         assert!(store
             .lyrics_to_look_up(10)
             .await
@@ -878,7 +966,7 @@ mod tests {
             .await
             .unwrap();
         let got = store.lyrics(ids[1]).await.unwrap().unwrap();
-        assert!((got.source.as_str(), got.ai) == ("lrclib", false));
+        assert!((got.source.as_str(), got.ai) == ("lrclib", 0));
         assert_eq!(store.lyrics_counts().await.unwrap().ai, 0);
     }
 

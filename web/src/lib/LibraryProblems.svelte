@@ -95,7 +95,7 @@
     },
     ai_lyrics: {
       label: 'Lyrics an AI made',
-      hint: 'These lyrics were made by an AI listening to the song (speech to text with timing), so they are guesses and may have mistakes. Any other source replaces them when it has the lyrics: LRCLIB is still asked about these songs, and an import of ordinary lyrics replaces them. Use Report these lyrics, then Remove and block, on one that is wrong.',
+      hint: 'An AI worked on these lyrics. "Words made by an AI" are guesses from listening and may have mistakes: any other source replaces them (LRCLIB is still asked about these songs, and an import of ordinary lyrics replaces them). "Timed by an AI" are a person\'s words with timing worked out by an AI; the match says how well they fit, so check the low ones. Each row says which import it came from. Use Report these lyrics, then Remove and block, on one that is wrong.',
     },
     vanished: {
       label: 'Songs that went missing lately',

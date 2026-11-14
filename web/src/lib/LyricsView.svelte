@@ -66,8 +66,12 @@
   })
 </script>
 
-{#if lyrics?.ai}
+{#if lyrics?.ai === 'made'}
   <p class="ai-note small">Made by an AI listening to the song, so it may have mistakes.</p>
+{:else if lyrics?.ai === 'synced'}
+  <p class="ai-note small">
+    Timing made by an AI listening to the song{lyrics.ai_match != null ? ` (${lyrics.ai_match}% match)` : ''}.
+  </p>
 {/if}
 <div class="lyrics" class:big bind:this={box}>
   {#if lyrics === undefined}

@@ -162,7 +162,10 @@ Admin > Library > Lyrics can load lyrics from a zip of files. DJINN keeps them i
 
 **Safety.** Files are read only as text. A file that looks like code or markup (SQL, script or HTML tags, shell commands, binary data) is thrown out and listed as a warning, and program or data files in the zip (`.exe`, `.sql`, `.zip` and so on) are never read. Admin Home reminds you until you clear the report. The rest of the zip still imports.
 
-**Lyrics made by an AI.** A file whose header says an AI made it (a `[by:...AI-generated...]` line, as lyrics tools that listen to songs write) is stored as such: its lyrics show with a note that they may have mistakes, they count under Problems as **Lyrics an AI made**, and any other source replaces them. LRCLIB is still asked about those songs, and an import of ordinary lyrics replaces them without asking, even when the AI's are timed. The notice line "(AI-generated lyrics)" at the top of such a file is not shown as a lyric. A title and credits line that lyrics websites put first (for example "Song (Guest) - Artist") is dropped when it names the artist and has a dash.
+**Lyrics an AI worked on.** A file whose header says so is stored as such, with the model, the zip it came from and when. Two kinds, both listed under Problems as **Lyrics an AI made** (with how well the timing matched, for the second):
+
+- `[by:... (AI-generated; model=...)]`: an AI wrote the words by listening, so they are guesses. They show with a note, any other source replaces them, LRCLIB is still asked about those songs, and an import of ordinary lyrics replaces them without asking, even when the AI's are timed.
+- `[by:... (AI-synced; model=...; match=84%)]`: a person's words that an AI timed. Timing beats plain words, so these replace plain imported lyrics; a person's own timed lyrics beat them, and so does anything beside the song. The notice line "(AI-generated lyrics)" at the top of such a file is not shown as a lyric. A title and credits line that lyrics websites put first (for example "Song (Guest) - Artist") is dropped when it names the artist and has a dash.
 
 Timed lyrics are always preferred: if a song has both timed and plain imported lyrics, the timed ones are kept, and a later zip with timed lyrics takes the place of plain ones without asking.
 

@@ -407,7 +407,15 @@ macro_rules! no_loudness_from {
 macro_rules! ai_lyrics_from {
     () => {
         "FROM lyrics l JOIN tracks t ON t.id = l.track_id
-         WHERE t.removed_at IS NULL AND l.ai = 1"
+         WHERE t.removed_at IS NULL AND l.ai > 0"
+    };
+}
+macro_rules! ai_lyrics_detail {
+    () => {
+        "CASE WHEN l.ai = 2 THEN 'Timed by an AI' ELSE 'Words made by an AI' END
+         || ' (' || coalesce(l.ai_model, 'AI')
+         || CASE WHEN l.ai_match IS NOT NULL THEN ', match ' || l.ai_match || '%' ELSE '' END
+         || ')' || CASE WHEN l.import_name IS NOT NULL THEN ', from ' || l.import_name ELSE '' END"
     };
 }
 macro_rules! vanished_from {
@@ -847,7 +855,7 @@ impl Store {
                 " ORDER BY t.path LIMIT ? OFFSET ?"
             )),
             K::AiLyrics => sqlx::query_as(concat!(
-                song_columns!("coalesce(l.ai_model, 'AI')", "l.updated_at"),
+                song_columns!(ai_lyrics_detail!(), "l.imported_at"),
                 ai_lyrics_from!(),
                 " ORDER BY t.path LIMIT ? OFFSET ?"
             )),

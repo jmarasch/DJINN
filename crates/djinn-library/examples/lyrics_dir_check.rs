@@ -61,7 +61,7 @@ async fn main() {
         match (found, content(&text)) {
             (Some(_), Content::Lyrics(l)) => {
                 matched += 1;
-                if head.ai_model().is_some() {
+                if head.ai_info().is_some() {
                     ai += 1;
                 }
                 if l.synced.is_some() {
@@ -78,7 +78,7 @@ async fn main() {
                     .unwrap_or("");
                 println!(
                     "{}\t{}\t{first:.70}",
-                    if head.ai_model().is_some() {
+                    if head.ai_info().is_some() {
                         "AI "
                     } else {
                         "web"

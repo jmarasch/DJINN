@@ -22,7 +22,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use djinn_library::lyrics_import::{self as lines, Content};
 use djinn_library::playlist_match::SongIndex;
-use djinn_store::{BulkSave, NewLyrics, SongFacts, WantedSong};
+use djinn_store::{AiMark, BulkSave, NewLyrics, SongFacts, WantedSong};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
@@ -616,8 +616,8 @@ async fn save_chunk(
     struct Found {
         id: i64,
         found: djinn_library::lyrics::Found,
-        /// An AI made these (the model it names).
-        ai: Option<String>,
+        /// An AI worked on these.
+        ai: Option<djinn_library::lyrics_import::AiInfo>,
     }
     let mut matched: Vec<Found> = Vec::new();
     for item in items {
@@ -658,7 +658,7 @@ async fn save_chunk(
                         continue;
                     }
                 };
-                let ai = header.ai_model();
+                let ai = header.ai_info();
                 matched.push(Found { id, found, ai });
             }
         }
@@ -671,6 +671,7 @@ async fn save_chunk(
         .into_iter()
         .map(|s| (s.track_id, s))
         .collect();
+    let import_name = snapshot().map(|r| r.file).unwrap_or_default();
     for m in matched {
         let current = states.get(&m.id);
         // LRCLIB gets the first go at songs it hasn't been asked about.
@@ -682,6 +683,11 @@ async fn save_chunk(
             update(|r| r.waiting_lrclib += 1);
             continue;
         }
+        let mark = m.ai.as_ref().map(|a| AiMark {
+            kind: a.kind,
+            model: &a.model,
+            match_pct: a.match_pct,
+        });
         let new = NewLyrics {
             synced: m.found.synced.as_deref(),
             plain: m.found.plain.as_deref(),
@@ -690,7 +696,7 @@ async fn save_chunk(
         };
         match state
             .store
-            .save_bulk_lyrics(m.id, &new, options.replace, m.ai.as_deref())
+            .save_bulk_lyrics(m.id, &new, options.replace, mark.as_ref(), &import_name)
             .await?
         {
             BulkSave::Saved => {
