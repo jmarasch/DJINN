@@ -694,7 +694,8 @@ impl Node {
             format!("can't put it in place: {e}")
         })?;
         tracing::info!(version = %update.version, "updated from Main; starting again");
-        crate::update::restart(&exe).map_err(|e| format!("can't start again: {e}"))
+        start_again();
+        Ok(())
     }
 }
 
@@ -1787,14 +1788,11 @@ async fn restart(
     headers: axum::http::HeaderMap,
 ) -> ApiResult<StatusCode> {
     must_manage(&node, &headers)?;
-    let exe = std::env::current_exe().map_err(anyhow::Error::from)?;
     tracing::info!("restarting, as asked on the node's page");
     tokio::spawn(async move {
         // Let the answer go out first.
         tokio::time::sleep(Duration::from_millis(300)).await;
-        if let Err(e) = crate::update::restart(&exe) {
-            tracing::warn!(error = %e, "couldn't restart");
-        }
+        start_again();
     });
     Ok(StatusCode::ACCEPTED)
 }
@@ -1841,12 +1839,31 @@ async fn ask_again(State(node): State<Node>) -> ApiResult<Json<Status>> {
     Ok(Json(node.status()))
 }
 
-/// Runs this box as a node until asked to stop.
+/// Asks the node to stop, set by `serve`.
+static STOP: std::sync::OnceLock<Arc<tokio::sync::Notify>> = std::sync::OnceLock::new();
+/// Start the program again once stopped (after an update, or asked to).
+static RESTART: AtomicBool = AtomicBool::new(false);
+
+/// Stops the node and starts its program again. Shutting down first
+/// matters on Windows, where starting again only starts a second copy: the
+/// first has to let go of the port and the database for it.
+fn start_again() {
+    RESTART.store(true, Ordering::Release);
+    if let Some(stop) = STOP.get() {
+        stop.notify_one();
+    }
+}
+
+/// Runs this box as a node until `stop` notifies (the tray, Ctrl+C,
+/// SIGTERM) or it starts itself again.
 pub async fn serve(
     store: Store,
     db_path: &Path,
     listen: std::net::SocketAddr,
+    stop: Arc<tokio::sync::Notify>,
+    until: impl std::future::Future<Output = ()> + Send + 'static,
 ) -> anyhow::Result<()> {
+    let _ = STOP.set(Arc::clone(&stop));
     let cache_dir = db_path
         .parent()
         .map_or_else(|| PathBuf::from("node-cache"), |dir| dir.join("node-cache"));
@@ -1862,15 +1879,25 @@ pub async fn serve(
     std::thread::Builder::new()
         .name("djinn-find-mains".to_owned())
         .spawn(move || browsing.find_mains())?;
-    let listener = tokio::net::TcpListener::bind(listen).await?;
+    let listener = crate::bind(listen).await?;
     tracing::info!(%listen, "running as a node; its page is at /node");
     axum::serve(listener, router(node))
-        .with_graceful_shutdown(async {
-            let _ = tokio::signal::ctrl_c().await;
-        })
+        .with_graceful_shutdown(until)
         .await?;
-    store.close().await;
+    tracing::info!("closing the database");
+    if tokio::time::timeout(Duration::from_secs(5), store.close())
+        .await
+        .is_err()
+    {
+        tracing::warn!("the database was still busy; closing anyway");
+    }
+    tracing::info!("shut down");
     Ok(())
+}
+
+/// Whether the node stopped to start again.
+pub fn restart_requested() -> bool {
+    RESTART.load(Ordering::Acquire)
 }
 
 #[cfg(test)]

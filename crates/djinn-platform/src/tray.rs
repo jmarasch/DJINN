@@ -40,6 +40,15 @@ const JOIN: &str = "join";
 const TV: &str = "tv";
 const QUIT: &str = "quit";
 
+/// Which menu the icon has.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum TrayMenu {
+    /// The jukebox: open, join code, TV page, shut down.
+    Main,
+    /// A node: its own page and shut down.
+    Node,
+}
+
 /// The running tray icon. Dropping it removes the icon.
 pub struct Tray {
     quit: mpsc::Sender<()>,
@@ -51,6 +60,7 @@ impl Tray {
     /// not block for long.
     pub fn spawn(
         tooltip: String,
+        kind: TrayMenu,
         on_action: impl Fn(TrayAction) + Send + Sync + 'static,
     ) -> Result<Self, TrayError> {
         let (quit, quit_rx) = mpsc::channel();
@@ -58,7 +68,7 @@ impl Tray {
         let thread = std::thread::Builder::new()
             .name("djinn-tray".to_owned())
             .spawn(move || {
-                let tray = match build(&tooltip) {
+                let tray = match build(&tooltip, kind) {
                     Ok(tray) => tray,
                     Err(e) => {
                         let _ = ready_tx.send(Err(e));
@@ -102,17 +112,24 @@ impl Drop for Tray {
     }
 }
 
-fn build(tooltip: &str) -> Result<TrayIcon, TrayError> {
+fn build(tooltip: &str, kind: TrayMenu) -> Result<TrayIcon, TrayError> {
     let unavailable = |e: &dyn std::fmt::Display| TrayError::Unavailable(e.to_string());
     let menu = Menu::new();
-    menu.append_items(&[
-        &MenuItem::with_id(OPEN, "Open DJINN", true, None),
-        &MenuItem::with_id(JOIN, "Show join QR code", true, None),
-        &MenuItem::with_id(TV, "Open TV page", true, None),
-        &PredefinedMenuItem::separator(),
-        &MenuItem::with_id(QUIT, "Shut down DJINN", true, None),
-    ])
-    .map_err(|e| unavailable(&e))?;
+    let added = match kind {
+        TrayMenu::Main => menu.append_items(&[
+            &MenuItem::with_id(OPEN, "Open DJINN", true, None),
+            &MenuItem::with_id(JOIN, "Show join QR code", true, None),
+            &MenuItem::with_id(TV, "Open TV page", true, None),
+            &PredefinedMenuItem::separator(),
+            &MenuItem::with_id(QUIT, "Shut down DJINN", true, None),
+        ]),
+        TrayMenu::Node => menu.append_items(&[
+            &MenuItem::with_id(OPEN, "Open node page", true, None),
+            &PredefinedMenuItem::separator(),
+            &MenuItem::with_id(QUIT, "Shut down DJINN node", true, None),
+        ]),
+    };
+    added.map_err(|e| unavailable(&e))?;
     let icon =
         Icon::from_rgba(icon_rgba(ICON_SIZE), ICON_SIZE, ICON_SIZE).map_err(|e| unavailable(&e))?;
     TrayIconBuilder::new()
