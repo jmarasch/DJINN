@@ -46,6 +46,13 @@ pub struct Node {
     pub visual: String,
     /// How many songs, playing and coming up, it keeps copies of.
     pub cache_ahead: i64,
+    /// Helps with AI lyrics while it isn't playing or showing visuals.
+    pub ai_help: bool,
+    /// The Whisper model it uses; None for the one suggested for it.
+    pub ai_model: Option<String>,
+    /// What it last reported about its AI helper, as JSON.
+    #[serde(skip)]
+    pub ai_report: Option<String>,
 }
 
 /// A node's speaker settings.
@@ -88,7 +95,7 @@ impl Store {
     pub async fn nodes(&self) -> Result<Vec<Node>> {
         Ok(sqlx::query_as(
             "SELECT id, node_id, name, secret_hash, status, room_id, address, version, platform,
-                    requested_at, approved_at, last_seen, device, delay_ms, trim, equalizer, offline, devices, free_run, screen, visual, cache_ahead
+                    requested_at, approved_at, last_seen, device, delay_ms, trim, equalizer, offline, devices, free_run, screen, visual, cache_ahead, ai_help, ai_model, ai_report
              FROM nodes ORDER BY status = 'approved', name, id",
         )
         .fetch_all(&self.pool)
@@ -98,7 +105,7 @@ impl Store {
     pub async fn node_by_node_id(&self, node_id: &str) -> Result<Option<Node>> {
         Ok(sqlx::query_as(
             "SELECT id, node_id, name, secret_hash, status, room_id, address, version, platform,
-                    requested_at, approved_at, last_seen, device, delay_ms, trim, equalizer, offline, devices, free_run, screen, visual, cache_ahead
+                    requested_at, approved_at, last_seen, device, delay_ms, trim, equalizer, offline, devices, free_run, screen, visual, cache_ahead, ai_help, ai_model, ai_report
              FROM nodes WHERE node_id = ?",
         )
         .bind(node_id)
@@ -109,7 +116,7 @@ impl Store {
     pub async fn node(&self, id: i64) -> Result<Option<Node>> {
         Ok(sqlx::query_as(
             "SELECT id, node_id, name, secret_hash, status, room_id, address, version, platform,
-                    requested_at, approved_at, last_seen, device, delay_ms, trim, equalizer, offline, devices, free_run, screen, visual, cache_ahead
+                    requested_at, approved_at, last_seen, device, delay_ms, trim, equalizer, offline, devices, free_run, screen, visual, cache_ahead, ai_help, ai_model, ai_report
              FROM nodes WHERE id = ?",
         )
         .bind(id)
@@ -269,6 +276,28 @@ impl Store {
             .execute(&self.pool)
             .await?;
         Ok(result.rows_affected() > 0)
+    }
+
+    /// Whether a node helps with AI lyrics, and with which model (None: the
+    /// suggested one).
+    pub async fn set_node_ai(&self, id: i64, help: bool, model: Option<&str>) -> Result<bool> {
+        let result = sqlx::query("UPDATE nodes SET ai_help = ?, ai_model = ? WHERE id = ?")
+            .bind(help)
+            .bind(model)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
+    /// What a node says about its AI helper (JSON).
+    pub async fn set_node_ai_report(&self, id: i64, report: &str) -> Result<()> {
+        sqlx::query("UPDATE nodes SET ai_report = ? WHERE id = ?")
+            .bind(report)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
     }
 
     pub async fn set_node_devices(&self, id: i64, devices: &str) -> Result<()> {

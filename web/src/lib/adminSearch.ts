@@ -178,6 +178,13 @@ export const adminEntries: AdminEntry[] = [
   },
   { label: 'Read searches with AI', tab: 'ai', keywords: 'ai reader qwen search' },
   { label: 'Use the graphics card', tab: 'ai', keywords: 'gpu nvidia cuda' },
+  {
+    label: 'Isolate the vocals here for nodes that help',
+    tab: 'ai',
+    keywords: 'ai lyrics nodes vocals demucs',
+    key: 'ai_vocals_for_nodes',
+  },
+  { label: 'Help with AI lyrics', tab: 'nodes', keywords: 'ai lyrics node whisper helper' },
   // System
   { label: 'Status', tab: 'home', keywords: 'running uptime addresses' },
   { label: 'Server ports', tab: 'home', keywords: 'port 8066 8067' },

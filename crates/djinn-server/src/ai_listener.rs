@@ -25,10 +25,10 @@ use crate::backup::data_dir;
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 
-const MODEL: &str = "ai_listener_model";
+pub const MODEL: &str = "ai_listener_model";
 const VOCALS: &str = "ai_listener_vocals";
 const AUTO: &str = "ai_listener_auto";
-const LOCAL_KEY_NAME: &str = "this computer";
+pub const LOCAL_KEY_NAME: &str = "this computer";
 /// The pack's version: a new one is written over the old on install.
 const PACK_VERSION: &str = "1";
 
@@ -119,7 +119,7 @@ fn note(line: impl Into<String>) {
 /// The keepsake (packages and models saved by `make-keepsake.sh`), if the
 /// computer has one: `$DJINN_AI_KEEP`, DJINN's own folder, or /opt/djinn/keep
 /// (where the install disc puts it). Installing from it needs no internet.
-fn keepsake(d: &Path) -> Option<PathBuf> {
+pub fn keepsake(d: &Path) -> Option<PathBuf> {
     [
         std::env::var_os("DJINN_AI_KEEP").map(PathBuf::from),
         Some(d.join("keep")),
@@ -131,7 +131,7 @@ fn keepsake(d: &Path) -> Option<PathBuf> {
 }
 
 /// Copies a folder, for putting a kept model where the worker looks.
-fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
+pub fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(to)?;
     for entry in std::fs::read_dir(from)? {
         let entry = entry?;
@@ -145,11 +145,11 @@ fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-fn dir(state: &AppState) -> PathBuf {
+pub fn dir(state: &AppState) -> PathBuf {
     data_dir(state).join("ai-listener")
 }
 
-fn venv_python(dir: &Path) -> PathBuf {
+pub fn venv_python(dir: &Path) -> PathBuf {
     if cfg!(windows) {
         dir.join(".venv").join("Scripts").join("python.exe")
     } else {
@@ -157,13 +157,22 @@ fn venv_python(dir: &Path) -> PathBuf {
     }
 }
 
-fn installed(dir: &Path) -> bool {
+/// Written when vocal isolation installed, so DJINN knows it can isolate
+/// vocals for nodes.
+const VOCALS_OK: &str = ".vocals";
+
+/// Whether the listener here can isolate vocals (Demucs installed).
+pub fn can_isolate(dir: &Path) -> bool {
+    installed(dir) && dir.join(VOCALS_OK).is_file()
+}
+
+pub fn installed(dir: &Path) -> bool {
     venv_python(dir).exists()
         && std::fs::read_to_string(dir.join(".installed")).is_ok_and(|v| v.trim() == PACK_VERSION)
 }
 
 /// A Python to build the environment with, if the computer has one.
-async fn find_python() -> Option<String> {
+pub async fn find_python() -> Option<String> {
     for name in [
         "python3.12",
         "python3.11",
@@ -195,7 +204,7 @@ async fn has_nvidia() -> bool {
         .is_ok_and(|s| s.success())
 }
 
-async fn has_ffmpeg() -> bool {
+pub async fn has_ffmpeg() -> bool {
     Command::new("ffmpeg")
         .arg("-version")
         .stdout(Stdio::null())
@@ -210,6 +219,8 @@ struct Status {
     installed: bool,
     installing: bool,
     running: bool,
+    /// Vocal isolation is installed, so it can isolate vocals for nodes.
+    can_isolate: bool,
     python: Option<String>,
     ffmpeg: bool,
     nvidia: bool,
@@ -234,6 +245,7 @@ async fn status(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json<S
         installed: installed(&d),
         installing,
         running,
+        can_isolate: can_isolate(&d),
         python: find_python().await,
         ffmpeg: has_ffmpeg().await,
         nvidia: has_nvidia().await,
@@ -256,7 +268,7 @@ struct Choices {
     auto_start: bool,
 }
 
-const MODELS: [&str; 6] = [
+pub const MODELS: [&str; 6] = [
     "tiny",
     "base",
     "small",
@@ -280,7 +292,7 @@ async fn put_settings(
 }
 
 /// Runs a command, adding each output line to the log; false if it failed.
-async fn run_logged(mut command: Command) -> bool {
+pub async fn run_logged(mut command: Command) -> bool {
     command
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -340,7 +352,9 @@ async fn install(_: AdminUser, State(state): State<AppState>) -> ApiResult<Statu
     Ok(StatusCode::ACCEPTED)
 }
 
-async fn install_into(d: &Path, model: &str, vocals: bool) -> Result<(), String> {
+/// Writes the listener's files (the worker, its library and requirements)
+/// into `d`. A node writes its own copy the same way, from its own DJINN.
+pub async fn write_pack(d: &Path) -> Result<(), String> {
     for (name, text) in FILES {
         let path = d.join(name);
         if let Some(parent) = path.parent() {
@@ -352,7 +366,18 @@ async fn install_into(d: &Path, model: &str, vocals: bool) -> Result<(), String>
             .await
             .map_err(|e| e.to_string())?;
     }
-    note("Listener files written.");
+    Ok(())
+}
+
+/// Marks the pack as installed.
+pub async fn mark_installed(d: &Path) -> Result<(), String> {
+    tokio::fs::write(d.join(".installed"), PACK_VERSION)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Makes the listener's private Python environment in `d` if it has none.
+pub async fn make_venv(d: &Path, log: impl Fn(&str)) -> Result<(), String> {
     if !has_ffmpeg().await {
         return Err("ffmpeg isn't installed on this computer; install it (Debian: sudo apt install ffmpeg) and try again".into());
     }
@@ -360,13 +385,26 @@ async fn install_into(d: &Path, model: &str, vocals: bool) -> Result<(), String>
         "Python 3 isn't installed on this computer (Debian: sudo apt install python3 python3-venv)",
     )?;
     if !venv_python(d).exists() {
-        note("Making a private Python environment...");
-        let mut c = Command::new(&python);
-        c.args(["-m", "venv"]).arg(d.join(".venv"));
-        if !run_logged(c).await {
+        log("Making a private Python environment...");
+        let ok = Command::new(&python)
+            .args(["-m", "venv"])
+            .arg(d.join(".venv"))
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .await
+            .is_ok_and(|s| s.success());
+        if !ok {
             return Err("couldn't make the Python environment (Debian needs python3-venv)".into());
         }
     }
+    Ok(())
+}
+
+async fn install_into(d: &Path, model: &str, vocals: bool) -> Result<(), String> {
+    write_pack(d).await?;
+    note("Listener files written.");
+    make_venv(d, |line| note(line)).await?;
     let py = venv_python(d);
     let keep = keepsake(d);
     if let Some(keep) = &keep {
@@ -410,6 +448,8 @@ async fn install_into(d: &Path, model: &str, vocals: bool) -> Result<(), String>
             note("The card's libraries didn't install; the listener will use the processor.");
         }
     }
+    let _ = tokio::fs::remove_file(d.join(VOCALS_OK)).await;
+    let mut vocals_ok = false;
     if vocals {
         note("Installing vocal isolation (large)...");
         let nvidia = has_nvidia().await;
@@ -426,6 +466,8 @@ async fn install_into(d: &Path, model: &str, vocals: bool) -> Result<(), String>
         .await
         {
             note("Vocal isolation didn't install; the listener will go without it.");
+        } else {
+            vocals_ok = true;
         }
     }
     // A kept model goes in place first, so nothing is downloaded.
@@ -450,9 +492,12 @@ async fn install_into(d: &Path, model: &str, vocals: bool) -> Result<(), String>
     if !run_logged(c).await {
         return Err("couldn't download the model".into());
     }
-    tokio::fs::write(d.join(".installed"), PACK_VERSION)
-        .await
-        .map_err(|e| e.to_string())?;
+    if vocals_ok {
+        tokio::fs::write(d.join(VOCALS_OK), "1")
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    mark_installed(d).await?;
     note("Done.");
     Ok(())
 }

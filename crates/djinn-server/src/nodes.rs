@@ -423,6 +423,14 @@ struct MeAnswer {
     /// changes, and its name on the network (`<host>.local`).
     server_id: String,
     host: String,
+    /// Help with AI lyrics (while not playing or showing visuals) with this
+    /// model; None to stop the helper.
+    ai: Option<NodeAiWanted>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NodeAiWanted {
+    pub model: String,
 }
 
 /// A node's own visualizers, if it has them.
@@ -585,6 +593,16 @@ async fn me(
     } else {
         Vec::new()
     };
+    let ai = if node.status == "approved"
+        && node.ai_help
+        && settings::flag(&state.store, crate::ai_work::WORK_ON, false).await?
+    {
+        Some(NodeAiWanted {
+            model: crate::ai_work::model_for(&node),
+        })
+    } else {
+        None
+    };
     Ok(Json(MeAnswer {
         audio,
         upcoming,
@@ -601,6 +619,7 @@ async fn me(
         server_name: crate::go_announce::server_name(&state.store).await?,
         server_id: crate::go_announce::server_id(&state.store).await?,
         host: crate::go_announce::host_label(&crate::go_announce::computer_name()),
+        ai,
     }))
 }
 
@@ -613,6 +632,18 @@ struct ListedNode {
     audio: AudioSettings,
     /// The speakers the node reported.
     speakers: Vec<serde_json::Value>,
+    /// Its AI helper: what it reported, the model suggested and in use, and
+    /// its measured speed.
+    ai: ListedAi,
+}
+
+#[derive(Serialize)]
+struct ListedAi {
+    #[serde(flatten)]
+    report: crate::ai_work::NodeAiReport,
+    suggested: &'static str,
+    using: String,
+    secs_per_minute: Option<f64>,
 }
 
 #[derive(Serialize)]
@@ -637,6 +668,15 @@ async fn list(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json<Nod
                 .as_deref()
                 .and_then(|d| serde_json::from_str(d).ok())
                 .unwrap_or_default(),
+            ai: ListedAi {
+                report: crate::ai_work::NodeAiReport::of(&node),
+                suggested: crate::ai_work::suggested_model(
+                    &crate::ai_work::NodeAiReport::of(&node),
+                    crate::ai_work::speed_of(&crate::ai_work::node_worker(&node)),
+                ),
+                using: crate::ai_work::model_for(&node),
+                secs_per_minute: crate::ai_work::speed_of(&crate::ai_work::node_worker(&node)),
+            },
             node,
         })
         .collect();
@@ -810,6 +850,9 @@ fn any_missing<'a>(nodes: impl IntoIterator<Item = (&'a str, Option<i64>)>, now:
 struct NodeChange {
     name: Option<String>,
     room_id: Option<i64>,
+    /// Help with AI lyrics, with this model ("" or none for the suggested one).
+    ai_help: Option<bool>,
+    ai_model: Option<String>,
 }
 
 async fn update(
@@ -831,6 +874,13 @@ async fn update(
         if !state.store.set_node_room(id, room).await? {
             return Err(ApiError::bad_request("there's no such room"));
         }
+    }
+    if let Some(help) = body.ai_help {
+        let model = body.ai_model.as_deref().filter(|m| !m.is_empty());
+        if model.is_some_and(|m| !crate::ai_listener::MODELS.contains(&m)) {
+            return Err(ApiError::bad_request("unknown model"));
+        }
+        state.store.set_node_ai(id, help, model).await?;
     }
     Ok(StatusCode::NO_CONTENT)
 }
@@ -1693,5 +1743,230 @@ mod tests {
         assert!(!valid_id("short"));
         assert!(!valid_id("has space in it"));
         assert!(!valid_id(&"x".repeat(65)));
+    }
+
+    /// Like `send`, from a computer at home (as AI workers must be).
+    async fn from_home(
+        state: &AppState,
+        method: Method,
+        path: &str,
+        body: Option<&str>,
+        auth: Option<(&str, &str)>,
+    ) -> (StatusCode, String) {
+        let mut req = Request::builder().method(method).uri(path);
+        if body.is_some() {
+            req = req.header(header::CONTENT_TYPE, "application/json");
+        }
+        if let Some((name, value)) = auth {
+            req = req.header(name, value);
+        }
+        let req = req
+            .extension(axum::extract::ConnectInfo(std::net::SocketAddr::from((
+                [192, 168, 1, 20],
+                4000,
+            ))))
+            .body(body.map_or_else(Body::empty, |b| Body::from(b.to_owned())))
+            .unwrap();
+        let res = crate::app(state.clone()).oneshot(req).await.unwrap();
+        let status = res.status();
+        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        (status, String::from_utf8_lossy(&bytes).into_owned())
+    }
+
+    #[tokio::test]
+    async fn a_node_helps_with_ai_lyrics_from_vocals_main_isolated() {
+        use djinn_store::{NewLyrics, ScannedTrack};
+        let state = AppState::for_tests().await;
+        admin_with_password(&state).await;
+        settings::set_flag(&state.store, NODES_JOIN, true)
+            .await
+            .unwrap();
+        send(
+            &state,
+            Method::POST,
+            "/api/nodes/join",
+            Some(JOIN),
+            None,
+            true,
+        )
+        .await;
+        let id = state
+            .store
+            .node_by_node_id("kitchen-0001")
+            .await
+            .unwrap()
+            .unwrap()
+            .id;
+        state.store.approve_node(id, 1).await.unwrap();
+        let signed = format!("Node kitchen-0001:{SECRET}");
+        let node = Some(("authorization", signed.as_str()));
+        let me = |body: &str| -> serde_json::Value {
+            serde_json::from_str::<serde_json::Value>(body).unwrap()["ai"].clone()
+        };
+        // Off until the admin switches it on (and lyrics listening is on).
+        let (_, body) = send(&state, Method::GET, "/api/nodes/me", None, node, true).await;
+        assert!(me(&body).is_null(), "{body}");
+        let (status, _) = send(
+            &state,
+            Method::POST,
+            "/api/nodes/ai/next",
+            Some("{}"),
+            node,
+            true,
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        settings::set_flag(&state.store, crate::ai_work::WORK_ON, true)
+            .await
+            .unwrap();
+        state.store.set_node_ai(id, true, None).await.unwrap();
+        let (_, body) = send(&state, Method::GET, "/api/nodes/me", None, node, true).await;
+        assert_eq!(me(&body)["model"], "tiny", "nothing known about it yet");
+        // It reports a decent box: a bigger model is suggested.
+        let report = r#"{"phase":"ready","threads":8,"memory_mb":16000,"bench_ms":2000}"#;
+        let (status, _) = send(
+            &state,
+            Method::PUT,
+            "/api/nodes/ai/report",
+            Some(report),
+            node,
+            true,
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        let (_, body) = send(&state, Method::GET, "/api/nodes/me", None, node, true).await;
+        assert_eq!(me(&body)["model"], "small");
+
+        // Two songs without lyrics.
+        let song = |t: &str| ScannedTrack {
+            path: format!("/m/{t}.mp3"),
+            title: t.into(),
+            artist: Some("Band".into()),
+            duration_ms: Some(60_000),
+            ..Default::default()
+        };
+        state
+            .store
+            .save_scanned(&[song("One"), song("Two")])
+            .await
+            .unwrap();
+        for row in state.store.compare_rows().await.unwrap() {
+            state
+                .store
+                .save_read_lyrics(row.id, 1, &NewLyrics::NONE)
+                .await
+                .unwrap();
+            state
+                .store
+                .save_looked_up_lyrics(row.id, None)
+                .await
+                .unwrap();
+        }
+        // The node asks first and gets a whole song.
+        let (_, body) = send(
+            &state,
+            Method::POST,
+            "/api/nodes/ai/next",
+            Some(r#"{"max":1}"#),
+            node,
+            true,
+        )
+        .await;
+        let first: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(first["jobs"][0]["vocals"], false, "{body}");
+        // This computer's listener, able to isolate vocals, is asked to
+        // prepare the other for the node that is helping.
+        let key = crate::ai_work::replace_key(&state, crate::ai_listener::LOCAL_KEY_NAME)
+            .await
+            .unwrap();
+        let worker = format!("Worker {key}");
+        let local = Some(("authorization", worker.as_str()));
+        let (_, body) = from_home(
+            &state,
+            Method::POST,
+            "/api/ai-work/next",
+            Some(r#"{"max":1,"can_isolate":true}"#),
+            local,
+        )
+        .await;
+        let prep: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(prep["jobs"][0]["prepare"], true, "{body}");
+        let two = prep["jobs"][0]["track_id"].as_i64().unwrap();
+        let (status, _) = from_home(
+            &state,
+            Method::POST,
+            &format!("/api/ai-work/vocals/{two}"),
+            Some("not flac"),
+            local,
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        let (status, _) = from_home(
+            &state,
+            Method::POST,
+            &format!("/api/ai-work/vocals/{two}"),
+            Some("fLaC vocals"),
+            local,
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        // The node gets it as vocals, and only its holder can fetch it.
+        let (_, body) = send(
+            &state,
+            Method::POST,
+            "/api/nodes/ai/next",
+            Some(r#"{"max":1}"#),
+            node,
+            true,
+        )
+        .await;
+        let got: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(
+            (
+                got["jobs"][0]["track_id"].as_i64(),
+                got["jobs"][0]["vocals"].as_bool()
+            ),
+            (Some(two), Some(true)),
+            "{body}"
+        );
+        let (_, audio) = send(
+            &state,
+            Method::GET,
+            &format!("/api/nodes/ai/song/{two}"),
+            None,
+            node,
+            true,
+        )
+        .await;
+        assert_eq!(audio, "fLaC vocals");
+        let (status, _) = from_home(
+            &state,
+            Method::GET,
+            &format!("/api/ai-work/song/{two}"),
+            None,
+            local,
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        // Its lyrics come back; the vocals are deleted.
+        let lrc = r#"{"lrc":"[ar:Band]\n[ti:Two]\n[by:lyrics-listener (AI-generated; model=tiny)]\n\n[00:01.00]hello","elapsed_ms":30000}"#;
+        let (status, text) = send(
+            &state,
+            Method::POST,
+            &format!("/api/nodes/ai/result/{two}"),
+            Some(lrc),
+            node,
+            true,
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT, "{text}");
+        assert_eq!(state.store.lyrics(two).await.unwrap().unwrap().ai, 1);
+        assert!(!crate::ai_listener::dir(&state)
+            .join("vocals")
+            .join(format!("{two}.flac"))
+            .exists());
+        assert_eq!(crate::ai_work::speed_of("node:kitchen-0001"), Some(30.0));
     }
 }

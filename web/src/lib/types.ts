@@ -1523,16 +1523,37 @@ export interface AiWorkStatus {
   on: boolean
   new_songs: boolean
   sync_plain: boolean
-  counts: { waiting_listen: number; waiting_sync: number; working: number; done: number; failed: number }
+  /** Main isolates vocals for helping nodes when it can. */
+  vocals_for_nodes: boolean
+  counts: {
+    waiting_listen: number
+    waiting_sync: number
+    working: number
+    /** Vocals isolated here, waiting for a node. */
+    prepared: number
+    done: number
+    failed: number
+  }
   held: { reason: 'music' } | { reason: 'hours'; from: number; until: number } | null
   keys: string[]
-  workers: { name: string; last_seen: number; done: number; failed: number }[]
+  workers: {
+    name: string
+    label: string
+    node: boolean
+    last_seen: number
+    done: number
+    failed: number
+    /** Seconds of work per minute of song. */
+    secs_per_minute: number | null
+  }[]
 }
 
 export interface AiListenerStatus {
   installed: boolean
   installing: boolean
   running: boolean
+  /** Vocal isolation is installed, so it can isolate vocals for nodes. */
+  can_isolate: boolean
   python: string | null
   ffmpeg: boolean
   nvidia: boolean
@@ -1601,6 +1622,30 @@ export interface HouseNode {
   audio: NodeAudio
   /** The speakers the node reported. */
   speakers: NodeSpeaker[]
+  /** Helps with AI lyrics while it isn't playing or showing visuals. */
+  ai_help: boolean
+  /** The model chosen for it; null for the suggested one. */
+  ai_model: string | null
+  ai: NodeAi
+}
+
+/** A node's AI lyrics helper, as it reported it. */
+export interface NodeAi {
+  /** off, installing, ready, working, paused or failed. */
+  phase: string
+  detail: string | null
+  python: string | null
+  threads: number | null
+  memory_mb: number | null
+  /** The model installed. */
+  model: string | null
+  /** The speed test: milliseconds to hear 30 seconds. */
+  bench_ms: number | null
+  /** The model suggested for it, and the one it uses. */
+  suggested: string
+  using: string
+  /** Seconds of work per minute of song, once it has done some. */
+  secs_per_minute: number | null
 }
 
 /** A node's speaker settings, kept on Main. */

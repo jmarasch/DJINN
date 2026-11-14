@@ -31,6 +31,8 @@ pub struct AiCounts {
     pub waiting_listen: i64,
     pub waiting_sync: i64,
     pub working: i64,
+    /// Vocals isolated on Main, waiting for a node.
+    pub prepared: i64,
     pub done: i64,
     pub failed: i64,
 }
@@ -40,7 +42,7 @@ macro_rules! free {
     () => {
         "NOT EXISTS (SELECT 1 FROM ai_jobs j WHERE j.track_id = t.id
             AND (j.status = 'done' OR (j.status = 'failed' AND j.attempts >= 3)
-                 OR (j.status = 'working' AND j.taken_at > ?1)))"
+                 OR (j.status IN ('working', 'prepared') AND j.taken_at > ?1)))"
     };
 }
 macro_rules! listen_where {
@@ -128,6 +130,68 @@ impl Store {
         Ok(jobs)
     }
 
+    /// Hands `limit` songs whose vocals Main has isolated to `worker` (a
+    /// node), oldest first, as long as they still need lyrics.
+    pub async fn ai_claim_prepared(&self, worker: &str, limit: i64) -> Result<Vec<AiJob>> {
+        let now = now_ms();
+        let mut tx = self.write().await?;
+        let jobs: Vec<AiJob> = sqlx::query_as(
+            "SELECT t.id AS track_id, j.kind, t.artist, t.title, t.album, t.duration_ms, t.codec,
+                    CASE WHEN j.kind = 'sync' THEN l.plain END AS plain
+             FROM ai_jobs j JOIN tracks t ON t.id = j.track_id JOIN lyrics l ON l.track_id = t.id
+             WHERE j.status = 'prepared' AND t.removed_at IS NULL
+               AND ((j.kind = 'listen' AND l.source = 'none')
+                    OR (j.kind = 'sync' AND l.ai = 0 AND l.synced IS NULL AND l.plain IS NOT NULL))
+             ORDER BY j.taken_at LIMIT ?1",
+        )
+        .bind(limit)
+        .fetch_all(&mut *tx)
+        .await?;
+        for job in &jobs {
+            sqlx::query(
+                "UPDATE ai_jobs SET status = 'working', worker = ?, taken_at = ? WHERE track_id = ?",
+            )
+            .bind(worker)
+            .bind(now)
+            .bind(job.track_id)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(jobs)
+    }
+
+    /// Main has isolated a song's vocals: it waits for a node.
+    pub async fn ai_prepared(&self, track_id: i64) -> Result<()> {
+        sqlx::query(
+            "UPDATE ai_jobs SET status = 'prepared', worker = NULL, taken_at = ? WHERE track_id = ?",
+        )
+        .bind(now_ms())
+        .bind(track_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// How many songs wait for a node with their vocals isolated.
+    pub async fn ai_prepared_count(&self) -> Result<i64> {
+        Ok(
+            sqlx::query_scalar("SELECT count(*) FROM ai_jobs WHERE status = 'prepared'")
+                .fetch_one(&self.pool)
+                .await?,
+        )
+    }
+
+    /// Songs a worker holds or that wait prepared: their isolated vocals
+    /// are still wanted.
+    pub async fn ai_open_jobs(&self) -> Result<Vec<i64>> {
+        Ok(sqlx::query_scalar(
+            "SELECT track_id FROM ai_jobs WHERE status IN ('working', 'prepared')",
+        )
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
     /// Who holds a song, and its kind, while the lease stands.
     pub async fn ai_holder(&self, track_id: i64) -> Result<Option<(String, String)>> {
         Ok(sqlx::query_as(
@@ -185,6 +249,7 @@ impl Store {
             free!(),
             ") AS waiting_sync,
                (SELECT count(*) FROM ai_jobs WHERE status = 'working') AS working,
+               (SELECT count(*) FROM ai_jobs WHERE status = 'prepared') AS prepared,
                (SELECT count(*) FROM ai_jobs WHERE status = 'done') AS done,
                (SELECT count(*) FROM ai_jobs WHERE status = 'failed') AS failed"
         ))
@@ -285,5 +350,27 @@ mod tests {
         let counts = store.ai_counts(false, lease).await.unwrap();
         assert_eq!((counts.done, counts.failed, counts.working), (1, 1, 0));
         assert_eq!(store.ai_retry_failed().await.unwrap(), 1);
+        // Main isolates the vocals of a song for a node: only a node's claim
+        // of prepared songs takes it, until the lease runs out.
+        let batch = store
+            .ai_claim("main", true, true, false, 1, lease)
+            .await
+            .unwrap();
+        let id = batch[0].track_id;
+        store.ai_prepared(id).await.unwrap();
+        assert_eq!(store.ai_prepared_count().await.unwrap(), 1);
+        assert!(store
+            .ai_claim("main", true, true, false, 10, lease)
+            .await
+            .unwrap()
+            .iter()
+            .all(|j| j.track_id != id));
+        let taken = store.ai_claim_prepared("node-1", 5).await.unwrap();
+        assert_eq!(taken.iter().map(|j| j.track_id).collect::<Vec<_>>(), [id]);
+        assert_eq!(
+            store.ai_holder(id).await.unwrap().map(|h| h.0),
+            Some("node-1".into())
+        );
+        assert!(store.ai_open_jobs().await.unwrap().contains(&id));
     }
 }

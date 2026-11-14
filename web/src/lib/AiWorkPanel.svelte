@@ -34,7 +34,12 @@
   async function saveWork() {
     if (!work) return
     try {
-      await api.setAiWork({ on: work.on, new_songs: work.new_songs, sync_plain: work.sync_plain })
+      await api.setAiWork({
+        on: work.on,
+        new_songs: work.new_songs,
+        sync_plain: work.sync_plain,
+        vocals_for_nodes: work.vocals_for_nodes,
+      })
       if (work.on && listener?.installed && listener.auto_start && !listener.running) await api.startAiListener()
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Could not save', true)
@@ -108,7 +113,8 @@
     </label>
     <p class="small">
       Waiting: {n(work.counts.waiting_listen)} without lyrics, {n(work.counts.waiting_sync)} plain.
-      Working: {n(work.counts.working)}. Done: {n(work.counts.done)}. Failed: {n(work.counts.failed)}
+      Working: {n(work.counts.working)}.{#if work.counts.prepared}
+        Vocals ready for nodes: {n(work.counts.prepared)}.{/if} Done: {n(work.counts.done)}. Failed: {n(work.counts.failed)}
       {#if work.counts.failed}<button class="link" onclick={() => act(api.retryAiWork, 'Will try again')}>Try again</button>{/if}
     </p>
   {/if}
@@ -137,6 +143,25 @@
       <input type="checkbox" bind:checked={listener.auto_start} onchange={saveListener} />
       Start it with DJINN
     </label>
+    {#if work}
+      <label class="switch">
+        <input
+          type="checkbox"
+          bind:checked={work.vocals_for_nodes}
+          onchange={saveWork}
+          disabled={!listener.can_isolate}
+        />
+        Isolate the vocals here for nodes that help
+      </label>
+      <p class="small muted sub">
+        {#if listener.can_isolate}
+          This computer does the heavy part (separating the voice from the music) and sends a node only the voice, a
+          few megabytes, to listen to. The node deletes it when done.
+        {:else}
+          Needs the listener installed here with "Isolate the vocals first". Without it, nodes listen to whole songs.
+        {/if}
+      </p>
+    {/if}
     <div class="actions">
       <button onclick={() => act(api.installAiListener)} disabled={listener.installing}>
         {listener.installed ? 'Install again (after changing the model)' : 'Install the listener'}
@@ -154,6 +179,23 @@
     {#if listener.log.length}<pre class="log small">{listener.log.join('\n')}</pre>{/if}
   {/if}
 
+  {#if work?.workers.some((w) => w.node)}
+    <h4>Nodes helping</h4>
+    <ul class="keys">
+      {#each work.workers.filter((w) => w.node) as w (w.name)}
+        <li>
+          <strong>{w.label}</strong>
+          <span class="small muted">
+            asked {new Date(w.last_seen).toLocaleTimeString()} · {n(w.done)} done · {n(w.failed)} failed{w.secs_per_minute
+              ? ` · ${Math.round(w.secs_per_minute)} s per minute of song`
+              : ''}
+          </span>
+        </li>
+      {/each}
+    </ul>
+  {/if}
+  <p class="small muted">Nodes are switched on to help, and given their model, in <a href="#/admin/nodes">Nodes</a>.</p>
+
   <h4>Other computers</h4>
   <p class="small muted">
     A computer with a decent processor or graphics card can listen too. Make a key for it, copy the folder
@@ -162,7 +204,7 @@
   </p>
   {#if work}
     <ul class="keys">
-      {#each work.keys as name (name)}
+      {#each work.keys.filter((k) => k !== 'this computer') as name (name)}
         <li>
           <strong>{name}</strong>
           {#each work.workers.filter((w) => w.name === name) as w (w.name)}

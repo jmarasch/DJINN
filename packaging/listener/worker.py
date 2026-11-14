@@ -10,10 +10,16 @@ into ./models and nothing is sent anywhere but to your own DJINN.
 
     python worker.py --server http://127.0.0.1:8066 --key KEY      # run
     python worker.py --setup [--model medium]                      # download models
+    python worker.py --bench [--model small]                       # speed test
 
 Two kinds of job: "listen" makes the lyrics from the audio (they are
 guesses, tagged AI-generated), "sync" times lyrics DJINN already has (tagged
 AI-synced, with how well the audio matched the words).
+
+Nodes help too: DJINN may ask this computer (when it has vocal isolation)
+to "prepare" a song, isolating its vocals into a small 16 kHz FLAC for a
+node, and a node's song may come as those vocals already ("vocals"), which
+are listened to as they are.
 """
 
 import argparse
@@ -21,6 +27,7 @@ import dataclasses
 import json
 import os
 import signal
+import subprocess
 import sys
 import tempfile
 import time
@@ -31,7 +38,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from lib.aligner import compare_lyrics, sync_lyrics_to_audio  # noqa: E402
-from lib.audio import ListenerEngine  # noqa: E402
+from lib.audio import ListenerEngine, detect_available_backends, separate_vocals  # noqa: E402
 from lib.bootstrap import (  # noqa: E402
     DEFAULT_MODELS_DIR,
     configure_model_env,
@@ -66,8 +73,8 @@ class Djinn:
             req.add_header("Content-Type", "application/json")
         return urllib.request.urlopen(req, timeout=timeout)
 
-    def next(self, count: int) -> dict:
-        with self._request("POST", "/api/ai-work/next", {"max": count}) as res:
+    def next(self, count: int, can_isolate: bool) -> dict:
+        with self._request("POST", "/api/ai-work/next", {"max": count, "can_isolate": can_isolate}) as res:
             return json.load(res)
 
     def audio(self, track_id: int, dest: Path) -> None:
@@ -75,13 +82,45 @@ class Djinn:
             while chunk := res.read(1 << 20):
                 out.write(chunk)
 
-    def result(self, track_id: int, lrc=None, error=None) -> None:
-        with self._request("POST", f"/api/ai-work/result/{track_id}", {"lrc": lrc, "error": error}):
+    def result(self, track_id: int, lrc=None, error=None, elapsed_ms=None) -> None:
+        body = {"lrc": lrc, "error": error, "elapsed_ms": elapsed_ms}
+        with self._request("POST", f"/api/ai-work/result/{track_id}", body):
+            pass
+
+    def vocals(self, track_id: int, flac: Path) -> None:
+        req = urllib.request.Request(
+            f"{self.server}/api/ai-work/vocals/{track_id}", data=flac.read_bytes(), method="POST"
+        )
+        req.add_header("Authorization", f"Worker {self.key}")
+        req.add_header("Content-Type", "audio/flac")
+        with urllib.request.urlopen(req, timeout=120):
             pass
 
 
 class Skip(Exception):
     """A song that can't be done, with why."""
+
+
+def prepare(engine: ListenerEngine, audio: Path, work: Path) -> Path:
+    """Isolates a song's vocals into a small 16 kHz mono FLAC for a node."""
+    vocals, separated = separate_vocals(
+        str(audio),
+        work,
+        mode="demucs",
+        device=engine.resolved_device,
+        use_ffmpeg_filter=False,
+        models_dir=engine.models_dir,
+        gpu_info=engine.gpu_info,
+    )
+    if not separated:
+        raise Skip("couldn't isolate the vocals")
+    out = work / "vocals.flac"
+    cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", vocals,
+           "-vn", "-ac", "1", "-ar", "16000", "-sample_fmt", "s16", str(out)]
+    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if proc.returncode != 0 or not out.is_file():
+        raise RuntimeError(f"ffmpeg couldn't write the vocals: {(proc.stderr or '').strip()[-200:]}")
+    return out
 
 
 def listen(engine: ListenerEngine, job: dict, audio: Path, min_similarity: float) -> str:
@@ -92,7 +131,16 @@ def listen(engine: ListenerEngine, job: dict, audio: Path, min_similarity: float
         album=job.get("album"),
         duration_ms=job.get("duration_ms"),
     )
-    transcript = engine.transcribe(str(audio))
+    if job.get("vocals"):
+        # Isolated on Main already: listen to it as it is.
+        saved = (engine.separate_vocals_mode, engine.vocal_filter)
+        engine.separate_vocals_mode, engine.vocal_filter = False, False
+        try:
+            transcript = engine.transcribe(str(audio))
+        finally:
+            engine.separate_vocals_mode, engine.vocal_filter = saved
+    else:
+        transcript = engine.transcribe(str(audio))
     if transcript.instrumental:
         raise Skip("instrumental")
     plain = job.get("plain")
@@ -142,10 +190,15 @@ def run(args) -> int:
         separate_vocals_mode=None if args.vocals == "auto" else args.vocals == "on",
         models_dir=Path(args.models_dir),
     )
-    print(f"Listener ready: backend={engine.resolved_backend} model={engine.model_name} device={engine.resolved_device}", flush=True)
+    can_isolate = args.vocals != "off" and detect_available_backends().get("demucs", False)
+    print(
+        f"Listener ready: backend={engine.resolved_backend} model={engine.model_name} "
+        f"device={engine.resolved_device} isolates={can_isolate}",
+        flush=True,
+    )
     while not STOP:
         try:
-            batch = djinn.next(1)
+            batch = djinn.next(1, can_isolate)
         except (urllib.error.URLError, OSError, ValueError) as e:
             print(f"DJINN isn't answering ({e}); trying again soon", flush=True)
             time.sleep(30)
@@ -166,10 +219,17 @@ def run(args) -> int:
             started = time.time()
             try:
                 with tempfile.TemporaryDirectory(prefix="djinn-listener-") as tmp:
-                    audio = Path(tmp) / f"song.{EXTENSIONS.get(job.get('codec') or '', 'audio')}"
+                    ext = "flac" if job.get("vocals") else EXTENSIONS.get(job.get("codec") or "", "audio")
+                    audio = Path(tmp) / f"song.{ext}"
                     djinn.audio(job["track_id"], audio)
+                    if job.get("prepare"):
+                        djinn.vocals(job["track_id"], prepare(engine, audio, Path(tmp)))
+                        print(f"vocals for a node: {job.get('artist')} - {job.get('title')} ({time.time() - started:.0f}s)", flush=True)
+                        continue
+                    listened = time.time()
                     lrc = listen(engine, job, audio, args.min_similarity)
-                djinn.result(job["track_id"], lrc=lrc)
+                    elapsed = int((time.time() - listened) * 1000)
+                djinn.result(job["track_id"], lrc=lrc, elapsed_ms=elapsed)
                 print(f"{job['kind']}: {job.get('artist')} - {job.get('title')} ({time.time() - started:.0f}s)", flush=True)
             except Skip as why:
                 djinn.result(job["track_id"], error=str(why))
@@ -182,6 +242,31 @@ def run(args) -> int:
                     pass
         if args.once:
             return 0
+    return 0
+
+
+def bench(args) -> int:
+    """The speed test: how long the model takes to hear 30 seconds of sound,
+    printed as JSON ({"encode_ms": N})."""
+    import numpy as np
+    from faster_whisper import WhisperModel
+
+    models = configure_model_env(Path(args.models_dir))
+    model_dir = ensure_whisper_model(args.model, models)
+    device = "cpu" if args.device == "auto" else args.device
+    model = WhisperModel(str(model_dir), device=device, compute_type="int8" if device == "cpu" else "float16")
+    rng = np.random.default_rng(1)
+    t = np.arange(16000 * 30) / 16000
+    # A voice-like hum with noise, so the features look like sound.
+    audio = (0.3 * np.sin(2 * np.pi * 180 * t) * (1 + np.sin(2 * np.pi * 3 * t)) + 0.05 * rng.standard_normal(t.size)).astype(np.float32)
+    features = model.feature_extractor(audio)[:, :3000]
+    model.encode(features)  # warm up
+    tries = []
+    for _ in range(2):
+        start = time.time()
+        model.encode(features)
+        tries.append(time.time() - start)
+    print(json.dumps({"encode_ms": int(min(tries) * 1000)}), flush=True)
     return 0
 
 
@@ -209,9 +294,12 @@ def main() -> int:
     p.add_argument("--min-similarity", type=float, default=0.5, help="how well the audio must match words to time them")
     p.add_argument("--once", action="store_true", help="do one batch (or wait once) and stop")
     p.add_argument("--setup", action="store_true", help="download the models and stop")
+    p.add_argument("--bench", action="store_true", help="test this computer's speed with the model and stop")
     args = p.parse_args()
     if args.setup:
         return setup(args)
+    if args.bench:
+        return bench(args)
     if not args.key:
         print("A worker key is needed (--key or DJINN_WORKER_KEY).", file=sys.stderr)
         return 2

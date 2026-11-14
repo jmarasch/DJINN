@@ -64,6 +64,7 @@ pub const DEFAULTS: &[(&str, Default)] = &[
     (GUEST_MODE, Default::Flag(false)),
     (crate::duplicates::ACROSS_ALBUMS, Default::Flag(false)),
     (crate::lyrics::LYRICS_AI_NOTE, Default::Flag(true)),
+    (crate::ai_work::VOCALS_FOR_NODES, Default::Flag(true)),
     (crate::tv_api::TV_PAGE, Default::Flag(true)),
     (crate::tv_api::TV_SOUND, Default::Flag(false)),
     (crate::cast_api::PLAY_HERE, Default::Flag(false)),

@@ -7,6 +7,7 @@
 mod accounts;
 mod address;
 mod ai;
+mod ai_kit;
 mod ai_listener;
 mod ai_work;
 mod api;
@@ -48,6 +49,7 @@ mod lyrics;
 mod lyrics_import;
 mod mood_api;
 mod network;
+mod node_ai;
 mod node_audio;
 mod node_builds;
 mod node_mode;

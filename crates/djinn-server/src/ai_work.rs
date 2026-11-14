@@ -26,6 +26,7 @@ use tower_http::services::ServeFile;
 use crate::auth::{AdminUser, Device};
 use crate::error::{ApiError, ApiResult};
 use crate::lyrics_import::store_from_worker;
+use crate::nodes::NodeAuth;
 use crate::security::{hex, random_hex, same_secret};
 use crate::settings;
 use crate::state::AppState;
@@ -51,6 +52,15 @@ pub fn router() -> Router<AppState> {
         .route("/ai-work/next", post(next))
         .route("/ai-work/song/{id}", get(song))
         .route("/ai-work/result/{id}", post(result))
+        .route(
+            "/ai-work/vocals/{id}",
+            post(vocals).layer(axum::extract::DefaultBodyLimit::max(VOCALS_MAX_BYTES)),
+        )
+        .route("/nodes/ai/next", post(node_next))
+        .route("/nodes/ai/song/{id}", get(node_song))
+        .route("/nodes/ai/result/{id}", post(node_result))
+        .route("/nodes/ai/kit", get(node_kit))
+        .route("/nodes/ai/report", axum::routing::put(node_report))
 }
 
 // --- Worker keys ---
@@ -136,9 +146,24 @@ impl FromRequestParts<AppState> for Worker {
 
 #[derive(Clone, Default, Serialize)]
 struct Seen {
+    /// The name to show (a node's own name).
+    label: String,
+    node: bool,
     last_seen: i64,
+    /// When it last asked for work while free to do it (a node that's
+    /// playing doesn't ask).
+    #[serde(skip)]
+    asked_at: i64,
     done: u64,
     failed: u64,
+    /// Time spent listening and the length of the songs it listened to,
+    /// for its speed.
+    #[serde(skip)]
+    work_ms: u64,
+    #[serde(skip)]
+    audio_ms: u64,
+    /// Seconds of work per minute of song, once it has done some.
+    secs_per_minute: Option<f64>,
 }
 
 static WORKERS: Mutex<Option<HashMap<String, Seen>>> = Mutex::new(None);
@@ -148,11 +173,42 @@ fn seen(name: &str, f: impl FnOnce(&mut Seen)) {
         let entry = guard
             .get_or_insert_with(HashMap::new)
             .entry(name.to_owned())
-            .or_default();
+            .or_insert_with(|| Seen {
+                label: name.to_owned(),
+                ..Seen::default()
+            });
         entry.last_seen = djinn_store::now_ms();
         f(entry);
     }
 }
+
+/// A worker's measured speed, in seconds of work per minute of song.
+pub fn speed_of(name: &str) -> Option<f64> {
+    WORKERS.lock().ok()?.as_ref()?.get(name)?.secs_per_minute
+}
+
+/// Nodes that asked for work lately, while free to do it.
+fn helping_nodes() -> usize {
+    let cut = djinn_store::now_ms() - HELPER_FRESH_MS;
+    WORKERS
+        .lock()
+        .ok()
+        .and_then(|g| {
+            g.as_ref()
+                .map(|m| m.values().filter(|s| s.node && s.asked_at > cut).count())
+        })
+        .unwrap_or(0)
+}
+
+/// A node that asked within this long counts as helping.
+const HELPER_FRESH_MS: i64 = 10 * 60 * 1000;
+/// Songs with isolated vocals kept waiting per helping node, and at most.
+const PREPARED_PER_NODE: i64 = 2;
+const PREPARED_MAX: i64 = 8;
+/// The largest isolated vocals file taken (16 kHz mono FLAC is a few MB).
+const VOCALS_MAX_BYTES: usize = 40 << 20;
+/// Setting key: Main isolates vocals for nodes when it can.
+pub const VOCALS_FOR_NODES: &str = "ai_vocals_for_nodes";
 
 // --- Admin ---
 
@@ -161,6 +217,7 @@ struct Status {
     on: bool,
     new_songs: bool,
     sync_plain: bool,
+    vocals_for_nodes: bool,
     counts: AiCounts,
     /// Why handing out work is paused (music playing, outside the hours).
     held: Option<crate::background::Held>,
@@ -193,6 +250,7 @@ async fn status(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json<S
         on: settings::flag(&state.store, WORK_ON, false).await?,
         new_songs: settings::flag(&state.store, WORK_NEW, true).await?,
         sync_plain: settings::flag(&state.store, WORK_SYNC, false).await?,
+        vocals_for_nodes: settings::flag(&state.store, VOCALS_FOR_NODES, true).await?,
         counts: state
             .store
             .ai_counts(lookups_off(&state).await?, LEASE_MS)
@@ -208,6 +266,12 @@ struct Settings {
     on: bool,
     new_songs: bool,
     sync_plain: bool,
+    #[serde(default = "yes")]
+    vocals_for_nodes: bool,
+}
+
+fn yes() -> bool {
+    true
 }
 
 async fn put_settings(
@@ -218,6 +282,7 @@ async fn put_settings(
     settings::set_flag(&state.store, WORK_ON, body.on).await?;
     settings::set_flag(&state.store, WORK_NEW, body.new_songs).await?;
     settings::set_flag(&state.store, WORK_SYNC, body.sync_plain).await?;
+    settings::set_flag(&state.store, VOCALS_FOR_NODES, body.vocals_for_nodes).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -241,6 +306,9 @@ async fn make_key(
     let name: String = body.name.trim().chars().take(40).collect();
     if name.is_empty() {
         return Err(ApiError::bad_request("give the worker a name"));
+    }
+    if name.starts_with("node:") {
+        return Err(ApiError::bad_request("that name is kept for nodes"));
     }
     let mut all = keys(&state).await?;
     if all.iter().any(|k| k.name == name) {
@@ -278,15 +346,147 @@ struct Next {
     /// Songs wanted at once.
     #[serde(default)]
     max: usize,
+    /// This worker has vocal isolation (Demucs) and may isolate vocals for
+    /// nodes.
+    #[serde(default)]
+    can_isolate: bool,
+}
+
+/// A song for a worker, and what to do with it.
+#[derive(Serialize)]
+struct Job {
+    #[serde(flatten)]
+    job: djinn_store::AiJob,
+    /// Only isolate the vocals and send them back (`/ai-work/vocals/{id}`),
+    /// for a node to listen to.
+    prepare: bool,
+    /// The song's audio is its isolated vocals already: listen as it is.
+    vocals: bool,
 }
 
 #[derive(Serialize)]
 struct Batch {
-    jobs: Vec<djinn_store::AiJob>,
+    jobs: Vec<Job>,
     /// Nothing handed out: ask again after this many seconds.
     wait_secs: Option<u64>,
     /// Why, when it's paused.
     held: Option<crate::background::Held>,
+}
+
+fn vocals_dir(state: &AppState) -> std::path::PathBuf {
+    crate::ai_listener::dir(state).join("vocals")
+}
+
+fn vocals_file(state: &AppState, id: i64) -> std::path::PathBuf {
+    vocals_dir(state).join(format!("{id}.flac"))
+}
+
+/// Removes isolated vocals no job wants any more.
+async fn sweep_vocals(state: &AppState) -> anyhow::Result<()> {
+    let Ok(mut entries) = tokio::fs::read_dir(vocals_dir(state)).await else {
+        return Ok(());
+    };
+    let open: std::collections::HashSet<i64> =
+        state.store.ai_open_jobs().await?.into_iter().collect();
+    while let Some(entry) = entries.next_entry().await? {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let id = name
+            .strip_suffix(".flac")
+            .and_then(|n| n.parse::<i64>().ok());
+        if id.is_none_or(|id| !open.contains(&id)) {
+            let _ = tokio::fs::remove_file(entry.path()).await;
+        }
+    }
+    Ok(())
+}
+
+/// Who is asking for work.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Asker {
+    /// A computer with a worker key (this one's own listener among them).
+    Keyed,
+    /// A node: its own rules (not playing, no visuals) decided it may ask.
+    Node,
+}
+
+async fn hand_out(state: &AppState, name: &str, asker: Asker, body: Next) -> ApiResult<Batch> {
+    seen(name, |s| {
+        s.node = asker == Asker::Node;
+        if asker == Asker::Node {
+            s.asked_at = djinn_store::now_ms();
+        }
+    });
+    let nothing = |held| Batch {
+        jobs: Vec::new(),
+        wait_secs: Some(WAIT_SECS),
+        held,
+    };
+    if !settings::flag(&state.store, WORK_ON, false).await? {
+        return Ok(nothing(None));
+    }
+    // A node keeps its own rules (it asks only while it isn't playing or
+    // showing visuals); Main's rules are for Main's own work.
+    if asker == Asker::Keyed {
+        if let Some(held) = crate::background::held(state).await {
+            return Ok(nothing(Some(held)));
+        }
+    }
+    let max = i64::try_from(body.max.clamp(1, BATCH_MAX)).unwrap_or(1);
+    let listen = settings::flag(&state.store, WORK_NEW, true).await?;
+    let sync = settings::flag(&state.store, WORK_SYNC, false).await?;
+    let lookups_off = lookups_off(state).await?;
+    let mut prepare = false;
+    let jobs = if asker == Asker::Node {
+        let mut jobs = state.store.ai_claim_prepared(name, max).await?;
+        if jobs.is_empty() {
+            jobs = state
+                .store
+                .ai_claim(name, listen, sync, lookups_off, max, LEASE_MS)
+                .await?;
+        }
+        jobs
+    } else {
+        // This computer's own listener isolates vocals for helping nodes
+        // first, keeping a few songs ready for each.
+        if name == crate::ai_listener::LOCAL_KEY_NAME && body.can_isolate {
+            sweep_vocals(state).await?;
+            let nodes = i64::try_from(helping_nodes()).unwrap_or(0);
+            prepare = nodes > 0
+                && settings::flag(&state.store, VOCALS_FOR_NODES, true).await?
+                && state.store.ai_prepared_count().await?
+                    < (nodes * PREPARED_PER_NODE).min(PREPARED_MAX);
+        }
+        state
+            .store
+            .ai_claim(
+                name,
+                listen,
+                sync,
+                lookups_off,
+                if prepare { 1 } else { max },
+                LEASE_MS,
+            )
+            .await?
+    };
+    if jobs.is_empty() {
+        return Ok(nothing(None));
+    }
+    let jobs = jobs
+        .into_iter()
+        .map(|job| {
+            let vocals = !prepare && vocals_file(state, job.track_id).is_file();
+            Job {
+                job,
+                prepare,
+                vocals,
+            }
+        })
+        .collect();
+    Ok(Batch {
+        jobs,
+        wait_secs: None,
+        held: None,
+    })
 }
 
 async fn next(
@@ -294,61 +494,39 @@ async fn next(
     State(state): State<AppState>,
     Json(body): Json<Next>,
 ) -> ApiResult<Json<Batch>> {
-    seen(&name, |_| {});
-    let nothing = |held| Batch {
-        jobs: Vec::new(),
-        wait_secs: Some(WAIT_SECS),
-        held,
-    };
-    if !settings::flag(&state.store, WORK_ON, false).await? {
-        return Ok(Json(nothing(None)));
-    }
-    if let Some(held) = crate::background::held(&state).await {
-        return Ok(Json(nothing(Some(held))));
-    }
-    let max = i64::try_from(body.max.clamp(1, BATCH_MAX)).unwrap_or(1);
-    let jobs = state
-        .store
-        .ai_claim(
-            &name,
-            settings::flag(&state.store, WORK_NEW, true).await?,
-            settings::flag(&state.store, WORK_SYNC, false).await?,
-            lookups_off(&state).await?,
-            max,
-            LEASE_MS,
-        )
-        .await?;
-    Ok(Json(if jobs.is_empty() {
-        nothing(None)
-    } else {
-        Batch {
-            jobs,
-            wait_secs: None,
-            held: None,
-        }
-    }))
+    Ok(Json(hand_out(&state, &name, Asker::Keyed, body).await?))
 }
 
-/// A song's audio, only to the worker that holds it.
+/// A song's audio (or its isolated vocals), only to the worker that holds it.
+async fn send_song(state: &AppState, name: &str, id: i64, request: Request) -> ApiResult<Response> {
+    match state.store.ai_holder(id).await? {
+        Some((holder, _)) if holder == name => {}
+        _ => return Err(ApiError::forbidden()),
+    }
+    let vocals = vocals_file(state, id);
+    let path = if vocals.is_file() {
+        vocals
+    } else {
+        state
+            .store
+            .track_path(id)
+            .await?
+            .ok_or_else(ApiError::not_found)?
+            .into()
+    };
+    match ServeFile::new(path).oneshot(request).await {
+        Ok(response) => Ok(response.map(Body::new).into_response()),
+        Err(e) => match e {},
+    }
+}
+
 async fn song(
     Worker(name): Worker,
     State(state): State<AppState>,
     UrlPath(id): UrlPath<i64>,
     request: Request,
 ) -> ApiResult<Response> {
-    match state.store.ai_holder(id).await? {
-        Some((holder, _)) if holder == name => {}
-        _ => return Err(ApiError::forbidden()),
-    }
-    let path = state
-        .store
-        .track_path(id)
-        .await?
-        .ok_or_else(ApiError::not_found)?;
-    match ServeFile::new(path).oneshot(request).await {
-        Ok(response) => Ok(response.map(Body::new).into_response()),
-        Err(e) => match e {},
-    }
+    send_song(&state, &name, id, request).await
 }
 
 #[derive(Deserialize)]
@@ -357,13 +535,16 @@ struct Outcome {
     lrc: Option<String>,
     /// Why there isn't one.
     error: Option<String>,
+    /// How long the listening took, for the worker's speed.
+    #[serde(default)]
+    elapsed_ms: Option<u64>,
 }
 
-async fn result(
-    Worker(name): Worker,
-    State(state): State<AppState>,
-    UrlPath(id): UrlPath<i64>,
-    Json(body): Json<Outcome>,
+async fn take_result(
+    state: &AppState,
+    name: &str,
+    id: i64,
+    body: Outcome,
 ) -> ApiResult<StatusCode> {
     let Some((holder, kind)) = state.store.ai_holder(id).await? else {
         return Err(ApiError::conflict(
@@ -377,20 +558,251 @@ async fn result(
     let failure = match (&body.lrc, &body.error) {
         // An instrumental has no lyrics to make: finished, nothing stored.
         (None, Some(error)) if error == "instrumental" => None,
-        (Some(text), _) => store_from_worker(&state, id, text, kind_number, &name)
+        (Some(text), _) => store_from_worker(state, id, text, kind_number, name)
             .await
             .err(),
         (None, Some(error)) => Some(error.chars().take(200).collect()),
         (None, None) => Some("sent nothing".to_owned()),
     };
     state.store.ai_finish(id, failure.as_deref()).await?;
-    seen(&name, |s| {
+    let _ = tokio::fs::remove_file(vocals_file(state, id)).await;
+    let audio_ms = state
+        .store
+        .track(id)
+        .await
+        .ok()
+        .flatten()
+        .and_then(|t| t.duration_ms)
+        .and_then(|d| u64::try_from(d).ok());
+    seen(name, |s| {
         if failure.is_some() {
             s.failed += 1;
         } else {
             s.done += 1;
         }
+        if let (Some(work), Some(audio)) = (body.elapsed_ms, audio_ms) {
+            if failure.is_none() && audio > 0 {
+                s.work_ms += work;
+                s.audio_ms += audio;
+                #[allow(clippy::cast_precision_loss)]
+                {
+                    s.secs_per_minute = Some(s.work_ms as f64 / s.audio_ms as f64 * 60.0);
+                }
+            }
+        }
     });
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn result(
+    Worker(name): Worker,
+    State(state): State<AppState>,
+    UrlPath(id): UrlPath<i64>,
+    Json(body): Json<Outcome>,
+) -> ApiResult<StatusCode> {
+    take_result(&state, &name, id, body).await
+}
+
+/// This computer's listener sends a song's isolated vocals (16 kHz mono
+/// FLAC), which then waits for a node.
+async fn vocals(
+    Worker(name): Worker,
+    State(state): State<AppState>,
+    UrlPath(id): UrlPath<i64>,
+    body: axum::body::Bytes,
+) -> ApiResult<StatusCode> {
+    match state.store.ai_holder(id).await? {
+        Some((holder, _)) if holder == name => {}
+        _ => return Err(ApiError::forbidden()),
+    }
+    if body.len() > VOCALS_MAX_BYTES || !body.starts_with(b"fLaC") {
+        return Err(ApiError::bad_request("that isn't FLAC vocals"));
+    }
+    tokio::fs::create_dir_all(vocals_dir(&state))
+        .await
+        .map_err(anyhow::Error::from)?;
+    tokio::fs::write(vocals_file(&state, id), &body)
+        .await
+        .map_err(anyhow::Error::from)?;
+    state.store.ai_prepared(id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+// --- Nodes helping ---
+
+/// The name a node's work goes under.
+pub fn node_worker(node: &djinn_store::Node) -> String {
+    format!("node:{}", node.node_id)
+}
+
+/// A node that may help: accepted and switched on by the admin.
+fn helper(node: &djinn_store::Node) -> ApiResult<String> {
+    if node.status != "approved" || !node.ai_help {
+        return Err(ApiError::forbidden());
+    }
+    let name = node_worker(node);
+    seen(&name, |s| {
+        s.label.clone_from(&node.name);
+        s.node = true;
+    });
+    Ok(name)
+}
+
+async fn node_next(
+    State(state): State<AppState>,
+    NodeAuth(node): NodeAuth,
+    Json(body): Json<Next>,
+) -> ApiResult<Json<Batch>> {
+    let name = helper(&node)?;
+    Ok(Json(hand_out(&state, &name, Asker::Node, body).await?))
+}
+
+async fn node_song(
+    State(state): State<AppState>,
+    NodeAuth(node): NodeAuth,
+    UrlPath(id): UrlPath<i64>,
+    request: Request,
+) -> ApiResult<Response> {
+    let name = helper(&node)?;
+    send_song(&state, &name, id, request).await
+}
+
+async fn node_result(
+    State(state): State<AppState>,
+    NodeAuth(node): NodeAuth,
+    UrlPath(id): UrlPath<i64>,
+    Json(body): Json<Outcome>,
+) -> ApiResult<StatusCode> {
+    let name = helper(&node)?;
+    take_result(&state, &name, id, body).await
+}
+
+#[derive(Deserialize)]
+struct KitAsk {
+    python: String,
+    arch: String,
+    #[serde(default)]
+    path: Option<String>,
+}
+
+/// The node's model: the admin's choice, else the one suggested for it.
+pub fn model_for(node: &djinn_store::Node) -> String {
+    node.ai_model
+        .clone()
+        .filter(|m| crate::ai_listener::MODELS.contains(&m.as_str()))
+        .unwrap_or_else(|| {
+            suggested_model(&NodeAiReport::of(node), speed_of(&node_worker(node))).to_owned()
+        })
+}
+
+/// What the node needs: the list (ready, or being put together), or one
+/// file of it with `path`.
+async fn node_kit(
+    State(state): State<AppState>,
+    NodeAuth(node): NodeAuth,
+    axum::extract::Query(ask): axum::extract::Query<KitAsk>,
+    request: Request,
+) -> ApiResult<Response> {
+    helper(&node)?;
+    let model = model_for(&node);
+    if let Some(path) = ask.path {
+        if !crate::ai_kit::safe_path(&path) {
+            return Err(ApiError::bad_request("not a kit file"));
+        }
+        let file = crate::ai_kit::file_of(&state, &ask.python, &ask.arch, &model, &path)
+            .ok_or_else(ApiError::not_found)?;
+        return match ServeFile::new(file).oneshot(request).await {
+            Ok(response) => Ok(response.map(Body::new).into_response()),
+            Err(e) => match e {},
+        };
+    }
+    let kit = crate::ai_kit::kit(&state, &ask.python, &ask.arch, &model);
+    let code = match kit {
+        crate::ai_kit::Kit::Ready { .. } => StatusCode::OK,
+        crate::ai_kit::Kit::Preparing => StatusCode::ACCEPTED,
+        crate::ai_kit::Kit::Failed { .. } => StatusCode::CONFLICT,
+    };
+    Ok((
+        code,
+        Json(serde_json::json!({ "model": model, "kit": kit })),
+    )
+        .into_response())
+}
+
+/// What a node says about its helper: how far the install got, what it's
+/// doing, its processor and memory, and how fast it listens.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct NodeAiReport {
+    /// "off", "installing", "ready", "working", "paused" or "failed".
+    #[serde(default)]
+    pub phase: String,
+    #[serde(default)]
+    pub detail: Option<String>,
+    #[serde(default)]
+    pub python: Option<String>,
+    #[serde(default)]
+    pub threads: Option<u32>,
+    #[serde(default)]
+    pub memory_mb: Option<u64>,
+    /// The model installed.
+    #[serde(default)]
+    pub model: Option<String>,
+    /// The speed test: milliseconds the model takes to hear 30 seconds.
+    #[serde(default)]
+    pub bench_ms: Option<u64>,
+}
+
+impl NodeAiReport {
+    pub fn of(node: &djinn_store::Node) -> Self {
+        node.ai_report
+            .as_deref()
+            .and_then(|r| serde_json::from_str(r).ok())
+            .unwrap_or_default()
+    }
+}
+
+/// The Whisper model to suggest for a node: by its memory and processor,
+/// one size smaller when it has proved slow (more than 1.5 minutes of work
+/// per minute of song, measured or from the speed test).
+pub fn suggested_model(report: &NodeAiReport, secs_per_minute: Option<f64>) -> &'static str {
+    const SIZES: [&str; 3] = ["tiny", "base", "small"];
+    let memory = report.memory_mb.unwrap_or(0);
+    let threads = report.threads.unwrap_or(0);
+    let mut size: usize = if memory < 6_000 || threads < 4 {
+        0
+    } else if memory < 12_000 {
+        1
+    } else {
+        2
+    };
+    // The speed test hears 30 s; a whole song takes about three times its
+    // listening (finding the voice, writing the words) on top.
+    #[allow(clippy::cast_precision_loss)]
+    let tested = report.bench_ms.map(|ms| ms as f64 / 1000.0 * 2.0 * 3.0);
+    if secs_per_minute.or(tested).is_some_and(|s| s > 90.0) {
+        size = size.saturating_sub(1);
+    }
+    SIZES[size]
+}
+
+async fn node_report(
+    State(state): State<AppState>,
+    NodeAuth(node): NodeAuth,
+    Json(body): Json<NodeAiReport>,
+) -> ApiResult<StatusCode> {
+    if node.status != "approved" {
+        return Err(ApiError::forbidden());
+    }
+    let mut report = body;
+    report.detail = report.detail.map(|d| d.chars().take(300).collect());
+    report.phase = report.phase.chars().take(20).collect();
+    state
+        .store
+        .set_node_ai_report(
+            node.id,
+            &serde_json::to_string(&report).map_err(anyhow::Error::from)?,
+        )
+        .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

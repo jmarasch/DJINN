@@ -191,6 +191,8 @@ pub struct Node {
     searched_at: Arc<Mutex<Option<std::time::Instant>>>,
     /// What the speaker plays, measured for the screen's visualizer.
     levels: djinn_engine::Levels,
+    /// Helping with AI lyrics while idle.
+    ai: Arc<crate::node_ai::Helper>,
 }
 
 /// After a failed update, how long before trying again.
@@ -257,7 +259,40 @@ impl Node {
             lost_since: Arc::default(),
             searched_at: Arc::default(),
             levels: djinn_engine::Levels::new(),
+            ai: Arc::new(crate::node_ai::Helper::new(
+                cache_dir
+                    .parent()
+                    .map_or_else(|| PathBuf::from("ai-listener"), |d| d.join("ai-listener")),
+            )?),
         })
+    }
+
+    /// The AI lyrics helper.
+    pub(crate) fn ai(&self) -> Arc<crate::node_ai::Helper> {
+        Arc::clone(&self.ai)
+    }
+
+    /// Playing music or drawing visuals for a screen: AI work must wait.
+    pub(crate) fn busy(&self) -> bool {
+        self.status().playing || self.levels.watched(djinn_engine::clock::now_micros())
+    }
+
+    /// The port this node's page listens on.
+    pub(crate) fn port(&self) -> u16 {
+        LISTEN.get().map_or(8066, std::net::SocketAddr::port)
+    }
+
+    /// Main's address, a client pinned to its certificate and this node's
+    /// sign-in, once joined.
+    pub(crate) async fn main_client(
+        &self,
+        timeout: Duration,
+    ) -> Option<(String, reqwest::Client, String)> {
+        let (main, pin) = self.joined_main().await?;
+        let (id, secret) = self.identity().await.ok()?;
+        let client =
+            pinned_client_with(Some(pin), Arc::new(Mutex::new(None)), Some(timeout)).ok()?;
+        Some((main, client, format!("Node {id}:{secret}")))
     }
 
     pub fn status(&self) -> Status {
@@ -480,6 +515,7 @@ impl Node {
         let http = response.status();
         if http == reqwest::StatusCode::UNAUTHORIZED {
             // Main doesn't know this node: declined while waiting, or kicked.
+            self.ai.set_wanted(None);
             if status.pairing == Pairing::Joined {
                 self.wipe_cache();
                 self.set_pairing(Pairing::Kicked).await?;
@@ -551,6 +587,11 @@ impl Node {
                 self.audio.send_replace(Some(audio));
             }
         }
+        self.ai.set_wanted(
+            serde_json::from_value(answer["ai"].clone())
+                .ok()
+                .filter(|_| joined),
+        );
         if let Ok(update) =
             serde_json::from_value::<crate::node_builds::NodeUpdate>(answer["update"].clone())
         {
@@ -1517,6 +1558,10 @@ pub fn router(node: Node) -> Router {
         .route("/api/node/log/file", get(log_file))
         .route("/api/node/restart", post(restart))
         .route("/api/node/levels", get(levels))
+        // The AI lyrics helper's worker, passed on to Main.
+        .route("/api/ai-work/next", post(crate::node_ai::next))
+        .route("/api/ai-work/song/{id}", get(crate::node_ai::song))
+        .route("/api/ai-work/result/{id}", post(crate::node_ai::result))
         .fallback(crate::web::static_handler)
         .layer(axum::middleware::from_fn(crate::security::same_origin))
         .layer(axum::middleware::from_fn(node_headers))
@@ -1858,6 +1903,7 @@ pub async fn serve(
     tokio::spawn(node.clone().run_clock());
     tokio::spawn(node.clone().run_audio());
     tokio::spawn(node.clone().run_cache());
+    tokio::spawn(crate::node_ai::run(node.clone(), node.ai()));
     let browsing = node.clone();
     std::thread::Builder::new()
         .name("djinn-find-mains".to_owned())

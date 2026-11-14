@@ -272,7 +272,8 @@ export const api = {
   setLyricsSettings: (settings: LyricsSettings) => put<void>('/lyrics/settings', settings),
   recheckLyrics: () => post<void>('/lyrics/recheck'),
   aiWork: () => get<AiWorkStatus>('/ai-work'),
-  setAiWork: (s: { on: boolean; new_songs: boolean; sync_plain: boolean }) => put<void>('/ai-work/settings', s),
+  setAiWork: (s: { on: boolean; new_songs: boolean; sync_plain: boolean; vocals_for_nodes: boolean }) =>
+    put<void>('/ai-work/settings', s),
   makeAiWorkerKey: (name: string) => post<{ name: string; key: string }>('/ai-work/keys', { name }),
   removeAiWorkerKey: (name: string) => del<void>(`/ai-work/keys/${encodeURIComponent(name)}`),
   retryAiWork: () => post<void>('/ai-work/retry'),
@@ -347,6 +348,8 @@ export const api = {
   setNodeJoining: (joinOpen: boolean) => put<void>('/nodes/settings', { join_open: joinOpen }),
   acceptNode: (id: number, password: string) => post<void>(`/nodes/${id}/accept`, { password }),
   renameNode: (id: number, name: string) => patch<void>(`/nodes/${id}`, { name }),
+  setNodeAi: (id: number, help: boolean, model: string | null) =>
+    patch<void>(`/nodes/${id}`, { ai_help: help, ai_model: model ?? '' }),
   removeNode: (id: number) => del<void>(`/nodes/${id}`),
   setNodeAudio: (id: number, audio: NodeAudio) => put<void>(`/nodes/${id}/audio`, audio),
   /** What node screens draw, for the whole house. */
