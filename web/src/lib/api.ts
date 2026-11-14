@@ -11,6 +11,8 @@ import type {
   NodeList,
   Lyrics,
   LyricsSettings,
+  EditorNode,
+  EditorSong,
   EditableFolder,
   CompareShown,
   AuditEntry,
@@ -270,6 +272,12 @@ export const api = {
   libraryCompare: (offset: number, field?: string, why?: string, folder?: string) =>
     get<CompareShown>(
       `/library/compare?offset=${offset}${field ? `&field=${field}` : ''}${why ? `&why=${why}` : ''}${folder ? `&folder=${encodeURIComponent(folder)}` : ''}`,
+    ),
+  editorTree: (path: string) =>
+    get<{ folders: EditorNode[]; songs_here: number }>(`/editor/tree?path=${encodeURIComponent(path)}`),
+  editorSongs: (folder: string, offset: number, files: boolean) =>
+    get<{ total: number; editable: boolean; songs: EditorSong[] }>(
+      `/editor/songs?folder=${encodeURIComponent(folder)}&offset=${offset}&files=${files}`,
     ),
   editableFolders: () => get<EditableFolder[]>('/library/editable'),
   setFolderEditable: (path: string, editable: boolean) => put<void>('/library/editable', { path, editable }),

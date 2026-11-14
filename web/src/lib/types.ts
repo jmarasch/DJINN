@@ -1404,6 +1404,40 @@ export interface LyricsStatus {
   phase: '' | 'reading' | 'looking up'
 }
 
+export interface EditorNode {
+  name: string
+  path: string
+  songs: number
+  /** Library folders only: changes are allowed in it. */
+  editable: boolean | null
+}
+
+export interface EditorSong {
+  id: number
+  path: string
+  title: string
+  artist: string | null
+  album: string | null
+  album_artist: string | null
+  track_no: number | null
+  disc_no: number | null
+  year: number | null
+  genre: string | null
+  album_id: number | null
+  art_hash: string | null
+  /** What the file says (editing the library); null if it couldn't be read. */
+  file: {
+    title: string
+    artist: string | null
+    album: string | null
+    album_artist: string | null
+    track_no: number | null
+    disc_no: number | null
+    year: number | null
+    genre: string | null
+  } | null
+}
+
 export type CompareWhy = 'correction' | 'identified' | 'other'
 
 export interface CompareDiff {

@@ -3,6 +3,7 @@
 mod audit;
 mod compare;
 mod duplicates;
+mod editor;
 mod identify;
 mod library;
 mod loudness;
@@ -29,6 +30,7 @@ mod users;
 pub use audit::*;
 pub use compare::*;
 pub use duplicates::*;
+pub use editor::*;
 pub use identify::*;
 pub use library::*;
 pub use loudness::*;

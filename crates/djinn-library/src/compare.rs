@@ -11,7 +11,7 @@ use crate::tags::fill_from_tags;
 
 /// The tags of one file, read the way a library check reads them but without
 /// DJINN's corrections or identifications.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct FileTags {
     pub title: String,
     pub artist: Option<String>,

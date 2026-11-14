@@ -1,0 +1,158 @@
+//! What the library editor's folder tree and grid read: the folders under a
+//! folder (worked out from song paths, so it shows the real layout on disk),
+//! and the songs under one, with their stored tags.
+
+use serde::Serialize;
+use sqlx::FromRow;
+
+use crate::{Result, Store};
+
+/// A folder one level down, with how many songs are in it (any depth).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, FromRow)]
+pub struct FolderChild {
+    pub name: String,
+    pub songs: i64,
+}
+
+/// What a folder holds directly.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct FolderListing {
+    pub folders: Vec<FolderChild>,
+    /// Songs directly in the folder, not in a folder under it.
+    pub songs_here: i64,
+}
+
+/// A song as the editor's grid shows it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, FromRow)]
+pub struct EditorSong {
+    pub id: i64,
+    pub path: String,
+    pub title: String,
+    pub artist: Option<String>,
+    pub album: Option<String>,
+    pub album_artist: Option<String>,
+    pub track_no: Option<i64>,
+    pub disc_no: Option<i64>,
+    pub year: Option<i64>,
+    pub genre: Option<String>,
+    pub album_id: Option<i64>,
+    pub art_hash: Option<String>,
+}
+
+/// The separator a path uses: `\` on Windows, `/` elsewhere.
+fn separator(path: &str) -> &'static str {
+    if path.contains('\\') && !path.contains('/') {
+        "\\"
+    } else {
+        "/"
+    }
+}
+
+impl Store {
+    /// The folders directly under `folder`, and how many songs sit directly in it.
+    pub async fn folder_listing(&self, folder: &str) -> Result<FolderListing> {
+        let sep = separator(folder);
+        let prefix = format!("{}{sep}", folder.trim_end_matches(['/', '\\']));
+        let cut = i64::try_from(prefix.chars().count()).unwrap_or(0);
+        let rows: Vec<(Option<String>, i64)> = sqlx::query_as(
+            "SELECT CASE WHEN instr(rest, ?1) > 0 THEN substr(rest, 1, instr(rest, ?1) - 1) END AS seg,
+                    count(*)
+             FROM (SELECT substr(path, ?3 + 1) AS rest FROM tracks
+                   WHERE removed_at IS NULL AND substr(path, 1, ?3) = ?2)
+             GROUP BY seg ORDER BY lower(seg)",
+        )
+        .bind(sep)
+        .bind(&prefix)
+        .bind(cut)
+        .fetch_all(&self.pool)
+        .await?;
+        let mut folders = Vec::new();
+        let mut songs_here = 0;
+        for (seg, count) in rows {
+            match seg {
+                Some(name) => folders.push(FolderChild { name, songs: count }),
+                None => songs_here = count,
+            }
+        }
+        Ok(FolderListing {
+            folders,
+            songs_here,
+        })
+    }
+
+    /// Songs at any depth under `folder`, by path; one page, and the total.
+    pub async fn editor_songs(
+        &self,
+        folder: &str,
+        offset: i64,
+        limit: i64,
+    ) -> Result<(Vec<EditorSong>, i64)> {
+        let sep = separator(folder);
+        let prefix = format!("{}{sep}", folder.trim_end_matches(['/', '\\']));
+        let cut = i64::try_from(prefix.chars().count()).unwrap_or(0);
+        let rows = sqlx::query_as(
+            "SELECT t.id, t.path, t.title, t.artist, t.album, t.album_artist, t.track_no,
+                    t.disc_no, t.year, t.genre, t.album_id,
+                    coalesce(t.art_hash, a.art_hash, a.online_art_hash) AS art_hash
+             FROM tracks t LEFT JOIN albums a ON a.id = t.album_id
+             WHERE t.removed_at IS NULL AND substr(t.path, 1, ?1) = ?2
+             ORDER BY t.path LIMIT ?3 OFFSET ?4",
+        )
+        .bind(cut)
+        .bind(&prefix)
+        .bind(limit.clamp(1, 1000))
+        .bind(offset.max(0))
+        .fetch_all(&self.pool)
+        .await?;
+        let total = sqlx::query_scalar(
+            "SELECT count(*) FROM tracks WHERE removed_at IS NULL AND substr(path, 1, ?1) = ?2",
+        )
+        .bind(cut)
+        .bind(&prefix)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok((rows, total))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{ScannedTrack, Store};
+
+    #[tokio::test]
+    async fn folders_and_songs_follow_the_paths() {
+        let store = Store::open_in_memory().await.unwrap();
+        let song = |path: &str| ScannedTrack {
+            path: path.into(),
+            title: path.rsplit('/').next().unwrap_or("").into(),
+            ..Default::default()
+        };
+        store
+            .save_scanned(&[
+                song("/pool/A/Artist One/Album x/1.mp3"),
+                song("/pool/A/Artist One/Album x/2.mp3"),
+                song("/pool/A/Artist One/Album y/1.mp3"),
+                song("/pool/B/Artist Two/Album z/1.mp3"),
+                song("/pool/loose.mp3"),
+                song("/poolside/other.mp3"),
+            ])
+            .await
+            .unwrap();
+        let root = store.folder_listing("/pool").await.unwrap();
+        assert_eq!(root.songs_here, 1);
+        let names: Vec<(&str, i64)> = root
+            .folders
+            .iter()
+            .map(|f| (f.name.as_str(), f.songs))
+            .collect();
+        assert_eq!(names, [("A", 3), ("B", 1)]);
+        let artist = store.folder_listing("/pool/A/Artist One").await.unwrap();
+        assert_eq!(artist.folders.len(), 2);
+        assert_eq!(artist.songs_here, 0);
+        // A folder with a similar name isn't inside it.
+        let (songs, total) = store.editor_songs("/pool", 0, 100).await.unwrap();
+        assert_eq!((songs.len() as i64, total), (5, 5));
+        let (page, _) = store.editor_songs("/pool/A", 1, 1).await.unwrap();
+        assert_eq!(page[0].path, "/pool/A/Artist One/Album x/2.mp3");
+    }
+}

@@ -25,6 +25,7 @@ mod discover;
 mod download;
 mod duplicates;
 mod editable;
+mod editor_api;
 mod error;
 mod events;
 mod folders;
