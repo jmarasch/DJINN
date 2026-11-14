@@ -312,6 +312,13 @@ export const api = {
     if (!res.ok) throw new ApiError(res.status, data?.error ?? `Request failed (${res.status})`)
     return data as EditorApplied
   },
+  /** Puts another song file in place of a song's, keeping the song. */
+  editorReplace: async (id: number, file: File) => {
+    const res = await fetch(`/api/editor/replace/${id}?name=${encodeURIComponent(file.name)}`, { method: 'POST', body: file })
+    const data = await res.json().catch(() => null)
+    if (!res.ok) throw new ApiError(res.status, data?.error ?? `Request failed (${res.status})`)
+    return data as EditorApplied
+  },
   editorRename: (ids: number[], pattern: string, preview: boolean) =>
     post<{ files: EditorRenamed[]; batch: number | null }>('/editor/rename', { ids, pattern, preview }),
   /** Moves songs to a folder (keeping their names), or sets them aside out of the library. */
@@ -320,6 +327,8 @@ export const api = {
   /** Writes a length header into variable bit rate MP3s that have none. */
   editorMp3Length: (ids: number[], preview: boolean) =>
     post<{ files: EditorRenamed[]; batch: number | null }>('/editor/mp3-length', { ids, preview }),
+  /** Starts measuring songs with no loudness data (with the sound analysis). */
+  measureLoudness: () => post<{ started: boolean }>('/library/problems/measure'),
   editableFolders: () => get<EditableFolder[]>('/library/editable'),
   setFolderEditable: (path: string, editable: boolean) => put<void>('/library/editable', { path, editable }),
   startLibraryCompare: () => post<void>('/library/compare'),

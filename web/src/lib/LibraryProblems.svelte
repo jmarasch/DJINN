@@ -247,6 +247,15 @@
   }
 
   const n = (x: number) => x.toLocaleString()
+  async function measure() {
+    try {
+      await api.measureLoudness()
+      toast('Measuring in the background; the Library tab shows how far it got')
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not start it', true)
+    }
+  }
+
   const folder = (path: string) => path.replace(/[\\/][^\\/]*$/, '')
   const name = (path: string) => path.replace(/^.*[\\/]/, '')
 </script>
@@ -304,7 +313,13 @@
                   <button class="small-button done danger" onclick={() => removeLyrics(item)}>Remove and block</button>
                   <button class="small-button done" onclick={() => done(item)}>Done</button>
                 {:else if item.detail}<div class="small muted">{item.detail}</div>{/if}
-                {#if item.path && k.kind !== 'reported_lyrics'}
+                {#if k.kind === 'vanished' && item.title}
+                  <button
+                    class="small-button done"
+                    title="Finds songs with this title in the library editor, in case it came back retagged or re-ripped"
+                    onclick={() => findInEditor([item.title ?? ''])}>Look for it</button
+                  >
+                {:else if item.path && k.kind !== 'reported_lyrics'}
                   <button class="small-button done" onclick={() => openInEditor(folder(item.path ?? ''))}>Fix in the editor</button>
                 {/if}
               {:else}
@@ -323,6 +338,9 @@
         <div class="actions">
           {#if items.length < openCount}
             <button class="small-button" disabled={loading} onclick={more}>Show more</button>
+          {/if}
+          {#if k.kind === 'no_loudness'}
+            <button class="small-button" onclick={measure}>Measure now</button>
           {/if}
           <button class="small-button" onclick={() => setHidden(k.kind, true)}>Hide this kind</button>
         </div>

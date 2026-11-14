@@ -40,12 +40,18 @@ pub fn router() -> Router<AppState> {
         .route("/editor/rename", post(rename))
         .route("/editor/move", post(move_songs))
         .route("/editor/mp3-length", post(mp3_length))
+        .route(
+            "/editor/replace/{id}",
+            post(replace).layer(axum::extract::DefaultBodyLimit::max(REPLACE_MAX)),
+        )
 }
 
 /// The most field changes one approval takes.
 const MAX_CHANGES: usize = 20_000;
 /// The largest cover picture taken.
 const COVER_MAX: usize = 20 << 20;
+/// The largest song file taken in place of another.
+const REPLACE_MAX: usize = 1 << 30;
 
 #[derive(Deserialize)]
 struct TreeQuery {
@@ -579,6 +585,37 @@ async fn undo(
                             }
                         }
                         Ok((old, new.clone(), edit.before.clone()))
+                    }
+                    Err(e) => Err(e),
+                }
+            }
+            "replace" => {
+                let before: serde_json::Value =
+                    serde_json::from_str(&edit.before).unwrap_or_default();
+                let (old, saved) = (
+                    before["path"].as_str().unwrap_or_default().to_owned(),
+                    before["saved"].as_str().unwrap_or_default().to_owned(),
+                );
+                let new = edit.after.clone();
+                let back = tokio::task::spawn_blocking({
+                    let (old, new) = (old.clone(), new.clone());
+                    move || -> Result<(), String> {
+                        if !Path::new(&saved).is_file() {
+                            return Err("the old file isn't kept any more".into());
+                        }
+                        std::fs::remove_file(&new).map_err(|e| e.to_string())?;
+                        move_across(Path::new(&saved), Path::new(&old)).map_err(|e| e.to_string())
+                    }
+                })
+                .await
+                .map_err(|e| e.to_string())
+                .and_then(|r| r);
+                match back {
+                    Ok(()) => {
+                        if let Some(track) = edit.track_id {
+                            state.store.move_track_path(track, &old).await?;
+                        }
+                        Ok((old, new, String::new()))
                     }
                     Err(e) => Err(e),
                 }
@@ -1210,6 +1247,124 @@ async fn mp3_length(
     }))
 }
 
+#[derive(Deserialize)]
+struct ReplaceQuery {
+    /// The new file's name, for its type (its extension).
+    name: String,
+}
+
+/// Copies a file where a rename can't go (another disk), else renames.
+fn move_across(from: &Path, to: &Path) -> std::io::Result<()> {
+    if std::fs::rename(from, to).is_ok() {
+        return Ok(());
+    }
+    std::fs::copy(from, to)?;
+    std::fs::remove_file(from)
+}
+
+/// Puts another file (the body) in place of a song's, keeping the song:
+/// its plays, likes and playlists. The old file is kept for undo. The new
+/// one must play; it is analyzed again.
+async fn replace(
+    Elevated(user): Elevated,
+    device: Device,
+    State(state): State<AppState>,
+    UrlPath(id): UrlPath<i64>,
+    Query(query): Query<ReplaceQuery>,
+    body: axum::body::Bytes,
+) -> ApiResult<Json<Applied>> {
+    let old = state
+        .store
+        .track_path(id)
+        .await?
+        .ok_or_else(ApiError::not_found)?;
+    let ext = Path::new(&query.name)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_lowercase)
+        .filter(|e| djinn_library::AUDIO_EXTENSIONS.contains(&e.as_str()))
+        .ok_or_else(|| ApiError::bad_request("that isn't a kind of song file DJINN plays"))?;
+    if body.len() < 1024 {
+        return Err(ApiError::bad_request("that file is empty"));
+    }
+    crate::editable::require(&state, Path::new(&old)).await?;
+    let new_path = Path::new(&old).with_extension(&ext);
+    let new_text = new_path.to_string_lossy().into_owned();
+    if new_text != old && new_path.exists() {
+        return Err(ApiError::conflict(
+            "a file with the new name is there already",
+        ));
+    }
+    let batch = state.store.next_file_batch().await?;
+    let keep = undo_dir(&state);
+    let old_ext = Path::new(&old)
+        .extension()
+        .map(|e| e.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let saved = keep.join(format!("{batch}-{id}.{old_ext}"));
+    let (old_c, saved_c, new_c) = (PathBuf::from(&old), saved.clone(), new_path.clone());
+    let done = tokio::task::spawn_blocking(move || -> Result<(), String> {
+        // Written beside the old one first and checked, so nothing changes
+        // if it won't play.
+        let part = new_c.with_extension(format!("{ext}.djinn-part"));
+        std::fs::write(&part, &body).map_err(|e| e.to_string())?;
+        let checked =
+            std::panic::catch_unwind(|| djinn_engine::fingerprint(&part).is_ok()).unwrap_or(false);
+        if !checked {
+            let _ = std::fs::remove_file(&part);
+            return Err("the new file doesn't play".into());
+        }
+        std::fs::create_dir_all(saved_c.parent().unwrap_or(Path::new(".")))
+            .map_err(|e| e.to_string())?;
+        if let Err(e) = move_across(&old_c, &saved_c) {
+            let _ = std::fs::remove_file(&part);
+            return Err(format!("couldn't keep the old file for undo: {e}"));
+        }
+        std::fs::rename(&part, &new_c).map_err(|e| {
+            let _ = move_across(&saved_c, &old_c);
+            e.to_string()
+        })
+    })
+    .await
+    .map_err(anyhow::Error::from)?;
+    if let Err(error) = done {
+        return Err(ApiError::bad_request(error));
+    }
+    if new_text != old {
+        state.store.move_track_path(id, &new_text).await?;
+    }
+    let (size, mtime) = stat(&new_path).map_err(anyhow::Error::from)?;
+    state
+        .store
+        .record_file_edit(&NewFileEdit {
+            batch,
+            track_id: Some(id),
+            path: &new_text,
+            kind: "replace",
+            before: &serde_json::json!({ "path": old, "saved": saved.to_string_lossy() })
+                .to_string(),
+            after: &new_text,
+            size,
+            mtime,
+            made_by: Some(user.id),
+        })
+        .await?;
+    crate::library_api::reread(&state, std::slice::from_ref(&new_text)).await?;
+    audit(
+        &state,
+        &user,
+        device.ip.as_deref(),
+        "editor_replace",
+        &format!("song {id}, approval {batch}"),
+    )
+    .await;
+    Ok(Json(Applied {
+        songs: 1,
+        failed: Vec::new(),
+        batch: Some(batch),
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use axum::http::StatusCode;
@@ -1425,6 +1580,48 @@ mod tests {
             std::fs::read(pool.join("song.flac")).unwrap(),
             std::fs::read(&fixture).unwrap()
         );
+        // Replaced by another recording, keeping the song; undo brings the old one back.
+        let before = std::fs::read(&quar_file).unwrap();
+        let other = std::fs::read(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../djinn-engine/tests/fixtures/gapless_b.flac"),
+        )
+        .unwrap();
+        let (status, text) = crate::test_util::send_bytes(
+            &state,
+            axum::http::Method::POST,
+            &format!("/api/editor/replace/{quar_song}?name=new.flac"),
+            other.clone(),
+            &admin,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&text));
+        assert_eq!(std::fs::read(&quar_file).unwrap(), other);
+        let replaced: i64 = serde_json::from_slice::<serde_json::Value>(&text).unwrap()["batch"]
+            .as_i64()
+            .unwrap();
+        let (status, _) = crate::test_util::send_bytes(
+            &state,
+            axum::http::Method::POST,
+            &format!("/api/editor/replace/{quar_song}?name=junk.flac"),
+            vec![0u8; 4096],
+            &admin,
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::BAD_REQUEST,
+            "a file that won't play is refused"
+        );
+        assert_eq!(
+            std::fs::read(&quar_file).unwrap(),
+            other,
+            "and nothing changed"
+        );
+        let (status, _) =
+            post_json(&state, &format!("/api/editor/undo/{replaced}"), "", &admin).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(std::fs::read(&quar_file).unwrap(), before);
         // Set aside: out of the library, into the hidden folder; undo brings it back.
         let aside = format!(r#"{{"ids":[{quar_song}],"set_aside":true}}"#);
         let (status, text) = post_json(&state, "/api/editor/move", &aside, &admin).await;

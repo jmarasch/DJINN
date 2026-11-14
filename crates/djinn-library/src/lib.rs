@@ -29,7 +29,7 @@ use serde::Serialize;
 use walkdir::WalkDir;
 
 /// File extensions the engine can decode.
-const AUDIO_EXTENSIONS: &[&str] = &["mp3", "flac", "m4a", "mp4", "aac", "ogg", "oga", "wav"];
+pub const AUDIO_EXTENSIONS: &[&str] = &["mp3", "flac", "m4a", "mp4", "aac", "ogg", "oga", "wav"];
 /// Audio formats DJINN doesn't play, reported on the Problems page instead
 /// of skipped without a word.
 const OTHER_AUDIO: &[&str] = &[

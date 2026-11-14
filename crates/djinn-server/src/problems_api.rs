@@ -27,6 +27,7 @@ pub fn router() -> Router<AppState> {
         .route("/library/problems", get(summary))
         .route("/library/problems.csv", get(csv))
         .route("/library/problems/hidden", put(set_hidden))
+        .route("/library/problems/measure", post(measure))
         .route("/library/problems/{kind}", get(list))
         .route("/library/reports/{track_id}", delete(clear_reports))
         .route("/tracks/{id}/report", post(report))
@@ -223,6 +224,21 @@ pub fn csv_cell(text: &str) -> String {
     } else {
         text
     }
+}
+
+/// Songs with no loudness data: measure them now (with the sound analysis,
+/// which does both in one read, as the background rules allow).
+async fn measure(
+    _: crate::auth::AdminUser,
+    State(state): State<AppState>,
+) -> ApiResult<Json<serde_json::Value>> {
+    if !crate::audio_api::analysis_on(&state).await {
+        return Err(ApiError::conflict(
+            "sound analysis is off; switch it on under Library to measure songs",
+        ));
+    }
+    crate::audio_api::start_analysis(&state).await;
+    Ok(Json(serde_json::json!({ "started": true })))
 }
 
 #[cfg(test)]

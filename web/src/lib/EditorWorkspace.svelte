@@ -47,6 +47,7 @@
   let moveTo = $state('')
   let history = $state<EditorBatch[]>([])
   let coverInput = $state<HTMLInputElement | null>(null)
+  let replaceInput = $state<HTMLInputElement | null>(null)
 
   const FIELDS: { key: EditorField; label: string; narrow?: boolean }[] = [
     { key: 'disc_no', label: 'Disc', narrow: true },
@@ -402,6 +403,23 @@
     return api.editorMove(ids, { set_aside: true }, preview)
   }
 
+  async function replaceFile(song: EditorSong, file: File) {
+    if (!confirm(`Put ${file.name} in place of ${fileName(song.path)}? The song keeps its plays, likes and playlists; the old file is kept so this can be undone.`))
+      return
+    busy = true
+    try {
+      await unlocked(() => api.editorReplace(song.id, file))
+      toast('File replaced; it will be analyzed again')
+      await loadSongs(0)
+      await loadHistory()
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not replace it', true)
+    } finally {
+      busy = false
+      if (replaceInput) replaceInput.value = ''
+    }
+  }
+
   async function previewMove(kind: 'rename' | 'move' | 'aside' | 'mp3') {
     if (kind === 'rename' && changeCount && !confirm('Rename from the tags as they are now? Changes not approved yet are left out.'))
       return
@@ -458,6 +476,7 @@
     rename: 'names and places',
     'set-aside': 'set aside',
     'mp3-length': 'MP3 lengths',
+    replace: 'replaced file',
   }
   const kindName = (kinds: string) =>
     kinds.startsWith('undo') ? 'undo' : kinds.split(',').map((k) => KINDS[k] ?? k).join(', ')
@@ -718,6 +737,30 @@
             </button>
           {/if}
         </div>
+        {#if target === 'library' && chosen}
+          <div class="box">
+            <div class="small muted">This song's file</div>
+            <div class="small mono file-name" title={chosen.path}>{fileName(chosen.path)}</div>
+            <input
+              type="file"
+              accept=".mp3,.flac,.m4a,.mp4,.aac,.ogg,.oga,.wav"
+              hidden
+              bind:this={replaceInput}
+              onchange={(e) => {
+                const file = e.currentTarget.files?.[0]
+                if (file && chosen) void replaceFile(chosen, file)
+              }}
+            />
+            <button
+              class="small-button"
+              disabled={busy || !chosen.editable}
+              title="For a song that won't play or a poor copy: puts a better file in its place"
+              onclick={() => replaceInput?.click()}
+            >
+              Replace the file...
+            </button>
+          </div>
+        {/if}
         <div class="box review">
           <div><strong>Preview and approve changes</strong></div>
           {#if review.length}
@@ -1033,6 +1076,10 @@
 
   .box ul {
     align-self: stretch;
+  }
+
+  .file-name {
+    overflow-wrap: anywhere;
   }
 
   .review {
