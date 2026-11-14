@@ -91,6 +91,7 @@ pub fn read(
         Ok(file) => {
             (artists, album_artists) = fill_from_tags(&mut track, &file, original_years);
             embedded_art = cover_picture(&file);
+            fix_mpeg_length(&mut track, path);
         }
         // Still list the file: symphonia may play what lofty can't parse.
         Err(e) => {
@@ -166,6 +167,7 @@ pub fn basics(path: &Path) -> Option<Basics> {
     let file = lofty::read_from_path(path).ok()?;
     let mut track = ScannedTrack::default();
     let (artists, album_artists) = fill_from_tags(&mut track, &file, true);
+    fix_mpeg_length(&mut track, path);
     Some(Basics {
         title: Some(track.title).filter(|t| !t.is_empty()),
         artist: (!artists.is_empty()).then(|| artists.join(" & ")),
@@ -173,6 +175,17 @@ pub fn basics(path: &Path) -> Option<Basics> {
         album_artist: (!album_artists.is_empty()).then(|| album_artists.join(" & ")),
         duration_ms: track.duration_ms.filter(|d| *d > 0),
     })
+}
+
+/// An MP3 with no length header and a varying bit rate gets its real length
+/// (see `mpeg`); the tag reader only guesses from the first frame. Only DJINN's
+/// database holds the figure: the file is never changed.
+fn fix_mpeg_length(track: &mut ScannedTrack, path: &Path) {
+    if track.codec.as_deref() == Some("mpeg") {
+        if let Some(ms) = crate::mpeg::exact_duration_ms(path) {
+            track.duration_ms = Some(ms).filter(|d| *d > 0);
+        }
+    }
 }
 
 /// The year a date tag starts with: "2005", "2005-04-27".

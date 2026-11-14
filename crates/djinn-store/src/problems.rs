@@ -327,8 +327,7 @@ macro_rules! low_bitrate_from {
 }
 macro_rules! low_bitrate_detail {
     () => {
-        "(t.size * 8 / t.duration_ms) || CASE WHEN t.size * 8 / t.duration_ms < 48
-              THEN ' kbps, and the length may be wrong' ELSE ' kbps' END"
+        "(t.size * 8 / t.duration_ms) || ' kbps'"
     };
 }
 /// Titles with leftovers: a video tag, a web address, a track number in

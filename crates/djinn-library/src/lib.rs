@@ -7,6 +7,7 @@ pub mod genres;
 pub mod identify;
 pub mod lyrics;
 pub mod lyrics_import;
+pub mod mpeg;
 pub mod online;
 pub mod playlist_file;
 pub mod playlist_match;
@@ -40,8 +41,9 @@ const READERS: usize = 4;
 /// Bumped when the scanner starts extracting something new, so the next
 /// scan re-reads every file once. 2: artwork sources, " - Topic" cleanup.
 /// 3: separate artists for collaborations and features. 4: ReplayGain tags.
-/// 6: original release years. 7: notes on unreadable tags.
-const SCAN_VERSION: i64 = 7;
+/// 6: original release years. 7: notes on unreadable tags. 8: the real length
+/// of MP3s with no length header (`mpeg`).
+const SCAN_VERSION: i64 = 8;
 /// Set to anything else to make the next scan re-read every file.
 pub const SCAN_VERSION_KEY: &str = "scan_version";
 /// Artist names never split (one per line); unset means the defaults.

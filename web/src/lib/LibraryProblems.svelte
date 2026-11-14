@@ -59,7 +59,7 @@
     },
     low_bitrate: {
       label: 'Low-quality songs',
-      hint: 'Under 96 kbps, which sounds poor. If you have a better copy, replace the file. A bit rate under 48 kbps on an MP3 is often a wrong stored length (DJINN divides the file size by a bit rate that was guessed too low), so the song may be fine.',
+      hint: 'Under 96 kbps, which sounds poor. If you have a better copy, replace the file.',
     },
     title_junk: {
       label: 'Titles with leftovers',

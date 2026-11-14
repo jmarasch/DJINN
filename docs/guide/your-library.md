@@ -182,7 +182,7 @@ Other checks on the Problems page (each can be hidden once you know about it):
 - **The same file twice in one album**: same size, length and title.
 - **Impossible numbers**: a track or disc number of 0 or less, or a length of 0.
 - **Very short or very long songs**: under 10 seconds or over 3 hours.
-- **Low-quality songs**: under 96 kbps (a very low figure on an MP3 can also mean DJINN stored the wrong length).
+- **Low-quality songs**: under 96 kbps.
 - **Titles with leftovers**: a track number and separator in front ("01 - "), "(Official Video)", a web address, spaces around, all capitals.
 - **File names that don't match the title**: the file's name and folders don't contain the title, ignoring spaces, dashes, colons, quotes and other punctuation.
 - **Artists spelled two ways**: "The Beatles" and "Beatles", "AC/DC" and "ACDC".
@@ -195,3 +195,7 @@ Other checks on the Problems page (each can be hidden once you know about it):
 Not checked yet: covers that are tiny, huge or not square (DJINN doesn't measure pictures yet), and silent or very quiet files.
 
 DJINN never deletes anything: remove the copy you don't want from your music folders, then check for changes.
+
+### MP3 lengths
+
+Many MP3s have no length header, so a tag reader can only guess their length, and it guesses wrong (often several times too long) for variable bit rate files that open with a quiet stretch. DJINN looks at such files: if the bit rate is the same wherever it samples, the guess stands, otherwise it counts every frame, which is exact. The figure is kept in DJINN's database; your files are never changed. The first library check after an update re-reads every file once to correct existing songs.
