@@ -1456,7 +1456,7 @@ export interface EditorBatch {
 }
 
 /** Where a release comes from. */
-export type ReleaseSource = 'musicbrainz' | 'deezer' | 'itunes'
+export type ReleaseSource = 'musicbrainz' | 'deezer' | 'itunes' | 'spotify'
 
 /** A release found, before its tracks are fetched. */
 export interface ReleaseHit {

@@ -58,10 +58,39 @@
   const lookups = $derived(settings.online_artist_info || settings.musicbrainz)
   const mb = (bytes: number) => (bytes / (1024 * 1024)).toFixed(1)
 
+  let spotifyId = $state('')
+  let spotifySecret = $state('')
+  let spotifySaved = $state<{ client_id: string | null; has_secret: boolean } | null>(null)
+  let spotifyBusy = $state(false)
+
+  async function loadSpotify() {
+    try {
+      spotifySaved = await api.spotify()
+      spotifyId = spotifySaved.client_id ?? ''
+    } catch {
+      spotifySaved = null
+    }
+  }
+
+  async function saveSpotify(remove = false) {
+    spotifyBusy = true
+    try {
+      await api.setSpotify(remove ? '' : spotifyId, remove ? '' : spotifySecret)
+      spotifySecret = ''
+      toast(remove ? 'Spotify account removed. DJINN no longer contacts Spotify' : 'Spotify accepted it: albums can be looked up there now')
+      await loadSpotify()
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not save it', true)
+    } finally {
+      spotifyBusy = false
+    }
+  }
+
   let hasYoutubeKey = $state(false)
   let youtubeKey = $state('')
 
   onMount(() => {
+    void loadSpotify()
     api
       .youtubeKey()
       .then((status) => (hasYoutubeKey = status.has_key))
@@ -311,6 +340,45 @@
   </p>
 </section>
 <IdentifyPanel />
+
+<section class="card">
+  <h3>Spotify account for album lookups: {spotifySaved?.client_id ? 'on' : 'off'}</h3>
+  <p class="small muted">
+    Lets the library editor's album layout look albums up on Spotify (track lists and covers), next to MusicBrainz,
+    Deezer and Apple. DJINN only contacts Spotify when you search there, sending what you typed and the app's keys.
+  </p>
+  <form
+    class="inline"
+    onsubmit={(e) => {
+      e.preventDefault()
+      void saveSpotify()
+    }}
+  >
+    <label>
+      Client ID
+      <input bind:value={spotifyId} autocomplete="off" spellcheck="false" maxlength="64" placeholder="From the app's settings" />
+    </label>
+    <label>
+      Client Secret
+      <SecretInput
+        bind:value={spotifySecret}
+        label="Spotify client secret"
+        placeholder={spotifySaved?.has_secret ? 'Saved. Paste a new one to replace it' : 'View client secret, then paste it'}
+      />
+    </label>
+    <button disabled={spotifyBusy || !spotifyId.trim() || (!spotifySecret.trim() && !spotifySaved?.has_secret)}>
+      {spotifyBusy ? 'Checking...' : 'Save'}
+    </button>
+    {#if spotifySaved?.client_id}<button type="button" disabled={spotifyBusy} onclick={() => saveSpotify(true)}>Remove</button>{/if}
+  </form>
+  <p class="small muted">
+    At
+    <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noopener noreferrer">developer.spotify.com/dashboard</a>,
+    choose Create app: any name (DJINN) and description; Redirect URI <code>http://127.0.0.1:8066/</code> (Spotify asks
+    for one, DJINN doesn't use it); tick Web API; save. Then open the app's Settings, copy the Client ID, choose View client
+    secret and copy that. Saving checks them with Spotify.
+  </p>
+</section>
 
 <section class="card">
   <h3>YouTube playlist links: {hasYoutubeKey ? 'on' : 'off'}</h3>

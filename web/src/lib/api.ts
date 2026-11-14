@@ -533,6 +533,10 @@ export const api = {
     post<ImportResult>('/playlists/import', { text, filename, name: name?.trim() || undefined }),
   youtubeKey: () => get<{ has_key: boolean }>('/playlists/youtube-key'),
   setYoutubeKey: (key: string) => put<void>('/playlists/youtube-key', { key }),
+  /** The Spotify developer app for album lookups (the secret is never sent back). */
+  spotify: () => get<{ client_id: string | null; has_secret: boolean }>('/spotify'),
+  setSpotify: (clientId: string, clientSecret: string) =>
+    put<void>('/spotify', { client_id: clientId, client_secret: clientSecret }),
   checkPlaylist: (id: number) => post<void>(`/playlists/${id}/check`),
   playlistCheck: () => get<PlaylistCheck | null>('/playlists/check'),
   shareTargets: () => get<ShareTarget[]>('/playlists/share-targets'),

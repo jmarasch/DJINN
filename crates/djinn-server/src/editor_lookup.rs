@@ -3,12 +3,15 @@
 //! Deezer or Apple), a release's track list with the songs matched to it,
 //! and its cover. Nothing is changed here: the layout's choices go back to
 //! the grid as changes to approve. Behind the protected areas' lock.
+//! Spotify needs the admin's developer app (Admin > Library): its client
+//! ID and secret are kept in settings, and the secret is never sent back.
 
 use axum::extract::{Query, State};
 use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
+use djinn_library::releases::Accounts;
 use djinn_library::releases::{self, Release, ReleaseHit, Source};
 use serde::{Deserialize, Serialize};
 
@@ -22,6 +25,101 @@ pub fn router() -> Router<AppState> {
         .route("/editor/release-search", get(search))
         .route("/editor/release", get(release))
         .route("/editor/release-cover", get(cover))
+        .route("/spotify", get(spotify_status).put(set_spotify))
+}
+
+/// Setting keys: the Spotify developer app's client ID and secret.
+const SPOTIFY_ID: &str = "spotify_client_id";
+const SPOTIFY_SECRET: &str = "spotify_client_secret";
+
+/// The accounts the lookups may use: MusicBrainz's contact, Spotify's app.
+async fn accounts(state: &AppState) -> ApiResult<Accounts> {
+    let id = state
+        .store
+        .get_setting(SPOTIFY_ID)
+        .await?
+        .filter(|v| !v.is_empty());
+    let secret = state
+        .store
+        .get_setting(SPOTIFY_SECRET)
+        .await?
+        .filter(|v| !v.is_empty());
+    Ok(Accounts {
+        musicbrainz: crate::settings::musicbrainz(&state.store).await?,
+        spotify: id.zip(secret),
+    })
+}
+
+#[derive(Serialize)]
+struct SpotifyStatus {
+    /// The app's client ID (not secret); None when there's no account.
+    client_id: Option<String>,
+    has_secret: bool,
+}
+
+async fn spotify_status(
+    _: crate::auth::AdminUser,
+    State(state): State<AppState>,
+) -> ApiResult<Json<SpotifyStatus>> {
+    let id = state
+        .store
+        .get_setting(SPOTIFY_ID)
+        .await?
+        .filter(|v| !v.is_empty());
+    let secret = state
+        .store
+        .get_setting(SPOTIFY_SECRET)
+        .await?
+        .filter(|v| !v.is_empty());
+    Ok(Json(SpotifyStatus {
+        client_id: id,
+        has_secret: secret.is_some(),
+    }))
+}
+
+#[derive(Deserialize)]
+struct SpotifyAccount {
+    client_id: String,
+    /// Empty keeps the saved secret (when the ID stays the same).
+    #[serde(default)]
+    client_secret: String,
+}
+
+fn plain_key(text: &str) -> bool {
+    !text.is_empty() && text.len() <= 64 && text.chars().all(|c| c.is_ascii_alphanumeric())
+}
+
+/// Saves the Spotify app after Spotify accepts it; empty removes it.
+async fn set_spotify(
+    _: crate::auth::AdminUser,
+    State(state): State<AppState>,
+    Json(body): Json<SpotifyAccount>,
+) -> ApiResult<StatusCode> {
+    let id = body.client_id.trim();
+    let mut secret = body.client_secret.trim().to_owned();
+    if id.is_empty() {
+        state.store.set_setting(SPOTIFY_ID, "").await?;
+        state.store.set_setting(SPOTIFY_SECRET, "").await?;
+        return Ok(StatusCode::NO_CONTENT);
+    }
+    if secret.is_empty() && state.store.get_setting(SPOTIFY_ID).await?.as_deref() == Some(id) {
+        secret = state
+            .store
+            .get_setting(SPOTIFY_SECRET)
+            .await?
+            .unwrap_or_default();
+    }
+    if !plain_key(id) || !plain_key(&secret) {
+        return Err(ApiError::bad_request(
+            "paste the Client ID and the Client Secret from the app's settings on developer.spotify.com",
+        ));
+    }
+    releases::spotify_token(&(id.to_owned(), secret.clone()))
+        .await
+        .map_err(|e| ApiError::bad_request(e.to_string()))?;
+    state.store.set_setting(SPOTIFY_ID, id).await?;
+    state.store.set_setting(SPOTIFY_SECRET, &secret).await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 fn lookup_failed(e: impl std::fmt::Display) -> ApiError {
@@ -83,10 +181,10 @@ async fn search(
     Query(query): Query<SearchQuery>,
 ) -> ApiResult<Json<Vec<ReleaseHit>>> {
     let clip = |t: &str| t.chars().take(200).collect::<String>();
-    let contact = contact(&state).await?;
+    let accounts = accounts(&state).await?;
     let hits = releases::search(
         query.source,
-        contact.as_deref(),
+        &accounts,
         &clip(&query.artist),
         &clip(&query.album),
     )
@@ -123,8 +221,8 @@ async fn release(
     State(state): State<AppState>,
     Query(query): Query<ReleaseQuery>,
 ) -> ApiResult<Json<Laid>> {
-    let contact = contact(&state).await?;
-    let found = releases::release(query.source, contact.as_deref(), &query.id)
+    let accounts = accounts(&state).await?;
+    let found = releases::release(query.source, &accounts, &query.id)
         .await
         .map_err(lookup_failed)?
         .ok_or_else(ApiError::not_found)?;
@@ -157,8 +255,13 @@ struct CoverQuery {
 }
 
 /// A release's front cover, fetched by DJINN (so the page needs no other site).
-async fn cover(_: Elevated, Query(query): Query<CoverQuery>) -> ApiResult<Response> {
-    let bytes = releases::cover(query.source, &query.id)
+async fn cover(
+    _: Elevated,
+    State(state): State<AppState>,
+    Query(query): Query<CoverQuery>,
+) -> ApiResult<Response> {
+    let accounts = accounts(&state).await?;
+    let bytes = releases::cover(query.source, &accounts, &query.id)
         .await
         .map_err(lookup_failed)?
         .ok_or_else(ApiError::not_found)?;
@@ -175,4 +278,65 @@ async fn cover(_: Elevated, Query(query): Query<CoverQuery>) -> ApiResult<Respon
         bytes,
     )
         .into_response())
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::http::{Method, StatusCode};
+    use djinn_store::Role;
+
+    use crate::state::AppState;
+    use crate::test_util::{call, get_body, session};
+
+    #[tokio::test]
+    async fn the_spotify_account_is_admin_only_checked_and_its_secret_kept_back() {
+        let state = AppState::for_tests().await;
+        let admin = session(&state, "admin", Role::Admin).await;
+        let guest = session(&state, "guest", Role::Guest).await;
+        let (status, _) = get_body(&state, "/api/spotify", &guest).await;
+        assert!(status.is_client_error(), "{status}");
+        let (status, body) = get_body(&state, "/api/spotify", &admin).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(
+            body.contains("\"client_id\":null") && body.contains("\"has_secret\":false"),
+            "{body}"
+        );
+        // Not what Spotify hands out: refused before Spotify is asked.
+        let (status, _) = call(
+            &state,
+            Method::PUT,
+            "/api/spotify",
+            Some(r#"{"client_id":"abc def","client_secret":"x;y"}"#),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        // A saved secret is never sent back; an empty ID removes the account.
+        state
+            .store
+            .set_setting(super::SPOTIFY_ID, "abc123")
+            .await
+            .unwrap();
+        state
+            .store
+            .set_setting(super::SPOTIFY_SECRET, "s3cr3t")
+            .await
+            .unwrap();
+        let (_, body) = get_body(&state, "/api/spotify", &admin).await;
+        assert!(
+            body.contains("abc123") && !body.contains("s3cr3t"),
+            "{body}"
+        );
+        let (status, _) = call(
+            &state,
+            Method::PUT,
+            "/api/spotify",
+            Some(r#"{"client_id":""}"#),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        let (_, body) = get_body(&state, "/api/spotify", &admin).await;
+        assert!(body.contains("\"client_id\":null"), "{body}");
+    }
 }

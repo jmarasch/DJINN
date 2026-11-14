@@ -1,13 +1,25 @@
 //! Searches each source for an album and shows the first release's tracks:
-//! `cargo run -p djinn-library --example releases -- <MusicBrainz contact> "artist" "album"`.
+//! `cargo run -p djinn-library --example releases -- <MusicBrainz contact> "artist" "album"`
+//! (Spotify too with `SPOTIFY_ID` and `SPOTIFY_SECRET` set).
 
-use djinn_library::releases::{cover, release, search, Source};
+use djinn_library::releases::{cover, release, search, Accounts, Source};
 
 #[tokio::main]
 async fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    for source in [Source::MusicBrainz, Source::Deezer, Source::Itunes] {
-        let hits = match search(source, Some(&args[0]), &args[1], &args[2]).await {
+    let accounts = Accounts {
+        musicbrainz: Some(args[0].clone()),
+        spotify: std::env::var("SPOTIFY_ID")
+            .ok()
+            .zip(std::env::var("SPOTIFY_SECRET").ok()),
+    };
+    for source in [
+        Source::MusicBrainz,
+        Source::Deezer,
+        Source::Itunes,
+        Source::Spotify,
+    ] {
+        let hits = match search(source, &accounts, &args[1], &args[2]).await {
             Ok(hits) => hits,
             Err(e) => {
                 println!("{source:?}: {e}");
@@ -22,7 +34,7 @@ async fn main() {
             );
         }
         if let Some(first) = hits.first() {
-            if let Ok(Some(r)) = release(source, Some(&args[0]), &first.id).await {
+            if let Ok(Some(r)) = release(source, &accounts, &first.id).await {
                 let names: Vec<String> = r
                     .tracks
                     .iter()
@@ -36,7 +48,7 @@ async fn main() {
                     r.year
                 );
             }
-            match cover(source, &first.id).await {
+            match cover(source, &accounts, &first.id).await {
                 Ok(Some(bytes)) => println!("  cover: {} KB", bytes.len() / 1024),
                 other => println!("  cover: {other:?}"),
             }

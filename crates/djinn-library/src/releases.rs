@@ -1,7 +1,8 @@
 //! Releases of an album to compare with the songs DJINN has, for the library
 //! editor's album layout (like Picard): every release MusicBrainz has of an
-//! album, and searches by artist and album on MusicBrainz, Deezer and Apple's
-//! iTunes catalog (the last two need no key). A release comes with its track
+//! album, and searches by artist and album on MusicBrainz, Deezer, Apple's
+//! iTunes catalog (those two need no key) and Spotify (with the admin's
+//! developer app's client ID and secret). A release comes with its track
 //! list and where its cover is. Only what the admin typed or picked is sent,
 //! and only when they ask.
 
@@ -18,6 +19,16 @@ pub enum Source {
     MusicBrainz,
     Deezer,
     Itunes,
+    Spotify,
+}
+
+/// The accounts some sources need.
+#[derive(Clone, Debug, Default)]
+pub struct Accounts {
+    /// The contact MusicBrainz asks for in each request.
+    pub musicbrainz: Option<String>,
+    /// A Spotify developer app's client ID and secret.
+    pub spotify: Option<(String, String)>,
 }
 
 /// A release found, before its track list is fetched.
@@ -450,15 +461,193 @@ async fn it_release(id: &str) -> Result<Option<Release>, LibraryError> {
     }))
 }
 
+// --- Spotify (Web API, client credentials) ---
+
+/// A token for the app, and when it runs out.
+static SPOTIFY_TOKEN: std::sync::Mutex<Option<(String, String, Instant)>> =
+    std::sync::Mutex::new(None);
+
+#[derive(Deserialize)]
+struct SpToken {
+    access_token: String,
+    #[serde(default)]
+    expires_in: u64,
+}
+
+/// A token for the Spotify app `keys` (client ID, secret), kept until it
+/// runs out. An error says why Spotify refused.
+pub async fn spotify_token(keys: &(String, String)) -> Result<String, LibraryError> {
+    if let Some((id, token, until)) = SPOTIFY_TOKEN
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+    {
+        if id == keys.0 && Instant::now() < until {
+            return Ok(token);
+        }
+    }
+    let response = client(AGENT)?
+        .post("https://accounts.spotify.com/api/token")
+        .basic_auth(&keys.0, Some(&keys.1))
+        .form(&[("grant_type", "client_credentials")])
+        .send()
+        .await
+        .map_err(|e| failed("Spotify", e))?;
+    if response.status() == reqwest::StatusCode::BAD_REQUEST
+        || response.status() == reqwest::StatusCode::UNAUTHORIZED
+    {
+        return Err(LibraryError::Task(
+            "Spotify didn't accept the client ID and secret".into(),
+        ));
+    }
+    let token: SpToken = response
+        .error_for_status()
+        .map_err(|e| failed("Spotify", e))?
+        .json()
+        .await
+        .map_err(|e| failed("Spotify", e))?;
+    let until = Instant::now() + Duration::from_secs(token.expires_in.saturating_sub(60).max(60));
+    *SPOTIFY_TOKEN.lock().unwrap_or_else(|e| e.into_inner()) =
+        Some((keys.0.clone(), token.access_token.clone(), until));
+    Ok(token.access_token)
+}
+
+async fn spotify_get<T: serde::de::DeserializeOwned>(
+    keys: &(String, String),
+    url: &str,
+    query: &[(&str, &str)],
+) -> Result<T, LibraryError> {
+    let token = spotify_token(keys).await?;
+    let response = client(AGENT)?
+        .get(url)
+        .bearer_auth(token)
+        .query(query)
+        .send()
+        .await
+        .and_then(reqwest::Response::error_for_status)
+        .map_err(|e| failed("Spotify", e))?;
+    response.json().await.map_err(|e| failed("Spotify", e))
+}
+
+#[derive(Deserialize)]
+struct SpName {
+    name: String,
+}
+
+#[derive(Deserialize)]
+struct SpImage {
+    url: String,
+}
+
+#[derive(Deserialize)]
+struct SpAlbum {
+    id: String,
+    name: String,
+    #[serde(default)]
+    artists: Vec<SpName>,
+    #[serde(default)]
+    release_date: Option<String>,
+    #[serde(default)]
+    total_tracks: usize,
+    #[serde(default)]
+    album_type: Option<String>,
+    #[serde(default)]
+    images: Vec<SpImage>,
+    #[serde(default)]
+    tracks: Option<SpPage<SpTrack>>,
+}
+
+#[derive(Deserialize)]
+struct SpPage<T> {
+    #[serde(default = "Vec::new")]
+    items: Vec<T>,
+    #[serde(default)]
+    next: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct SpSearch {
+    albums: SpPage<SpAlbum>,
+}
+
+#[derive(Deserialize)]
+struct SpTrack {
+    name: String,
+    #[serde(default)]
+    track_number: i64,
+    #[serde(default)]
+    disc_number: i64,
+    #[serde(default)]
+    duration_ms: Option<i64>,
+    #[serde(default)]
+    artists: Vec<SpName>,
+}
+
+fn names(list: &[SpName]) -> String {
+    list.iter()
+        .map(|a| a.name.as_str())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+async fn sp_album(keys: &(String, String), id: &str) -> Result<SpAlbum, LibraryError> {
+    spotify_get(
+        keys,
+        &format!("https://api.spotify.com/v1/albums/{id}"),
+        &[],
+    )
+    .await
+}
+
+async fn sp_release(keys: &(String, String), id: &str) -> Result<Option<Release>, LibraryError> {
+    let album = sp_album(keys, id).await?;
+    let artist = names(&album.artists);
+    let mut items = Vec::new();
+    let mut page = album.tracks;
+    // Long albums come in pages of 50; only Spotify's own next links are followed.
+    for _ in 0..20 {
+        let Some(current) = page.take() else { break };
+        items.extend(current.items);
+        match current
+            .next
+            .filter(|n| n.starts_with("https://api.spotify.com/"))
+        {
+            Some(next) => page = Some(spotify_get(keys, &next, &[]).await?),
+            None => break,
+        }
+    }
+    Ok(Some(Release {
+        source: Source::Spotify,
+        id: album.id,
+        title: album.name,
+        year: year_of(album.release_date.as_deref()),
+        tracks: items
+            .into_iter()
+            .map(|t| {
+                let own = names(&t.artists);
+                ReleaseTrack {
+                    disc: t.disc_number.max(1),
+                    number: t.track_number,
+                    title: t.name,
+                    artist: (own != artist && !own.is_empty()).then_some(own),
+                    length_ms: t.duration_ms,
+                }
+            })
+            .collect(),
+        artist,
+    }))
+}
+
 // --- All sources ---
 
 /// Releases matching an artist and album on `source`, best first.
 pub async fn search(
     source: Source,
-    contact: Option<&str>,
+    accounts: &Accounts,
     artist: &str,
     album: &str,
 ) -> Result<Vec<ReleaseHit>, LibraryError> {
+    let contact = accounts.musicbrainz.as_deref();
     let (artist, album) = (artist.trim(), album.trim());
     if artist.is_empty() && album.is_empty() {
         return Ok(Vec::new());
@@ -575,15 +764,55 @@ pub async fn search(
             found.sort_by_key(|(rank, _)| *rank);
             Ok(found.into_iter().map(|(_, hit)| hit).take(25).collect())
         }
+        Source::Spotify => {
+            let keys = spotify_keys(accounts)?;
+            let query = [
+                (!album.is_empty()).then(|| format!("album:{album}")),
+                (!artist.is_empty()).then(|| format!("artist:{artist}")),
+            ]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(" ");
+            let found: SpSearch = spotify_get(
+                keys,
+                "https://api.spotify.com/v1/search",
+                &[("q", &query), ("type", "album"), ("limit", "20")],
+            )
+            .await?;
+            Ok(found
+                .albums
+                .items
+                .into_iter()
+                .map(|a| ReleaseHit {
+                    source: Source::Spotify,
+                    artist: names(&a.artists),
+                    id: a.id,
+                    title: a.name,
+                    date: a.release_date,
+                    country: None,
+                    format: a.album_type,
+                    tracks: a.total_tracks,
+                    note: None,
+                })
+                .collect())
+        }
     }
+}
+
+fn spotify_keys(accounts: &Accounts) -> Result<&(String, String), LibraryError> {
+    accounts.spotify.as_ref().ok_or_else(|| {
+        LibraryError::Task("add the Spotify account under Admin > Library first".into())
+    })
 }
 
 /// A release with its track list.
 pub async fn release(
     source: Source,
-    contact: Option<&str>,
+    accounts: &Accounts,
     id: &str,
 ) -> Result<Option<Release>, LibraryError> {
+    let contact = accounts.musicbrainz.as_deref();
     let id = id.trim();
     if id.is_empty() || id.len() > 64 || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
     {
@@ -598,11 +827,16 @@ pub async fn release(
         }
         Source::Deezer => dz_release(id).await,
         Source::Itunes => it_release(id).await,
+        Source::Spotify => sp_release(spotify_keys(accounts)?, id).await,
     }
 }
 
 /// A release's front cover (JPEG or PNG bytes), if it has one.
-pub async fn cover(source: Source, id: &str) -> Result<Option<Vec<u8>>, LibraryError> {
+pub async fn cover(
+    source: Source,
+    accounts: &Accounts,
+    id: &str,
+) -> Result<Option<Vec<u8>>, LibraryError> {
     let id = id.trim();
     if id.is_empty() || id.len() > 64 || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
     {
@@ -620,6 +854,12 @@ pub async fn cover(source: Source, id: &str) -> Result<Option<Vec<u8>>, LibraryE
             .find(|r| r.wrapper_type == "collection")
             .and_then(|r| r.artwork_url100)
             .map(|u| u.replace("100x100bb", "600x600bb")),
+        Source::Spotify => sp_album(spotify_keys(accounts)?, id)
+            .await?
+            .images
+            .into_iter()
+            .next()
+            .map(|i| i.url),
     };
     let Some(url) = url else { return Ok(None) };
     let allowed = reqwest::Url::parse(&url).ok().is_some_and(|u| {
@@ -710,6 +950,19 @@ mod tests {
     }
 
     #[test]
+    fn spotify_answers_read_as_releases() {
+        let json = r#"{"id":"a1","name":"Out of Time","release_date":"1991-03-12","total_tracks":2,
+            "album_type":"album","artists":[{"name":"R.E.M."}],"images":[{"url":"https://i.scdn.co/image/x"}],
+            "tracks":{"items":[{"name":"Radio Song","track_number":1,"disc_number":1,"duration_ms":255000,
+              "artists":[{"name":"R.E.M."},{"name":"KRS-One"}]}],"next":null}}"#;
+        let album: SpAlbum = serde_json::from_str(json).unwrap();
+        assert_eq!(names(&album.artists), "R.E.M.");
+        let tracks = album.tracks.unwrap();
+        assert_eq!(names(&tracks.items[0].artists), "R.E.M., KRS-One");
+        assert_eq!(album.images[0].url, "https://i.scdn.co/image/x");
+    }
+
+    #[test]
     fn songs_land_on_their_tracks() {
         let release = Release {
             source: Source::Deezer,
@@ -747,9 +1000,15 @@ mod tests {
             .enable_all()
             .build()
             .unwrap();
+        let none = Accounts::default();
         assert!(rt
-            .block_on(release(Source::Deezer, None, "../etc"))
+            .block_on(release(Source::Deezer, &none, "../etc"))
             .is_err());
-        assert!(rt.block_on(cover(Source::Itunes, "1?x=y")).is_err());
+        assert!(rt.block_on(cover(Source::Itunes, &none, "1?x=y")).is_err());
+        // Spotify without an account says so, before asking anything.
+        let err = rt
+            .block_on(release(Source::Spotify, &none, "abc"))
+            .unwrap_err();
+        assert!(err.to_string().contains("Spotify account"), "{err}");
     }
 }

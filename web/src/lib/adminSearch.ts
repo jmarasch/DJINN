@@ -184,6 +184,7 @@ export const adminEntries: AdminEntry[] = [
     keywords: 'ai lyrics nodes vocals demucs',
     key: 'ai_vocals_for_nodes',
   },
+  { label: 'Spotify account for album lookups', tab: 'library', keywords: 'spotify client id secret album lookup' },
   { label: 'Help with AI lyrics', tab: 'nodes', keywords: 'ai lyrics node whisper helper' },
   // System
   { label: 'Status', tab: 'home', keywords: 'running uptime addresses' },

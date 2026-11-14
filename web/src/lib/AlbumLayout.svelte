@@ -27,6 +27,7 @@
     { key: 'musicbrainz', label: 'MusicBrainz' },
     { key: 'deezer', label: 'Deezer' },
     { key: 'itunes', label: 'Apple Music (iTunes)' },
+    { key: 'spotify', label: 'Spotify (needs its account in Admin > Library)' },
   ]
 
   // svelte-ignore state_referenced_locally
