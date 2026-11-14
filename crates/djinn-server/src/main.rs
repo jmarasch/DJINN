@@ -30,6 +30,7 @@ mod duplicates;
 mod editable;
 mod editor_api;
 mod editor_files;
+mod editor_lookup;
 mod error;
 mod events;
 mod folders;

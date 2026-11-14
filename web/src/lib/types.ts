@@ -1455,6 +1455,40 @@ export interface EditorBatch {
   final_at: number | null
 }
 
+/** Where a release comes from. */
+export type ReleaseSource = 'musicbrainz' | 'deezer' | 'itunes'
+
+/** A release found, before its tracks are fetched. */
+export interface ReleaseHit {
+  source: ReleaseSource
+  id: string
+  title: string
+  artist: string
+  date: string | null
+  country: string | null
+  format: string | null
+  tracks: number
+  note: string | null
+}
+
+export interface ReleaseTrack {
+  disc: number
+  number: number
+  title: string
+  /** The track's own artist when it isn't the release's. */
+  artist: string | null
+  length_ms: number | null
+}
+
+export interface Release {
+  source: ReleaseSource
+  id: string
+  title: string
+  artist: string
+  year: number | null
+  tracks: ReleaseTrack[]
+}
+
 /** What happens once files have moved. */
 export interface EditorAfterMove {
   /** Folders left with no songs go to the trash, with what's left in them. */
@@ -1483,6 +1517,7 @@ export interface EditorSong {
   genre: string | null
   album_id: number | null
   art_hash: string | null
+  duration_ms: number | null
   /** Its folder allows changes to the file. */
   editable: boolean
   /** What the file says (editing the library); null if it couldn't be read. */

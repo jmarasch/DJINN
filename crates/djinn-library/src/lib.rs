@@ -13,6 +13,7 @@ pub mod online;
 pub mod playlist_file;
 pub mod playlist_match;
 pub mod radio;
+pub mod releases;
 pub mod sound;
 mod tags;
 pub use tags::{basics, Basics};

@@ -12,6 +12,7 @@
   // marked, and the list of changes shows what will happen.
   import { onMount } from 'svelte'
   import { ApiError, api } from './api'
+  import AlbumLayout from './AlbumLayout.svelte'
   import Art from './Art.svelte'
   import { askToUnlock, unlocked } from './protected.svelte'
   import { toast } from './state.svelte'
@@ -55,6 +56,12 @@
   let history = $state<EditorBatch[]>([])
   let coverInput = $state<HTMLInputElement | null>(null)
   let replaceInput = $state<HTMLInputElement | null>(null)
+  /** The songs open in the album layout, if it's open. */
+  let layoutSongs = $state<EditorSong[] | null>(null)
+  let layoutBox = $state<HTMLElement | null>(null)
+  $effect(() => {
+    if (layoutBox) layoutBox.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  })
 
   const FIELDS: { key: EditorField; label: string; narrow?: boolean }[] = [
     { key: 'disc_no', label: 'Disc', narrow: true },
@@ -400,7 +407,7 @@
   }
 
   /** The songs a cover goes to: those picked, else the chosen song's album here. */
-  const coverSongs = $derived(
+  const coverSongsNow = $derived(
     (pickedSongs.length
       ? pickedSongs
       : chosen
@@ -409,7 +416,33 @@
     ).filter((s) => target === 'database' || s.editable),
   )
 
-  async function setCover(how: 'set' | 'remove' | 'reset', file: File | null = null) {
+  /** The album layout for the picked songs, or the chosen song's album. */
+  function openLayout() {
+    const list = pickedSongs.length
+      ? pickedSongs
+      : songs.filter((s) => (chosen?.album_id != null ? s.album_id === chosen.album_id : s.id === chosen?.id))
+    if (list.length) layoutSongs = list
+  }
+
+  async function useLayout(changes: { song: EditorSong; field: EditorField; value: string }[], cover: Blob | null) {
+    const list = layoutSongs ?? []
+    let skipped = 0
+    for (const c of changes) {
+      if (rowEditable(c.song)) setPending(c.song, c.field, c.value)
+      else skipped++
+    }
+    layoutSongs = null
+    toast(
+      `Changes from the release are waiting under Preview and approve${skipped ? `; ${skipped} left out (read only folders)` : ''}`,
+    )
+    if (cover) {
+      const kind = cover.type === 'image/png' ? 'png' : 'jpg'
+      await setCover('set', new File([cover], `cover.${kind}`, { type: cover.type }), list)
+    }
+  }
+
+  async function setCover(how: 'set' | 'remove' | 'reset', file: File | null = null, only: EditorSong[] | null = null) {
+    const coverSongs = (only ?? coverSongsNow).filter((s) => target === 'database' || s.editable)
     if (!coverSongs.length) return
     const where = target === 'library' ? 'into the files of' : 'for'
     const words = how === 'set' ? 'Use this cover' : how === 'remove' ? 'Take the cover out' : "Go back to the files' own cover"
@@ -457,7 +490,7 @@
   async function makeFolderArt() {
     busy = true
     try {
-      const done = await unlocked(() => api.editorFolderArt(coverSongs.map((s) => s.id), true))
+      const done = await unlocked(() => api.editorFolderArt(coverSongsNow.map((s) => s.id), true))
       toast(done.failed.length ? `${done.songs} written; ${done.failed[0].error}` : `folder.jpg written in ${done.songs} folders`)
       await loadHistory()
     } catch (e) {
@@ -548,7 +581,7 @@
           <button class="label" onclick={() => choose(node)} title={node.path}>
             {node.name}
             <span class="count">{n(node.songs)}</span>
-            {#if node.editable === true}<span class="badge on">Editable</span>{:else if node.editable === false}<span class="badge">View only</span>{/if}
+            {#if node.editable === true}<span class="badge on">Read and write</span>{:else if node.editable === false}<span class="badge">Read only</span>{/if}
           </button>
         </div>
         {#if open[node.path] && children[node.path]}
@@ -612,9 +645,9 @@
             {#if searching}Found {n(total)} songs for <b>{searching}</b>{total >= 1000 ? ' (the first 1,000)' : ''}{:else}{n(
                 songs.length,
               )} of {n(total)} songs{/if}{pickedSongs.length ? ` · ${n(pickedSongs.length)} picked` : ''}
-            {#if target === 'library' && !canEdit}· <strong>view only</strong>: changes aren't allowed in
-              {searching ? "these songs' folders" : 'this folder'} (allow it under Compare and folders){:else if target ===
-              'library' && searching}· songs in view only folders are dimmed{:else}· click a cell to change it{/if}
+            {#if target === 'library' && !canEdit}· <strong>read only</strong>: changes aren't allowed in
+              {searching ? "these songs' folders" : 'this folder'} (make it read and write under Library folders){:else if target ===
+              'library' && searching}· songs in read only folders are dimmed{:else}· click a cell to change it{/if}
           </p>
           <div class="scroll">
             <table>
@@ -632,7 +665,7 @@
                   <tr
                     class:chosen={chosen?.id === song.id}
                     class:unreadable={target === 'library' && !rowEditable(song)}
-                    title={target === 'library' && !song.editable ? 'View only folder' : undefined}
+                    title={target === 'library' && !song.editable ? 'Read only folder' : undefined}
                   >
                     <td class="pick">
                       <input
@@ -690,6 +723,14 @@
               <div class="tool">
                 <button class="small-button" onclick={numberInOrder} title="Track numbers 1, 2, 3... in the grid's order, for each album and disc">
                   Number in order
+                </button>
+                <button
+                  class="small-button"
+                  disabled={!chosen && !pickedSongs.length}
+                  onclick={openLayout}
+                  title="Compare the album with its releases on MusicBrainz (or search MusicBrainz, Deezer or Apple), lay the songs on the right tracks and take the tags and cover"
+                >
+                  Album layout...
                 </button>
                 <button
                   class="small-button"
@@ -787,7 +828,7 @@
         </div>
         <div class="box">
           <div class="small muted">
-            Cover {coverSongs.length ? `for ${coverSongs.length} ${pickedSongs.length ? 'picked songs' : 'songs of this album'}` : ''}
+            Cover {coverSongsNow.length ? `for ${coverSongsNow.length} ${pickedSongs.length ? 'picked songs' : 'songs of this album'}` : ''}
           </div>
           <input
             type="file"
@@ -799,20 +840,20 @@
               if (file) void setCover('set', file)
             }}
           />
-          <button class="small-button" disabled={!canEdit || busy || !coverSongs.length} onclick={() => coverInput?.click()}>
+          <button class="small-button" disabled={!canEdit || busy || !coverSongsNow.length} onclick={() => coverInput?.click()}>
             Replace cover
           </button>
-          <button class="small-button" disabled={!canEdit || busy || !coverSongs.length} onclick={() => setCover('remove')}>
+          <button class="small-button" disabled={!canEdit || busy || !coverSongsNow.length} onclick={() => setCover('remove')}>
             Remove cover
           </button>
           {#if target === 'database'}
-            <button class="small-button" disabled={busy || !coverSongs.length} onclick={() => setCover('reset')}>
+            <button class="small-button" disabled={busy || !coverSongsNow.length} onclick={() => setCover('reset')}>
               Use the files' cover
             </button>
           {:else}
             <button
               class="small-button"
-              disabled={busy || !coverSongs.length}
+              disabled={busy || !coverSongsNow.length}
               title="Saves the album's cover as folder.jpg in the songs' folders (replacing one that's there; undo from the history)"
               onclick={makeFolderArt}
             >
@@ -861,7 +902,7 @@
               {/each}
               {#if review.length > 200}<li class="small muted">and {n(review.length - 200)} more</li>{/if}
             </ul>
-            {#if blocked}<p class="small bad">{blocked} songs with changes are in view only folders.</p>{/if}
+            {#if blocked}<p class="small bad">{blocked} songs with changes are in read only folders.</p>{/if}
             <button class="primary" disabled={busy || !canEdit || blocked > 0} onclick={approve}>
               Approve {n(review.length)} changes
             </button>
@@ -898,6 +939,11 @@
         {/if}
       </aside>
     </div>
+    {#if layoutSongs}
+      <div bind:this={layoutBox}>
+        <AlbumLayout songs={layoutSongs} onapply={useLayout} onclose={() => (layoutSongs = null)} />
+      </div>
+    {/if}
   </div>
 {/if}
 

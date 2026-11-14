@@ -37,6 +37,7 @@ pub struct EditorSong {
     pub genre: Option<String>,
     pub album_id: Option<i64>,
     pub art_hash: Option<String>,
+    pub duration_ms: Option<i64>,
 }
 
 /// The separator a path uses: `\` on Windows, `/` elsewhere.
@@ -93,7 +94,7 @@ impl Store {
         let rows = sqlx::query_as(
             "SELECT t.id, t.path, t.title, t.artist, t.album, t.album_artist, t.track_no,
                     t.disc_no, t.year, t.genre, t.album_id,
-                    coalesce(t.art_hash, a.art_hash, a.online_art_hash) AS art_hash
+                    coalesce(t.art_hash, a.art_hash, a.online_art_hash) AS art_hash, t.duration_ms
              FROM tracks t LEFT JOIN albums a ON a.id = t.album_id
              WHERE t.removed_at IS NULL AND substr(t.path, 1, ?1) = ?2
              ORDER BY t.path LIMIT ?3 OFFSET ?4",
@@ -144,7 +145,7 @@ impl Store {
         Ok(sqlx::query_as(concat!(
             "SELECT t.id, t.path, t.title, t.artist, t.album, t.album_artist, t.track_no,
                     t.disc_no, t.year, t.genre, t.album_id,
-                    coalesce(t.art_hash, a.art_hash, a.online_art_hash) AS art_hash
+                    coalesce(t.art_hash, a.art_hash, a.online_art_hash) AS art_hash, t.duration_ms
              FROM tracks t LEFT JOIN albums a ON a.id = t.album_id
              WHERE t.removed_at IS NULL AND (",
             finds!("1"), " OR ", finds!("2"), " OR ", finds!("3"), " OR ", finds!("4"), " OR ", finds!("5"),
@@ -194,7 +195,7 @@ impl Store {
         Ok(sqlx::query_as(
             "SELECT t.id, t.path, t.title, t.artist, t.album, t.album_artist, t.track_no,
                     t.disc_no, t.year, t.genre, t.album_id,
-                    coalesce(t.art_hash, a.art_hash, a.online_art_hash) AS art_hash
+                    coalesce(t.art_hash, a.art_hash, a.online_art_hash) AS art_hash, t.duration_ms
              FROM tracks t LEFT JOIN albums a ON a.id = t.album_id
              WHERE t.removed_at IS NULL AND t.id IN (SELECT value FROM json_each(?1))
              ORDER BY t.path",

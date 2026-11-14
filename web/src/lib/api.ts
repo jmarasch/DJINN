@@ -18,6 +18,9 @@ import type {
   EditorBatch,
   EditorRenamed,
   EditorAfterMove,
+  Release,
+  ReleaseHit,
+  ReleaseSource,
   EditorSong,
   EditableFolder,
   AiListenerStatus,
@@ -346,6 +349,21 @@ export const api = {
       suggested: { id: number; disc_no: number; track_no: number }[]
       unmatched: number
     }>(`/editor/tracklist?album_id=${albumId}`),
+  /** Every MusicBrainz release of an album DJINN looked up. */
+  editorAlbumReleases: (albumId: number) =>
+    get<{ known: boolean; releases: ReleaseHit[] }>(`/editor/releases?album_id=${albumId}`),
+  editorReleaseSearch: (source: ReleaseSource, artist: string, album: string) =>
+    get<ReleaseHit[]>(
+      `/editor/release-search?source=${source}&artist=${encodeURIComponent(artist)}&album=${encodeURIComponent(album)}`,
+    ),
+  /** A release's tracks, with these songs matched to them by title. */
+  editorRelease: (source: ReleaseSource, id: string, songIds: number[]) =>
+    get<{ release: Release; matched: { id: number; track: number }[] }>(
+      `/editor/release?source=${source}&id=${encodeURIComponent(id)}&ids=${songIds.join(',')}`,
+    ),
+  /** Where a release's cover is served from (through DJINN). */
+  editorReleaseCover: (source: ReleaseSource, id: string) =>
+    `/api/editor/release-cover?source=${source}&id=${encodeURIComponent(id)}`,
   editableFolders: () => get<EditableFolder[]>('/library/editable'),
   setFolderEditable: (path: string, editable: boolean) => put<void>('/library/editable', { path, editable }),
   startLibraryCompare: () => post<void>('/library/compare'),
