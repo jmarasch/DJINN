@@ -112,6 +112,35 @@ fn note(line: impl Into<String>) {
     });
 }
 
+/// The keepsake (packages and models saved by `make-keepsake.sh`), if the
+/// computer has one: `$DJINN_AI_KEEP`, DJINN's own folder, or /opt/djinn/keep
+/// (where the install disc puts it). Installing from it needs no internet.
+fn keepsake(d: &Path) -> Option<PathBuf> {
+    [
+        std::env::var_os("DJINN_AI_KEEP").map(PathBuf::from),
+        Some(d.join("keep")),
+        Some(PathBuf::from("/opt/djinn/keep")),
+    ]
+    .into_iter()
+    .flatten()
+    .find(|p| p.join("wheelhouse").is_dir())
+}
+
+/// Copies a folder, for putting a kept model where the worker looks.
+fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(to)?;
+    for entry in std::fs::read_dir(from)? {
+        let entry = entry?;
+        let target = to.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_dir(&entry.path(), &target)?;
+        } else {
+            std::fs::copy(entry.path(), target)?;
+        }
+    }
+    Ok(())
+}
+
 fn dir(state: &AppState) -> PathBuf {
     data_dir(state).join("ai-listener")
 }
@@ -335,39 +364,78 @@ async fn install_into(d: &Path, model: &str, vocals: bool) -> Result<(), String>
         }
     }
     let py = venv_python(d);
-    let pip = |file: &str, extra: &[&str]| {
+    let keep = keepsake(d);
+    if let Some(keep) = &keep {
+        note(format!(
+            "Using the keepsake in {} (no internet needed for packages)",
+            keep.display()
+        ));
+    }
+    // Each set installs from the keepsake's folder for it when there is one.
+    let pip = |file: &str, set: &str, extra: &[&str]| {
         let mut c = Command::new(&py);
-        c.current_dir(d)
-            .args([
-                "-m",
-                "pip",
-                "install",
-                "--disable-pip-version-check",
-                "-r",
-                file,
-            ])
-            .args(extra);
+        c.current_dir(d).args([
+            "-m",
+            "pip",
+            "install",
+            "--disable-pip-version-check",
+            "-r",
+            file,
+        ]);
+        match keep
+            .as_ref()
+            .map(|k| k.join("wheelhouse").join(set))
+            .filter(|w| w.is_dir())
+        {
+            Some(wheels) => {
+                c.arg("--no-index").arg("--find-links").arg(wheels);
+            }
+            None => {
+                c.args(extra);
+            }
+        }
         c
     };
     note("Installing the listening software (downloads from the Python package index)...");
-    if !run_logged(pip("requirements.txt", &[])).await {
+    if !run_logged(pip("requirements.txt", "core", &[])).await {
         return Err("couldn't install the listening software".into());
     }
     if has_nvidia().await {
         note("An NVIDIA card was found: installing its libraries...");
-        if !run_logged(pip("requirements-gpu.txt", &[])).await {
+        if !run_logged(pip("requirements-gpu.txt", "gpu", &[])).await {
             note("The card's libraries didn't install; the listener will use the processor.");
         }
     }
     if vocals {
         note("Installing vocal isolation (large)...");
-        let extra: &[&str] = if has_nvidia().await {
+        let nvidia = has_nvidia().await;
+        let extra: &[&str] = if nvidia {
             &[]
         } else {
             &["--extra-index-url", "https://download.pytorch.org/whl/cpu"]
         };
-        if !run_logged(pip("requirements-vocals.txt", extra)).await {
+        if !run_logged(pip(
+            "requirements-vocals.txt",
+            if nvidia { "vocals-gpu" } else { "vocals-cpu" },
+            extra,
+        ))
+        .await
+        {
             note("Vocal isolation didn't install; the listener will go without it.");
+        }
+    }
+    // A kept model goes in place first, so nothing is downloaded.
+    if let Some(kept) = keep.as_ref().map(|k| k.join("models")) {
+        let name = format!("faster-whisper-{model}");
+        if kept.join(&name).is_dir() && !d.join("models").join(&name).is_dir() {
+            note(format!("Copying the kept {model} model..."));
+            copy_dir(&kept.join(&name), &d.join("models").join(&name))
+                .map_err(|e| e.to_string())?;
+        }
+        for extra in ["torch", "hf"] {
+            if kept.join(extra).is_dir() && !d.join("models").join(extra).is_dir() {
+                let _ = copy_dir(&kept.join(extra), &d.join("models").join(extra));
+            }
         }
     }
     note(format!("Downloading the {model} model (once)..."));
