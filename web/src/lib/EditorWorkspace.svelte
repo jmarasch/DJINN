@@ -13,16 +13,18 @@
   import { toast } from './state.svelte'
   import type { EditorBatch, EditorChange, EditorField, EditorNode, EditorRenamed, EditorSong, EditTarget } from './types'
 
-  let { startFolder = '' }: { startFolder?: string } = $props()
+  let { startFolder = '', startSearch = '' }: { startFolder?: string; startSearch?: string } = $props()
 
   let target = $state<EditTarget>('database')
   let roots = $state<EditorNode[]>([])
   let children = $state<Record<string, EditorNode[]>>({})
   let open = $state<Record<string, boolean>>({})
   let selected = $state('')
+  /** Words being looked for across the library (instead of a folder). */
+  let searching = $state('')
+  let searchText = $state('')
   let songs = $state<EditorSong[]>([])
   let total = $state(0)
-  let editable = $state(false)
   let locked = $state(false)
   let loading = $state(false)
   let busy = $state(false)
@@ -40,6 +42,9 @@
   let fillValue = $state('')
   let pattern = $state('{track} {title}')
   let renames = $state<EditorRenamed[] | null>(null)
+  /** What the list of new places is for. */
+  let moveKind = $state<'rename' | 'move' | 'aside'>('rename')
+  let moveTo = $state('')
   let history = $state<EditorBatch[]>([])
   let coverInput = $state<HTMLInputElement | null>(null)
 
@@ -93,7 +98,22 @@
   async function choose(node: EditorNode) {
     if (!leaveChanges()) return
     pending = {}
+    searching = ''
     selected = node.path
+    moveTo = node.path
+    chosen = null
+    picked = {}
+    renames = null
+    await loadSongs(0)
+  }
+
+  async function find(words: string) {
+    const clean = words.trim()
+    if (!clean || !leaveChanges()) return
+    pending = {}
+    selected = ''
+    searching = clean
+    searchText = clean
     chosen = null
     picked = {}
     renames = null
@@ -101,13 +121,12 @@
   }
 
   async function loadSongs(offset: number) {
-    if (!selected) return
+    if (!selected && !searching) return
     loading = true
     try {
-      const found = await api.editorSongs(selected, offset, target === 'library')
+      const found = await api.editorSongs(selected, offset, target === 'library', searching)
       songs = offset === 0 ? found.songs : [...songs, ...found.songs]
       total = found.total
-      editable = found.editable
       if (!chosen || !songs.some((s) => s.id === chosen?.id)) chosen = songs[0] ?? null
       else chosen = songs.find((s) => s.id === chosen?.id) ?? null
     } catch (e) {
@@ -143,6 +162,8 @@
     if (startFolder) {
       selected = startFolder
       await loadSongs(0)
+    } else if (startSearch) {
+      await find(startSearch)
     }
   })
 
@@ -171,10 +192,16 @@
     pending = next
   }
 
-  const canEdit = $derived(target === 'database' || editable)
+  /** Changes to the files are only allowed in folders the admin allowed. */
+  const rowEditable = (song: EditorSong) => target === 'database' || (song.editable && !!song.file)
+  const canEdit = $derived(target === 'database' || songs.some((s) => s.editable))
+  /** Songs with changes waiting that can't take them (library, view only). */
+  const blocked = $derived(
+    target === 'library' ? songs.filter((s) => pending[s.id] && !s.editable).length : 0,
+  )
 
   function startEdit(song: EditorSong, field: EditorField) {
-    if (!canEdit || (target === 'library' && !song.file)) return
+    if (!rowEditable(song)) return
     editing = { id: song.id, field }
     draft = shown(song, field)
   }
@@ -216,14 +243,17 @@
     picked = on ? Object.fromEntries(songs.map((s) => [s.id, true])) : {}
   }
 
+  /** The tools only touch songs that can be changed. */
+  const changeable = $derived(toolSongs.filter(rowEditable))
+
   function fill() {
-    for (const song of toolSongs) setPending(song, fillField, fillValue)
+    for (const song of changeable) setPending(song, fillField, fillValue)
   }
 
   /** Track numbers 1, 2, 3... in the grid's order, per disc. */
   function numberInOrder() {
     const next: Record<string, number> = {}
-    for (const song of toolSongs) {
+    for (const song of changeable) {
       const disc = shown(song, 'disc_no') || '1'
       next[disc] = (next[disc] ?? 0) + 1
       setPending(song, 'track_no', String(next[disc]))
@@ -244,7 +274,7 @@
 
   function cleanTitles() {
     let changed = 0
-    for (const song of toolSongs) {
+    for (const song of changeable) {
       const now = shown(song, 'title')
       const clean = cleanTitle(now)
       if (clean && clean !== now) {
@@ -338,11 +368,12 @@
 
   /** The songs a cover goes to: those picked, else the chosen song's album here. */
   const coverSongs = $derived(
-    pickedSongs.length
+    (pickedSongs.length
       ? pickedSongs
       : chosen
         ? songs.filter((s) => (chosen?.album_id != null ? s.album_id === chosen.album_id : s.id === chosen?.id))
-        : [],
+        : []
+    ).filter((s) => target === 'database' || s.editable),
   )
 
   async function setCover(how: 'set' | 'remove' | 'reset', file: File | null = null) {
@@ -364,25 +395,40 @@
     }
   }
 
-  async function previewRename() {
-    if (changeCount && !confirm('Rename from the tags as they are now? Changes not approved yet are left out.')) return
+  function relocation(kind: 'rename' | 'move' | 'aside', ids: number[], preview: boolean) {
+    if (kind === 'rename') return api.editorRename(ids, pattern, preview)
+    if (kind === 'move') return api.editorMove(ids, { folder: moveTo }, preview)
+    return api.editorMove(ids, { set_aside: true }, preview)
+  }
+
+  async function previewMove(kind: 'rename' | 'move' | 'aside') {
+    if (kind === 'rename' && changeCount && !confirm('Rename from the tags as they are now? Changes not approved yet are left out.'))
+      return
+    if (kind === 'move' && !moveTo.trim()) return
     try {
-      renames = (await unlocked(() => api.editorRename(toolSongs.map((s) => s.id), pattern, true))).files
+      moveKind = kind
+      renames = (await unlocked(() => relocation(kind, changeable.map((s) => s.id), true))).files
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not work out the names', true)
+      toast(e instanceof Error ? e.message : 'Could not work out where they go', true)
     }
   }
 
   const renamable = $derived(renames?.filter((r) => !r.problem) ?? [])
+  const MOVE_WORDS = {
+    rename: { title: 'New file names', verb: 'Rename', done: 'renamed' },
+    move: { title: 'New places', verb: 'Move', done: 'moved' },
+    aside: { title: 'Set aside (out of the library, into a hidden folder beside it)', verb: 'Set aside', done: 'set aside' },
+  }
 
   async function rename() {
     if (!renamable.length) return
-    if (!confirm(`Rename ${renamable.length} files on disk? This can be undone from the history.`)) return
+    const words = MOVE_WORDS[moveKind]
+    if (!confirm(`${words.verb} ${renamable.length} files on disk? This can be undone from the history.`)) return
     busy = true
     try {
-      const done = await unlocked(() => api.editorRename(renamable.map((r) => r.id), pattern, false))
+      const done = await unlocked(() => relocation(moveKind, renamable.map((r) => r.id), false))
       const moved = done.files.filter((f) => !f.problem).length
-      toast(`${n(moved)} files renamed`)
+      toast(`${n(moved)} files ${words.done}`)
       renames = null
       await loadSongs(0)
       await loadHistory()
@@ -394,7 +440,7 @@
   }
 
   const fileName = (path: string) => path.slice(Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\')) + 1)
-  const KINDS: Record<string, string> = { tags: 'tags', cover: 'cover', rename: 'names' }
+  const KINDS: Record<string, string> = { tags: 'tags', cover: 'cover', rename: 'names and places', 'set-aside': 'set aside' }
   const kindName = (kinds: string) =>
     kinds.startsWith('undo') ? 'undo' : kinds.split(',').map((k) => KINDS[k] ?? k).join(', ')
 </script>
@@ -452,13 +498,31 @@
       </aside>
 
       <section class="grid">
-        {#if !selected}
-          <p class="small muted pad">Choose a folder on the left to see its songs.</p>
+        <form
+          class="find pad"
+          onsubmit={(e) => {
+            e.preventDefault()
+            void find(searchText)
+          }}
+        >
+          <input
+            type="search"
+            bind:value={searchText}
+            placeholder="Find songs by artist, title or album (a | b finds either)"
+            aria-label="Find songs"
+          />
+          <button class="small-button" type="submit" disabled={!searchText.trim()}>Find</button>
+        </form>
+        {#if !selected && !searching}
+          <p class="small muted pad">Choose a folder on the left, or find songs, to see them here.</p>
         {:else}
           <p class="small muted pad">
-            {n(songs.length)} of {n(total)} songs{pickedSongs.length ? ` · ${n(pickedSongs.length)} picked` : ''}
-            {#if target === 'library' && !editable}· <strong>view only</strong>: changes aren't allowed in this folder
-              (allow it under Compare and folders){:else}· click a cell to change it{/if}
+            {#if searching}Found {n(total)} songs for <b>{searching}</b>{total >= 1000 ? ' (the first 1,000)' : ''}{:else}{n(
+                songs.length,
+              )} of {n(total)} songs{/if}{pickedSongs.length ? ` · ${n(pickedSongs.length)} picked` : ''}
+            {#if target === 'library' && !canEdit}· <strong>view only</strong>: changes aren't allowed in
+              {searching ? "these songs' folders" : 'this folder'} (allow it under Compare and folders){:else if target ===
+              'library' && searching}· songs in view only folders are dimmed{:else}· click a cell to change it{/if}
           </p>
           <div class="scroll">
             <table>
@@ -473,7 +537,11 @@
               </thead>
               <tbody>
                 {#each songs as song, i (song.id)}
-                  <tr class:chosen={chosen?.id === song.id} class:unreadable={target === 'library' && !song.file}>
+                  <tr
+                    class:chosen={chosen?.id === song.id}
+                    class:unreadable={target === 'library' && !rowEditable(song)}
+                    title={target === 'library' && !song.editable ? 'View only folder' : undefined}
+                  >
                     <td class="pick">
                       <input
                         type="checkbox"
@@ -509,14 +577,16 @@
               </tbody>
             </table>
           </div>
-          {#if songs.length < total}
+          {#if songs.length < total && !searching}
             <button class="small-button pad" disabled={loading} onclick={() => loadSongs(songs.length)}>Show more</button>
           {/if}
 
           {#if canEdit && songs.length}
             <div class="tools">
               <div class="tool">
-                <span class="small muted">{pickedSongs.length ? `For the ${pickedSongs.length} picked songs` : 'For every song shown'}:</span>
+                <span class="small muted"
+                  >{pickedSongs.length ? `For the ${changeable.length} picked songs` : `For every song shown (${changeable.length})`}:</span
+                >
               </div>
               <div class="tool">
                 <select bind:value={fillField} aria-label="Field to set">
@@ -540,8 +610,19 @@
               {#if target === 'library'}
                 <div class="tool">
                   <input bind:value={pattern} aria-label="File name pattern" class="pattern" />
-                  <button class="small-button" onclick={previewRename}>Rename files...</button>
+                  <button class="small-button" onclick={() => previewMove('rename')}>Rename files...</button>
                   <span class="small muted">{'{disc} {track} {title} {artist} {album} {album_artist} {year}'}</span>
+                </div>
+                <div class="tool">
+                  <input bind:value={moveTo} aria-label="Folder to move to" class="pattern" placeholder="Folder to move to" />
+                  <button class="small-button" onclick={() => previewMove('move')} disabled={!moveTo.trim()}>Move files...</button>
+                  <button
+                    class="small-button"
+                    onclick={() => previewMove('aside')}
+                    title="Takes them out of the library into a hidden .djinn-set-aside folder in the same library folder, like the copy you don't keep of an album filed twice. Undo brings them back."
+                  >
+                    Set aside...
+                  </button>
                 </div>
               {/if}
             </div>
@@ -549,16 +630,25 @@
 
           {#if renames}
             <div class="renames">
-              <div><strong>New file names</strong> <span class="small muted">({renamable.length} to rename)</span></div>
+              <div>
+                <strong>{MOVE_WORDS[moveKind].title}</strong>
+                <span class="small muted">({renamable.length} to {MOVE_WORDS[moveKind].verb.toLowerCase()})</span>
+              </div>
               <ul>
                 {#each renames as r (r.id)}
                   <li class="small" class:bad={!!r.problem}>
-                    <span class="mono">{fileName(r.from)}</span> → <span class="mono">{fileName(r.to)}</span>
+                    {#if moveKind === 'rename'}
+                      <span class="mono">{fileName(r.from)}</span> → <span class="mono">{fileName(r.to)}</span>
+                    {:else}
+                      <span class="mono">{r.from}</span> → <span class="mono">{r.to}</span>
+                    {/if}
                     {#if r.problem}<em>({r.problem})</em>{/if}
                   </li>
                 {/each}
               </ul>
-              <button class="primary" disabled={busy || !renamable.length} onclick={rename}>Rename {renamable.length} files</button>
+              <button class="primary" disabled={busy || !renamable.length} onclick={rename}>
+                {MOVE_WORDS[moveKind].verb} {renamable.length} files
+              </button>
               <button onclick={() => (renames = null)}>Cancel</button>
             </div>
           {/if}
@@ -618,7 +708,10 @@
               {/each}
               {#if review.length > 200}<li class="small muted">and {n(review.length - 200)} more</li>{/if}
             </ul>
-            <button class="primary" disabled={busy || !canEdit} onclick={approve}>Approve {n(review.length)} changes</button>
+            {#if blocked}<p class="small bad">{blocked} songs with changes are in view only folders.</p>{/if}
+            <button class="primary" disabled={busy || !canEdit || blocked > 0} onclick={approve}>
+              Approve {n(review.length)} changes
+            </button>
             <button class="small-button" disabled={busy} onclick={() => (pending = {})}>Throw them away</button>
           {:else}
             <p class="small muted">No changes yet. Click a cell to change it, or use the tools under the grid.</p>
@@ -839,6 +932,16 @@
   .pad {
     padding: 6px 10px;
     margin: 0;
+  }
+
+  .find {
+    display: flex;
+    gap: 6px;
+  }
+
+  .find input {
+    flex: 1;
+    min-width: 0;
   }
 
   .tools {

@@ -115,7 +115,53 @@ impl Store {
     }
 }
 
+/// At most this many words are looked for at once.
+pub const FIND_TERMS: usize = 5;
+
+macro_rules! finds {
+    ($n:literal) => {
+        concat!(
+            "instr(lower(coalesce(t.artist, '') || ' ' || coalesce(t.album_artist, '') || ' ' || t.title || ' ' || coalesce(t.album, '')), lower(?",
+            $n,
+            ")) > 0"
+        )
+    };
+}
+
 impl Store {
+    /// Songs whose artist, album artist, title or album holds any of
+    /// `terms` (any case), by artist, album and track; at most `limit`.
+    pub async fn editor_find(&self, terms: &[String], limit: i64) -> Result<Vec<EditorSong>> {
+        let term = |i: usize| {
+            terms
+                .get(i)
+                .filter(|t| !t.trim().is_empty())
+                .map(|t| t.trim().to_owned())
+        };
+        if (0..FIND_TERMS).all(|i| term(i).is_none()) {
+            return Ok(Vec::new());
+        }
+        Ok(sqlx::query_as(concat!(
+            "SELECT t.id, t.path, t.title, t.artist, t.album, t.album_artist, t.track_no,
+                    t.disc_no, t.year, t.genre, t.album_id,
+                    coalesce(t.art_hash, a.art_hash, a.online_art_hash) AS art_hash
+             FROM tracks t LEFT JOIN albums a ON a.id = t.album_id
+             WHERE t.removed_at IS NULL AND (",
+            finds!("1"), " OR ", finds!("2"), " OR ", finds!("3"), " OR ", finds!("4"), " OR ", finds!("5"),
+            ") ORDER BY lower(coalesce(t.album_artist, t.artist, '')), lower(coalesce(t.album, '')),
+                       t.disc_no, t.track_no, t.path
+             LIMIT ?6"
+        ))
+        .bind(term(0))
+        .bind(term(1))
+        .bind(term(2))
+        .bind(term(3))
+        .bind(term(4))
+        .bind(limit.clamp(1, 2000))
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
     /// These songs as the editor's grid shows them, by path.
     pub async fn editor_songs_by_id(&self, ids: &[i64]) -> Result<Vec<EditorSong>> {
         let list = format!(
@@ -175,5 +221,25 @@ mod tests {
         assert_eq!((songs.len() as i64, total), (5, 5));
         let (page, _) = store.editor_songs("/pool/A", 1, 1).await.unwrap();
         assert_eq!(page[0].path, "/pool/A/Artist One/Album x/2.mp3");
+        // Found by any of the words, in any case.
+        let found = store
+            .editor_find(&["ALBUM X".into(), "other".into()], 100)
+            .await
+            .unwrap();
+        assert_eq!(
+            found.len(),
+            1,
+            "only the title other.mp3; no album tags here"
+        );
+        let found = store
+            .editor_find(&["loose".into(), "2.MP3".into()], 100)
+            .await
+            .unwrap();
+        assert_eq!(found.len(), 2);
+        assert!(store
+            .editor_find(&[" ".into()], 100)
+            .await
+            .unwrap()
+            .is_empty());
     }
 }

@@ -5,8 +5,8 @@
   import EditorWorkspace from './EditorWorkspace.svelte'
   import LibraryCompare from './LibraryCompare.svelte'
 
-  /** A folder another page asked to open. */
-  const startFolder = takeEditorJump()
+  /** A folder or search another page asked for. */
+  const start = takeEditorJump()
 
   let view = $state<'editor' | 'compare'>('editor')
 </script>
@@ -21,7 +21,7 @@
 </div>
 
 {#if view === 'editor'}
-  <EditorWorkspace {startFolder} />
+  <EditorWorkspace startFolder={start.folder} startSearch={start.search} />
 {:else}
   <LibraryCompare />
 {/if}

@@ -1473,6 +1473,8 @@ export interface EditorSong {
   genre: string | null
   album_id: number | null
   art_hash: string | null
+  /** Its folder allows changes to the file. */
+  editable: boolean
   /** What the file says (editing the library); null if it couldn't be read. */
   file: {
     title: string

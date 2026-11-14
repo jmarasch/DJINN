@@ -111,6 +111,15 @@ impl Store {
         Ok(())
     }
 
+    /// A song set aside comes back.
+    pub async fn mark_restored(&self, track_id: i64) -> Result<()> {
+        sqlx::query("UPDATE tracks SET removed_at = NULL WHERE id = ?")
+            .bind(track_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     /// A song's file moved (a rename): its record follows.
     pub async fn move_track_path(&self, track_id: i64, path: &str) -> Result<()> {
         sqlx::query("UPDATE tracks SET path = ? WHERE id = ?")

@@ -293,9 +293,10 @@ export const api = {
     ),
   editorTree: (path: string) =>
     get<{ folders: EditorNode[]; songs_here: number }>(`/editor/tree?path=${encodeURIComponent(path)}`),
-  editorSongs: (folder: string, offset: number, files: boolean) =>
+  /** A folder's songs, or with `search` (words split by |) songs found across the library. */
+  editorSongs: (folder: string, offset: number, files: boolean, search = '') =>
     get<{ total: number; editable: boolean; songs: EditorSong[] }>(
-      `/editor/songs?folder=${encodeURIComponent(folder)}&offset=${offset}&files=${files}`,
+      `/editor/songs?folder=${encodeURIComponent(folder)}&offset=${offset}&files=${files}&search=${encodeURIComponent(search)}`,
     ),
   /** Approves the editor's changes: into DJINN's database or the files. */
   editorApply: (target: EditTarget, changes: EditorChange[]) =>
@@ -313,6 +314,9 @@ export const api = {
   },
   editorRename: (ids: number[], pattern: string, preview: boolean) =>
     post<{ files: EditorRenamed[]; batch: number | null }>('/editor/rename', { ids, pattern, preview }),
+  /** Moves songs to a folder (keeping their names), or sets them aside out of the library. */
+  editorMove: (ids: number[], to: { folder: string } | { set_aside: true }, preview: boolean) =>
+    post<{ files: EditorRenamed[]; batch: number | null }>('/editor/move', { ids, ...to, preview }),
   editableFolders: () => get<EditableFolder[]>('/library/editable'),
   setFolderEditable: (path: string, editable: boolean) => put<void>('/library/editable', { path, editable }),
   startLibraryCompare: () => post<void>('/library/compare'),

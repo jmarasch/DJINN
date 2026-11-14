@@ -54,6 +54,10 @@ pub const KEEP_WHOLE_KEY: &str = "artist_keep_whole";
 pub const ORIGINAL_YEARS_KEY: &str = "original_years";
 
 /// Whether years come from the original release, on unless turned off.
+/// The folder (in a library folder) where the library editor puts songs
+/// set aside; library checks skip it.
+pub const SET_ASIDE: &str = ".djinn-set-aside";
+
 pub async fn original_years(store: &Store) -> Result<bool, LibraryError> {
     Ok(store.get_setting(ORIGINAL_YEARS_KEY).await?.as_deref() != Some("0"))
 }
@@ -278,7 +282,11 @@ fn walk(roots: &[PathBuf]) -> (Vec<FoundFile>, Vec<PathBuf>, Vec<ScanProblem>) {
             continue;
         }
         available.push(root.clone());
-        for entry in WalkDir::new(root).follow_links(true) {
+        let walk = WalkDir::new(root)
+            .follow_links(true)
+            .into_iter()
+            .filter_entry(|e| e.file_name() != SET_ASIDE);
+        for entry in walk {
             let entry = match entry {
                 Ok(entry) => entry,
                 Err(e) => {

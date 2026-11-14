@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { openInEditor } from './editorJump.svelte'
+  import { findInEditor, openInEditor } from './editorJump.svelte'
   // Admin > Library > Problems: what the last library check couldn't add,
   // songs that won't play or whose tags couldn't be read, and gaps in the
   // tags, each with what to do about it. Kinds the admin already knows
@@ -271,6 +271,8 @@
                 {#if k.kind === 'duplicate_albums' && item.detail}<div class="small muted">{item.detail}</div>{/if}
                 {#if item.path}
                   <button class="small-button done" onclick={() => openInEditor(folder(item.path ?? ''))}>Fix in the editor</button>
+                {:else if item.artist}
+                  <button class="small-button done" onclick={() => findInEditor([item.album ?? item.artist ?? ''])}>Fix in the editor</button>
                 {/if}
               {:else if item.track_id !== null}
                 {#if item.album_id !== null}
@@ -311,6 +313,9 @@
                   <div class="path small mono">{folder(item.path)}</div>
                 {/if}
                 {#if item.detail && k.kind !== 'unsupported'}<div class="small muted">{item.detail}</div>{/if}
+                {#if k.kind === 'artist_variants' && item.detail}
+                  <button class="small-button done" onclick={() => findInEditor(item.detail.split('/'))}>Fix in the editor</button>
+                {/if}
               {/if}
             </li>
           {/each}

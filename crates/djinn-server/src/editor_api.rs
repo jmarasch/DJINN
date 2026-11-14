@@ -23,6 +23,8 @@ use crate::protected::{audit, Elevated};
 use crate::state::AppState;
 
 const PAGE: i64 = 200;
+/// The most songs a search shows.
+const FIND_LIMIT: i64 = 1000;
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -36,6 +38,7 @@ pub fn router() -> Router<AppState> {
             post(cover).layer(axum::extract::DefaultBodyLimit::max(COVER_MAX)),
         )
         .route("/editor/rename", post(rename))
+        .route("/editor/move", post(move_songs))
 }
 
 /// The most field changes one approval takes.
@@ -128,7 +131,13 @@ async fn tree(
 
 #[derive(Deserialize)]
 struct SongsQuery {
+    /// A folder's songs, at any depth.
+    #[serde(default)]
     folder: String,
+    /// Or songs found by words (any of them, split by "|") in their
+    /// artist, album artist, title or album, across the library.
+    #[serde(default)]
+    search: String,
     #[serde(default)]
     offset: i64,
     /// Also read each file's own tags (editing the library, not the database).
@@ -142,6 +151,8 @@ struct Row {
     song: EditorSong,
     /// What the file says, when asked for; None if it couldn't be read.
     file: Option<FileTags>,
+    /// Its folder allows changes to the file.
+    editable: bool,
 }
 
 #[derive(Serialize)]
@@ -157,15 +168,29 @@ async fn songs(
     State(state): State<AppState>,
     Query(query): Query<SongsQuery>,
 ) -> ApiResult<Json<Songs>> {
-    inside_library(&state, &query.folder).await?;
-    let editable = editable_roots(&state)
-        .await?
-        .iter()
-        .any(|root| Path::new(&query.folder).starts_with(root));
-    let (found, total) = state
-        .store
-        .editor_songs(&query.folder, query.offset, PAGE)
-        .await?;
+    let roots = editable_roots(&state).await?;
+    let (found, total) = if query.search.trim().is_empty() {
+        inside_library(&state, &query.folder).await?;
+        state
+            .store
+            .editor_songs(&query.folder, query.offset, PAGE)
+            .await?
+    } else {
+        let terms: Vec<String> = query
+            .search
+            .split('|')
+            .map(|t| t.trim().chars().take(100).collect::<String>())
+            .filter(|t| !t.is_empty())
+            .take(djinn_store::FIND_TERMS)
+            .collect();
+        let found = state.store.editor_find(&terms, FIND_LIMIT).await?;
+        let total = i64::try_from(found.len()).unwrap_or(0);
+        (found, total)
+    };
+    let editable = !query.folder.is_empty()
+        && roots
+            .iter()
+            .any(|root| Path::new(&query.folder).starts_with(root));
     let files: Vec<Option<FileTags>> = if query.files {
         let original_years = djinn_library::original_years(&state.store).await?;
         let paths: Vec<String> = found.iter().map(|s| s.path.clone()).collect();
@@ -186,7 +211,13 @@ async fn songs(
         songs: found
             .into_iter()
             .zip(files)
-            .map(|(song, file)| Row { song, file })
+            .map(|(song, file)| Row {
+                editable: roots
+                    .iter()
+                    .any(|root| Path::new(&song.path).starts_with(root)),
+                song,
+                file,
+            })
             .collect(),
     }))
 }
@@ -528,8 +559,11 @@ async fn undo(
                 .map_err(|e| e.to_string())
                 .and_then(|r| r)
             }
-            "rename" => {
+            "rename" | "set-aside" => {
                 let (old, new) = (edit.before.clone(), edit.after.clone());
+                if let Some(parent) = Path::new(&old).parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
                 match move_file(&new, &old) {
                     Ok(()) => {
                         let lrc = Path::new(&new).with_extension("lrc");
@@ -539,6 +573,9 @@ async fn undo(
                         }
                         if let Some(track) = edit.track_id {
                             state.store.move_track_path(track, &old).await?;
+                            if edit.kind == "set-aside" {
+                                state.store.mark_restored(track).await?;
+                            }
                         }
                         Ok((old, new.clone(), edit.before.clone()))
                     }
@@ -868,16 +905,51 @@ async fn rename(
     if body.preview {
         return Ok(Json(RenameResult { files, batch: None }));
     }
-    all_editable(
+    let (batch, moved) = relocate(&state, &user, &mut files, "rename").await?;
+    audit(
         &state,
-        &files.iter().map(|f| f.from.as_str()).collect::<Vec<_>>(),
+        &user,
+        device.ip.as_deref(),
+        "editor_rename",
+        &format!("{} files, approval {batch}", moved),
+    )
+    .await;
+    Ok(Json(RenameResult {
+        files,
+        batch: (moved > 0).then_some(batch),
+    }))
+}
+
+/// Moves each file without a problem (with the `.lrc` beside it), points
+/// its song at the new place and records it as one approval of `kind`
+/// ("rename" or "set-aside", which also takes the song out of the
+/// library). Returns the approval and how many moved.
+async fn relocate(
+    state: &AppState,
+    user: &djinn_store::User,
+    files: &mut [Renamed],
+    kind: &str,
+) -> ApiResult<(i64, usize)> {
+    all_editable(
+        state,
+        &files
+            .iter()
+            .flat_map(|f| [f.from.as_str(), f.to.as_str()])
+            .collect::<Vec<_>>(),
     )
     .await?;
     let batch = state.store.next_file_batch().await?;
     let mut moved = Vec::new();
-    for file in &mut files {
+    let mut aside = Vec::new();
+    for file in files.iter_mut() {
         if file.problem.is_some() {
             continue;
+        }
+        if let Some(parent) = Path::new(&file.to).parent() {
+            if let Err(e) = std::fs::create_dir_all(parent) {
+                file.problem = Some(e.to_string());
+                continue;
+            }
         }
         if let Err(e) = move_file(&file.from, &file.to) {
             file.problem = Some(e);
@@ -899,7 +971,7 @@ async fn rename(
                 batch,
                 track_id: Some(file.id),
                 path: &file.to,
-                kind: "rename",
+                kind,
                 before: &file.from,
                 after: &file.to,
                 size,
@@ -907,22 +979,121 @@ async fn rename(
                 made_by: Some(user.id),
             })
             .await?;
-        moved.push(file.to.clone());
+        if kind == "set-aside" {
+            aside.push(file.id);
+        } else {
+            moved.push(file.to.clone());
+        }
+    }
+    if !aside.is_empty() {
+        state.store.mark_removed(&aside).await?;
+        state.store.refresh_artwork().await?;
+        let _ = state
+            .events
+            .send(crate::events::ServerEvent::LibraryChanged);
     }
     if !moved.is_empty() {
-        crate::library_api::reread(&state, &moved).await?;
+        crate::library_api::reread(state, &moved).await?;
     }
+    Ok((batch, moved.len() + aside.len()))
+}
+
+#[derive(Deserialize)]
+struct Move {
+    ids: Vec<i64>,
+    /// The folder to move them to (inside a library folder), keeping their
+    /// names; or none with `set_aside`.
+    #[serde(default)]
+    folder: Option<String>,
+    /// Out of the library: into `.djinn-set-aside` in the song's own library
+    /// folder, keeping its place under it. A library check skips it, and
+    /// undo brings it back.
+    #[serde(default)]
+    set_aside: bool,
+    #[serde(default)]
+    preview: bool,
+}
+
+async fn move_songs(
+    Elevated(user): Elevated,
+    device: Device,
+    State(state): State<AppState>,
+    Json(body): Json<Move>,
+) -> ApiResult<Json<RenameResult>> {
+    if body.ids.is_empty() || body.ids.len() > 5_000 {
+        return Err(ApiError::bad_request("choose 1 to 5000 songs"));
+    }
+    let roots = crate::folders::library_roots(&state).await?;
+    let folder = match (&body.folder, body.set_aside) {
+        (_, true) => None,
+        (Some(folder), false) if !folder.trim().is_empty() => {
+            let folder = PathBuf::from(folder.trim());
+            if !roots.iter().any(|r| folder.starts_with(r))
+                || folder
+                    .components()
+                    .any(|c| matches!(c, std::path::Component::ParentDir))
+            {
+                return Err(ApiError::bad_request("that isn't inside a library folder"));
+            }
+            Some(folder)
+        }
+        _ => return Err(ApiError::bad_request("choose the folder to move them to")),
+    };
+    let songs = state.store.editor_songs_by_id(&body.ids).await?;
+    let mut files = Vec::new();
+    let mut taken = std::collections::HashSet::new();
+    for song in &songs {
+        let from = PathBuf::from(&song.path);
+        let to = match &folder {
+            Some(folder) => from.file_name().map(|name| folder.join(name)),
+            None => roots.iter().find(|r| from.starts_with(r)).and_then(|root| {
+                from.strip_prefix(root)
+                    .ok()
+                    .map(|rel| root.join(djinn_library::SET_ASIDE).join(rel))
+            }),
+        };
+        let Some(to) = to else { continue };
+        let to_text = to.to_string_lossy().into_owned();
+        let problem = if to == from {
+            Some("it's there already".to_owned())
+        } else if !taken.insert(to_text.to_lowercase()) {
+            Some("another song would get the same place".to_owned())
+        } else if to.exists() {
+            Some("a file with that name is there already".to_owned())
+        } else {
+            None
+        };
+        files.push(Renamed {
+            id: song.id,
+            from: song.path.clone(),
+            to: to_text,
+            problem,
+        });
+    }
+    if body.preview {
+        return Ok(Json(RenameResult { files, batch: None }));
+    }
+    let kind = if body.set_aside {
+        "set-aside"
+    } else {
+        "rename"
+    };
+    let (batch, moved) = relocate(&state, &user, &mut files, kind).await?;
     audit(
         &state,
         &user,
         device.ip.as_deref(),
-        "editor_rename",
-        &format!("{} files, approval {batch}", moved.len()),
+        if body.set_aside {
+            "editor_set_aside"
+        } else {
+            "editor_move"
+        },
+        &format!("{moved} files, approval {batch}"),
     )
     .await;
     Ok(Json(RenameResult {
         files,
-        batch: (!moved.is_empty()).then_some(batch),
+        batch: (moved > 0).then_some(batch),
     }))
 }
 
@@ -1034,6 +1205,17 @@ mod tests {
             state.store.tag_edit(pool_song).await.unwrap().track_no,
             Some(4)
         );
+        // Found by words across the library, each saying if its file may change.
+        let (_, found) = get_body(
+            &state,
+            "/api/editor/songs?search=nothing%20here%20%7C%20FIXED",
+            &admin,
+        )
+        .await;
+        assert!(
+            found.contains("\"title\":\"Fixed\"") && found.contains("\"editable\":false"),
+            "{found}"
+        );
         // A bad value is refused.
         let bad = format!(
             r#"{{"target":"database","changes":[{{"id":{pool_song},"field":"year","value":"85"}}]}}"#
@@ -1129,6 +1311,44 @@ mod tests {
         assert_eq!(
             std::fs::read(pool.join("song.flac")).unwrap(),
             std::fs::read(&fixture).unwrap()
+        );
+        // Set aside: out of the library, into the hidden folder; undo brings it back.
+        let aside = format!(r#"{{"ids":[{quar_song}],"set_aside":true}}"#);
+        let (status, text) = post_json(&state, "/api/editor/move", &aside, &admin).await;
+        assert_eq!(status, StatusCode::OK, "{text}");
+        let hidden = quar.join(djinn_library::SET_ASIDE).join("song.flac");
+        assert!(hidden.exists() && !quar_file.exists());
+        let in_quar = |state: AppState, dir: std::path::PathBuf| async move {
+            state
+                .store
+                .editor_songs(&dir.to_string_lossy(), 0, 10)
+                .await
+                .unwrap()
+                .1
+        };
+        assert_eq!(
+            in_quar(state.clone(), quar.clone()).await,
+            0,
+            "out of the library"
+        );
+        let set_aside: i64 = serde_json::from_str::<serde_json::Value>(&text).unwrap()["batch"]
+            .as_i64()
+            .unwrap();
+        let (status, _) =
+            post_json(&state, &format!("/api/editor/undo/{set_aside}"), "", &admin).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(quar_file.exists() && !hidden.exists());
+        assert_eq!(in_quar(state.clone(), quar.clone()).await, 1, "back in");
+        // Moving into the pool (view only) is refused.
+        let into_pool = format!(
+            r#"{{"ids":[{quar_song}],"folder":"{}"}}"#,
+            pool.to_string_lossy()
+        );
+        assert_eq!(
+            post_json(&state, "/api/editor/move", &into_pool, &admin)
+                .await
+                .0,
+            StatusCode::FORBIDDEN
         );
         std::fs::remove_dir_all(base).ok();
     }
