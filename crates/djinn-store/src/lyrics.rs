@@ -281,6 +281,9 @@ impl Store {
     }
 
     /// Saves imported lyrics for a song with none (no row, or source 'none').
+    /// With `replace_other`, imported lyrics that rank better also replace
+    /// lyrics from a `.lrc` file, the tags or LRCLIB (timed over plain, say);
+    /// the song's file isn't read again for them until a recheck.
     /// Timed lyrics also take the place of imported plain ones; with
     /// `replace`, imported lyrics are replaced by newer ones (but never timed
     /// by plain). Lyrics from files, tags or LRCLIB are never touched, and
@@ -292,6 +295,7 @@ impl Store {
         replace: bool,
         ai: Option<&AiMark<'_>>,
         import_name: &str,
+        replace_other: bool,
     ) -> Result<BulkSave> {
         if self
             .lyrics_blocked(track_id, "bulk", found.synced, found.plain)
@@ -317,8 +321,12 @@ impl Store {
                instrumental = excluded.instrumental, source = 'bulk',
                ai = excluded.ai, ai_model = excluded.ai_model, ai_match = excluded.ai_match,
                import_name = excluded.import_name, imported_at = excluded.imported_at,
-               file_mtime = NULL, updated_at = excluded.updated_at
+               file_mtime = CASE WHEN lyrics.source IN ('lrc', 'file', 'lrclib')
+                                 THEN (SELECT mtime FROM tracks WHERE id = lyrics.track_id) END,
+               updated_at = excluded.updated_at
              WHERE lyrics.source = 'none'
+                OR (?12 AND lyrics.source IN ('lrc', 'file', 'lrclib')
+                    AND ?11 > CASE WHEN lyrics.synced IS NOT NULL THEN 4 ELSE 2 END)
                 OR (lyrics.source = 'bulk'
                     AND (?11 > CASE WHEN lyrics.ai = 2 THEN 3 WHEN lyrics.ai = 1 THEN 1
                                     WHEN lyrics.synced IS NOT NULL THEN 4 ELSE 2 END
@@ -336,6 +344,7 @@ impl Store {
         .bind(track_id)
         .bind(replace)
         .bind(rank)
+        .bind(replace_other)
         .execute(&self.pool)
         .await?;
         Ok(if done.rows_affected() > 0 {
@@ -641,7 +650,7 @@ mod tests {
             let store = &store;
             async move {
                 store
-                    .save_bulk_lyrics(id, &bulk(text), replace, None, "z")
+                    .save_bulk_lyrics(id, &bulk(text), replace, None, "z", false)
                     .await
                     .unwrap()
                     == BulkSave::Saved
@@ -710,7 +719,7 @@ mod tests {
         };
         assert_eq!(
             store
-                .save_bulk_lyrics(ids[0], &plain, false, None, "z")
+                .save_bulk_lyrics(ids[0], &plain, false, None, "z", false)
                 .await
                 .unwrap(),
             BulkSave::Saved
@@ -718,7 +727,7 @@ mod tests {
         // Timed takes the place of plain without being asked to replace.
         assert_eq!(
             store
-                .save_bulk_lyrics(ids[0], &timed, false, None, "z")
+                .save_bulk_lyrics(ids[0], &timed, false, None, "z", false)
                 .await
                 .unwrap(),
             BulkSave::Saved
@@ -726,7 +735,7 @@ mod tests {
         // Plain never takes the place of timed, even when replacing.
         assert_eq!(
             store
-                .save_bulk_lyrics(ids[0], &plain, true, None, "z")
+                .save_bulk_lyrics(ids[0], &plain, true, None, "z", false)
                 .await
                 .unwrap(),
             BulkSave::Kept
@@ -792,7 +801,7 @@ mod tests {
         };
         assert_eq!(
             store
-                .save_bulk_lyrics(ids[0], &bulk, false, None, "z")
+                .save_bulk_lyrics(ids[0], &bulk, false, None, "z", false)
                 .await
                 .unwrap(),
             BulkSave::Saved
@@ -803,7 +812,7 @@ mod tests {
         );
         assert_eq!(
             store
-                .save_bulk_lyrics(ids[0], &bulk, false, None, "z")
+                .save_bulk_lyrics(ids[0], &bulk, false, None, "z", false)
                 .await
                 .unwrap(),
             BulkSave::Blocked
@@ -814,7 +823,7 @@ mod tests {
         };
         assert_eq!(
             store
-                .save_bulk_lyrics(ids[0], &fixed, false, None, "z")
+                .save_bulk_lyrics(ids[0], &fixed, false, None, "z", false)
                 .await
                 .unwrap(),
             BulkSave::Saved
@@ -855,7 +864,7 @@ mod tests {
             let store = &store;
             async move {
                 store
-                    .save_bulk_lyrics(id, &l, replace, ai.as_ref(), "batch.zip")
+                    .save_bulk_lyrics(id, &l, replace, ai.as_ref(), "batch.zip", false)
                     .await
                     .unwrap()
             }
@@ -968,6 +977,78 @@ mod tests {
         let got = store.lyrics(ids[1]).await.unwrap().unwrap();
         assert!((got.source.as_str(), got.ai) == ("lrclib", 0));
         assert_eq!(store.lyrics_counts().await.unwrap().ai, 0);
+    }
+
+    #[tokio::test]
+    async fn imports_may_replace_lyrics_from_other_sources_when_allowed_and_better() {
+        let (store, ids) = store_with(&["One", "Two"]).await;
+        let plain_file = NewLyrics {
+            synced: None,
+            plain: Some("plain from a tag"),
+            instrumental: false,
+            source: "file",
+        };
+        let timed_file = NewLyrics {
+            synced: Some("[00:01.00]timed from a file"),
+            plain: Some("timed from a file"),
+            instrumental: false,
+            source: "lrc",
+        };
+        store
+            .save_read_lyrics(ids[0], 7, &plain_file)
+            .await
+            .unwrap();
+        store
+            .save_read_lyrics(ids[1], 7, &timed_file)
+            .await
+            .unwrap();
+        let timed_import = NewLyrics {
+            synced: Some("[00:01.00]timed import"),
+            plain: Some("timed import"),
+            instrumental: false,
+            source: "bulk",
+        };
+        let sync = AiMark {
+            kind: 2,
+            model: "m",
+            match_pct: Some(90),
+        };
+        let go = |id: i64, other: bool, ai: Option<AiMark<'static>>| {
+            let store = &store;
+            let l = NewLyrics {
+                ..timed_import_ref(&timed_import)
+            };
+            async move {
+                store
+                    .save_bulk_lyrics(id, &l, false, ai.as_ref(), "z.zip", other)
+                    .await
+                    .unwrap()
+            }
+        };
+        // Not allowed: the tag's lyrics stay.
+        assert_eq!(go(ids[0], false, None).await, BulkSave::Kept);
+        // Allowed: timed beats the tag's plain words, and the file isn't read over it.
+        assert_eq!(go(ids[0], true, None).await, BulkSave::Saved);
+        assert_eq!(store.lyrics(ids[0]).await.unwrap().unwrap().source, "bulk");
+        assert!(store
+            .lyrics_to_read(10)
+            .await
+            .unwrap()
+            .iter()
+            .all(|t| t.id != ids[0]));
+        // A person's timed lyrics are not replaced by the AI's timing, nor by equal ones.
+        assert_eq!(go(ids[1], true, Some(sync.clone())).await, BulkSave::Kept);
+        assert_eq!(go(ids[1], true, None).await, BulkSave::Kept);
+        assert_eq!(store.lyrics(ids[1]).await.unwrap().unwrap().source, "lrc");
+    }
+
+    fn timed_import_ref<'a>(l: &NewLyrics<'a>) -> NewLyrics<'a> {
+        NewLyrics {
+            synced: l.synced,
+            plain: l.plain,
+            instrumental: l.instrumental,
+            source: l.source,
+        }
     }
 
     #[tokio::test]

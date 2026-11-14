@@ -151,6 +151,8 @@ export const adminEntries: AdminEntry[] = [
   { label: 'Lyrics page', tab: 'library', keywords: 'lyrics tv screen /lyrics karaoke', key: 'lyrics_page' },
   { label: 'Export .lrc files', tab: 'library', keywords: 'lyrics export zip lrc download' },
   { label: 'Allow removed lyrics again', tab: 'library', keywords: 'lyrics removed blocked bad wrong report undo' },
+  { label: 'Show a note on lyrics an AI worked on', tab: 'library', keywords: 'lyrics ai note made timed', key: 'lyrics_ai_note' },
+  { label: 'Let better imported lyrics replace lyrics from files, tags and LRCLIB', tab: 'library', keywords: 'lyrics import replace timed ai synced' },
   { label: 'Import lyrics from a zip', tab: 'library', keywords: 'lyrics import zip lrc txt bulk upload' },
   { label: 'Remove all imported lyrics', tab: 'system', keywords: 'lyrics imported zip bulk reset clear remove' },
   { label: 'Recheck lyrics', tab: 'library', keywords: 'lyrics reread lrc' },

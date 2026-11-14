@@ -68,6 +68,8 @@ pub struct Warning {
 pub struct Report {
     pub file: String,
     pub replace: bool,
+    /// Imported lyrics that rank better also replaced lyrics from files, tags and LRCLIB.
+    pub replace_other: bool,
     pub even_if_unasked: bool,
     pub started_at: i64,
     pub finished_at: Option<i64>,
@@ -249,6 +251,9 @@ struct UploadQuery {
     /// Import even for songs LRCLIB hasn't been asked about yet.
     #[serde(default)]
     unasked: bool,
+    /// Let better imported lyrics replace those from files, tags and LRCLIB.
+    #[serde(default)]
+    replace_other: bool,
 }
 
 /// Takes a zip as the request body and imports it in the background.
@@ -270,6 +275,7 @@ async fn upload(
             let options = Options {
                 replace: query.replace,
                 unasked: query.unasked,
+                replace_other: query.replace_other,
             };
             let name: String = query
                 .name
@@ -284,6 +290,7 @@ async fn upload(
                     *guard = Some(Report {
                         file: name,
                         replace: options.replace,
+                        replace_other: options.replace_other,
                         even_if_unasked: options.unasked,
                         started_at: djinn_store::now_ms(),
                         ..Report::default()
@@ -484,6 +491,7 @@ impl Library {
 struct Options {
     replace: bool,
     unasked: bool,
+    replace_other: bool,
 }
 
 /// One zip entry read and checked, ready to match.
@@ -696,7 +704,14 @@ async fn save_chunk(
         };
         match state
             .store
-            .save_bulk_lyrics(m.id, &new, options.replace, mark.as_ref(), &import_name)
+            .save_bulk_lyrics(
+                m.id,
+                &new,
+                options.replace,
+                mark.as_ref(),
+                &import_name,
+                options.replace_other,
+            )
             .await?
         {
             BulkSave::Saved => {
@@ -853,6 +868,7 @@ mod tests {
             Options {
                 replace: false,
                 unasked: false,
+                replace_other: false,
             },
         )
         .await;
@@ -888,6 +904,7 @@ mod tests {
             Options {
                 replace: false,
                 unasked: false,
+                replace_other: false,
             },
         )
         .await;
@@ -899,6 +916,7 @@ mod tests {
             Options {
                 replace: true,
                 unasked: false,
+                replace_other: false,
             },
         )
         .await;
@@ -921,6 +939,7 @@ mod tests {
             Options {
                 replace: false,
                 unasked: false,
+                replace_other: false,
             },
         )
         .await;
@@ -932,6 +951,7 @@ mod tests {
             Options {
                 replace: false,
                 unasked: true,
+                replace_other: false,
             },
         )
         .await;

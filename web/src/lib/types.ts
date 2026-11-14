@@ -1553,6 +1553,8 @@ export interface LyricsImportStatus {
 export interface LyricsSettings {
   lookup: boolean
   page: boolean
+  /** Show a note on lyrics an AI worked on. */
+  ai_note: boolean
 }
 
 /** Another DJINN box playing a room on its own speakers. */

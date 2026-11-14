@@ -12,6 +12,7 @@
   let files = $state<FileList | null>(null)
   let replace = $state(false)
   let unasked = $state(false)
+  let replaceOther = $state(false)
   let sending = $state(false)
   const n = (x: number) => x.toLocaleString()
 
@@ -63,7 +64,7 @@
     sending = true
     try {
       for (const file of Array.from(files)) {
-        await api.importLyrics(file, replace, unasked)
+        await api.importLyrics(file, replace, unasked, replaceOther)
         // Wait for it to finish before the next.
         for (;;) {
           await new Promise((r) => setTimeout(r, 1500))
@@ -132,6 +133,13 @@
       {#if settings.lookup && status && status.not_looked_up > 0}{n(status.not_looked_up)} songs still to ask about.{/if}
     </p>
     <label class="switch">
+      <input type="checkbox" bind:checked={settings.ai_note} onchange={save} />
+      Show a note on lyrics an AI worked on
+    </label>
+    <p class="small muted sub">
+      A line under the lyrics saying an AI made the words, or timed them. On by default.
+    </p>
+    <label class="switch">
       <input type="checkbox" bind:checked={settings.page} onchange={save} />
       Lyrics page
     </label>
@@ -171,6 +179,14 @@
     <input type="checkbox" bind:checked={replace} />
     Replace lyrics from an earlier import
   </label>
+  <label class="switch">
+    <input type="checkbox" bind:checked={replaceOther} />
+    Let better imported lyrics replace lyrics from files, tags and LRCLIB
+  </label>
+  <p class="small muted sub">
+    "Better" means timed over plain, or a person's words timed by an AI over plain words. Lyrics an AI made by listening
+    never replace anyone's, and nothing replaces a person's timed lyrics with equal or worse ones.
+  </p>
   <label class="switch">
     <input type="checkbox" bind:checked={unasked} />
     Import even if LRCLIB has not been asked about the song yet

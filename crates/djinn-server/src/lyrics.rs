@@ -27,6 +27,8 @@ use crate::state::AppState;
 pub const LYRICS_LOOKUP: &str = "lyrics_lookup";
 /// Setting key: the public lyrics page; on unless "0".
 pub const LYRICS_PAGE: &str = "lyrics_page";
+/// Setting key: show a note on lyrics an AI worked on; on unless "0".
+pub const LYRICS_AI_NOTE: &str = "lyrics_ai_note";
 
 /// Files read between checks on whether heavy work may run.
 const READ_BATCH: i64 = 200;
@@ -270,7 +272,14 @@ impl From<StoredLyrics> for LyricsView {
 }
 
 pub async fn lyrics_for(state: &AppState, track_id: i64) -> ApiResult<Option<LyricsView>> {
-    Ok(state.store.lyrics(track_id).await?.map(LyricsView::from))
+    let mut view = state.store.lyrics(track_id).await?.map(LyricsView::from);
+    // The admin can turn the note about AI-made lyrics off.
+    if let Some(v) = view.as_mut() {
+        if !settings::flag(&state.store, LYRICS_AI_NOTE, true).await? {
+            v.ai = None;
+        }
+    }
+    Ok(view)
 }
 
 async fn track_lyrics(
@@ -351,6 +360,7 @@ async fn status(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json<S
 struct LyricsSettings {
     lookup: bool,
     page: bool,
+    ai_note: bool,
 }
 
 async fn get_settings(
@@ -360,6 +370,7 @@ async fn get_settings(
     Ok(Json(LyricsSettings {
         lookup: settings::flag(&state.store, LYRICS_LOOKUP, true).await?,
         page: page_on(&state).await?,
+        ai_note: settings::flag(&state.store, LYRICS_AI_NOTE, true).await?,
     }))
 }
 
@@ -371,6 +382,7 @@ async fn put_settings(
     let was = settings::flag(&state.store, LYRICS_LOOKUP, true).await?;
     settings::set_flag(&state.store, LYRICS_LOOKUP, body.lookup).await?;
     settings::set_flag(&state.store, LYRICS_PAGE, body.page).await?;
+    settings::set_flag(&state.store, LYRICS_AI_NOTE, body.ai_note).await?;
     if body.lookup && !was {
         start(&state);
     }

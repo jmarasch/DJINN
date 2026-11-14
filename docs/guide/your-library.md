@@ -160,6 +160,8 @@ Admin > Library > Lyrics can load lyrics from a zip of files. DJINN keeps them i
 
 **What it does.** It only fills songs that have no lyrics. Lyrics from a `.lrc` beside the song, from the song's tags or from LRCLIB always win. By default it skips songs LRCLIB hasn't been asked about yet (while the LRCLIB lookup is on), so LRCLIB gets the first go; a tick box imports them anyway. Songs that already hold lyrics from an earlier import keep them unless you tick "Replace lyrics from an earlier import".
 
+**Replacing other lyrics.** Normally an import only fills songs that have none. Tick "Let better imported lyrics replace lyrics from files, tags and LRCLIB" and an import also replaces those when it ranks better: timed over plain, or a person's words timed by an AI over plain words. Nothing replaces a person's timed lyrics with equal or worse ones, and lyrics an AI made by listening never replace anyone's. The song's file isn't read over the replacement until a recheck. The note under lyrics that an AI worked on can be turned off in the same panel.
+
 **Safety.** Files are read only as text. A file that looks like code or markup (SQL, script or HTML tags, shell commands, binary data) is thrown out and listed as a warning, and program or data files in the zip (`.exe`, `.sql`, `.zip` and so on) are never read. Admin Home reminds you until you clear the report. The rest of the zip still imports.
 
 **Lyrics an AI worked on.** A file whose header says so is stored as such, with the model, the zip it came from and when. Two kinds, both listed under Problems as **Lyrics an AI made** (with how well the timing matched, for the second):

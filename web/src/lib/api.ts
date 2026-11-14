@@ -298,8 +298,13 @@ export const api = {
   lyricsImport: () => get<LyricsImportStatus>('/lyrics/import'),
   dismissLyricsImport: () => post<void>('/lyrics/import/dismiss'),
   /** Sends one zip of lyrics files; it's imported in the background. */
-  async importLyrics(file: File, replace: boolean, unasked: boolean): Promise<void> {
-    const query = new URLSearchParams({ name: file.name, replace: String(replace), unasked: String(unasked) })
+  async importLyrics(file: File, replace: boolean, unasked: boolean, replaceOther: boolean): Promise<void> {
+    const query = new URLSearchParams({
+      name: file.name,
+      replace: String(replace),
+      unasked: String(unasked),
+      replace_other: String(replaceOther),
+    })
     const res = await fetch(`/api/lyrics/import?${query}`, { method: 'POST', body: file })
     const data = res.ok ? null : await res.json().catch(() => null)
     if (!res.ok) throw new ApiError(res.status, data?.error ?? `Upload failed (${res.status})`)
