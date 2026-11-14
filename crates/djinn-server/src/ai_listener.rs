@@ -377,8 +377,12 @@ pub async fn mark_installed(d: &Path) -> Result<(), String> {
 }
 
 /// Makes the listener's private Python environment in `d` if it has none.
-pub async fn make_venv(d: &Path, log: impl Fn(&str)) -> Result<(), String> {
-    if !has_ffmpeg().await {
+/// This computer's listener needs ffmpeg (it prepares vocals for nodes);
+/// a node's doesn't (`need_ffmpeg` false), and a node without Debian's
+/// python3-venv gets an environment without pip, which it fills from
+/// Main's kit (`has_pip` tells).
+pub async fn make_venv(d: &Path, log: impl Fn(&str), need_ffmpeg: bool) -> Result<(), String> {
+    if need_ffmpeg && !has_ffmpeg().await {
         return Err("ffmpeg isn't installed on this computer; install it (Debian: sudo apt install ffmpeg) and try again".into());
     }
     let python = find_python().await.ok_or(
@@ -394,17 +398,43 @@ pub async fn make_venv(d: &Path, log: impl Fn(&str)) -> Result<(), String> {
             .status()
             .await
             .is_ok_and(|s| s.success());
-        if !ok {
+        if !ok && need_ffmpeg {
             return Err("couldn't make the Python environment (Debian needs python3-venv)".into());
+        }
+        if !ok {
+            // Debian without python3-venv: no pip in it, but it can be made.
+            let _ = tokio::fs::remove_dir_all(d.join(".venv")).await;
+            let bare = Command::new(&python)
+                .args(["-m", "venv", "--without-pip"])
+                .arg(d.join(".venv"))
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .await
+                .is_ok_and(|s| s.success());
+            if !bare {
+                return Err("couldn't make the Python environment".into());
+            }
         }
     }
     Ok(())
 }
 
+/// Whether the environment in `d` has pip.
+pub async fn has_pip(d: &Path) -> bool {
+    Command::new(venv_python(d))
+        .args(["-m", "pip", "--version"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .await
+        .is_ok_and(|s| s.success())
+}
+
 async fn install_into(d: &Path, model: &str, vocals: bool) -> Result<(), String> {
     write_pack(d).await?;
     note("Listener files written.");
-    make_venv(d, |line| note(line)).await?;
+    make_venv(d, |line| note(line), true).await?;
     let py = venv_python(d);
     let keep = keepsake(d);
     if let Some(keep) = &keep {

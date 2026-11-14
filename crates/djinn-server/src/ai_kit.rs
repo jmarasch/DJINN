@@ -166,7 +166,13 @@ async fn build(d: &Path, python: &str, arch: &str, model: &str) -> Result<Vec<Ki
         );
     }
     let wheels = wheels_dir(d, python, arch);
-    if !wheels.join(".done").is_file() {
+    // Kits made before they carried pip are made again.
+    let has_pip_wheel = std::fs::read_dir(&wheels).is_ok_and(|entries| {
+        entries
+            .flatten()
+            .any(|e| e.file_name().to_string_lossy().starts_with("pip-"))
+    });
+    if !wheels.join(".done").is_file() || !has_pip_wheel {
         fetch_wheels(d, &wheels, python, arch).await?;
     }
     ensure_model(d, model).await?;
@@ -221,7 +227,8 @@ async fn fetch_wheels(d: &Path, wheels: &Path, python: &str, arch: &str) -> Resu
         if let Some(keep) = offline {
             c.arg("--no-index").arg("--find-links").arg(keep);
         }
-        c.args(["-r", "requirements.txt", "-d"]).arg(wheels);
+        // pip itself too, for a node whose Python came without it.
+        c.args(["-r", "requirements.txt", "pip", "-d"]).arg(wheels);
         c
     };
     let from_keep = ai_listener::keepsake(d)

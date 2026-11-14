@@ -315,6 +315,14 @@ def _load_mono_16k_float(audio_path: str) -> np.ndarray:
             pcm = np.frombuffer(proc.stdout, dtype=np.int16)
             return pcm.astype(np.float32) / 32768.0
 
+    # Without ffmpeg (a DJINN node): faster-whisper's own decoder (PyAV).
+    try:
+        from faster_whisper.audio import decode_audio
+
+        return decode_audio(str(audio_path), sampling_rate=SAMPLE_RATE)
+    except ImportError:
+        pass
+
     # Stdlib WAV fallback if ffmpeg is unavailable and file is PCM WAV.
     with wave.open(str(audio_path), "rb") as wf:
         channels = wf.getnchannels()
@@ -524,11 +532,12 @@ class ListenerEngine:
         if self.separate_vocals_mode is True:
             return "demucs"
         if self.separate_vocals_mode is False:
-            return "ffmpeg" if self.vocal_filter else "none"
+            # Without ffmpeg (a DJINN node) the song is listened to as it is.
+            return "ffmpeg" if self.vocal_filter and self._caps["ffmpeg"] else "none"
         # Auto mode: use Demucs for Whisper backends when installed, else ffmpeg filter.
         if self.resolved_backend in ("faster-whisper", "whisper") and self._caps["demucs"]:
             return "demucs"
-        return "ffmpeg" if self.vocal_filter else "none"
+        return "ffmpeg" if self.vocal_filter and self._caps["ffmpeg"] else "none"
 
     def transcribe(self, audio_path: str) -> ListenTranscript:
         """Separate vocals (if enabled) and transcribe or analyze `audio_path`."""

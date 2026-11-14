@@ -288,7 +288,12 @@ async fn install(node: &Node, helper: &Helper, model: &str) -> Result<(), String
     let d = &helper.dir;
     helper.set("installing", Some("writing the listener".into()));
     ai_listener::write_pack(d).await?;
-    ai_listener::make_venv(d, |line| helper.set("installing", Some(line.to_owned()))).await?;
+    ai_listener::make_venv(
+        d,
+        |line| helper.set("installing", Some(line.to_owned())),
+        false,
+    )
+    .await?;
     let py = ai_listener::venv_python(d);
     let (python, arch) = python_kind(&py).await?;
     if let Ok(mut r) = helper.report.lock() {
@@ -358,6 +363,41 @@ async fn install(node: &Node, helper: &Helper, model: &str) -> Result<(), String
             fetch(node, &python, &arch, file, &target).await?;
         }
         got += file.size;
+    }
+    // An environment made without pip (no python3-venv) gets pip from the
+    // kit: a pip wheel runs as it is.
+    if !ai_listener::has_pip(d).await {
+        helper.set("installing", Some("putting pip in place".into()));
+        let wheel = std::fs::read_dir(d.join("kit"))
+            .map_err(|e| e.to_string())?
+            .flatten()
+            .map(|e| e.path())
+            .find(|p| {
+                p.file_name().is_some_and(|n| {
+                    let n = n.to_string_lossy();
+                    n.starts_with("pip-") && n.ends_with(".whl")
+                })
+            })
+            .ok_or("Main's kit has no pip; update Main and try again")?;
+        let ok = Command::new(&py)
+            .arg(wheel.join("pip"))
+            .args([
+                "install",
+                "--disable-pip-version-check",
+                "--quiet",
+                "--no-index",
+                "--find-links",
+            ])
+            .arg(d.join("kit"))
+            .arg("pip")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .await
+            .is_ok_and(|s| s.success());
+        if !ok {
+            return Err("couldn't put pip in place".into());
+        }
     }
     helper.set(
         "installing",
