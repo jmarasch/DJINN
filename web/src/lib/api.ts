@@ -564,6 +564,8 @@ export const api = {
   libraryProblems: () => get<ProblemSummary>('/library/problems'),
   libraryProblemList: (kind: ProblemKind, offset = 0) =>
     get<ProblemItem[]>(`/library/problems/${kind}?offset=${offset}&limit=100`),
+  setDuplicatesAcrossAlbums: (acrossAlbums: boolean) =>
+    put<void>('/library/duplicates/settings', { across_albums: acrossAlbums }),
   duplicates: (offset = 0) => get<DuplicateListing>(`/library/duplicates?offset=${offset}`),
   notDuplicates: (ids: number[]) => post<void>('/library/duplicates/dismiss', { ids }),
   reportSong: (id: number, reason: string, note?: string) => post<void>(`/tracks/${id}/report`, { reason, note }),

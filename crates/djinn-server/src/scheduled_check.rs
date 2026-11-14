@@ -110,7 +110,7 @@ async fn run(state: &AppState) -> anyhow::Result<Summary> {
             trouble += count;
         }
     }
-    let duplicates = i64::try_from(crate::duplicates::current(state).await?.groups.len())?;
+    let duplicates = i64::try_from(crate::duplicates::shown_count(state).await?)?;
     let summary = summarize(
         before.as_ref(),
         now_ms(),

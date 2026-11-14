@@ -846,6 +846,7 @@ export type ProblemKind =
   | 'album_no_cover'
   | 'album_no_year'
   | 'album_no_genre'
+  | 'duplicate_albums'
 
 export interface ProblemCount {
   kind: ProblemKind
@@ -900,6 +901,8 @@ export interface DuplicateListing {
   total: number
   songs: number
   groups: DuplicateGroup[]
+  /** Copies in different albums are listed too. */
+  across_albums: boolean
   sound_analysis: boolean
 }
 

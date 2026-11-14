@@ -41,6 +41,10 @@
       label: 'Lyrics listeners reported',
       hint: 'Listeners said these lyrics are wrong or bad. Remove and block takes them away and remembers where they came from, so that source is not used again for the song unless its text changes. Done clears the reports and keeps the lyrics.',
     },
+    duplicate_albums: {
+      label: 'Albums filed twice',
+      hint: "These albums by one artist hold almost the same songs: a copy in another folder, or the same album under a slightly different name. Keep the better one and remove the other from your music folders, then check for changes. A deluxe edition with extra songs isn't listed, and neither is a song that sits on several albums.",
+    },
     no_artist: {
       label: 'Songs with no artist',
       hint: 'Add the artist with Edit tags on the song, or in a tag editor.',
@@ -207,6 +211,7 @@
                 <a href="#/album/{item.album_id}">{item.album}</a>
                 <span class="muted"> · {item.artist}</span>
                 {#if item.path}<div class="path small mono">{folder(item.path)}</div>{/if}
+                {#if k.kind === 'duplicate_albums' && item.detail}<div class="small muted">{item.detail}</div>{/if}
               {:else if item.track_id !== null}
                 {#if item.album_id !== null}
                   <a href="#/album/{item.album_id}">{item.title}</a>

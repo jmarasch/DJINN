@@ -169,3 +169,12 @@ When it finishes, the panel shows what was saved and skipped, and the full repor
 ## Reporting bad lyrics
 
 On the Playing tab and in DJINN GO, **Report these lyrics** under a song's lyrics lets anyone say they are another song's, out of time, garbled, or missing parts. Reports show in Admin > Library > Problems as **Lyrics listeners reported**, with a button to look at the lyrics. **Remove and block** takes the lyrics away and remembers which source they came from (a `.lrc` file, the song's tags, LRCLIB or an import): that source's same text is not used for the song again. If the source gives different text later, it is used. **Done** clears the reports and keeps the lyrics. **Allow them again** in Admin > Library > Lyrics lifts every block.
+
+## Problems and duplicates
+
+Admin > Library > **Problems** lists what a library check couldn't add or found broken (missing folders, unreadable files, songs that won't play, listeners' reports) and gaps in the tags. One check is about copies:
+
+- **Albums filed twice** are albums by one artist that hold almost the same songs (at least 85% of the larger one's song titles, and nearly the same number of songs): a copy in another folder, or the same album under a slightly different name such as "(Remastered)". A deluxe edition with extra songs isn't listed.
+- **A song on several albums is fine.** A track on both its album and a greatest hits is not a problem. The **Possible duplicates** card lists copies of a song only when they are in the same album (or have no album); tick **Also list copies in different albums** to see the rest.
+
+DJINN never deletes anything: remove the copy you don't want from your music folders, then check for changes.

@@ -33,6 +33,12 @@ export const adminEntries: AdminEntry[] = [
     keywords: 'duplicates copies auto mix',
     key: 'avoid_copies',
   },
+  {
+    label: 'Also list copies in different albums',
+    tab: 'library',
+    keywords: 'duplicates copies songs albums greatest hits',
+    key: 'duplicates_across_albums',
+  },
   // Smart play
   { label: 'Learn from the party for wild play and radio', tab: 'smart', keywords: 'smart play learning', key: 'smart_play' },
   { label: 'Also use it for shuffled playlists', tab: 'smart', keywords: 'smart playlists', key: 'smart_playlists' },

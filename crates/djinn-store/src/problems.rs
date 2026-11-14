@@ -35,10 +35,13 @@ pub enum ProblemKind {
     AlbumNoCover,
     AlbumNoYear,
     AlbumNoGenre,
+    /// The same album filed twice (a copy in another folder, or under
+    /// another name).
+    DuplicateAlbums,
 }
 
 impl ProblemKind {
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 14] = [
         Self::MissingFolder,
         Self::Unreadable,
         Self::BadName,
@@ -52,6 +55,7 @@ impl ProblemKind {
         Self::AlbumNoCover,
         Self::AlbumNoYear,
         Self::AlbumNoGenre,
+        Self::DuplicateAlbums,
     ];
 
     /// Kinds a library check finds while walking the folders. Each check
@@ -78,6 +82,7 @@ impl ProblemKind {
             Self::AlbumNoCover => "album_no_cover",
             Self::AlbumNoYear => "album_no_year",
             Self::AlbumNoGenre => "album_no_genre",
+            Self::DuplicateAlbums => "duplicate_albums",
         }
     }
 
@@ -102,9 +107,20 @@ impl ProblemKind {
     pub fn per_album(self) -> bool {
         matches!(
             self,
-            Self::AlbumNoCover | Self::AlbumNoYear | Self::AlbumNoGenre
+            Self::AlbumNoCover | Self::AlbumNoYear | Self::AlbumNoGenre | Self::DuplicateAlbums
         )
     }
+}
+
+/// Two albums that are the same album: how many songs they share and hold.
+#[derive(Clone, Debug, PartialEq, Eq, FromRow)]
+pub struct AlbumTwin {
+    /// The smaller album id.
+    pub a: i64,
+    pub b: i64,
+    pub shared: i64,
+    pub a_songs: i64,
+    pub b_songs: i64,
 }
 
 /// Something a library check found while walking the folders.
@@ -347,6 +363,9 @@ impl Store {
                 "SELECT COUNT(DISTINCT t.id) ",
                 reported_lyrics_from!()
             )),
+            K::DuplicateAlbums => {
+                return Ok(i64::try_from(self.album_twins().await?.len()).unwrap_or(i64::MAX))
+            }
             K::NoArtist => sqlx::query_scalar(concat!("SELECT COUNT(*) ", no_artist_from!())),
             K::NoAlbum => sqlx::query_scalar(concat!("SELECT COUNT(*) ", no_album_from!())),
             K::AlbumNoCover => sqlx::query_scalar(concat!(
@@ -364,6 +383,63 @@ impl Store {
             )),
         };
         Ok(query.fetch_one(&self.pool).await?)
+    }
+
+    /// One row per pair of albums that are the same album: the first of
+    /// them, and where the other is.
+    async fn duplicate_album_rows(&self, offset: i64, limit: i64) -> Result<Vec<ProblemItem>> {
+        #[derive(FromRow)]
+        struct Row {
+            title: String,
+            artist: String,
+            path: Option<String>,
+        }
+        let twins = self.album_twins().await?;
+        let start = usize::try_from(offset.max(0)).unwrap_or(0).min(twins.len());
+        let end = start
+            .saturating_add(usize::try_from(limit.max(0)).unwrap_or(0))
+            .min(twins.len());
+        let mut items = Vec::with_capacity(end - start);
+        for twin in &twins[start..end] {
+            let mut rows = Vec::with_capacity(2);
+            for id in [twin.a, twin.b] {
+                let row: Option<Row> = sqlx::query_as(
+                    "SELECT a.title, ar.name AS artist,
+                            (SELECT t.path FROM tracks t WHERE t.album_id = a.id
+                             AND t.removed_at IS NULL ORDER BY t.disc_no, t.track_no LIMIT 1) AS path
+                     FROM albums a JOIN artists ar ON ar.id = a.artist_id WHERE a.id = ?",
+                )
+                .bind(id)
+                .fetch_optional(&self.pool)
+                .await?;
+                rows.push(row);
+            }
+            let (Some(first), Some(second)) = (rows.remove(0), rows.remove(0)) else {
+                continue;
+            };
+            let folder = |path: &Option<String>| {
+                path.as_deref()
+                    .and_then(|p| p.rsplit_once(['/', '\\']).map(|(dir, _)| dir.to_owned()))
+                    .unwrap_or_default()
+            };
+            items.push(ProblemItem {
+                path: first.path.clone(),
+                detail: format!(
+                    "Also filed as \"{}\" in {}: {} of {} songs match",
+                    second.title,
+                    folder(&second.path),
+                    twin.shared,
+                    twin.a_songs.max(twin.b_songs)
+                ),
+                track_id: None,
+                album_id: Some(twin.a),
+                title: None,
+                artist: Some(first.artist),
+                album: Some(first.title),
+                noticed_at: None,
+            });
+        }
+        Ok(items)
     }
 
     /// A page of one kind, ordered by path (albums by artist and title).
@@ -412,6 +488,7 @@ impl Store {
                 reported_lyrics_from!(),
                 " GROUP BY t.id ORDER BY noticed_at DESC LIMIT ? OFFSET ?"
             )),
+            K::DuplicateAlbums => return self.duplicate_album_rows(offset, limit).await,
             K::NoArtist => sqlx::query_as(concat!(
                 song_columns!("''", "NULL"),
                 no_artist_from!(),
@@ -537,6 +614,64 @@ mod tests {
         assert_eq!(count(&counts, ProblemKind::ReportedLyrics), 1);
         assert_eq!(count(&counts, ProblemKind::Reported), 0);
         assert_eq!(store.clear_lyrics_reports(track).await.unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn the_same_album_filed_twice_is_a_problem_but_a_deluxe_edition_or_a_shared_song_is_not()
+    {
+        let store = Store::open_in_memory().await.unwrap();
+        let track = |path: &str, album: &str, title: &str, n: i64| ScannedTrack {
+            track_no: Some(n),
+            album: Some(album.into()),
+            ..song(path, title)
+        };
+        let mut songs = Vec::new();
+        // Twelve songs filed twice under two folders and names.
+        for n in 1..=12 {
+            songs.push(track(
+                &format!("/m/a/{n}.flac"),
+                "Abbey Road",
+                &format!("Song {n}"),
+                n,
+            ));
+            songs.push(track(
+                &format!("/m/b/{n}.flac"),
+                "Abbey Road (Remastered)",
+                &format!("Song {n}"),
+                n,
+            ));
+        }
+        // A deluxe edition with extra songs, and a greatest hits with a few of them.
+        for n in 1..=20 {
+            songs.push(track(
+                &format!("/m/c/{n}.flac"),
+                "Abbey Road Deluxe",
+                &format!("Song {n}"),
+                n,
+            ));
+        }
+        for n in 1..=3 {
+            songs.push(track(
+                &format!("/m/d/{n}.flac"),
+                "Hits",
+                &format!("Song {n}"),
+                n,
+            ));
+        }
+        store.save_scanned(&songs).await.unwrap();
+        let counts = store.problem_counts().await.unwrap();
+        assert_eq!(count(&counts, ProblemKind::DuplicateAlbums), 1);
+        let rows = store
+            .problems(ProblemKind::DuplicateAlbums, 0, 10)
+            .await
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert!(
+            rows[0].detail.contains("12 of 12 songs match"),
+            "{}",
+            rows[0].detail
+        );
+        assert!(rows[0].detail.contains("/m/"), "{}", rows[0].detail);
     }
 
     #[tokio::test]

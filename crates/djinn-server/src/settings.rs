@@ -62,6 +62,7 @@ pub enum Default {
 /// their features use (keep in step), for "changed from default".
 pub const DEFAULTS: &[(&str, Default)] = &[
     (GUEST_MODE, Default::Flag(false)),
+    (crate::duplicates::ACROSS_ALBUMS, Default::Flag(false)),
     (crate::tv_api::TV_PAGE, Default::Flag(true)),
     (crate::tv_api::TV_SOUND, Default::Flag(false)),
     (crate::cast_api::PLAY_HERE, Default::Flag(false)),

@@ -59,6 +59,15 @@
     }
   }
 
+  async function setAcross(on: boolean) {
+    try {
+      await api.setDuplicatesAcrossAlbums(on)
+      await load()
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not save that', true)
+    }
+  }
+
   async function notCopies(group: DuplicateGroup) {
     try {
       await api.notDuplicates(group.songs.map((s) => s.id))
@@ -101,6 +110,14 @@
       {#if !listing.sound_analysis}
         Turn on sound analysis in Library extras to also find copies that are named differently.
       {/if}
+    </p>
+    <label class="switch">
+      <input type="checkbox" checked={listing.across_albums} onchange={(e) => setAcross(e.currentTarget.checked)} />
+      Also list copies in different albums
+    </label>
+    <p class="small muted">
+      A song on both its album and a greatest hits is fine, so by default only copies in the same album (or with no
+      album) are listed. The same album filed twice is under Problems.
     </p>
     {#if listing.total}
       <button class="small-button" onclick={() => (open = !open)}>{open ? 'Hide the list' : 'Show the list'}</button>

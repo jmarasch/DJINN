@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
-use axum::routing::{get, post};
+use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use djinn_library::duplicates::{self, Group, Reason, MAX_SHIFT, MIN_OVERLAP};
 use djinn_store::DuplicateCandidate;
@@ -16,8 +16,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::auth::AdminUser;
 use crate::error::{ApiError, ApiResult};
+use crate::settings;
 use crate::state::AppState;
 
+/// Setting key: also list copies of a song that sit in different albums
+/// (a greatest hits next to the original). Off: those are fine.
+pub const ACROSS_ALBUMS: &str = "duplicates_across_albums";
 const PAGE: usize = 50;
 /// At most this many songs dismissed at once (one group).
 const MAX_DISMISS: usize = 100;
@@ -33,6 +37,36 @@ pub struct Duplicates {
 }
 
 impl Duplicates {
+    /// The groups worth showing the admin. A song on a greatest hits album
+    /// and on its original is fine, so unless `across` is on, a group keeps
+    /// only the songs that share an album with another in it (and songs with
+    /// no album), and drops out with fewer than two. Albums that are
+    /// themselves copies are the Problems page's business.
+    pub fn shown(&self, across: bool) -> Vec<Group> {
+        if across {
+            return self.groups.clone();
+        }
+        self.groups
+            .iter()
+            .filter_map(|group| {
+                let album = |id: &i64| self.songs.get(id).and_then(|s| s.album_id);
+                let kept: Vec<i64> = group
+                    .songs
+                    .iter()
+                    .copied()
+                    .filter(|id| match album(id) {
+                        None => true,
+                        Some(a) => group.songs.iter().filter(|o| album(o) == Some(a)).count() > 1,
+                    })
+                    .collect();
+                (kept.len() > 1).then(|| Group {
+                    songs: kept,
+                    reasons: group.reasons.clone(),
+                })
+            })
+            .collect()
+    }
+
     /// The other copies of a song, if it has any.
     pub fn copies_of(&self, id: i64) -> impl Iterator<Item = i64> + '_ {
         self.by_song.get(&id).into_iter().flat_map(move |&g| {
@@ -131,6 +165,27 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/library/duplicates", get(list))
         .route("/library/duplicates/dismiss", post(dismiss))
+        .route("/library/duplicates/settings", put(set_across))
+}
+
+/// How many groups the card lists (what the nightly check counts too).
+pub async fn shown_count(state: &AppState) -> anyhow::Result<usize> {
+    let across = settings::flag(&state.store, ACROSS_ALBUMS, false).await?;
+    Ok(current(state).await?.shown(across).len())
+}
+
+#[derive(Deserialize)]
+struct Across {
+    across_albums: bool,
+}
+
+async fn set_across(
+    _: AdminUser,
+    State(state): State<AppState>,
+    Json(body): Json<Across>,
+) -> ApiResult<StatusCode> {
+    settings::set_flag(&state.store, ACROSS_ALBUMS, body.across_albums).await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(Serialize)]
@@ -163,6 +218,8 @@ struct Listing {
     /// Songs in groups.
     songs: usize,
     groups: Vec<GroupView>,
+    /// Copies in different albums are listed too.
+    across_albums: bool,
     /// Without sound analysis only names and identifications are compared.
     sound_analysis: bool,
 }
@@ -179,8 +236,9 @@ async fn list(
     Query(page): Query<Page>,
 ) -> ApiResult<Json<Listing>> {
     let found = current(&state).await?;
-    let groups = found
-        .groups
+    let across_albums = settings::flag(&state.store, ACROSS_ALBUMS, false).await?;
+    let shown = found.shown(across_albums);
+    let groups = shown
         .iter()
         .skip(page.offset)
         .take(PAGE)
@@ -195,9 +253,10 @@ async fn list(
         })
         .collect();
     Ok(Json(Listing {
-        total: found.groups.len(),
-        songs: found.by_song.len(),
+        total: shown.len(),
+        songs: shown.iter().map(|g| g.songs.len()).sum(),
         groups,
+        across_albums,
         sound_analysis: crate::audio_api::analysis_on(&state).await,
     }))
 }
@@ -242,6 +301,56 @@ async fn dismiss(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn copies_in_different_albums_are_fine_unless_asked_for() {
+        let song = |id: i64, album: Option<i64>| DuplicateCandidate {
+            id,
+            album_id: album,
+            ..Default::default()
+        };
+        let groups = vec![
+            // The original and a greatest hits: different albums.
+            Group {
+                songs: vec![1, 2],
+                reasons: vec![Reason::Name],
+            },
+            // Twice in one album, and once more on a compilation.
+            Group {
+                songs: vec![3, 4, 5],
+                reasons: vec![Reason::Name],
+            },
+            // Two loose songs.
+            Group {
+                songs: vec![6, 7],
+                reasons: vec![Reason::Sound],
+            },
+        ];
+        let songs = [
+            song(1, Some(10)),
+            song(2, Some(11)),
+            song(3, Some(12)),
+            song(4, Some(12)),
+            song(5, Some(13)),
+            song(6, None),
+            song(7, None),
+        ]
+        .into_iter()
+        .map(|s| (s.id, s))
+        .collect();
+        let found = Duplicates {
+            version: (0, 0, 0, 0),
+            groups,
+            by_song: HashMap::new(),
+            songs,
+        };
+        let shown = found.shown(false);
+        assert_eq!(
+            shown.iter().map(|g| g.songs.clone()).collect::<Vec<_>>(),
+            vec![vec![3, 4], vec![6, 7]]
+        );
+        assert_eq!(found.shown(true).len(), 3);
+    }
     use crate::test_util::{call, get_body, session};
     use axum::http::Method;
     use djinn_store::{Role, ScannedTrack};
