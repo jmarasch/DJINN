@@ -2,6 +2,8 @@
 //! only on the files; point it at a COPY of a database, since opening one
 //! applies migrations): `compare_library <db copy> [limit]`.
 
+#![allow(clippy::expect_used)]
+
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
