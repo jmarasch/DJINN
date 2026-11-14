@@ -238,6 +238,9 @@ pub struct LyricsView {
     plain: Option<String>,
     instrumental: bool,
     source: String,
+    /// An AI made these by listening: they may be wrong.
+    ai: bool,
+    ai_model: Option<String>,
 }
 
 impl From<StoredLyrics> for LyricsView {
@@ -252,6 +255,8 @@ impl From<StoredLyrics> for LyricsView {
             plain: l.plain,
             instrumental: l.instrumental,
             source: l.source,
+            ai: l.ai,
+            ai_model: l.ai_model,
         }
     }
 }

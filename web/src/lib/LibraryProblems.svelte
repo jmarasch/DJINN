@@ -93,6 +93,10 @@
       label: 'Songs with no loudness data',
       hint: 'No ReplayGain tags and no measurement, in a library where other songs have them. Turn on ReplayGain in Audio so DJINN measures them.',
     },
+    ai_lyrics: {
+      label: 'Lyrics an AI made',
+      hint: 'These lyrics were made by an AI listening to the song (speech to text with timing), so they are guesses and may have mistakes. Any other source replaces them when it has the lyrics: LRCLIB is still asked about these songs, and an import of ordinary lyrics replaces them. Use Report these lyrics, then Remove and block, on one that is wrong.',
+    },
     vanished: {
       label: 'Songs that went missing lately',
       hint: 'These were in the library and their files are gone (in the last 30 days). If that is a mistake, plug the drive back in or restore the files, then check for changes.',

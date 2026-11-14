@@ -26,6 +26,27 @@ pub struct Header {
     pub title: Option<String>,
     pub album: Option<String>,
     pub length_ms: Option<i64>,
+    /// `[by:...]`: who or what made the file.
+    pub by: Option<String>,
+}
+
+impl Header {
+    /// Set when the file says an AI made its lyrics (a `[by:]` line such as
+    /// `lyrics-listener (AI-generated; model=faster-whisper/medium)`): the
+    /// model it names, or a plain "AI". These are guesses at what is said
+    /// or sung, and rank below lyrics from anywhere else.
+    pub fn ai_model(&self) -> Option<String> {
+        let by = self.by.as_deref()?;
+        if !by.to_lowercase().contains("ai-generated") {
+            return None;
+        }
+        Some(
+            by.split_once("model=")
+                .map(|(_, rest)| rest.trim_end_matches(')').trim().to_owned())
+                .filter(|m| !m.is_empty())
+                .unwrap_or_else(|| "AI".to_owned()),
+        )
+    }
 }
 
 /// The header lines (`[ar:Artist]` and so on) at the top of LRC text.
@@ -54,6 +75,7 @@ pub fn header(text: &str) -> Header {
                 "ar" => out.artist = Some(value.to_owned()),
                 "ti" => out.title = Some(value.to_owned()),
                 "al" => out.album = Some(value.to_owned()),
+                "by" => out.by = Some(value.to_owned()),
                 "length" => {
                     out.length_ms = timestamp(value).map(|ms| ms as i64).or_else(|| {
                         // "[length:215]" in seconds
@@ -90,11 +112,35 @@ pub enum Content {
 /// the extension). Header lines are not part of plain lyrics.
 pub fn content(text: &str) -> Content {
     let text = text.trim_start_matches('\u{feff}');
-    let body: String = text
+    // A line that only says "(AI-generated lyrics)" is the file's notice, not
+    // a lyric; the header's `[by:]` carries the same fact.
+    let clean: String = text
         .lines()
-        .filter(|l| !is_header_line(l))
+        .filter(|l| !is_ai_notice(l))
         .collect::<Vec<_>>()
         .join("\n");
+    let mut all: Vec<&str> = clean.lines().collect();
+    let head = header(&clean);
+    let timed = crate::lyrics::is_timed(&clean);
+    if timed {
+        // The credits line is the first timed line.
+        let first = all.iter().position(|l| {
+            let (tags, words) = leading_tags(l);
+            !words.trim().is_empty() && tags.iter().any(|t| timestamp(t).is_some())
+        });
+        if let (Some(i), Some(artist)) = (first, first_artist(&head)) {
+            if is_credit_line(leading_tags(all[i]).1, &artist) {
+                all.remove(i);
+            }
+        }
+    }
+    let joined = all.join("\n");
+    let text = joined.as_str();
+    let mut lines: Vec<&str> = text.lines().filter(|l| !is_header_line(l)).collect();
+    if !timed {
+        drop_credit_line(&mut lines, &head);
+    }
+    let body: String = lines.join("\n");
     let marker = body
         .trim()
         .trim_matches(|c| matches!(c, '[' | ']' | '(' | ')' | '*' | '-' | '.' | ' '))
@@ -111,6 +157,50 @@ pub fn content(text: &str) -> Content {
         Some(found) => Content::Lyrics(found),
         None => Content::Empty,
     }
+}
+
+fn is_ai_notice(line: &str) -> bool {
+    let (_, words) = leading_tags(line);
+    words.trim().eq_ignore_ascii_case("(AI-generated lyrics)")
+}
+
+/// Letters and digits only, lower case, so "Mot örhead" meets "Motörhead".
+fn squash(text: &str) -> String {
+    text.chars()
+        .filter(|c| c.is_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+/// Lyrics sites often start with a title and credits line ("All About U
+/// (Nate Dogg) -2Pac"). Drops the first line when it names the artist and has
+/// a dash, which a real first lyric rarely does.
+fn drop_credit_line(lines: &mut Vec<&str>, header: &Header) {
+    let Some(artist) = first_artist(header) else {
+        return;
+    };
+    let Some(first) = lines.iter().position(|l| !l.trim().is_empty()) else {
+        return;
+    };
+    if is_credit_line(lines[first], &artist) {
+        lines.remove(first);
+    }
+}
+
+/// The first artist of the header, squashed, when there is one to go by.
+fn first_artist(header: &Header) -> Option<String> {
+    header
+        .artist
+        .as_deref()
+        .and_then(|a| a.split(['&', ',']).next())
+        .map(squash)
+        .filter(|a| a.len() >= 2)
+}
+
+fn is_credit_line(line: &str, artist: &str) -> bool {
+    line.chars().count() <= 120
+        && line.contains(['-', '‐', '–', '—'])
+        && squash(line).contains(artist)
 }
 
 /// Extensions of files that run or hold data; one in a zip is thrown out
@@ -349,6 +439,7 @@ mod tests {
                 title: Some("Bohemian Rhapsody".into()),
                 album: Some("A Night at the Opera".into()),
                 length_ms: Some(355_000),
+                by: None,
             }
         );
         assert_eq!(header("Just words\n[ar:Late]"), Header::default());
@@ -371,6 +462,73 @@ mod tests {
         assert_eq!(found.plain.as_deref(), Some("We sing\nAll night"));
         assert_eq!(content("[ar:Band]\n[Instrumental]"), Content::Instrumental);
         assert_eq!(content("  \n"), Content::Empty);
+    }
+
+    #[test]
+    fn ai_made_lyrics_are_told_apart_and_their_notice_is_not_a_lyric() {
+        let text = "[ar:Band]\n[ti:Skit]\n[by:lyrics-listener (AI-generated; model=faster-whisper/medium)]\n\n[00:00.00](AI-generated lyrics)\n[00:00.00]Jack, leave him alone.\n[00:06.36]Or else.";
+        let head = header(text);
+        assert_eq!(head.ai_model().as_deref(), Some("faster-whisper/medium"));
+        let Content::Lyrics(found) = content(text) else {
+            panic!("lyrics")
+        };
+        assert_eq!(
+            found.plain.as_deref(),
+            Some("Jack, leave him alone.\nOr else.")
+        );
+        assert!(!found
+            .synced
+            .unwrap_or_default()
+            .contains("(AI-generated lyrics)"));
+        // A person's file is not AI.
+        assert_eq!(
+            header("[ar:A]\n[by:someone]\n[00:01.00]Hi").ai_model(),
+            None
+        );
+        assert_eq!(
+            header("[by:AI-generated]\n[00:01.00]Hi")
+                .ai_model()
+                .as_deref(),
+            Some("AI")
+        );
+    }
+
+    #[test]
+    fn a_title_and_credits_line_from_a_lyrics_site_is_dropped() {
+        let with = |first: &str| {
+            format!("[ar:2Pac & Snoop Dogg]\n[ti:All Bout U]\n[length:04:37]\n\n{first}\nAhh yeah\nIt's all about you")
+        };
+        for credit in [
+            "All About U （Nate Dogg ,Snoop Dogg ）-2Pac （派克）",
+            "2Pac - All About U",
+        ] {
+            let Content::Lyrics(found) = content(&with(credit)) else {
+                panic!("lyrics")
+            };
+            assert_eq!(
+                found.plain.as_deref(),
+                Some("Ahh yeah\nIt's all about you"),
+                "{credit}"
+            );
+        }
+        // The same in timed lyrics: the first timed line goes.
+        let timed = "[ar:2Pac]\n[ti:If I Die 2Nite]\n\n[00:00.44]If I Die 2 Nite - 2Pac\n[00:00.44]A coward dies\n[00:02.98]A soldier dies but once";
+        let Content::Lyrics(found) = content(timed) else {
+            panic!("lyrics")
+        };
+        assert_eq!(
+            found.plain.as_deref(),
+            Some("A coward dies\nA soldier dies but once")
+        );
+        assert!(!found.synced.unwrap_or_default().contains("Nite - 2Pac"));
+        // An ordinary first line stays, even one with a dash.
+        let Content::Lyrics(found) = content(&with("Ahh yeah - I said it")) else {
+            panic!("lyrics")
+        };
+        assert!(found
+            .plain
+            .unwrap_or_default()
+            .starts_with("Ahh yeah - I said it"));
     }
 
     #[test]

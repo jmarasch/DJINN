@@ -860,6 +860,7 @@ export type ProblemKind =
   | 'no_lyrics'
   | 'no_loudness'
   | 'vanished'
+  | 'ai_lyrics'
 
 export interface ProblemCount {
   kind: ProblemKind
@@ -1379,8 +1380,11 @@ export interface Lyrics {
   lines: LyricLine[] | null
   plain: string | null
   instrumental: boolean
-  /** lrc (a file beside the song), file (its tags) or lrclib (online). */
+  /** lrc (a file beside the song), file (its tags), lrclib (online) or bulk (imported). */
   source: string
+  /** An AI made these by listening to the song: they may be wrong. */
+  ai?: boolean
+  ai_model?: string | null
 }
 
 /** A song found by its words, with the line that matched. */
@@ -1398,6 +1402,8 @@ export interface LyricsStatus {
   not_looked_up: number
   /** Songs whose lyrics came from an imported zip. */
   imported: number
+  /** Songs whose lyrics an AI made by listening. */
+  ai: number
   /** Songs with lyrics an admin removed as bad. */
   blocked: number
   running: boolean
@@ -1511,6 +1517,7 @@ export interface AuditEntry {
 
 /** What the last lyrics zip import did. */
 export interface LyricsImportReport {
+  saved_ai: number
   file: string
   replace: boolean
   even_if_unasked: boolean

@@ -64,10 +64,12 @@ pub enum ProblemKind {
     NoLoudness,
     /// Songs that went missing from the library in the last 30 days.
     Vanished,
+    /// Lyrics an AI made by listening (guesses worth checking).
+    AiLyrics,
 }
 
 impl ProblemKind {
-    pub const ALL: [Self; 27] = [
+    pub const ALL: [Self; 28] = [
         Self::MissingFolder,
         Self::Unreadable,
         Self::BadName,
@@ -95,6 +97,7 @@ impl ProblemKind {
         Self::NoLyrics,
         Self::NoLoudness,
         Self::Vanished,
+        Self::AiLyrics,
     ];
 
     /// Kinds a library check finds while walking the folders. Each check
@@ -135,6 +138,7 @@ impl ProblemKind {
             Self::NoLyrics => "no_lyrics",
             Self::NoLoudness => "no_loudness",
             Self::Vanished => "vanished",
+            Self::AiLyrics => "ai_lyrics",
         }
     }
 
@@ -400,6 +404,12 @@ macro_rules! no_loudness_from {
                 WHERE o.rg_track_gain IS NOT NULL OR o.loudness_lufs IS NOT NULL LIMIT 1) IS NOT NULL"
     };
 }
+macro_rules! ai_lyrics_from {
+    () => {
+        "FROM lyrics l JOIN tracks t ON t.id = l.track_id
+         WHERE t.removed_at IS NULL AND l.ai = 1"
+    };
+}
 macro_rules! vanished_from {
     () => {
         "FROM tracks t WHERE t.removed_at IS NOT NULL AND t.removed_at > ?
@@ -609,6 +619,7 @@ impl Store {
             }
             K::NoLyrics => sqlx::query_scalar(concat!("SELECT COUNT(*) ", no_lyrics_from!())),
             K::NoLoudness => sqlx::query_scalar(concat!("SELECT COUNT(*) ", no_loudness_from!())),
+            K::AiLyrics => sqlx::query_scalar(concat!("SELECT COUNT(*) ", ai_lyrics_from!())),
             K::Vanished => sqlx::query_scalar(concat!("SELECT COUNT(*) ", vanished_from!()))
                 .bind(vanished_since()),
             K::ArtistVariants => {
@@ -833,6 +844,11 @@ impl Store {
             K::NoLoudness => sqlx::query_as(concat!(
                 song_columns!("''", "NULL"),
                 no_loudness_from!(),
+                " ORDER BY t.path LIMIT ? OFFSET ?"
+            )),
+            K::AiLyrics => sqlx::query_as(concat!(
+                song_columns!("coalesce(l.ai_model, 'AI')", "l.updated_at"),
+                ai_lyrics_from!(),
                 " ORDER BY t.path LIMIT ? OFFSET ?"
             )),
             K::Vanished => sqlx::query_as(concat!(

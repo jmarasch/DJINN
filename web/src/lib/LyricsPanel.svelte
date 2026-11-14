@@ -119,7 +119,7 @@
       {/if}
       {n(withWords)} of {n(status.songs)} songs have lyrics ({n(status.synced)} timed){#if status.instrumental}, {n(
           status.instrumental,
-        )} instrumental{/if}{#if status.imported}; {n(status.imported)} imported from zips{/if}.
+        )} instrumental{/if}{#if status.imported}; {n(status.imported)} imported from zips{/if}{#if status.ai} ({n(status.ai)} made by an AI){/if}.
     </p>
   {/if}
   {#if settings}

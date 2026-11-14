@@ -76,6 +76,8 @@ pub struct Report {
     pub done: u64,
     pub saved_timed: u64,
     pub saved_plain: u64,
+    /// Of those, made by an AI (guesses that rank below any other lyrics).
+    pub saved_ai: u64,
     /// The song has lyrics from its file, its tags or LRCLIB.
     pub had_lyrics: u64,
     /// The song has lyrics from an earlier import (kept unless replacing).
@@ -139,6 +141,7 @@ impl Report {
         line(format!("Files in the zip: {}", self.total));
         line(format!("Saved, timed: {}", self.saved_timed));
         line(format!("Saved, plain: {}", self.saved_plain));
+        line(format!("Of those made by an AI: {}", self.saved_ai));
         line(format!("Song already had lyrics: {}", self.had_lyrics));
         line(format!(
             "Song kept lyrics from an earlier import: {}",
@@ -613,6 +616,8 @@ async fn save_chunk(
     struct Found {
         id: i64,
         found: djinn_library::lyrics::Found,
+        /// An AI made these (the model it names).
+        ai: Option<String>,
     }
     let mut matched: Vec<Found> = Vec::new();
     for item in items {
@@ -653,7 +658,8 @@ async fn save_chunk(
                         continue;
                     }
                 };
-                matched.push(Found { id, found });
+                let ai = header.ai_model();
+                matched.push(Found { id, found, ai });
             }
         }
     }
@@ -684,11 +690,14 @@ async fn save_chunk(
         };
         match state
             .store
-            .save_bulk_lyrics(m.id, &new, options.replace)
+            .save_bulk_lyrics(m.id, &new, options.replace, m.ai.as_deref())
             .await?
         {
             BulkSave::Saved => {
                 let timed = m.found.synced.is_some();
+                if m.ai.is_some() {
+                    update(|r| r.saved_ai += 1);
+                }
                 update(|r| {
                     if timed {
                         r.saved_timed += 1;

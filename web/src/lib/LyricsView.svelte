@@ -66,6 +66,9 @@
   })
 </script>
 
+{#if lyrics?.ai}
+  <p class="ai-note small">Made by an AI listening to the song, so it may have mistakes.</p>
+{/if}
 <div class="lyrics" class:big bind:this={box}>
   {#if lyrics === undefined}
     <p class="note">Loading lyrics...</p>
@@ -91,6 +94,12 @@
 {/if}
 
 <style>
+  .ai-note {
+    margin: 0 0 4px;
+    text-align: center;
+    color: var(--muted);
+  }
+
   .report-link {
     display: block;
     margin: 4px auto 0;
