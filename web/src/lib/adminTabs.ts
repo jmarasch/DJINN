@@ -9,6 +9,7 @@ export const adminGroups = [
     label: 'Music and playback',
     tabs: [
       { id: 'library', label: 'Library', icon: 'library' },
+      { id: 'editor', label: 'Library editor', icon: 'list' },
       { id: 'rules', label: 'Party and queue', icon: 'queue-play' },
       { id: 'smart', label: 'Smart play', icon: 'similar' },
       { id: 'audio', label: 'Audio', icon: 'playing' },

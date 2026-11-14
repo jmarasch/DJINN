@@ -13,6 +13,7 @@
   import LogViewer from '../lib/LogViewer.svelte'
   import SignInLog from '../lib/SignInLog.svelte'
   import ProtectedPanel from '../lib/ProtectedPanel.svelte'
+  import LibraryEditor from '../lib/LibraryEditor.svelte'
   import UnlockHost from '../lib/UnlockHost.svelte'
   import ResetPanel from '../lib/ResetPanel.svelte'
   import SystemStatus from '../lib/SystemStatus.svelte'
@@ -470,6 +471,8 @@
   <div class="cards-2"><AiPanel /></div>
 {:else if t === 'users'}
   <div class="cards-2"><UsersPanel /></div>
+{:else if t === 'editor'}
+  <LibraryEditor />
 {:else if t === 'protected'}
   <div class="cards-2"><ProtectedPanel /></div>
 {:else if t === 'go'}

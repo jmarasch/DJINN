@@ -1404,6 +1404,43 @@ export interface LyricsStatus {
   phase: '' | 'reading' | 'looking up'
 }
 
+export type CompareWhy = 'correction' | 'identified' | 'other'
+
+export interface CompareDiff {
+  field: string
+  /** What DJINN holds. */
+  database: string | null
+  /** What the file says. */
+  file: string | null
+  why: CompareWhy
+}
+
+export interface CompareSong {
+  track_id: number
+  path: string
+  title: string
+  artist: string | null
+  diffs: CompareDiff[]
+}
+
+export interface CompareRun {
+  started_at: number
+  finished_at: number | null
+  total: number
+  done: number
+  differing: number
+  unreadable: number
+  counts: { field: string; why: CompareWhy; songs: number }[]
+  error: string | null
+}
+
+export interface CompareShown {
+  running: boolean
+  run: CompareRun | null
+  matching: number
+  songs: CompareSong[]
+}
+
 /** How strict the lock on library changes is. */
 export type ProtectedLevel = 'off' | 'medium' | 'max'
 

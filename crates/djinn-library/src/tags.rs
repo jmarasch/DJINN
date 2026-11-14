@@ -198,7 +198,7 @@ fn year_of(date: &str) -> Option<i64> {
         .flatten()
 }
 
-fn fill_from_tags(
+pub(crate) fn fill_from_tags(
     track: &mut ScannedTrack,
     file: &TaggedFile,
     original_years: bool,

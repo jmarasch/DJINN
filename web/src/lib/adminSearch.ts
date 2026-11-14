@@ -98,6 +98,7 @@ export const adminEntries: AdminEntry[] = [
   { label: 'Public hostname', tab: 'go', keywords: 'domain https hostname' },
   { label: 'Admins must use two-step sign-in for GO', tab: 'go', keywords: '2fa totp security', key: 'admin_two_step' },
   { label: 'Trusted proxies', tab: 'go', keywords: 'reverse proxy cloudflare' },
+  { label: 'Library editor', tab: 'editor', keywords: 'compare database files tags differences corrections write grid' },
   { label: 'Protected areas', tab: 'protected', keywords: 'lock library changes strictness password two-step 2fa unlock max medium off' },
   { label: 'Audit trail', tab: 'protected', keywords: 'audit log records purge turn off who unlocked changed' },
   { label: 'Sign-in log', tab: 'signins', keywords: 'logins security attempts clear old' },

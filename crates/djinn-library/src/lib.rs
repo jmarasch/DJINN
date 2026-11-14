@@ -1,6 +1,7 @@
 //! DJINN music library: scanner, tags, cover art, and search.
 
 pub mod art;
+pub mod compare;
 pub mod credits;
 pub mod duplicates;
 pub mod genres;

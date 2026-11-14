@@ -16,6 +16,7 @@ mod backup;
 mod banner;
 mod cast_api;
 mod client;
+mod compare;
 mod config;
 mod convert;
 mod cpu;

@@ -11,6 +11,7 @@ import type {
   NodeList,
   Lyrics,
   LyricsSettings,
+  CompareShown,
   AuditEntry,
   ProtectedLevel,
   ProtectedStatus,
@@ -265,6 +266,11 @@ export const api = {
   lyricsSettings: () => get<LyricsSettings>('/lyrics/settings'),
   setLyricsSettings: (settings: LyricsSettings) => put<void>('/lyrics/settings', settings),
   recheckLyrics: () => post<void>('/lyrics/recheck'),
+  libraryCompare: (offset: number, field?: string, why?: string) =>
+    get<CompareShown>(
+      `/library/compare?offset=${offset}${field ? `&field=${field}` : ''}${why ? `&why=${why}` : ''}`,
+    ),
+  startLibraryCompare: () => post<void>('/library/compare'),
   protectedStatus: () => get<ProtectedStatus>('/protected'),
   protectedEnter: (password: string, code: string) => post<void>('/protected/enter', { password, code }),
   protectedLeave: () => post<void>('/protected/leave'),

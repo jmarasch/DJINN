@@ -199,3 +199,15 @@ DJINN never deletes anything: remove the copy you don't want from your music fol
 ### MP3 lengths
 
 Many MP3s have no length header, so a tag reader can only guess their length, and it guesses wrong (often several times too long) for variable bit rate files that open with a quiet stretch. DJINN looks at such files: if the bit rate is the same wherever it samples, the guess stands, otherwise it counts every frame, which is exact. The figure is kept in DJINN's database; your files are never changed. The first library check after an update re-reads every file once to correct existing songs.
+
+## Library editor
+
+Admin > **Library editor** is where library problems will be fixed: tags, names, covers and lengths, in DJINN's database or, when you choose, in the files themselves. It sits behind the lock in Admin > Protected areas (see Accounts and roles), so opening it asks for your password, and a code too at the strictest level.
+
+The first piece is a **compare**. It reads every song's tags from its file and sets them next to what DJINN's database holds, for title, artist, album, album artist, track and disc number, year and genre. Each difference says why:
+
+- **Corrected in DJINN**: you changed it with Edit tags or Edit album; the file still has the old value.
+- **Filled in by identification**: the file had nothing there and an applied identification filled it in.
+- **Other**: the file changed since DJINN read it (a library check re-reads changed files), or the two readings differ.
+
+The compare only reads; nothing in your music folders or the database changes. About half a minute for 40,000 songs on a local disk.
