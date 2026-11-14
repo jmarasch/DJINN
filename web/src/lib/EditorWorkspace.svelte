@@ -251,13 +251,13 @@
     for (const song of changeable) setPending(song, fillField, fillValue)
   }
 
-  /** Track numbers 1, 2, 3... in the grid's order, per disc. */
+  /** Track numbers 1, 2, 3... in the grid's order, for each album and disc. */
   function numberInOrder() {
     const next: Record<string, number> = {}
     for (const song of changeable) {
-      const disc = shown(song, 'disc_no') || '1'
-      next[disc] = (next[disc] ?? 0) + 1
-      setPending(song, 'track_no', String(next[disc]))
+      const key = `${shown(song, 'album_artist') || shown(song, 'artist')}\u0000${shown(song, 'album')}\u0000${shown(song, 'disc_no') || '1'}`
+      next[key] = (next[key] ?? 0) + 1
+      setPending(song, 'track_no', String(next[key]))
     }
   }
 
@@ -633,7 +633,7 @@
                 <button class="small-button" onclick={fill}>Set</button>
               </div>
               <div class="tool">
-                <button class="small-button" onclick={numberInOrder} title="Track numbers 1, 2, 3... in the grid's order, per disc">
+                <button class="small-button" onclick={numberInOrder} title="Track numbers 1, 2, 3... in the grid's order, for each album and disc">
                   Number in order
                 </button>
                 <button
@@ -678,6 +678,9 @@
                 <strong>{MOVE_WORDS[moveKind].title}</strong>
                 <span class="small muted">({renamable.length} to {MOVE_WORDS[moveKind].verb.toLowerCase()})</span>
               </div>
+              {#if moveKind === 'rename'}
+                <p class="small muted">Names come from the tags as DJINN shows them, with its corrections.</p>
+              {/if}
               <ul>
                 {#each renames as r (r.id)}
                   <li class="small" class:bad={!!r.problem}>
@@ -818,6 +821,7 @@
 
 <style>
   .editor {
+    container-type: inline-size;
     --target: var(--accent);
     border: 2px solid var(--target);
     border-radius: 12px;
@@ -861,9 +865,56 @@
 
   .panes {
     display: grid;
-    grid-template-columns: 280px minmax(0, 1fr) 260px;
+    grid-template-columns: 220px minmax(0, 1fr) 240px;
     gap: 12px;
     min-height: 60vh;
+  }
+
+  /* Inside Admin's menu there's less room: the side boxes go under. */
+  @container (max-width: 1150px) {
+    .panes {
+      grid-template-columns: 200px minmax(0, 1fr);
+    }
+
+    .side {
+      grid-column: 1 / -1;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      align-items: start;
+    }
+
+    /* What's waiting for approval comes first, where it's seen. */
+    .review {
+      order: -1;
+    }
+  }
+
+  @container (max-width: 640px) {
+    .panes {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .folders {
+      max-height: 30vh;
+    }
+  }
+
+  /* The page's big touch controls are too tall for a dense grid. */
+  .editor button:not(.primary),
+  .editor input,
+  .editor select {
+    min-height: 0;
+  }
+
+  .editor input,
+  .editor select {
+    padding: 4px 8px;
+  }
+
+  .pick input {
+    width: auto;
+    margin: 0;
+    padding: 0;
   }
 
   .folders,
@@ -901,7 +952,8 @@
   }
 
   .twisty {
-    width: 24px;
+    width: 22px;
+    flex: none;
     padding: 0;
     border: 0;
     background: none;
@@ -910,12 +962,15 @@
 
   .label {
     flex: 1;
+    min-width: 0;
     text-align: left;
     border: 0;
     background: none;
     box-shadow: none;
-    padding: 3px 6px;
+    padding: 2px 6px;
     border-radius: 6px;
+    font-size: 0.9rem;
+    overflow-wrap: anywhere;
   }
 
   .count {
@@ -1087,9 +1142,4 @@
     box-shadow: 0 0 10px var(--glow);
   }
 
-  @media (max-width: 1100px) {
-    .panes {
-      grid-template-columns: 1fr;
-    }
-  }
 </style>
