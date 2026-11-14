@@ -1052,6 +1052,40 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn songs_say_whether_an_ai_made_or_timed_their_lyrics() {
+        let (store, ids) = store_with(&["One", "Two", "Three"]).await;
+        let timed = NewLyrics {
+            synced: Some("[00:01.00]la"),
+            plain: Some("la"),
+            instrumental: false,
+            source: "bulk",
+        };
+        let mark = |kind| AiMark {
+            kind,
+            model: "m",
+            match_pct: None,
+        };
+        store
+            .save_bulk_lyrics(ids[0], &timed, false, Some(&mark(1)), "z", false)
+            .await
+            .unwrap();
+        store
+            .save_bulk_lyrics(ids[1], &timed, false, Some(&mark(2)), "z", false)
+            .await
+            .unwrap();
+        store
+            .save_bulk_lyrics(ids[2], &timed, false, None, "z", false)
+            .await
+            .unwrap();
+        let mut got = Vec::new();
+        for id in &ids {
+            let t = store.track(*id).await.unwrap().unwrap();
+            got.push((t.lyrics, t.lyrics_ai));
+        }
+        assert_eq!(got, [(2, 1), (2, 2), (2, 0)]);
+    }
+
+    #[tokio::test]
     async fn words_are_searchable_and_follow_changes() {
         let (store, ids) = store_with(&["One", "Two"]).await;
         let save = |id: i64, plain: &'static str| {

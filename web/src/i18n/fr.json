@@ -479,6 +479,8 @@
   "lyrics.instrumental": "Instrumental",
   "lyrics.words_mark": "Paroles disponibles",
   "lyrics.timed_mark": "Paroles synchronisées",
+  "lyrics.ai_made_mark": "Paroles créées par une IA",
+  "lyrics.ai_timed_mark": "Synchronisation faite par une IA",
   "kept.on_this_phone": "Sur ce téléphone",
   "go.more_for": "Plus pour {title}",
   "scan.hint": "Visez le code QR avec l’appareil photo. Dans GO sur un ordinateur : Compte > Ouvrir sur votre téléphone.",

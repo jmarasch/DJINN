@@ -479,6 +479,8 @@
   "lyrics.instrumental": "Instrumental",
   "lyrics.words_mark": "Songtext vorhanden",
   "lyrics.timed_mark": "Synchroner Songtext",
+  "lyrics.ai_made_mark": "Songtext von einer KI erstellt",
+  "lyrics.ai_timed_mark": "Timing von einer KI erstellt",
   "kept.on_this_phone": "Auf diesem Telefon",
   "go.more_for": "Mehr zu {title}",
   "scan.hint": "Richte die Kamera auf den QR-Code. In GO auf einem Computer: Konto > Auf dem Telefon öffnen.",

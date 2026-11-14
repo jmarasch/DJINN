@@ -14,6 +14,9 @@
   --bad-surface: #5a2430;
   /* The second color, from the logo's waveform. */
   --accent-2: #3fe0cf;
+  /* The microphone beside songs whose lyrics an AI made (pink) or timed (green). */
+  --ai-made: #ff4fd8;
+  --ai-timed: #7dff4f;
   /* Neon edges: a thin lavender line with a soft glow around it. */
   --edge: rgb(190 150 255 / 0.62);
   --edge-strong: rgb(205 170 255 / 0.95);
@@ -53,6 +56,8 @@
     --bad: #c9303f;
     --bad-surface: #f9d7db;
     --accent-2: #0d9488;
+    --ai-made: #d4129e;
+    --ai-timed: #2f9e0a;
     --edge: rgb(111 63 214 / 0.26);
     --edge-strong: rgb(111 63 214 / 0.6);
     --glow: 0 0 12px rgb(111 63 214 / 0.08);

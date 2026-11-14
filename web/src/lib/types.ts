@@ -346,6 +346,8 @@ export interface Track {
   likes?: number
   /** Lyrics found: 0 none (or not looked for yet), 1 words, 2 timed. */
   lyrics?: number
+  /** 0 not AI, 1 the words were made by an AI, 2 a person's words timed by an AI. */
+  lyrics_ai?: number
 }
 
 export type LyricsFilter = 'all' | 'words' | 'timed'

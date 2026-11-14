@@ -822,6 +822,7 @@ fn next_song_on_the_album_joins_gaplessly() {
         duration_ms: None,
         art_hash: None,
         lyrics: 0,
+        lyrics_ai: 0,
     };
     assert!(follows_on_album(
         &track(Some(1), None, Some(3)),

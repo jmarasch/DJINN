@@ -479,6 +479,8 @@
   "lyrics.instrumental": "Instrumental",
   "lyrics.words_mark": "Tiene letra",
   "lyrics.timed_mark": "Tiene letra sincronizada",
+  "lyrics.ai_made_mark": "Letra hecha por una IA",
+  "lyrics.ai_timed_mark": "Sincronización hecha por una IA",
   "kept.on_this_phone": "En este teléfono",
   "go.more_for": "Más opciones de {title}",
   "scan.hint": "Apunta la cámara al código QR. En GO en un ordenador: Cuenta > Abrir en el teléfono.",
