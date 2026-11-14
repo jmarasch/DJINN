@@ -37,7 +37,17 @@
   const pending = $derived(users.filter((u) => u.status === 'pending'))
   const accounts = $derived(users.filter((u) => u.status !== 'pending'))
 
+  /** Accounts locked after too many wrong two-step codes. */
+  let locked = $state<number[]>([])
+
+  async function unlock(user: User) {
+    if (await attempt(() => api.unlockAccount(user.id), `${user.username} can sign in again`)) {
+      locked = locked.filter((id) => id !== user.id)
+    }
+  }
+
   onMount(() => {
+    api.lockedAccounts().then((ids) => (locked = ids)).catch(() => {})
     load().catch((e) => toast(e.message, true))
   })
 
@@ -326,6 +336,7 @@
           {#if user.id === app.me?.id}<span class="muted small">(you)</span>{/if}
           {#if user.status === 'disabled'}<span class="badge">Turned off</span>{/if}
           {#if user.two_step}<span class="badge">Two-step</span>{/if}
+          {#if locked.includes(user.id)}<span class="badge">Locked</span>{/if}
         </div>
         <div class="user-controls">
           <select
@@ -350,6 +361,9 @@
           <button class="small-button" onclick={() => resetPassword(user)}>Reset password</button>
           {#if user.two_step && user.id !== app.me?.id}
             <button class="small-button" onclick={() => resetTwoStep(user)}>Turn off two-step</button>
+          {/if}
+          {#if locked.includes(user.id)}
+            <button class="small-button" onclick={() => unlock(user)}>Unlock</button>
           {/if}
           {#if user.id !== app.me?.id}
             {#if user.status === 'disabled'}

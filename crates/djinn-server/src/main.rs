@@ -56,6 +56,7 @@ mod presence;
 mod problems_api;
 mod protected;
 mod reader;
+mod recover_cmd;
 mod rooms_api;
 mod rooms_rt;
 mod schedule;
@@ -102,9 +103,11 @@ use crate::state::AppState;
 #[derive(Parser)]
 #[command(name = "djinn", version = env!("DJINN_RELEASE_VERSION"), about)]
 struct Cli {
+    #[command(subcommand)]
+    command: Option<Command>,
     /// Path to config.toml. Defaults to next to the binary on Windows and
     /// ~/.config/djinn/config.toml elsewhere.
-    #[arg(long)]
+    #[arg(long, global = true)]
     config: Option<PathBuf>,
     /// Don't show a system tray icon, even on a desktop.
     #[arg(long)]
@@ -112,6 +115,13 @@ struct Cli {
     /// Write logs to this file instead of the terminal.
     #[arg(long)]
     log_file: Option<PathBuf>,
+}
+
+#[derive(clap::Subcommand)]
+enum Command {
+    /// Last resort for an admin locked out of DJINN: run on the computer
+    /// DJINN is installed on. Only works when no admin account can sign in.
+    Recover,
 }
 
 fn main() {
@@ -148,6 +158,9 @@ async fn run() -> anyhow::Result<()> {
     // terminal that started a Windows release build.
     let has_console = djinn_platform::console::attach_parent_console();
     let cli = Cli::parse();
+    if let Some(Command::Recover) = cli.command {
+        return recover_cmd::run(cli.config.as_deref()).await;
+    }
 
     // Always keep dated files; also show lines in an attached terminal.
     let log_file = cli.log_file.clone().or_else(default_log_file);

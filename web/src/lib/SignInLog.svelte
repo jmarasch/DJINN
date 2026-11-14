@@ -55,6 +55,7 @@
     ok: 'Signed in',
     wrong_password: 'Wrong password',
     locked_out: 'Locked out (too many tries)',
+    account_locked: 'Account locked (too many wrong codes)',
     waiting: 'Waiting for approval',
     turned_off: 'Account turned off',
     wrong_code: 'Wrong two-step code',

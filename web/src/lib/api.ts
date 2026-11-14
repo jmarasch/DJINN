@@ -268,6 +268,9 @@ export const api = {
   protectedStatus: () => get<ProtectedStatus>('/protected'),
   protectedEnter: (password: string, code: string) => post<void>('/protected/enter', { password, code }),
   protectedLeave: () => post<void>('/protected/leave'),
+  lockedAccounts: () => get<number[]>('/protected/locked'),
+  unlockAccount: (id: number) => post<void>(`/users/${id}/unlock`),
+  dismissRecovery: () => post<void>('/protected/recovery/dismiss'),
   setProtectedLevel: (level: ProtectedLevel, password: string, code: string, confirm: string) =>
     put<void>('/protected/level', { level, password, code, confirm }),
   auditPage: (offset: number) => get<{ entries: AuditEntry[]; total: number }>(`/protected/audit?offset=${offset}&limit=50`),

@@ -4,7 +4,7 @@
   import { api } from './api'
   import Icon from './Icon.svelte'
   import { toast } from './state.svelte'
-  import type { About, LyricsImportReport, ProblemSummary, ScheduledCheck, SystemStatus } from './types'
+  import type { About, LyricsImportReport, ProtectedStatus, ProblemSummary, ScheduledCheck, SystemStatus } from './types'
 
   type Level = 'ok' | 'warn' | 'bad'
   type Line = { level: Level; label: string; detail: string; href?: string }
@@ -14,6 +14,7 @@
   let nightly = $state<ScheduledCheck | null>(null)
   let about = $state<About | null>(null)
   let lyricsImport = $state<LyricsImportReport | null>(null)
+  let lock = $state<ProtectedStatus | null>(null)
 
   async function load() {
     try {
@@ -28,6 +29,7 @@
     api.libraryProblems().then((p) => (problems = p)).catch(() => {})
     api.scheduledCheck().then((c) => (nightly = c)).catch(() => {})
     api.about().then((a) => (about = a)).catch(() => {})
+    api.protectedStatus().then((p) => (lock = p)).catch(() => {})
     api.lyricsImport().then((i) => (lyricsImport = i.report)).catch(() => {})
     const timer = setInterval(() => void load(), 10_000)
     return () => clearInterval(timer)
@@ -130,6 +132,22 @@
         label: 'Problems',
         detail: problems.trouble ? `${n(problems.trouble)} need a look` : 'Nothing needs a look',
         href: '#/admin/problems',
+      })
+    }
+    if (lock?.recovery_used) {
+      lines.push({
+        level: 'bad',
+        label: 'Recovery used',
+        detail: `The host's recovery command was used for ${lock.recovery_used.username} on ${new Date(lock.recovery_used.at).toLocaleDateString()}`,
+        href: '#/admin/protected',
+      })
+    }
+    if (lock && lock.level === 'off') {
+      lines.push({
+        level: 'warn',
+        label: 'Protected areas',
+        detail: 'The lock on library changes is off',
+        href: '#/admin/protected',
       })
     }
     if (lyricsImport?.warning_count) {

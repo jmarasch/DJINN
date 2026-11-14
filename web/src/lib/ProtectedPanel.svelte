@@ -75,6 +75,11 @@
     }
   }
 
+  async function dismissRecovery() {
+    await api.dismissRecovery().catch(() => {})
+    await refresh()
+  }
+
   async function lockNow() {
     await api.protectedLeave().catch(() => {})
     await refresh()
@@ -120,6 +125,8 @@
     audit_off: 'Audit trail turned off',
     audit_purged: 'Audit trail purged',
     approved_submission: 'Song added to the library',
+    account_unlocked: 'Account unlocked',
+    recovery_used: 'Host recovery command used',
   }
   const when = (ms: number) => new Date(ms).toLocaleString()
 </script>
@@ -132,6 +139,13 @@
     authenticator app too. It locks again when you leave Admin, or after ten minutes without use. DJINN's own database
     (tag corrections kept in DJINN, history, lyrics) is not behind it.
   </p>
+  {#if status?.recovery_used}
+    <p class="small bad">
+      The host's recovery command was used on {when(status.recovery_used.at)} for "{status.recovery_used.username}". If
+      that wasn't you or another admin, treat the computer as compromised.
+      <button class="link" onclick={dismissRecovery}>Dismiss</button>
+    </p>
+  {/if}
   {#if status}
     <p class="small">
       {#if status.level === 'off'}

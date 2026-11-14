@@ -187,6 +187,11 @@
       {/if}
     </div>
   </header>
+  {#if app.me.must_change_password}
+    <div class="must-change" role="alert">
+      Your password is a temporary one. <a href="#/account">Change it now</a>.
+    </div>
+  {/if}
 
   <nav class="side" class:rail={tab === 'admin'} aria-label="Main navigation">
     <a class="brand side-brand" href="#/" aria-label="DJINN">
@@ -304,6 +309,19 @@
 <Toasts />
 
 <style>
+  .must-change {
+    padding: 8px 16px;
+    text-align: center;
+    background: var(--accent);
+    color: var(--on-accent, #000);
+    font-weight: 600;
+  }
+
+  .must-change a {
+    color: inherit;
+    text-decoration: underline;
+  }
+
   .join-language {
     display: flex;
     justify-content: center;

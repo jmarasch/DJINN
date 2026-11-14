@@ -94,3 +94,17 @@ Admin > Access > Protected areas sets how strict it is:
 An unlock belongs to your session. It ends when you leave Admin, when you select Lock now, after ten minutes without use, or after an hour at most. Changing the level needs your password, and leaving Max needs a code too, so a stolen password alone can't loosen the lock. The server enforces the lock, not just the screen.
 
 **Audit trail.** Each unlock, failed try, change of level and library change is recorded with who, when and from where. In the same page you can turn the trail off and delete all records (both need the area unlocked). While the trail is on, deleting leaves one record of itself; turn it off first to leave no trace.
+
+### Locked accounts and the host recovery command
+
+An account is **locked** after ten wrong two-step codes in a row (counted only after the right password, so a stranger can't lock someone out). A locked account can't sign in until another admin selects **Unlock** on it in Admin > Users and roles, and unlocking, resetting a password and turning off two-step are all things one admin can do for another.
+
+If no admin is left who can sign in, run this on the computer DJINN is installed on:
+
+```sh
+djinn recover
+```
+
+It only works when every admin account is shut out (locked, turned off or waiting), and only for an admin account whose username you type exactly. For anything else it says only "Not eligible", and three wrong tries lock the command for 15 minutes (then 30, then 60 minutes after each further round). The tries are kept in the database, so restarting DJINN doesn't clear them. When it works it unlocks the account and makes it active, gives it a temporary password (shown once) that DJINN asks you to change straight away, turns its two-step sign-in off so you can set it up again, and signs it out everywhere. It never opens a session. Admins see a banner in Admin until they dismiss it, and the audit trail records the use.
+
+This is a speed bump with a record. Anyone with full control of the computer can already read DJINN's database or replace the program; the computer's own login and disk encryption are the real protection.

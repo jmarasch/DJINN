@@ -47,6 +47,9 @@ pub fn router() -> Router<AppState> {
             "/protected/audit",
             get(audit_page).put(set_audit).delete(purge_audit),
         )
+        .route("/protected/locked", get(locked_accounts))
+        .route("/protected/recovery/dismiss", post(dismiss_recovery))
+        .route("/users/{id}/unlock", post(unlock_account))
 }
 
 // --- Levels ---
@@ -239,6 +242,8 @@ struct Status {
     can_open: bool,
     audit_on: bool,
     audit_count: i64,
+    /// The host's recovery command was used (until an admin dismisses it).
+    recovery_used: Option<djinn_store::RecoveryUsed>,
 }
 
 async fn status(
@@ -257,7 +262,55 @@ async fn status(
         can_open: wanted != Level::Max || two_step,
         audit_on: settings::flag(&state.store, AUDIT_ON, true).await?,
         audit_count: state.store.audit_count().await?,
+        recovery_used: state.store.recovery_used().await?,
     }))
+}
+
+/// Accounts locked after too many wrong codes, for Admin > Users.
+async fn locked_accounts(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json<Vec<i64>>> {
+    Ok(Json(
+        state
+            .store
+            .admin_accounts()
+            .await?
+            .into_iter()
+            .filter(|a| a.locked)
+            .map(|a| a.id)
+            .collect(),
+    ))
+}
+
+/// One admin lets a locked account sign in again.
+async fn unlock_account(
+    AdminUser(admin): AdminUser,
+    device: Device,
+    State(state): State<AppState>,
+    axum::extract::Path(id): axum::extract::Path<i64>,
+) -> ApiResult<StatusCode> {
+    let target = state
+        .store
+        .user(id)
+        .await?
+        .ok_or_else(ApiError::not_found)?;
+    if !state.store.unlock_account(id).await? {
+        return Err(ApiError::bad_request("that account isn't locked"));
+    }
+    tracing::info!(username = %target.username, by = %admin.username, "account unlocked");
+    audit(
+        &state,
+        &admin,
+        device.ip.as_deref(),
+        "account_unlocked",
+        &target.username,
+    )
+    .await;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Dismisses the banner about the host recovery command having been used.
+async fn dismiss_recovery(_: AdminUser, State(state): State<AppState>) -> ApiResult<StatusCode> {
+    state.store.dismiss_recovery_note().await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(Deserialize)]
@@ -295,12 +348,16 @@ async fn prove(
         return Err(crate::auth::too_many_tries(wait));
     }
     if !two_step::verify(state, user.id, &proof.code).await? {
+        if state.store.note_code_failure(user.id).await? {
+            tracing::warn!(username = %user.username, "account locked after too many wrong codes");
+        }
         return Err(ApiError::new(
             StatusCode::UNAUTHORIZED,
             "that code didn't work; try the newest one",
         ));
     }
     state.limiter.code_ok(&bucket, device.addr);
+    state.store.clear_code_failures(user.id).await?;
     Ok(())
 }
 
@@ -597,6 +654,34 @@ mod tests {
             Some(&user),
         )
         .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn another_admin_can_unlock_a_locked_account() {
+        let state = AppState::for_tests().await;
+        let admin = session(&state, "admin", Role::Admin).await;
+        let locked = state
+            .store
+            .create_user("locked", "x", Role::Admin)
+            .await
+            .unwrap();
+        for _ in 0..djinn_store::CODE_FAILURE_LIMIT {
+            state.store.note_code_failure(locked.id).await.unwrap();
+        }
+        let (status, body) =
+            crate::test_util::get_body(&state, "/api/protected/locked", &admin).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body, format!("[{}]", locked.id));
+        let path = format!("/api/users/{}/unlock", locked.id);
+        let (status, _) = call(&state, Method::POST, &path, Some("{}"), Some(&admin)).await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        assert!(!state.store.is_locked(locked.id).await.unwrap());
+        // Not locked any more: nothing to do.
+        let (status, _) = call(&state, Method::POST, &path, Some("{}"), Some(&admin)).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        let user = session(&state, "sam", Role::User).await;
+        let (status, _) = call(&state, Method::POST, &path, Some("{}"), Some(&user)).await;
         assert_eq!(status, StatusCode::FORBIDDEN);
     }
 

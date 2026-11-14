@@ -22,6 +22,8 @@ export interface User {
   permissions?: Permissions
   /** DJINN GO asks this account for two-step sign-in. Only on /me. */
   two_step_required?: boolean
+  /** The password came from the host's recovery command: change it now. Only on /me. */
+  must_change_password?: boolean
 }
 
 /** Login's answer when the password was right but a code is needed. */
@@ -1398,6 +1400,8 @@ export interface ProtectedStatus {
   can_open: boolean
   audit_on: boolean
   audit_count: number
+  /** The host's recovery command was used (until dismissed). */
+  recovery_used: { at: number; username: string } | null
 }
 
 export interface AuditEntry {
