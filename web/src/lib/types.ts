@@ -1517,6 +1517,30 @@ export interface AuditEntry {
   detail: string
 }
 
+export interface AiWorkStatus {
+  on: boolean
+  new_songs: boolean
+  sync_plain: boolean
+  counts: { waiting_listen: number; waiting_sync: number; working: number; done: number; failed: number }
+  held: { reason: 'music' } | { reason: 'hours'; from: number; until: number } | null
+  keys: string[]
+  workers: { name: string; last_seen: number; done: number; failed: number }[]
+}
+
+export interface AiListenerStatus {
+  installed: boolean
+  installing: boolean
+  running: boolean
+  python: string | null
+  ffmpeg: boolean
+  nvidia: boolean
+  model: string
+  vocals: boolean
+  auto_start: boolean
+  error: string | null
+  log: string[]
+}
+
 /** What the last lyrics zip import did. */
 export interface LyricsImportReport {
   saved_ai: number

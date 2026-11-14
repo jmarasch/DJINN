@@ -1,0 +1,490 @@
+//! DJINN's own lyrics listener (Admin > AI): a Python worker that listens to
+//! songs with local models (faster-whisper, Demucs when installed) and makes
+//! or times lyrics for them. Nothing leaves the computer: the models are
+//! downloaded once into `<db dir>/ai-listener/models`, and the worker only
+//! talks to this DJINN. DJINN carries the worker's source in itself, sets up
+//! a private Python environment for it on request (the install can be run
+//! again, and a PC install image already has Python and ffmpeg), and runs it
+//! as a helper that pulls its songs from `ai_work.rs`. The same pack can
+//! run on another computer with a key from Admin > AI.
+
+use std::path::{Path, PathBuf};
+use std::process::Stdio;
+use std::sync::Mutex;
+
+use axum::extract::State;
+use axum::http::StatusCode;
+use axum::routing::{get, post};
+use axum::{Json, Router};
+use serde::{Deserialize, Serialize};
+use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::process::{Child, Command};
+
+use crate::auth::AdminUser;
+use crate::backup::data_dir;
+use crate::error::{ApiError, ApiResult};
+use crate::state::AppState;
+
+const MODEL: &str = "ai_listener_model";
+const VOCALS: &str = "ai_listener_vocals";
+const AUTO: &str = "ai_listener_auto";
+const LOCAL_KEY_NAME: &str = "this computer";
+/// The pack's version: a new one is written over the old on install.
+const PACK_VERSION: &str = "1";
+
+/// The pack's files, carried in DJINN.
+const FILES: &[(&str, &str)] = &[
+    (
+        "worker.py",
+        include_str!("../../../packaging/listener/worker.py"),
+    ),
+    (
+        "requirements.txt",
+        include_str!("../../../packaging/listener/requirements.txt"),
+    ),
+    (
+        "requirements-gpu.txt",
+        include_str!("../../../packaging/listener/requirements-gpu.txt"),
+    ),
+    (
+        "requirements-vocals.txt",
+        include_str!("../../../packaging/listener/requirements-vocals.txt"),
+    ),
+    (
+        "lib/__init__.py",
+        include_str!("../../../packaging/listener/lib/__init__.py"),
+    ),
+    (
+        "lib/aligner.py",
+        include_str!("../../../packaging/listener/lib/aligner.py"),
+    ),
+    (
+        "lib/audio.py",
+        include_str!("../../../packaging/listener/lib/audio.py"),
+    ),
+    (
+        "lib/bootstrap.py",
+        include_str!("../../../packaging/listener/lib/bootstrap.py"),
+    ),
+    (
+        "lib/cleaner.py",
+        include_str!("../../../packaging/listener/lib/cleaner.py"),
+    ),
+    (
+        "lib/lrc.py",
+        include_str!("../../../packaging/listener/lib/lrc.py"),
+    ),
+    (
+        "lib/models.py",
+        include_str!("../../../packaging/listener/lib/models.py"),
+    ),
+];
+
+pub fn router() -> Router<AppState> {
+    Router::new()
+        .route("/ai-listener", get(status))
+        .route("/ai-listener/install", post(install))
+        .route("/ai-listener/start", post(start))
+        .route("/ai-listener/stop", post(stop))
+        .route("/ai-listener/settings", axum::routing::put(put_settings))
+}
+
+#[derive(Default)]
+struct Inner {
+    installing: bool,
+    log: Vec<String>,
+    child: Option<Child>,
+    error: Option<String>,
+}
+
+static INNER: Mutex<Option<Inner>> = Mutex::new(None);
+
+fn with<T>(f: impl FnOnce(&mut Inner) -> T) -> T {
+    let mut guard = INNER.lock().unwrap_or_else(|e| e.into_inner());
+    f(guard.get_or_insert_with(Inner::default))
+}
+
+fn note(line: impl Into<String>) {
+    with(|i| {
+        i.log.push(line.into());
+        let extra = i.log.len().saturating_sub(300);
+        i.log.drain(..extra);
+    });
+}
+
+fn dir(state: &AppState) -> PathBuf {
+    data_dir(state).join("ai-listener")
+}
+
+fn venv_python(dir: &Path) -> PathBuf {
+    if cfg!(windows) {
+        dir.join(".venv").join("Scripts").join("python.exe")
+    } else {
+        dir.join(".venv").join("bin").join("python")
+    }
+}
+
+fn installed(dir: &Path) -> bool {
+    venv_python(dir).exists()
+        && std::fs::read_to_string(dir.join(".installed")).is_ok_and(|v| v.trim() == PACK_VERSION)
+}
+
+/// A Python to build the environment with, if the computer has one.
+async fn find_python() -> Option<String> {
+    for name in [
+        "python3.12",
+        "python3.11",
+        "python3.10",
+        "python3",
+        "python",
+    ] {
+        let ok = Command::new(name)
+            .arg("--version")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .await
+            .is_ok_and(|s| s.success());
+        if ok {
+            return Some(name.to_owned());
+        }
+    }
+    None
+}
+
+async fn has_nvidia() -> bool {
+    Command::new("nvidia-smi")
+        .arg("-L")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .await
+        .is_ok_and(|s| s.success())
+}
+
+async fn has_ffmpeg() -> bool {
+    Command::new("ffmpeg")
+        .arg("-version")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .await
+        .is_ok_and(|s| s.success())
+}
+
+#[derive(Serialize)]
+struct Status {
+    installed: bool,
+    installing: bool,
+    running: bool,
+    python: Option<String>,
+    ffmpeg: bool,
+    nvidia: bool,
+    model: String,
+    vocals: bool,
+    auto_start: bool,
+    error: Option<String>,
+    log: Vec<String>,
+}
+
+async fn status(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json<Status>> {
+    let d = dir(&state);
+    let (installing, running, error, log) = with(|i| {
+        let running = i
+            .child
+            .as_mut()
+            .is_some_and(|c| matches!(c.try_wait(), Ok(None)));
+        (i.installing, running, i.error.clone(), i.log.clone())
+    });
+    let lines: Vec<String> = log.iter().rev().take(40).rev().cloned().collect();
+    Ok(Json(Status {
+        installed: installed(&d),
+        installing,
+        running,
+        python: find_python().await,
+        ffmpeg: has_ffmpeg().await,
+        nvidia: has_nvidia().await,
+        model: state
+            .store
+            .get_setting(MODEL)
+            .await?
+            .unwrap_or_else(|| "small".into()),
+        vocals: crate::settings::flag(&state.store, VOCALS, false).await?,
+        auto_start: crate::settings::flag(&state.store, AUTO, true).await?,
+        error,
+        log: lines,
+    }))
+}
+
+#[derive(Deserialize)]
+struct Choices {
+    model: String,
+    vocals: bool,
+    auto_start: bool,
+}
+
+const MODELS: [&str; 6] = [
+    "tiny",
+    "base",
+    "small",
+    "medium",
+    "large-v3",
+    "large-v3-turbo",
+];
+
+async fn put_settings(
+    _: AdminUser,
+    State(state): State<AppState>,
+    Json(body): Json<Choices>,
+) -> ApiResult<StatusCode> {
+    if !MODELS.contains(&body.model.as_str()) {
+        return Err(ApiError::bad_request("unknown model"));
+    }
+    state.store.set_setting(MODEL, &body.model).await?;
+    crate::settings::set_flag(&state.store, VOCALS, body.vocals).await?;
+    crate::settings::set_flag(&state.store, AUTO, body.auto_start).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Runs a command, adding each output line to the log; false if it failed.
+async fn run_logged(mut command: Command) -> bool {
+    command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    let Ok(mut child) = command.spawn() else {
+        note("couldn't start the command");
+        return false;
+    };
+    let readers: Vec<_> = [
+        child.stdout.take().map(|o| tokio::spawn(log_lines(o))),
+        child.stderr.take().map(|e| tokio::spawn(log_lines(e))),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    let ok = child.wait().await.is_ok_and(|s| s.success());
+    for r in readers {
+        let _ = r.await;
+    }
+    ok
+}
+
+/// Adds each line a helper writes to the log.
+async fn log_lines<R: tokio::io::AsyncRead + Unpin>(reader: R) {
+    let mut lines = BufReader::new(reader).lines();
+    while let Ok(Some(line)) = lines.next_line().await {
+        note(line);
+    }
+}
+
+/// Writes the pack, makes its Python environment, installs what it needs and
+/// downloads the model. Safe to run again.
+async fn install(_: AdminUser, State(state): State<AppState>) -> ApiResult<StatusCode> {
+    if with(|i| std::mem::replace(&mut i.installing, true)) {
+        return Err(ApiError::conflict(
+            "the listener is being installed already",
+        ));
+    }
+    let model = state
+        .store
+        .get_setting(MODEL)
+        .await?
+        .unwrap_or_else(|| "small".into());
+    let vocals = crate::settings::flag(&state.store, VOCALS, false).await?;
+    let d = dir(&state);
+    tokio::spawn(async move {
+        with(|i| {
+            i.log.clear();
+            i.error = None;
+        });
+        let result = install_into(&d, &model, vocals).await;
+        with(|i| {
+            i.installing = false;
+            i.error = result.err();
+        });
+    });
+    Ok(StatusCode::ACCEPTED)
+}
+
+async fn install_into(d: &Path, model: &str, vocals: bool) -> Result<(), String> {
+    for (name, text) in FILES {
+        let path = d.join(name);
+        if let Some(parent) = path.parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .map_err(|e| e.to_string())?;
+        }
+        tokio::fs::write(&path, text)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    note("Listener files written.");
+    if !has_ffmpeg().await {
+        return Err("ffmpeg isn't installed on this computer; install it (Debian: sudo apt install ffmpeg) and try again".into());
+    }
+    let python = find_python().await.ok_or(
+        "Python 3 isn't installed on this computer (Debian: sudo apt install python3 python3-venv)",
+    )?;
+    if !venv_python(d).exists() {
+        note("Making a private Python environment...");
+        let mut c = Command::new(&python);
+        c.args(["-m", "venv"]).arg(d.join(".venv"));
+        if !run_logged(c).await {
+            return Err("couldn't make the Python environment (Debian needs python3-venv)".into());
+        }
+    }
+    let py = venv_python(d);
+    let pip = |file: &str, extra: &[&str]| {
+        let mut c = Command::new(&py);
+        c.current_dir(d)
+            .args([
+                "-m",
+                "pip",
+                "install",
+                "--disable-pip-version-check",
+                "-r",
+                file,
+            ])
+            .args(extra);
+        c
+    };
+    note("Installing the listening software (downloads from the Python package index)...");
+    if !run_logged(pip("requirements.txt", &[])).await {
+        return Err("couldn't install the listening software".into());
+    }
+    if has_nvidia().await {
+        note("An NVIDIA card was found: installing its libraries...");
+        if !run_logged(pip("requirements-gpu.txt", &[])).await {
+            note("The card's libraries didn't install; the listener will use the processor.");
+        }
+    }
+    if vocals {
+        note("Installing vocal isolation (large)...");
+        let extra: &[&str] = if has_nvidia().await {
+            &[]
+        } else {
+            &["--extra-index-url", "https://download.pytorch.org/whl/cpu"]
+        };
+        if !run_logged(pip("requirements-vocals.txt", extra)).await {
+            note("Vocal isolation didn't install; the listener will go without it.");
+        }
+    }
+    note(format!("Downloading the {model} model (once)..."));
+    let mut c = Command::new(&py);
+    c.current_dir(d)
+        .args(["worker.py", "--setup", "--model", model])
+        .args(["--vocals", if vocals { "auto" } else { "off" }]);
+    if !run_logged(c).await {
+        return Err("couldn't download the model".into());
+    }
+    tokio::fs::write(d.join(".installed"), PACK_VERSION)
+        .await
+        .map_err(|e| e.to_string())?;
+    note("Done.");
+    Ok(())
+}
+
+/// The key this computer's own worker uses: made on first start, kept in the
+/// listener's folder (readable only by DJINN's user), its hash in the list.
+async fn local_key(state: &AppState, d: &Path) -> anyhow::Result<String> {
+    let file = d.join(".key");
+    if let Ok(key) = tokio::fs::read_to_string(&file).await {
+        if crate::ai_work::key_is_valid(state, LOCAL_KEY_NAME, key.trim()).await? {
+            return Ok(key.trim().to_owned());
+        }
+    }
+    let key = crate::ai_work::replace_key(state, LOCAL_KEY_NAME).await?;
+    tokio::fs::write(&file, &key).await?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        tokio::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).await?;
+    }
+    Ok(key)
+}
+
+async fn start(_: AdminUser, State(state): State<AppState>) -> ApiResult<StatusCode> {
+    start_worker(&state)
+        .await
+        .map_err(|e| ApiError::bad_request(e.to_string()))?;
+    Ok(StatusCode::ACCEPTED)
+}
+
+/// Starts the local worker (also at DJINN's start when switched on).
+pub async fn start_worker(state: &AppState) -> anyhow::Result<()> {
+    let d = dir(state);
+    if !installed(&d) {
+        anyhow::bail!("install the listener first");
+    }
+    if with(|i| {
+        i.child
+            .as_mut()
+            .is_some_and(|c| matches!(c.try_wait(), Ok(None)))
+    }) {
+        return Ok(());
+    }
+    let key = local_key(state, &d).await?;
+    let model = state
+        .store
+        .get_setting(MODEL)
+        .await?
+        .unwrap_or_else(|| "small".into());
+    let vocals = crate::settings::flag(&state.store, VOCALS, false).await?;
+    let mut command = Command::new(venv_python(&d));
+    command
+        .current_dir(&d)
+        .args(["worker.py", "--server"])
+        .arg(format!(
+            "http://127.0.0.1:{}",
+            crate::system_api::party_port()
+        ))
+        .args(["--model", &model])
+        .args(["--vocals", if vocals { "auto" } else { "off" }])
+        .env("DJINN_WORKER_KEY", key)
+        .env("PYTHONUNBUFFERED", "1")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    let mut child = command.spawn()?;
+    if let Some(o) = child.stdout.take() {
+        tokio::spawn(log_lines(o));
+    }
+    if let Some(e) = child.stderr.take() {
+        tokio::spawn(log_lines(e));
+    }
+    with(|i| i.child = Some(child));
+    tracing::info!("lyrics listener started");
+    Ok(())
+}
+
+async fn stop(_: AdminUser) -> StatusCode {
+    stop_worker().await;
+    StatusCode::NO_CONTENT
+}
+
+pub async fn stop_worker() {
+    let child = with(|i| i.child.take());
+    if let Some(mut child) = child {
+        let _ = child.kill().await;
+        tracing::info!("lyrics listener stopped");
+    }
+}
+
+/// At DJINN's start: bring the worker back if it's installed and wanted.
+pub async fn resume(state: &AppState) {
+    if !installed(&dir(state)) {
+        return;
+    }
+    let wanted = crate::settings::flag(&state.store, AUTO, true)
+        .await
+        .unwrap_or(false)
+        && crate::settings::flag(&state.store, crate::ai_work::WORK_ON, false)
+            .await
+            .unwrap_or(false);
+    if wanted {
+        if let Err(e) = start_worker(state).await {
+            tracing::warn!(error = %e, "couldn't start the lyrics listener");
+        }
+    }
+}

@@ -220,3 +220,13 @@ The first piece is a **compare**. It reads every song's tags from its file and s
 - **Other**: the file changed since DJINN read it (a library check re-reads changed files), or the two readings differ.
 
 The compare only reads; nothing in your music folders or the database changes. About half a minute for 40,000 songs on a local disk.
+
+## Lyrics listening (local AI)
+
+Admin > AI > **Lyrics listening** lets a local AI make lyrics for songs that have none, and time lyrics that are plain. It uses faster-whisper (and Demucs to isolate the vocals, if you tick that) on your own computer: the models are downloaded once, and nothing is sent anywhere but to your own DJINN.
+
+1. **Install the listener.** DJINN sets up a private Python environment for it and downloads the model you chose (tiny and base suit a small processor, small a decent one, medium or large-v3-turbo a graphics card; an NVIDIA card is used when found). The PC install disc already has Python and ffmpeg; on another system install `python3`, `python3-venv` and `ffmpeg` first. The install needs the internet once, for the packages and the model.
+2. **Let it work.** It takes one song at a time, and asks DJINN before each, so it only works when background work is allowed (the hours or "no music playing" rule in Library) and stops between songs when it isn't. It starts with DJINN if you leave that ticked.
+3. **What it makes.** Lyrics for songs with none (once LRCLIB has been asked), marked as AI-made, and, if you tick it, timing for plain lyrics, marked as AI-timed with how well they matched. Both show a note, are listed under Library > Problems as **Lyrics an AI made**, and rank below every other source.
+
+Other computers can help: make a key under **Other computers**, copy the `ai-listener` folder from DJINN's data folder to the computer, and run `python worker.py --server http://this-computer:8066 --key KEY` in it. Keys only work from your home network.

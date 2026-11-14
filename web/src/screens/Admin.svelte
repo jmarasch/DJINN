@@ -13,6 +13,7 @@
   import LogViewer from '../lib/LogViewer.svelte'
   import SignInLog from '../lib/SignInLog.svelte'
   import ProtectedPanel from '../lib/ProtectedPanel.svelte'
+  import AiWorkPanel from '../lib/AiWorkPanel.svelte'
   import LibraryEditor from '../lib/LibraryEditor.svelte'
   import UnlockHost from '../lib/UnlockHost.svelte'
   import ResetPanel from '../lib/ResetPanel.svelte'
@@ -468,7 +469,7 @@
   <div data-subtab="styles" hidden={sub.smart !== 'styles'}><SmartPlayPanel part="styles" /></div>
   <div data-subtab="schedule" hidden={sub.smart !== 'schedule'}><SchedulePanel /></div>
 {:else if t === 'ai'}
-  <div class="cards-2"><AiPanel /></div>
+  <div class="cards-2"><AiPanel /><AiWorkPanel /></div>
 {:else if t === 'users'}
   <div class="cards-2"><UsersPanel /></div>
 {:else if t === 'editor'}

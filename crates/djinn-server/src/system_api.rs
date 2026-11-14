@@ -117,6 +117,11 @@ fn live_addresses(listen: SocketAddr, join: &str) -> Vec<String> {
     found
 }
 
+/// The port guests (and DJINN's own helpers) reach DJINN on.
+pub fn party_port() -> u16 {
+    STARTUP.get().map_or(8066, |s| s.party_listen.port())
+}
+
 /// Records when DJINN started, its database, and the port guests use.
 pub fn started(database: &Path, party_listen: SocketAddr) {
     let _ = STARTUP.set(Startup {

@@ -613,6 +613,64 @@ async fn run(state: &AppState, zip_path: &Path, options: Options) -> anyhow::Res
     Ok(())
 }
 
+/// What storing one lyrics file from a worker did.
+pub enum Stored {
+    Saved,
+    /// Better lyrics were already there (or an admin removed these).
+    NotNeeded,
+}
+
+/// Stores the lyrics file an AI worker made for a song, the way an import
+/// would, and marks it as the AI's (`kind` 1 made, 2 timed) whatever the
+/// header says. An Err says why the file wasn't used.
+pub async fn store_from_worker(
+    state: &AppState,
+    track_id: i64,
+    text: &str,
+    kind: i64,
+    worker: &str,
+) -> Result<Stored, String> {
+    if text.len() as u64 > lines::MAX_FILE_BYTES {
+        return Err("the lyrics are too big".into());
+    }
+    if let Some(why) = lines::suspicious(text) {
+        return Err(format!("the lyrics look like code or markup ({why})"));
+    }
+    let header = lines::header(text);
+    let Content::Lyrics(found) = lines::content(text) else {
+        return Err("there are no lyrics in it".into());
+    };
+    let info = header.ai_info();
+    let mark = AiMark {
+        kind: info.as_ref().map_or(kind, |i| i.kind),
+        model: info.as_ref().map_or("worker", |i| i.model.as_str()),
+        match_pct: info.as_ref().and_then(|i| i.match_pct),
+    };
+    let new = NewLyrics {
+        synced: found.synced.as_deref(),
+        plain: found.plain.as_deref(),
+        instrumental: false,
+        source: "bulk",
+    };
+    // A job to time plain lyrics is meant to replace them, whoever found them.
+    let saved = state
+        .store
+        .save_bulk_lyrics(
+            track_id,
+            &new,
+            false,
+            Some(&mark),
+            &format!("worker {worker}"),
+            kind == 2,
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(match saved {
+        BulkSave::Saved => Stored::Saved,
+        _ => Stored::NotNeeded,
+    })
+}
+
 async fn save_chunk(
     state: &AppState,
     library: &Library,

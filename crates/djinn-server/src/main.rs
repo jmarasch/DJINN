@@ -7,6 +7,8 @@
 mod accounts;
 mod address;
 mod ai;
+mod ai_listener;
+mod ai_work;
 mod api;
 mod appearance;
 mod audio_api;
@@ -452,6 +454,7 @@ async fn run() -> anyhow::Result<()> {
     scheduled_check::start(state.clone());
     schedule::start(state.clone());
     lyrics::start(&state);
+    ai_listener::resume(&state).await;
     update::start(&state);
     if let Err(e) = convert::apply(&state).await {
         tracing::error!(error = %format!("{e:#}"), "couldn't read the converting settings");
