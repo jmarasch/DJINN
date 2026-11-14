@@ -206,3 +206,39 @@ Then add `DJINN_ANDROID_KEYSTORE_BASE64` (the output of the second command),
 Back the key up with the release key. **If it's lost, phones can't update the
 app to a build signed with a new one**; everyone would have to uninstall first,
 which deletes what they've kept on the phone. Never commit it.
+
+## The AI keepsake (offline lyrics listener)
+
+The lyrics listener (Admin > AI) needs Python packages from PyPI and PyTorch's
+server and Whisper models from Hugging Face. So that an install never depends
+on those still having them, the **AI keepsake** saves everything with
+checksums. It is big, changes only when the pins do, and is not part of every
+release.
+
+- **Pins:** `packaging/listener/requirements*.txt` (packages) and
+  `packaging/listener/models.json` (each Whisper model's exact revision, file
+  sizes and the model file's SHA-256). A model that doesn't match is refused.
+  To change a pin, edit the file, then rebuild the keepsake.
+- **Build it:** Actions > **AI keepsake** > Run workflow (manual, nothing starts
+  it by itself). It builds the packages inside Debian 12 and Debian 13 (the
+  wheels depend on the Python version) and the six models, and publishes them
+  to the release tagged `ai-keepsake` as parts of at most 1.9 GB each (a release
+  file can't be bigger than 2 GB), with `SHA256SUMS`. Roughly 4.6 GB of packages
+  per Debian (CPU and CUDA PyTorch, NVIDIA libraries) and 7.2 GB of models.
+- **Or build it yourself:** `sh packaging/listener/make-keepsake.sh OUT` on a
+  computer with the Python you'll install with (`--only packages` or
+  `--only models`, `--models "tiny base small"`, `--no-gpu`, `--no-vocals`).
+- **Use it:** download the parts you need (the packages for your Debian, and
+  the models) into one folder and run
+  `packaging/listener/install-keepsake.sh FOLDER`. That unpacks to
+  `/opt/djinn/keep`, where Admin > AI > Install finds it and installs with no
+  internet. `DJINN_AI_KEEP=DIR` or `<data folder>/ai-listener/keep` also work.
+- **An install disc that carries it:** `DJINN_KEEPSAKE=DIR sh
+  packaging/image/pc/build-iso.sh DJINN_BINARY OUT.iso` adds the keepsake to the
+  disc (ISO level 3, for the biggest files) and the installed system gets it in
+  `/opt/djinn/keep`. The released disc leaves it out, since a disc with
+  everything is about 12 GB, over GitHub's 2 GB file limit; build that one
+  yourself.
+
+The keepsake's release is a pre-release with a tag that is not a version, so
+DJINN's update check ignores it.

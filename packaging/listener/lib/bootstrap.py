@@ -290,6 +290,47 @@ def _whisper_local_dir(model_name: str, models_dir: Path) -> Path:
     return models_dir / f"faster-whisper-{safe}"
 
 
+PINNED_MODELS_FILE = Path(__file__).resolve().parents[1] / "models.json"
+
+
+def pinned_model(model_name: str) -> Optional[dict]:
+    """The pinned revision, sizes and checksums for a Whisper model, if it has them."""
+    import json
+
+    try:
+        data = json.loads(PINNED_MODELS_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data.get("models", {}).get(model_name.strip())
+
+
+def verify_whisper_model(model_dir: Path, model_name: str, *, checksums: bool) -> list[str]:
+    """Problems with a model folder against the pinned sizes (and, when asked,
+    the model file's SHA-256); an empty list means it is the pinned model."""
+    pin = pinned_model(model_name)
+    if pin is None:
+        return []
+    problems: list[str] = []
+    for name, spec in pin["files"].items():
+        if name in (".gitattributes", "README.md"):
+            continue
+        path = model_dir / name
+        if not path.is_file():
+            problems.append(f"{name} is missing")
+        elif path.stat().st_size != spec["size"]:
+            problems.append(f"{name} has the wrong size")
+        elif checksums and spec.get("sha256"):
+            import hashlib
+
+            digest = hashlib.sha256()
+            with open(path, "rb") as fh:
+                while chunk := fh.read(1 << 22):
+                    digest.update(chunk)
+            if digest.hexdigest() != spec["sha256"]:
+                problems.append(f"{name} fails its checksum")
+    return problems
+
+
 def ensure_whisper_model(
     model_name: str,
     models_dir: Optional[Path] = None,
@@ -305,6 +346,8 @@ def ensure_whisper_model(
     model_bin = target_dir / "model.bin"
     config_json = target_dir / "config.json"
     if model_bin.is_file() and config_json.is_file():
+        for problem in verify_whisper_model(target_dir, model_name, checksums=False):
+            print(f"[models] Warning: {model_name}: {problem}; it isn't the pinned model.")
         return target_dir
 
     repo_id = resolve_hf_whisper_repo(model_name)
@@ -313,8 +356,10 @@ def ensure_whisper_model(
 
     from huggingface_hub import snapshot_download
 
+    pin = pinned_model(model_name)
     snapshot_download(
         repo_id=repo_id,
+        revision=pin["revision"] if pin else None,
         local_dir=str(target_dir),
         cache_dir=str(resolved_dir / "hf"),
     )
@@ -323,6 +368,9 @@ def ensure_whisper_model(
         raise RuntimeError(
             f"Downloaded model at {target_dir} is missing model.bin or config.json."
         )
+    problems = verify_whisper_model(target_dir, model_name, checksums=True)
+    if problems:
+        raise RuntimeError(f"The {model_name} model didn't download correctly: {'; '.join(problems)}")
     return target_dir
 
 

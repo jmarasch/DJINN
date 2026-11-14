@@ -6,6 +6,13 @@
 #
 #   build-iso.sh DJINN_X86_64_BINARY OUT.iso [extra preseed lines file]
 #
+# With DJINN_KEEPSAKE=DIR (made by packaging/listener/make-keepsake.sh) the
+# disc also carries the lyrics listener's packages and models, and the
+# installed system finds them in /opt/djinn/keep, so Admin > AI installs the
+# listener with no internet. That makes a large disc (up to about 12 GB with
+# everything); the released disc leaves it out, and the keepsake is
+# published beside it as separate files (see docs/releasing.md).
+#
 # Needs xorriso, cpio, gzip, curl. The third argument is for tests that
 # answer the remaining questions too.
 set -eu
@@ -39,6 +46,10 @@ mkdir -p "$work/iso/djinn"
 cp "$binary" "$work/iso/djinn/djinn"
 cp "$here/../common/install-files.sh" "$here/../common/config.toml" "$here/../common/djinn.service" \
     "$here/../common/kiosk.sh" "$here/late.sh" "$work/iso/djinn/"
+if [ -n "${DJINN_KEEPSAKE:-}" ]; then
+    echo "Adding the AI keepsake from $DJINN_KEEPSAKE"
+    cp -r "$DJINN_KEEPSAKE" "$work/iso/djinn/keep"
+fi
 chmod 755 "$work/iso/djinn/djinn" "$work/iso/djinn/install-files.sh" "$work/iso/djinn/kiosk.sh" "$work/iso/djinn/late.sh"
 
 # The answers go inside the installer's own startup files, where it looks
@@ -78,11 +89,14 @@ menuentry "Install DJINN with a screen (shows the TV page)" {
     initrd /install.amd/initrd.gz
 }
 CFG
-(cd "$work/iso" && find . -type f ! -name md5sum.txt ! -path './isolinux/*' -exec md5sum {} + > md5sum.txt)
+(cd "$work/iso" && find . -type f ! -name md5sum.txt ! -path './isolinux/*' ! -path './djinn/keep/*' -exec md5sum {} + > md5sum.txt)
+# Files over 4 GiB (the biggest model) need ISO level 3.
+level=""
+[ -n "${DJINN_KEEPSAKE:-}" ] && level="-iso-level 3"
 
 echo "Writing $out"
 # The original disc's boot setup (BIOS, UEFI, and USB-stick hybrid), as
 # xorriso describes it, applied to the changed files.
 xorriso -indev "$cache/$iso" -report_el_torito as_mkisofs 2>/dev/null > "$work/boot-options"
-eval "xorriso -as mkisofs $(tr '\n' ' ' < "$work/boot-options") -o \"$out\" \"$work/iso\"" 2>&1 | grep -iE 'failure|error' && exit 1
+eval "xorriso -as mkisofs $(tr '\n' ' ' < "$work/boot-options") $level -o \"$out\" \"$work/iso\"" 2>&1 | grep -iE 'failure|error' && exit 1
 ls -la "$out"

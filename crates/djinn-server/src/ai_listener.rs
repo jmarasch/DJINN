@@ -39,6 +39,10 @@ const FILES: &[(&str, &str)] = &[
         include_str!("../../../packaging/listener/worker.py"),
     ),
     (
+        "models.json",
+        include_str!("../../../packaging/listener/models.json"),
+    ),
+    (
         "requirements.txt",
         include_str!("../../../packaging/listener/requirements.txt"),
     ),

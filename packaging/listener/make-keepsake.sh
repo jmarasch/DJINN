@@ -5,6 +5,7 @@
 #
 #   make-keepsake.sh OUTPUT_DIR [--models "tiny base small medium large-v3-turbo"]
 #                    [--python python3] [--no-gpu] [--no-vocals]
+#                    [--only packages|models]
 #
 # OUTPUT_DIR gets wheelhouse/{core,vocals-cpu,vocals-gpu,gpu}, models/ and
 # SHA256SUMS. DJINN's Install button (Admin > AI) uses it when it is in
@@ -20,12 +21,14 @@ models="tiny base small medium large-v3-turbo"
 python=python3
 gpu=1
 vocals=1
+only=all
 while [ $# -gt 0 ]; do
     case "$1" in
         --models) models=$2; shift 2 ;;
         --python) python=$2; shift 2 ;;
         --no-gpu) gpu=0; shift ;;
         --no-vocals) vocals=0; shift ;;
+        --only) only=$2; shift 2 ;;
         *) echo "unknown option $1" >&2; exit 2 ;;
     esac
 done
@@ -42,17 +45,26 @@ get() { # name requirements [extra pip args]
     echo "Downloading $name packages"
     "$py" -m pip download -q --disable-pip-version-check -d "$out/wheelhouse/$name" -r "$here/$req" "$@"
 }
-get core requirements.txt
-[ "$vocals" = 1 ] && get vocals-cpu requirements-vocals.txt --extra-index-url https://download.pytorch.org/whl/cpu
-[ "$vocals" = 1 ] && [ "$gpu" = 1 ] && get vocals-gpu requirements-vocals.txt
-[ "$gpu" = 1 ] && get gpu requirements-gpu.txt
+if [ "$only" != models ]; then
+    get core requirements.txt
+    [ "$vocals" = 1 ] && get vocals-cpu requirements-vocals.txt --extra-index-url https://download.pytorch.org/whl/cpu
+    [ "$vocals" = 1 ] && [ "$gpu" = 1 ] && get vocals-gpu requirements-vocals.txt
+    [ "$gpu" = 1 ] && get gpu requirements-gpu.txt
+fi
+if [ "$only" = packages ]; then models=""; fi
 
 # Install from the wheelhouse alone (proving it works with no internet),
 # then let the worker's own setup fetch each model into the keepsake.
 echo "Checking the packages install offline"
-"$py" -m pip install -q --disable-pip-version-check --no-index --find-links "$out/wheelhouse/core" -r "$here/requirements.txt"
-if [ "$vocals" = 1 ]; then
-    "$py" -m pip install -q --disable-pip-version-check --no-index --find-links "$out/wheelhouse/vocals-cpu" -r "$here/requirements-vocals.txt"
+if [ "$only" = models ]; then
+    # Only the models: the packages come from the internet, just to run the setup.
+    "$py" -m pip install -q --disable-pip-version-check -r "$here/requirements.txt"
+    [ "$vocals" = 1 ] && "$py" -m pip install -q --disable-pip-version-check -r "$here/requirements-vocals.txt" --extra-index-url https://download.pytorch.org/whl/cpu
+else
+    "$py" -m pip install -q --disable-pip-version-check --no-index --find-links "$out/wheelhouse/core" -r "$here/requirements.txt"
+    if [ "$vocals" = 1 ]; then
+        "$py" -m pip install -q --disable-pip-version-check --no-index --find-links "$out/wheelhouse/vocals-cpu" -r "$here/requirements-vocals.txt"
+    fi
 fi
 first=1
 for model in $models; do
