@@ -45,6 +45,58 @@
       label: 'Albums filed twice',
       hint: "These albums by one artist hold almost the same songs: a copy in another folder, or the same album under a slightly different name. Keep the better one and remove the other from your music folders, then check for changes. A deluxe edition with extra songs isn't listed, and neither is a song that sits on several albums.",
     },
+    identical_files: {
+      label: 'The same file twice in one album',
+      hint: 'These songs in one album have the same size, length and title, so they are almost certainly the same file copied. Keep one and remove the other from your music folders, then check for changes.',
+    },
+    bogus_values: {
+      label: 'Songs with impossible numbers',
+      hint: 'A track or disc number of 0 or less, or a length of 0, usually means a bad rip or a damaged tag. Fix it with Edit tags or a tag editor.',
+    },
+    odd_length: {
+      label: 'Very short or very long songs',
+      hint: 'Under 10 seconds or over 3 hours. Often a cut-off download, a hidden track, a skit, or a whole mix filed as one song.',
+    },
+    low_bitrate: {
+      label: 'Low-quality songs',
+      hint: 'Under 96 kbps, which sounds poor. If you have a better copy, replace the file.',
+    },
+    title_junk: {
+      label: 'Titles with leftovers',
+      hint: 'A track number in front, "(Official Video)", a web address, spaces around, or all capitals. Clean it with Edit tags, which keeps your change in DJINN, or in a tag editor.',
+    },
+    name_mismatch: {
+      label: "File names that don't match the title",
+      hint: "The file's name (and folders) don't contain the song's title. Sometimes the tag is right and the name is just different (accents and punctuation count), sometimes the file is mislabeled. Play it to check.",
+    },
+    artist_variants: {
+      label: 'Artists spelled two ways',
+      hint: 'Names that differ only by capitals, a leading "The", "&" or punctuation, so one artist shows twice ("The Beatles" and "Beatles", "AC/DC" and "ACDC"). Pick one spelling and fix the other with Edit tags.',
+    },
+    split_across_artists: {
+      label: 'Albums split across artist names',
+      hint: "These albums share a folder and a title but were filed under different artist names, often because of a compilation tag or a \"feat.\" in the album artist. Set the same album artist on all of its songs with Edit album.",
+    },
+    cover_differs: {
+      label: 'Albums with different covers inside',
+      hint: "The songs of these albums carry more than one cover picture. Embed the same cover in every song, or put one cover.jpg in the folder.",
+    },
+    track_gaps: {
+      label: 'Albums with missing or repeated track numbers',
+      hint: 'Track numbers that start at 1 with a hole in them (songs missing from the album), or one number used twice. Check that all songs are there and numbered right.',
+    },
+    no_lyrics: {
+      label: 'Songs with no lyrics',
+      hint: 'No lyrics were found in a .lrc file, the tags, an import or LRCLIB. Turn on LRCLIB lookups or import a zip in Library > Lyrics. Instrumentals are fine.',
+    },
+    no_loudness: {
+      label: 'Songs with no loudness data',
+      hint: 'No ReplayGain tags and no measurement, in a library where other songs have them. Turn on ReplayGain in Audio so DJINN measures them.',
+    },
+    vanished: {
+      label: 'Songs that went missing lately',
+      hint: 'These were in the library and their files are gone (in the last 30 days). If that is a mistake, plug the drive back in or restore the files, then check for changes.',
+    },
     no_artist: {
       label: 'Songs with no artist',
       hint: 'Add the artist with Edit tags on the song, or in a tag editor.',
@@ -283,7 +335,7 @@
       <p class="small">Every file in your music folders made it in and plays.</p>
     {/if}
     {#if gaps.length}
-      <h3>Gaps in the tags</h3>
+      <h3>Worth a look</h3>
       {#each gaps as k (k.kind)}{@render kindRow(k)}{/each}
     {/if}
     {#if hidden.length}

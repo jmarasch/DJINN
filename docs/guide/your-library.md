@@ -177,4 +177,21 @@ Admin > Library > **Problems** lists what a library check couldn't add or found 
 - **Albums filed twice** are albums by one artist that hold almost the same songs (at least 85% of the larger one's song titles, and nearly the same number of songs): a copy in another folder, or the same album under a slightly different name such as "(Remastered)". A deluxe edition with extra songs isn't listed.
 - **A song on several albums is fine.** A track on both its album and a greatest hits is not a problem. The **Possible duplicates** card lists copies of a song only when they are in the same album (or have no album); tick **Also list copies in different albums** to see the rest.
 
+Other checks on the Problems page (each can be hidden once you know about it):
+
+- **The same file twice in one album**: same size, length and title.
+- **Impossible numbers**: a track or disc number of 0 or less, or a length of 0.
+- **Very short or very long songs**: under 10 seconds or over 3 hours.
+- **Low-quality songs**: under 96 kbps.
+- **Titles with leftovers**: a track number in front, "(Official Video)", a web address, spaces around, all capitals.
+- **File names that don't match the title**: the file's name and folders don't contain the title.
+- **Artists spelled two ways**: "The Beatles" and "Beatles", "AC/DC" and "ACDC".
+- **Albums split across artist names**: an album's folder filed under two artists.
+- **Albums with different covers inside**.
+- **Albums with missing or repeated track numbers**.
+- **Songs with no lyrics**, and **songs with no loudness data** (only once other songs have it).
+- **Songs that went missing lately**: gone from the library in the last 30 days.
+
+Not checked yet: covers that are tiny, huge or not square (DJINN doesn't measure pictures yet), and silent or very quiet files.
+
 DJINN never deletes anything: remove the copy you don't want from your music folders, then check for changes.

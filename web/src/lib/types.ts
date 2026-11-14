@@ -847,6 +847,19 @@ export type ProblemKind =
   | 'album_no_year'
   | 'album_no_genre'
   | 'duplicate_albums'
+  | 'identical_files'
+  | 'bogus_values'
+  | 'odd_length'
+  | 'low_bitrate'
+  | 'title_junk'
+  | 'name_mismatch'
+  | 'artist_variants'
+  | 'split_across_artists'
+  | 'cover_differs'
+  | 'track_gaps'
+  | 'no_lyrics'
+  | 'no_loudness'
+  | 'vanished'
 
 export interface ProblemCount {
   kind: ProblemKind
