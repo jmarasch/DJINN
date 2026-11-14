@@ -43,7 +43,7 @@
   let pattern = $state('{track} {title}')
   let renames = $state<EditorRenamed[] | null>(null)
   /** What the list of new places is for. */
-  let moveKind = $state<'rename' | 'move' | 'aside'>('rename')
+  let moveKind = $state<'rename' | 'move' | 'aside' | 'mp3'>('rename')
   let moveTo = $state('')
   let history = $state<EditorBatch[]>([])
   let coverInput = $state<HTMLInputElement | null>(null)
@@ -395,19 +395,26 @@
     }
   }
 
-  function relocation(kind: 'rename' | 'move' | 'aside', ids: number[], preview: boolean) {
+  function relocation(kind: 'rename' | 'move' | 'aside' | 'mp3', ids: number[], preview: boolean) {
     if (kind === 'rename') return api.editorRename(ids, pattern, preview)
+    if (kind === 'mp3') return api.editorMp3Length(ids, preview)
     if (kind === 'move') return api.editorMove(ids, { folder: moveTo }, preview)
     return api.editorMove(ids, { set_aside: true }, preview)
   }
 
-  async function previewMove(kind: 'rename' | 'move' | 'aside') {
+  async function previewMove(kind: 'rename' | 'move' | 'aside' | 'mp3') {
     if (kind === 'rename' && changeCount && !confirm('Rename from the tags as they are now? Changes not approved yet are left out.'))
       return
     if (kind === 'move' && !moveTo.trim()) return
     try {
       moveKind = kind
-      renames = (await unlocked(() => relocation(kind, changeable.map((s) => s.id), true))).files
+      const found = (await unlocked(() => relocation(kind, changeable.map((s) => s.id), true))).files
+      // Only the MP3s that need it are worth listing.
+      renames = kind === 'mp3' ? found.filter((f) => !f.problem) : found
+      if (kind === 'mp3' && !renames.length) {
+        renames = null
+        toast('Every MP3 here shows its real length already')
+      }
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Could not work out where they go', true)
     }
@@ -418,6 +425,11 @@
     rename: { title: 'New file names', verb: 'Rename', done: 'renamed' },
     move: { title: 'New places', verb: 'Move', done: 'moved' },
     aside: { title: 'Set aside (out of the library, into a hidden folder beside it)', verb: 'Set aside', done: 'set aside' },
+    mp3: {
+      title: 'MP3s other players show the wrong length for (DJINN counts it already)',
+      verb: 'Fix',
+      done: 'fixed',
+    },
   }
 
   async function rename() {
@@ -440,7 +452,13 @@
   }
 
   const fileName = (path: string) => path.slice(Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\')) + 1)
-  const KINDS: Record<string, string> = { tags: 'tags', cover: 'cover', rename: 'names and places', 'set-aside': 'set aside' }
+  const KINDS: Record<string, string> = {
+    tags: 'tags',
+    cover: 'cover',
+    rename: 'names and places',
+    'set-aside': 'set aside',
+    'mp3-length': 'MP3 lengths',
+  }
   const kindName = (kinds: string) =>
     kinds.startsWith('undo') ? 'undo' : kinds.split(',').map((k) => KINDS[k] ?? k).join(', ')
 </script>
@@ -623,6 +641,13 @@
                   >
                     Set aside...
                   </button>
+                  <button
+                    class="small-button"
+                    onclick={() => previewMove('mp3')}
+                    title="Variable bit rate MP3s with no length header look several times too long in other players. This writes the header (as LAME does); the sound isn't touched."
+                  >
+                    Fix MP3 lengths...
+                  </button>
                 </div>
               {/if}
             </div>
@@ -637,7 +662,9 @@
               <ul>
                 {#each renames as r (r.id)}
                   <li class="small" class:bad={!!r.problem}>
-                    {#if moveKind === 'rename'}
+                    {#if moveKind === 'mp3'}
+                      <span class="mono">{fileName(r.from)}</span>
+                    {:else if moveKind === 'rename'}
                       <span class="mono">{fileName(r.from)}</span> → <span class="mono">{fileName(r.to)}</span>
                     {:else}
                       <span class="mono">{r.from}</span> → <span class="mono">{r.to}</span>

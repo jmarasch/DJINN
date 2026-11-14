@@ -39,6 +39,7 @@ pub fn router() -> Router<AppState> {
         )
         .route("/editor/rename", post(rename))
         .route("/editor/move", post(move_songs))
+        .route("/editor/mp3-length", post(mp3_length))
 }
 
 /// The most field changes one approval takes.
@@ -582,6 +583,16 @@ async fn undo(
                     Err(e) => Err(e),
                 }
             }
+            "mp3-length" => {
+                let path = edit.path.clone();
+                tokio::task::spawn_blocking(move || {
+                    djinn_library::mpeg::remove_length_header(Path::new(&path))
+                        .map(|_| (path, "{}".to_owned(), "{}".to_owned()))
+                })
+                .await
+                .map_err(|e| e.to_string())
+                .and_then(|r| r)
+            }
             other => Err(format!("can't undo {other}")),
         };
         match result {
@@ -1094,6 +1105,108 @@ async fn move_songs(
     Ok(Json(RenameResult {
         files,
         batch: (moved > 0).then_some(batch),
+    }))
+}
+
+#[derive(Deserialize)]
+struct Mp3Length {
+    ids: Vec<i64>,
+    #[serde(default)]
+    preview: bool,
+}
+
+/// Writes a length header into variable bit rate MP3s that have none, so
+/// every player shows their real length (DJINN counts it already).
+async fn mp3_length(
+    Elevated(user): Elevated,
+    device: Device,
+    State(state): State<AppState>,
+    Json(body): Json<Mp3Length>,
+) -> ApiResult<Json<RenameResult>> {
+    if body.ids.is_empty() || body.ids.len() > 5_000 {
+        return Err(ApiError::bad_request("choose 1 to 5000 songs"));
+    }
+    let songs = state.store.editor_songs_by_id(&body.ids).await?;
+    let paths: Vec<(i64, String)> = songs.iter().map(|s| (s.id, s.path.clone())).collect();
+    let checked = tokio::task::spawn_blocking(move || {
+        paths
+            .into_iter()
+            .map(|(id, path)| {
+                let needs = path.to_lowercase().ends_with(".mp3")
+                    && djinn_library::mpeg::needs_length_header(Path::new(&path));
+                Renamed {
+                    id,
+                    from: path.clone(),
+                    to: path,
+                    problem: (!needs).then(|| "its length is right already".to_owned()),
+                }
+            })
+            .collect::<Vec<_>>()
+    })
+    .await
+    .map_err(anyhow::Error::from)?;
+    let mut files = checked;
+    if body.preview {
+        return Ok(Json(RenameResult { files, batch: None }));
+    }
+    all_editable(
+        &state,
+        &files
+            .iter()
+            .filter(|f| f.problem.is_none())
+            .map(|f| f.from.as_str())
+            .collect::<Vec<_>>(),
+    )
+    .await?;
+    let batch = state.store.next_file_batch().await?;
+    let mut written = Vec::new();
+    for file in &mut files {
+        if file.problem.is_some() {
+            continue;
+        }
+        let path = file.from.clone();
+        let done = tokio::task::spawn_blocking(move || {
+            djinn_library::mpeg::add_length_header(Path::new(&path))
+        })
+        .await
+        .map_err(anyhow::Error::from)?;
+        match done {
+            Ok(true) => {
+                let (size, mtime) = stat(Path::new(&file.from)).map_err(anyhow::Error::from)?;
+                state
+                    .store
+                    .record_file_edit(&NewFileEdit {
+                        batch,
+                        track_id: Some(file.id),
+                        path: &file.from,
+                        kind: "mp3-length",
+                        before: "{}",
+                        after: "{}",
+                        size,
+                        mtime,
+                        made_by: Some(user.id),
+                    })
+                    .await?;
+                written.push(file.from.clone());
+            }
+            Ok(false) => file.problem = Some("its length is right already".into()),
+            Err(e) => file.problem = Some(e),
+        }
+    }
+    if !written.is_empty() {
+        crate::library_api::reread(&state, &written).await?;
+    }
+    audit(
+        &state,
+        &user,
+        device.ip.as_deref(),
+        "editor_mp3_length",
+        &format!("{} files, approval {batch}", written.len()),
+    )
+    .await;
+    Ok(Json(RenameResult {
+        files,
+        batch: (!written.is_empty()).then_some(batch),
     }))
 }
 

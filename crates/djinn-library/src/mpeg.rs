@@ -223,6 +223,169 @@ pub fn exact_duration_ms(path: &Path) -> Option<i64> {
     i64::try_from(samples * 1000 / u64::from(first.sample_rate)).ok()
 }
 
+/// The audio of a variable bit rate MP3 with no length header, as walked:
+/// where its first frame is, that frame's header, and each frame's place
+/// and samples so far.
+struct Walked {
+    first_pos: u64,
+    header: [u8; 4],
+    first: Frame,
+    /// (byte offset from `first_pos`, samples before this frame).
+    frames: Vec<(u64, u64)>,
+    /// Bytes of audio, from `first_pos` to the end of the last frame.
+    bytes: u64,
+    samples: u64,
+}
+
+/// Walks a file that needs a length header (variable bit rate, none there).
+fn walk_needing_header(path: &Path) -> Option<Walked> {
+    exact_duration_ms(path)?;
+    let mut r = BufReader::with_capacity(64 * 1024, File::open(path).ok()?);
+    let len = r.get_ref().metadata().ok()?.len();
+    let start = audio_start(&mut r)?;
+    let (first_pos, first) = find_frame(&mut r, start, 64 * 1024, None)?;
+    r.seek(SeekFrom::Start(first_pos)).ok()?;
+    let mut header = [0u8; 4];
+    r.read_exact(&mut header).ok()?;
+    let mut frames = Vec::new();
+    let mut samples: u64 = 0;
+    let mut pos = first_pos;
+    let mut end = first_pos;
+    while pos < len {
+        match header_at(&mut r, pos) {
+            Some(frame) if first.same_stream(&frame) => {
+                frames.push((pos - first_pos, samples));
+                samples += u64::from(frame.samples);
+                pos += frame.size;
+                end = pos.min(len);
+            }
+            _ => match find_frame(&mut r, pos + 1, RESYNC_BYTES, Some(&first)) {
+                Some((next, _)) => pos = next,
+                None => break,
+            },
+        }
+    }
+    Some(Walked {
+        first_pos,
+        header,
+        first,
+        frames,
+        bytes: end - first_pos,
+        samples,
+    })
+}
+
+/// Whether this MP3 would get a length header: its bit rate varies and it
+/// has none, so players other than DJINN guess its length wrong.
+pub fn needs_length_header(path: &Path) -> bool {
+    exact_duration_ms(path).is_some()
+}
+
+/// The Xing frame for `walked`: the first frame's kind (no CRC, no
+/// padding) at the smallest bit rate that fits, holding the frame count,
+/// the byte count and a seek table, like LAME writes.
+fn xing_frame(walked: &Walked) -> Option<Vec<u8>> {
+    let mono = walked.header[3] >> 6 == 3;
+    let side = match (walked.first.version == 3, mono) {
+        (true, true) => 17,
+        (true, false) => 32,
+        (false, true) => 9,
+        (false, false) => 17,
+    };
+    let offset = 4 + side;
+    let needed = offset + 4 + 4 + 4 + 4 + 100;
+    let mut header = walked.header;
+    header[1] |= 1; // no CRC
+    header[2] &= !0x02; // no padding
+    let (size, header) = (1..15u8).find_map(|index| {
+        let mut h = header;
+        h[2] = (h[2] & 0x0f) | (index << 4);
+        let frame = parse(h)?;
+        (frame.size >= needed as u64).then_some((frame.size, h))
+    })?;
+    let mut out = vec![0u8; usize::try_from(size).ok()?];
+    out[..4].copy_from_slice(&header);
+    let mut at = offset;
+    let mut put = |out: &mut Vec<u8>, bytes: &[u8]| {
+        out[at..at + bytes.len()].copy_from_slice(bytes);
+        at += bytes.len();
+    };
+    let count = u32::try_from(walked.frames.len()).ok()?;
+    let total = u32::try_from(walked.bytes + size).ok()?;
+    put(&mut out, b"Xing");
+    put(&mut out, &7u32.to_be_bytes()); // frames, bytes, seek table
+    put(&mut out, &count.to_be_bytes());
+    put(&mut out, &total.to_be_bytes());
+    // The seek table: where each hundredth of the song starts, as a share
+    // of the bytes (0 to 255).
+    let mut table = [0u8; 100];
+    let mut i = 0;
+    for (n, slot) in table.iter_mut().enumerate() {
+        let wanted = walked.samples * n as u64 / 100;
+        while i + 1 < walked.frames.len() && walked.frames[i + 1].1 <= wanted {
+            i += 1;
+        }
+        let byte = walked.frames.get(i).map_or(0, |f| f.0) + size;
+        *slot = u8::try_from((byte * 256 / u64::from(total).max(1)).min(255)).unwrap_or(255);
+    }
+    put(&mut out, &table);
+    Some(out)
+}
+
+/// Puts a length header (a Xing frame) in front of a variable bit rate MP3
+/// that has none, so every player shows its real length. The audio is left
+/// as it is. Returns false when the file doesn't need one.
+pub fn add_length_header(path: &Path) -> Result<bool, String> {
+    let Some(walked) = walk_needing_header(path) else {
+        return Ok(false);
+    };
+    if walked.frames.len() < 10 {
+        return Ok(false);
+    }
+    let frame = xing_frame(&walked).ok_or("couldn't make a length header for it")?;
+    let data = std::fs::read(path).map_err(|e| e.to_string())?;
+    let at = usize::try_from(walked.first_pos).map_err(|e| e.to_string())?;
+    let mut out = Vec::with_capacity(data.len() + frame.len());
+    out.extend_from_slice(&data[..at]);
+    out.extend_from_slice(&frame);
+    out.extend_from_slice(&data[at..]);
+    replace_file(path, &out)?;
+    Ok(true)
+}
+
+/// Takes out a length header put in by [`add_length_header`] (the first
+/// frame, when it is a Xing frame with no audio). False if there's none.
+pub fn remove_length_header(path: &Path) -> Result<bool, String> {
+    let data = std::fs::read(path).map_err(|e| e.to_string())?;
+    let mut r = std::io::Cursor::new(&data);
+    let start = audio_start(&mut r).ok_or("not an MP3")?;
+    let (pos, frame) = find_frame(&mut r, start, 64 * 1024, None).ok_or("not an MP3")?;
+    let (from, to) = (
+        usize::try_from(pos).map_err(|e| e.to_string())?,
+        usize::try_from(pos + frame.size).map_err(|e| e.to_string())?,
+    );
+    let body = data.get(from..to).ok_or("not an MP3")?;
+    if !body.windows(4).take(60).any(|w| w == b"Xing") {
+        return Ok(false);
+    }
+    let mut out = Vec::with_capacity(data.len());
+    out.extend_from_slice(&data[..from]);
+    out.extend_from_slice(&data[to..]);
+    replace_file(path, &out)?;
+    Ok(true)
+}
+
+/// Writes `bytes` beside `path`, then puts it in place, so the file is never
+/// half written.
+fn replace_file(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    let tmp = path.with_extension("djinn-part");
+    std::fs::write(&tmp, bytes).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, path).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        e.to_string()
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -281,6 +444,39 @@ mod tests {
         let path = file("xing", &frames, 0);
         assert_eq!(exact_duration_ms(&path), None);
         std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn a_length_header_goes_in_and_comes_out() {
+        let mut frames = vec![frame(32); 100];
+        frames.extend(vec![frame(192); 1000]);
+        let path = file("add", &frames, 300);
+        let before = std::fs::read(&path).unwrap();
+        let expected = 1100 * 1152 * 1000 / 44100;
+        assert!(needs_length_header(&path));
+        assert!(add_length_header(&path).unwrap());
+        // Now it has one: the tag reader gets the real length by itself.
+        assert!(!needs_length_header(&path));
+        let file = lofty::read_from_path(&path).unwrap();
+        let ms = i64::try_from(
+            lofty::prelude::AudioFile::properties(&file)
+                .duration()
+                .as_millis(),
+        )
+        .unwrap();
+        assert!((ms - expected).abs() <= 30, "{ms} vs {expected}");
+        assert!(!add_length_header(&path).unwrap(), "once is enough");
+        assert!(remove_length_header(&path).unwrap());
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            before,
+            "undo leaves it as it was"
+        );
+        std::fs::remove_file(path).ok();
+        // A constant rate file needs none.
+        let cbr = super::tests::file("add-cbr", &vec![frame(128); 600], 0);
+        assert!(!add_length_header(&cbr).unwrap());
+        std::fs::remove_file(cbr).ok();
     }
 
     #[test]

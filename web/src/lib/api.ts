@@ -317,6 +317,9 @@ export const api = {
   /** Moves songs to a folder (keeping their names), or sets them aside out of the library. */
   editorMove: (ids: number[], to: { folder: string } | { set_aside: true }, preview: boolean) =>
     post<{ files: EditorRenamed[]; batch: number | null }>('/editor/move', { ids, ...to, preview }),
+  /** Writes a length header into variable bit rate MP3s that have none. */
+  editorMp3Length: (ids: number[], preview: boolean) =>
+    post<{ files: EditorRenamed[]; batch: number | null }>('/editor/mp3-length', { ids, preview }),
   editableFolders: () => get<EditableFolder[]>('/library/editable'),
   setFolderEditable: (path: string, editable: boolean) => put<void>('/library/editable', { path, editable }),
   startLibraryCompare: () => post<void>('/library/compare'),
