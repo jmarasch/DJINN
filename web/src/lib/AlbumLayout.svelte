@@ -490,12 +490,14 @@
 
   .check {
     display: inline-flex;
+    flex-direction: row;
     align-items: center;
     gap: 6px;
   }
 
   .check input {
     width: auto;
+    margin: 0;
     padding: 0;
     min-height: 0;
   }

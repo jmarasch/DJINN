@@ -554,6 +554,15 @@
     }
   }
 
+  /** Two paths without the folders they share, to show what changes. */
+  function afterShared(from: string, to: string): [string, string] {
+    const a = from.split(/[\\/]/)
+    const b = to.split(/[\\/]/)
+    let i = 0
+    while (i < a.length - 1 && i < b.length - 1 && a[i] === b[i]) i++
+    return [a.slice(i).join('/'), b.slice(i).join('/')]
+  }
+
   const fileName = (path: string) => path.slice(Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\')) + 1)
   const KINDS: Record<string, string> = {
     tags: 'tags',
@@ -581,7 +590,7 @@
           <button class="label" onclick={() => choose(node)} title={node.path}>
             {node.name}
             <span class="count">{n(node.songs)}</span>
-            {#if node.editable === true}<span class="badge on">Read and write</span>{:else if node.editable === false}<span class="badge">Read only</span>{/if}
+            {#if node.editable === true}<span class="mode on">read and write</span>{:else if node.editable === false}<span class="mode">read only</span>{/if}
           </button>
         </div>
         {#if open[node.path] && children[node.path]}
@@ -798,10 +807,9 @@
                   <li class="small" class:bad={!!r.problem}>
                     {#if moveKind === 'mp3'}
                       <span class="mono">{fileName(r.from)}</span>
-                    {:else if moveKind === 'rename'}
-                      <span class="mono">{fileName(r.from)}</span> → <span class="mono">{fileName(r.to)}</span>
                     {:else}
-                      <span class="mono">{r.from}</span> → <span class="mono">{r.to}</span>
+                      {@const [from, to] = afterShared(r.from, r.to)}
+                      <span class="mono">{from}</span> → <span class="mono">{to}</span>
                     {/if}
                     {#if r.problem}<em>({r.problem})</em>{/if}
                   </li>
@@ -1107,9 +1115,15 @@
     margin-left: 6px;
   }
 
-  .badge.on {
-    background: var(--accent);
-    color: #000;
+  .mode {
+    display: block;
+    font-size: 0.72rem;
+    color: var(--muted);
+  }
+
+  .mode.on {
+    color: var(--target);
+    font-weight: 600;
   }
 
   .grid {
@@ -1218,12 +1232,14 @@
 
   .check {
     display: inline-flex;
+    flex-direction: row;
     align-items: center;
     gap: 6px;
   }
 
   .check input {
     width: auto;
+    margin: 0;
     padding: 0;
   }
 
