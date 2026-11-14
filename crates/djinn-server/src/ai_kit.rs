@@ -393,8 +393,12 @@ mod real {
         let files = super::build(&d, "3.13", "x86_64", "tiny").await.unwrap();
         let total: u64 = files.iter().map(|f| f.size).sum();
         println!("{} files, {} MB", files.len(), total / 1_000_000);
-        assert!(files.iter().any(|f| f.path.starts_with("wheels/ctranslate2")));
-        assert!(files.iter().any(|f| f.path == "models/faster-whisper-tiny/model.bin"));
+        assert!(files
+            .iter()
+            .any(|f| f.path.starts_with("wheels/ctranslate2")));
+        assert!(files
+            .iter()
+            .any(|f| f.path == "models/faster-whisper-tiny/model.bin"));
         assert!(files.iter().all(|f| super::safe_path(&f.path)));
     }
 }

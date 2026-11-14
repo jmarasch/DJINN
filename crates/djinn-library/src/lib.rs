@@ -17,6 +17,7 @@ pub mod sound;
 mod tags;
 pub use tags::{basics, Basics};
 pub mod vibe;
+pub mod write;
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};

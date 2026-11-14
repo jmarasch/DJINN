@@ -1422,6 +1422,44 @@ export interface EditorNode {
   editable: boolean | null
 }
 
+/** What the editor changes: DJINN's own copy, or the files. */
+export type EditTarget = 'database' | 'library'
+
+/** The fields the editor's grid edits. */
+export type EditorField = 'title' | 'artist' | 'album' | 'album_artist' | 'track_no' | 'disc_no' | 'year' | 'genre'
+
+export interface EditorChange {
+  id: number
+  field: EditorField
+  /** null: back to the file's (database), or taken out of the file. */
+  value: string | null
+}
+
+export interface EditorApplied {
+  songs: number
+  failed: { id: number; error: string }[]
+  /** The approval's number in the history, when files were written. */
+  batch: number | null
+}
+
+/** One approval that wrote files. */
+export interface EditorBatch {
+  batch: number
+  made_at: number
+  made_by: string | null
+  files: number
+  /** tags, cover, rename, or undo-... */
+  kinds: string
+  undone_at: number | null
+}
+
+export interface EditorRenamed {
+  id: number
+  from: string
+  to: string
+  problem: string | null
+}
+
 export interface EditorSong {
   id: number
   path: string

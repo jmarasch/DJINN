@@ -440,6 +440,7 @@ async fn edit_tracks(
         album_artist: text_field(body.album_artist, "album artist")?,
         year: body.year,
         genre: text_field(body.genre, "genre")?,
+        ..TagChange::default()
     };
     let paths = state.store.edit_tags(&body.track_ids, &change).await?;
     reread(&state, &paths).await?;

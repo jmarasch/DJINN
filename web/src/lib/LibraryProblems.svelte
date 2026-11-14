@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { openInEditor } from './editorJump.svelte'
   // Admin > Library > Problems: what the last library check couldn't add,
   // songs that won't play or whose tags couldn't be read, and gaps in the
   // tags, each with what to do about it. Kinds the admin already knows
@@ -268,6 +269,9 @@
                 <span class="muted"> · {item.artist}</span>
                 {#if item.path}<div class="path small mono">{folder(item.path)}</div>{/if}
                 {#if k.kind === 'duplicate_albums' && item.detail}<div class="small muted">{item.detail}</div>{/if}
+                {#if item.path}
+                  <button class="small-button done" onclick={() => openInEditor(folder(item.path ?? ''))}>Fix in the editor</button>
+                {/if}
               {:else if item.track_id !== null}
                 {#if item.album_id !== null}
                   <a href="#/album/{item.album_id}">{item.title}</a>
@@ -298,6 +302,9 @@
                   <button class="small-button done danger" onclick={() => removeLyrics(item)}>Remove and block</button>
                   <button class="small-button done" onclick={() => done(item)}>Done</button>
                 {:else if item.detail}<div class="small muted">{item.detail}</div>{/if}
+                {#if item.path && k.kind !== 'reported_lyrics'}
+                  <button class="small-button done" onclick={() => openInEditor(folder(item.path ?? ''))}>Fix in the editor</button>
+                {/if}
               {:else}
                 {#if item.path}
                   <div>{name(item.path)}</div>

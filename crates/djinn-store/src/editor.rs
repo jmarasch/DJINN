@@ -115,6 +115,27 @@ impl Store {
     }
 }
 
+impl Store {
+    /// These songs as the editor's grid shows them, by path.
+    pub async fn editor_songs_by_id(&self, ids: &[i64]) -> Result<Vec<EditorSong>> {
+        let list = format!(
+            "[{}]",
+            ids.iter().map(i64::to_string).collect::<Vec<_>>().join(",")
+        );
+        Ok(sqlx::query_as(
+            "SELECT t.id, t.path, t.title, t.artist, t.album, t.album_artist, t.track_no,
+                    t.disc_no, t.year, t.genre, t.album_id,
+                    coalesce(t.art_hash, a.art_hash, a.online_art_hash) AS art_hash
+             FROM tracks t LEFT JOIN albums a ON a.id = t.album_id
+             WHERE t.removed_at IS NULL AND t.id IN (SELECT value FROM json_each(?1))
+             ORDER BY t.path",
+        )
+        .bind(list)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{ScannedTrack, Store};

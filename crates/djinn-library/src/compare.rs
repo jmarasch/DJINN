@@ -11,7 +11,7 @@ use crate::tags::fill_from_tags;
 
 /// The tags of one file, read the way a library check reads them but without
 /// DJINN's corrections or identifications.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, serde::Deserialize)]
 pub struct FileTags {
     pub title: String,
     pub artist: Option<String>,
@@ -138,9 +138,14 @@ pub fn differences(
         "track_no",
         number(row.track_no),
         number(file.track_no),
-        false,
+        e(|x| x.track_no.is_some()),
     );
-    check("disc_no", number(row.disc_no), number(file.disc_no), false);
+    check(
+        "disc_no",
+        number(row.disc_no),
+        number(file.disc_no),
+        e(|x| x.disc_no.is_some()),
+    );
     check(
         "year",
         number(row.year),

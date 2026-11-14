@@ -12,6 +12,11 @@ import type {
   Lyrics,
   LyricsSettings,
   EditorNode,
+  EditTarget,
+  EditorChange,
+  EditorApplied,
+  EditorBatch,
+  EditorRenamed,
   EditorSong,
   EditableFolder,
   AiListenerStatus,
@@ -292,6 +297,22 @@ export const api = {
     get<{ total: number; editable: boolean; songs: EditorSong[] }>(
       `/editor/songs?folder=${encodeURIComponent(folder)}&offset=${offset}&files=${files}`,
     ),
+  /** Approves the editor's changes: into DJINN's database or the files. */
+  editorApply: (target: EditTarget, changes: EditorChange[]) =>
+    post<EditorApplied>('/editor/apply', { target, changes }),
+  editorHistory: () => get<EditorBatch[]>('/editor/history'),
+  editorUndo: (batch: number) => post<EditorApplied>(`/editor/undo/${batch}`),
+  /** A new cover for songs (a JPEG or PNG), or with `file` null: `remove`
+   * takes it out, `reset` (database) goes back to the file's. */
+  editorCover: async (target: EditTarget, ids: number[], file: File | null, how: 'set' | 'remove' | 'reset') => {
+    const query = `target=${target}&ids=${ids.join(',')}${how === 'remove' ? '&remove=true' : ''}${how === 'reset' ? '&reset=true' : ''}`
+    const res = await fetch(`/api/editor/cover?${query}`, { method: 'POST', body: file ?? new Blob([]) })
+    const data = await res.json().catch(() => null)
+    if (!res.ok) throw new ApiError(res.status, data?.error ?? `Request failed (${res.status})`)
+    return data as EditorApplied
+  },
+  editorRename: (ids: number[], pattern: string, preview: boolean) =>
+    post<{ files: EditorRenamed[]; batch: number | null }>('/editor/rename', { ids, pattern, preview }),
   editableFolders: () => get<EditableFolder[]>('/library/editable'),
   setFolderEditable: (path: string, editable: boolean) => put<void>('/library/editable', { path, editable }),
   startLibraryCompare: () => post<void>('/library/compare'),

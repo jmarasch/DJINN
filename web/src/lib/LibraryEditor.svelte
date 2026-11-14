@@ -1,8 +1,12 @@
 <script lang="ts">
   // Admin > Library editor: the workspace, the compare, and which folders
   // can be changed. The whole editor sits behind the protected areas' lock.
+  import { takeEditorJump } from './editorJump.svelte'
   import EditorWorkspace from './EditorWorkspace.svelte'
   import LibraryCompare from './LibraryCompare.svelte'
+
+  /** A folder another page asked to open. */
+  const startFolder = takeEditorJump()
 
   let view = $state<'editor' | 'compare'>('editor')
 </script>
@@ -17,7 +21,7 @@
 </div>
 
 {#if view === 'editor'}
-  <EditorWorkspace />
+  <EditorWorkspace {startFolder} />
 {:else}
   <LibraryCompare />
 {/if}

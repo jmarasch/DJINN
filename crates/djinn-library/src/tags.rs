@@ -60,6 +60,12 @@ fn apply_edit(
     if let Some(genre) = &edit.genre {
         track.genre = Some(genre.clone());
     }
+    if edit.track_no.is_some() {
+        track.track_no = edit.track_no;
+    }
+    if edit.disc_no.is_some() {
+        track.disc_no = edit.disc_no;
+    }
 }
 
 pub fn read(
@@ -107,7 +113,8 @@ pub fn read(
     }
 
     // Corrections made in the app replace what the tags say.
-    if let Some(edit) = edits.get(path_str) {
+    let edit = edits.get(path_str);
+    if let Some(edit) = edit {
         apply_edit(&mut track, edit, &mut artists, &mut album_artists);
     }
 
@@ -131,6 +138,15 @@ pub fn read(
     track.folder_art = path
         .parent()
         .and_then(|dir| cached(&cache.folders, dir, || art::find_folder_art(dir), art_dir));
+    // A cover chosen in the app wins over the file's and the folder's.
+    match edit.and_then(|e| e.cover.as_deref()) {
+        Some("none") => {
+            track.embedded_art = None;
+            track.folder_art = None;
+        }
+        Some(hash) => track.embedded_art = Some(hash.to_owned()),
+        None => {}
+    }
     let artist = track
         .album_owner
         .clone()
