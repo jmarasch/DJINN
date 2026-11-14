@@ -204,6 +204,8 @@ Many MP3s have no length header, so a tag reader can only guess their length, an
 
 Admin > **Library editor** is where library problems will be fixed: tags, names, covers and lengths, in DJINN's database or, when you choose, in the files themselves. It sits behind the lock in Admin > Protected areas (see Accounts and roles), so opening it asks for your password, and a code too at the strictest level.
 
+**Which folders can be changed.** Every library folder is **view only** until you allow changes in it, in the same page. That lets one folder (say, where new music lands to be tidied) be edited while another, which someone else looks after, can only be watched: you can always see what is going on in a view-only folder, in the compare and on the Problems page, but nothing in it can be changed. Allowing a folder tests that DJINN can write there (it makes and removes a tiny file), so a read-only mount or a share without rights is reported straight away. Choosing is a protected action and is recorded in the audit trail.
+
 The first piece is a **compare**. It reads every song's tags from its file and sets them next to what DJINN's database holds, for title, artist, album, album artist, track and disc number, year and genre. Each difference says why:
 
 - **Corrected in DJINN**: you changed it with Edit tags or Edit album; the file still has the old value.

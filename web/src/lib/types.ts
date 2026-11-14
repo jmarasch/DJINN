@@ -1415,9 +1415,16 @@ export interface CompareDiff {
   why: CompareWhy
 }
 
+export interface EditableFolder {
+  path: string
+  name: string
+  editable: boolean
+}
+
 export interface CompareSong {
   track_id: number
   path: string
+  folder: string
   title: string
   artist: string | null
   diffs: CompareDiff[]
@@ -1431,6 +1438,7 @@ export interface CompareRun {
   differing: number
   unreadable: number
   counts: { field: string; why: CompareWhy; songs: number }[]
+  folders: { path: string; songs: number; differing: number; unreadable: number }[]
   error: string | null
 }
 

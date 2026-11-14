@@ -11,6 +11,7 @@ import type {
   NodeList,
   Lyrics,
   LyricsSettings,
+  EditableFolder,
   CompareShown,
   AuditEntry,
   ProtectedLevel,
@@ -266,10 +267,12 @@ export const api = {
   lyricsSettings: () => get<LyricsSettings>('/lyrics/settings'),
   setLyricsSettings: (settings: LyricsSettings) => put<void>('/lyrics/settings', settings),
   recheckLyrics: () => post<void>('/lyrics/recheck'),
-  libraryCompare: (offset: number, field?: string, why?: string) =>
+  libraryCompare: (offset: number, field?: string, why?: string, folder?: string) =>
     get<CompareShown>(
-      `/library/compare?offset=${offset}${field ? `&field=${field}` : ''}${why ? `&why=${why}` : ''}`,
+      `/library/compare?offset=${offset}${field ? `&field=${field}` : ''}${why ? `&why=${why}` : ''}${folder ? `&folder=${encodeURIComponent(folder)}` : ''}`,
     ),
+  editableFolders: () => get<EditableFolder[]>('/library/editable'),
+  setFolderEditable: (path: string, editable: boolean) => put<void>('/library/editable', { path, editable }),
   startLibraryCompare: () => post<void>('/library/compare'),
   protectedStatus: () => get<ProtectedStatus>('/protected'),
   protectedEnter: (password: string, code: string) => post<void>('/protected/enter', { password, code }),

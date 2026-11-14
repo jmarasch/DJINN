@@ -5,9 +5,9 @@
   // The editor sits behind the protected areas' lock.
   import { onMount } from 'svelte'
   import { ApiError, api } from './api'
-  import { askToUnlock } from './protected.svelte'
+  import { askToUnlock, unlocked } from './protected.svelte'
   import { toast } from './state.svelte'
-  import type { CompareShown, CompareWhy } from './types'
+  import type { CompareShown, CompareWhy, EditableFolder } from './types'
 
   const whyLabel: Record<CompareWhy, string> = {
     correction: 'Corrected in DJINN',
@@ -31,6 +31,8 @@
   }
 
   let shown = $state<CompareShown | null>(null)
+  let folders = $state<EditableFolder[]>([])
+  let folder = $state('')
   let locked = $state(false)
   let field = $state('')
   let why = $state<CompareWhy | ''>('')
@@ -42,7 +44,8 @@
 
   async function load(offset = 0) {
     try {
-      const found = await api.libraryCompare(offset, field || undefined, why || undefined)
+      folders = await api.editableFolders()
+      const found = await api.libraryCompare(offset, field || undefined, why || undefined, folder || undefined)
       shown = offset === 0 || !shown ? found : { ...found, songs: [...shown.songs, ...found.songs] }
       locked = false
     } catch (e) {
@@ -78,6 +81,19 @@
     return () => clearInterval(timer)
   })
 
+  async function allow(f: EditableFolder, on: boolean) {
+    try {
+      await unlocked(() => api.setFolderEditable(f.path, on))
+      folders = await api.editableFolders()
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not change it', true)
+      folders = await api.editableFolders().catch(() => folders)
+    }
+  }
+
+  const folderName = (path: string) => folders.find((f) => f.path === path)?.name ?? path
+  const folderStats = (path: string) => run?.folders.find((x) => x.path === path)
+
   function pick(f: string, w: CompareWhy | '') {
     field = f
     why = w
@@ -97,6 +113,26 @@
   {#if locked}
     <p class="small">The editor is locked. <button class="link" onclick={unlock}>Unlock</button></p>
   {:else}
+    <h4>Which folders can be changed</h4>
+    <p class="small muted">
+      Every library folder is view only until you allow changes in it. You can always see what's going on in a view-only
+      folder (the compare below and the Problems page read every folder), but nothing in it can be changed. Use this for
+      a folder someone else looks after. Allowing a folder checks that DJINN can write there.
+    </p>
+    <ul class="folders">
+      {#each folders as f (f.path)}
+        <li>
+          <div>
+            <strong>{f.name}</strong>
+            <span class="badge" class:on={f.editable}>{f.editable ? 'Can be changed' : 'View only'}</span>
+            <div class="small mono muted path">{f.path}</div>
+          </div>
+          <button class="small-button" onclick={() => allow(f, !f.editable)}>
+            {f.editable ? 'Make view only' : 'Allow changes'}
+          </button>
+        </li>
+      {/each}
+    </ul>
     <h4>Compare the database with the files</h4>
     <div class="actions">
       <button class="primary" onclick={start} disabled={busy || shown?.running}>
@@ -142,6 +178,19 @@
           {/each}
         </tbody>
       </table>
+      {#if run.folders.length > 1}
+        <div class="actions">
+          <label class="small">
+            Folder
+            <select bind:value={folder} onchange={() => load()}>
+              <option value="">All folders</option>
+              {#each run.folders as f (f.path)}
+                <option value={f.path}>{folderName(f.path)} ({n(folderStats(f.path)?.differing ?? 0)} of {n(f.songs)} songs differ)</option>
+              {/each}
+            </select>
+          </label>
+        </div>
+      {/if}
       <div class="actions">
         {#if field || why}<button class="small-button" onclick={() => pick('', '')}>Show all differences</button>{/if}
         <span class="small muted">{n(shown?.matching ?? 0)} songs shown{field ? ` for ${fieldLabel[field] ?? field}` : ''}{why ? `, ${whyLabel[why].toLowerCase()}` : ''}</span>
@@ -149,7 +198,7 @@
       <ul class="songs">
         {#each shown?.songs ?? [] as song (song.track_id)}
           <li>
-            <div><strong>{song.title}</strong>{#if song.artist}<span class="muted"> · {song.artist}</span>{/if}</div>
+            <div><strong>{song.title}</strong>{#if song.artist}<span class="muted"> · {song.artist}</span>{/if}{#if run.folders.length > 1}<span class="muted small"> · {folderName(song.folder)}</span>{/if}</div>
             <div class="path small mono muted">{song.path}</div>
             {#each song.diffs as d (d.field)}
               <div class="diff small">
@@ -176,6 +225,26 @@
     gap: 10px;
     align-items: center;
     margin: 8px 0;
+  }
+
+  .folders {
+    list-style: none;
+    margin: 8px 0;
+    padding: 0;
+  }
+
+  .folders li {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 0;
+    border-top: 1px solid var(--line);
+  }
+
+  .badge.on {
+    background: var(--accent);
+    color: var(--on-accent, #000);
   }
 
   .counts {

@@ -24,6 +24,7 @@ mod desktop;
 mod discover;
 mod download;
 mod duplicates;
+mod editable;
 mod error;
 mod events;
 mod folders;

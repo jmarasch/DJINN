@@ -37,6 +37,8 @@ pub fn router() -> Router<AppState> {
 struct SongDiff {
     track_id: i64,
     path: String,
+    /// The library folder it's in.
+    folder: String,
     title: String,
     artist: Option<String>,
     diffs: Vec<FieldDiff>,
@@ -54,9 +56,27 @@ struct Run {
     unreadable: usize,
     /// How many differences there are per field and reason.
     counts: Vec<Count>,
+    /// Songs and differences per library folder.
+    folders: Vec<FolderCount>,
     #[serde(skip)]
     songs: Vec<SongDiff>,
     error: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct FolderCount {
+    path: String,
+    songs: usize,
+    differing: usize,
+    unreadable: usize,
+}
+
+/// The library folder a file is in (the longest that holds it).
+fn folder_of<'a>(roots: &'a [PathBuf], path: &str) -> Option<&'a PathBuf> {
+    roots
+        .iter()
+        .filter(|r| std::path::Path::new(path).starts_with(r))
+        .max_by_key(|r| r.components().count())
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -109,6 +129,29 @@ async fn run(state: &AppState) -> anyhow::Result<()> {
     let edits = state.store.tag_edits_by_path().await?;
     let identified = state.store.identified_paths().await?;
     let original_years = djinn_library::original_years(&state.store).await?;
+    let roots = crate::folders::library_roots(state).await?;
+    let mut per_folder: HashMap<String, FolderCount> = roots
+        .iter()
+        .map(|r| {
+            let path = r.to_string_lossy().into_owned();
+            (
+                path.clone(),
+                FolderCount {
+                    path,
+                    songs: 0,
+                    differing: 0,
+                    unreadable: 0,
+                },
+            )
+        })
+        .collect();
+    for row in &rows {
+        if let Some(root) = folder_of(&roots, &row.path) {
+            if let Some(f) = per_folder.get_mut(root.to_string_lossy().as_ref()) {
+                f.songs += 1;
+            }
+        }
+    }
     with(|r| r.total = rows.len());
     let mut counts: HashMap<(&'static str, Why), usize> = HashMap::new();
     let mut done = 0;
@@ -141,8 +184,14 @@ async fn run(state: &AppState) -> anyhow::Result<()> {
         let mut unreadable = 0;
         let mut found: Vec<SongDiff> = Vec::new();
         for (row, file) in chunk.iter().zip(read) {
+            let folder = folder_of(&roots, &row.path)
+                .map(|r| r.to_string_lossy().into_owned())
+                .unwrap_or_default();
             let Ok(file) = file else {
                 unreadable += 1;
+                if let Some(f) = per_folder.get_mut(&folder) {
+                    f.unreadable += 1;
+                }
                 continue;
             };
             let diffs = compare::differences(
@@ -157,9 +206,13 @@ async fn run(state: &AppState) -> anyhow::Result<()> {
             for d in &diffs {
                 *counts.entry((d.field, d.why)).or_default() += 1;
             }
+            if let Some(f) = per_folder.get_mut(&folder) {
+                f.differing += 1;
+            }
             found.push(SongDiff {
                 track_id: row.id,
                 path: row.path.clone(),
+                folder,
                 title: row.title.clone(),
                 artist: row.artist.clone(),
                 diffs,
@@ -178,6 +231,9 @@ async fn run(state: &AppState) -> anyhow::Result<()> {
                 .collect();
             list.sort_by_key(|c| (c.why, c.field));
             r.counts = list;
+            let mut folders: Vec<FolderCount> = per_folder.values().cloned().collect();
+            folders.sort_by(|a, b| a.path.cmp(&b.path));
+            r.folders = folders;
         });
     }
     Ok(())
@@ -189,6 +245,8 @@ struct Filter {
     offset: usize,
     field: Option<String>,
     why: Option<Why>,
+    /// Only songs in this library folder.
+    folder: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -203,10 +261,11 @@ struct Shown {
 async fn show(_: Elevated, Query(filter): Query<Filter>) -> Json<Shown> {
     let run = LAST.lock().ok().and_then(|g| g.clone());
     let matches = |s: &SongDiff| {
-        s.diffs.iter().any(|d| {
-            filter.field.as_deref().is_none_or(|f| d.field == f)
-                && filter.why.is_none_or(|w| d.why == w)
-        })
+        filter.folder.as_deref().is_none_or(|f| s.folder == f)
+            && s.diffs.iter().any(|d| {
+                filter.field.as_deref().is_none_or(|f| d.field == f)
+                    && filter.why.is_none_or(|w| d.why == w)
+            })
     };
     let (matching, songs) = match &run {
         Some(r) => {
