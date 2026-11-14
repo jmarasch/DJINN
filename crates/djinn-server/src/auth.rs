@@ -365,7 +365,7 @@ pub async fn check_own_password(
     Ok(ok)
 }
 
-fn too_many_tries(wait: std::time::Duration) -> ApiError {
+pub(crate) fn too_many_tries(wait: std::time::Duration) -> ApiError {
     let minutes = wait.as_secs().div_ceil(60).max(1);
     ApiError::new(
         StatusCode::TOO_MANY_REQUESTS,
@@ -1411,7 +1411,7 @@ fn too_busy() -> ApiError {
     )
 }
 
-async fn hash_password(password: String) -> ApiResult<String> {
+pub(crate) async fn hash_password(password: String) -> ApiResult<String> {
     let _turn = hash_gate().enter().await.ok_or_else(too_busy)?;
     let hash = tokio::task::spawn_blocking(move || {
         Argon2::default()

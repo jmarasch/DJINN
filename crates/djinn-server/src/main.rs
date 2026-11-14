@@ -54,6 +54,7 @@ mod playlist_api;
 mod playlist_import;
 mod presence;
 mod problems_api;
+mod protected;
 mod reader;
 mod rooms_api;
 mod rooms_rt;

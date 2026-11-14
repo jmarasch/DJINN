@@ -25,7 +25,10 @@ export const adminGroups = [
   },
   {
     label: 'Access',
-    tabs: [{ id: 'users', label: 'Users and roles', icon: 'person' }],
+    tabs: [
+      { id: 'users', label: 'Users and roles', icon: 'person' },
+      { id: 'protected', label: 'Protected areas', icon: 'settings' },
+    ],
   },
   {
     label: 'System',

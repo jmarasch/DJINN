@@ -4,6 +4,7 @@
   import { onMount } from 'svelte'
   import { api } from './api'
   import { duration } from './format'
+  import { unlocked } from './protected.svelte'
   import { toast } from './state.svelte'
   import type { Submission, UploadSettings } from './types'
 
@@ -22,7 +23,7 @@
   async function approve(s: Submission) {
     busy = true
     try {
-      await api.approveSubmission(s.id)
+      await unlocked(() => api.approveSubmission(s.id))
       waiting = waiting.filter((w) => w.id !== s.id)
       toast(`Added "${s.title ?? s.file_name}" to the library`)
     } catch (e) {

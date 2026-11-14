@@ -80,3 +80,17 @@ Each account has:
 
 You can't turn off, delete or demote your own account, and DJINN always
 keeps at least one admin.
+
+## Protected areas
+
+Anything that changes your music library, meaning the folders and the files in them, sits behind a lock: writing tags, renaming or moving files, and adding songs (approving a submission already counts). DJINN's own database (tag corrections kept in DJINN, history, lyrics) is not behind it. Today only approving a submission is locked; the editing screens that come later will use the same lock.
+
+Admin > Access > Protected areas sets how strict it is:
+
+- **Max** (the default): opening a protected area asks for your password and a code from your authenticator app. It needs two-step sign-in set up on your account (Account page), so until then an admin at Max can't open protected areas.
+- **Medium**: your password only.
+- **Off**: no lock. The page warns that anyone who can sign in as an admin could then change or delete your files, and asks you to type OFF.
+
+An unlock belongs to your session. It ends when you leave Admin, when you select Lock now, after ten minutes without use, or after an hour at most. Changing the level needs your password, and leaving Max needs a code too, so a stolen password alone can't loosen the lock. The server enforces the lock, not just the screen.
+
+**Audit trail.** Each unlock, failed try, change of level and library change is recorded with who, when and from where. In the same page you can turn the trail off and delete all records (both need the area unlocked). While the trail is on, deleting leaves one record of itself; turn it off first to leave no trace.

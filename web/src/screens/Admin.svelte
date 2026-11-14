@@ -12,6 +12,8 @@
   import { clearListCache } from '../lib/listCache'
   import LogViewer from '../lib/LogViewer.svelte'
   import SignInLog from '../lib/SignInLog.svelte'
+  import ProtectedPanel from '../lib/ProtectedPanel.svelte'
+  import UnlockHost from '../lib/UnlockHost.svelte'
   import ResetPanel from '../lib/ResetPanel.svelte'
   import SystemStatus from '../lib/SystemStatus.svelte'
   import UpdatePanel from '../lib/UpdatePanel.svelte'
@@ -468,6 +470,8 @@
   <div class="cards-2"><AiPanel /></div>
 {:else if t === 'users'}
   <div class="cards-2"><UsersPanel /></div>
+{:else if t === 'protected'}
+  <div class="cards-2"><ProtectedPanel /></div>
 {:else if t === 'go'}
   <div class="cards-2"><GoPanel /></div>
 {:else if t === 'nodes'}
@@ -575,6 +579,7 @@
 {/if}
 {/snippet}
 
+<UnlockHost />
 <div class="admin" class:one-page={layout === 'page'}>
 <aside class="side">
   {#if OFFER_ONE_PAGE}

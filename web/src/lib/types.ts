@@ -1386,6 +1386,30 @@ export interface LyricsStatus {
   phase: '' | 'reading' | 'looking up'
 }
 
+/** How strict the lock on library changes is. */
+export type ProtectedLevel = 'off' | 'medium' | 'max'
+
+export interface ProtectedStatus {
+  level: ProtectedLevel
+  /** This session has the protected areas open (always true when off). */
+  open: boolean
+  seconds_left: number | null
+  two_step: boolean
+  can_open: boolean
+  audit_on: boolean
+  audit_count: number
+}
+
+export interface AuditEntry {
+  id: number
+  at: number
+  user_id: number | null
+  username: string
+  ip: string | null
+  kind: string
+  detail: string
+}
+
 /** What the last lyrics zip import did. */
 export interface LyricsImportReport {
   file: string

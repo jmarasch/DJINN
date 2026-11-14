@@ -64,6 +64,8 @@ pub struct AppState {
     pub limiter: Arc<crate::security::Limiter>,
     /// Sign-ins waiting for their two-step code.
     pub tickets: Arc<crate::two_step::Tickets>,
+    /// Sessions that have unlocked the protected areas (library changes).
+    pub elevations: Arc<crate::protected::Elevations>,
     /// DJINN GO's optional converting.
     pub converter: Arc<crate::convert::Converter>,
     /// Copies of songs, worked out when asked and kept until the library
@@ -140,6 +142,7 @@ impl AppState {
             go: Arc::default(),
             limiter: Arc::default(),
             tickets: Arc::default(),
+            elevations: Arc::default(),
             converter: Arc::default(),
             duplicates: Arc::default(),
             node_audio: Arc::default(),

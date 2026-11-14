@@ -1,5 +1,6 @@
 //! DJINN storage: SQLite access, migrations, and models.
 
+mod audit;
 mod duplicates;
 mod identify;
 mod library;
@@ -23,6 +24,7 @@ mod subsonic;
 mod tag_edits;
 mod users;
 
+pub use audit::*;
 pub use duplicates::*;
 pub use identify::*;
 pub use library::*;
