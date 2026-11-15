@@ -235,52 +235,54 @@
       </p>
     {/if}
     {#each joined as node (node.id)}
-      <div class="node">
-        <span class="dot" class:on={online(node)} title={online(node) ? 'Connected' : 'Not connected'}></span>
-        <div class="grow">
-          <b>{node.name}</b>
-          <span class="small muted">
-            {online(node) ? 'Connected' : `Last seen ${seen(node.last_seen)}`}{node.address
-              ? ` · ${node.address}`
-              : ''}{node.platform ? ` · ${systemName(node.platform)}` : ''}{node.version
-              ? ` · ${node.version}`
-              : ''}{#if node.build_label}{' · '}<b>{node.build_label}</b>{/if}
-            {#if online(node)}
-              {#if node.same_build}
-                <b class="same">· same build as Main</b>
-              {:else}
-                <b class="behind">· not Main's build yet</b>
-              {/if}
+      <div class="joined-node">
+        <div class="head">
+          <span class="dot" class:on={online(node)} title={online(node) ? 'Connected' : 'Not connected'}></span>
+          <b class="name">{node.name}</b>
+          <span class="small muted">{online(node) ? 'Connected' : `Last seen ${seen(node.last_seen)}`}</span>
+          {#if online(node)}
+            {#if node.same_build}
+              <span class="badge same">Same build as Main</span>
+            {:else}
+              <span class="badge behind">Not Main's build yet</span>
             {/if}
-          </span>
+          {/if}
         </div>
-        <button
-          title="What a screen plugged into this node shows"
-          onclick={() => (screenFor = screenFor === node.id ? null : node.id)}
-        >
-          Screen: {screenName(node.audio.screen)}
-        </button>
-        <button
-          title="Let this node make lyrics with AI while it isn't playing"
-          onclick={() => (aiFor = aiFor === node.id ? null : node.id)}
-        >
-          AI lyrics: {aiName(node)}
-        </button>
-        <button
-          title={online(node)
-            ? "Opens the node's own page, where its speaker, timing and other settings are"
-            : "The node isn't connected; it can be managed once it is"}
-          disabled={!online(node)}
-          onclick={() => manage(node)}
-        >
-          Manage
-        </button>
-        {#if kicking?.id === node.id}
-          <button class="danger" onclick={() => remove(node)}>Kick and wipe</button>
-          <button onclick={() => (kicking = null)}>Cancel</button>
-        {:else}
-          <button onclick={() => (kicking = node)}>Kick</button>
-        {/if}
+        <p class="facts small muted">
+          {#if node.address}<span>{node.address}</span>{/if}
+          {#if node.platform}<span>{systemName(node.platform)}</span>{/if}
+          {#if node.version}<span>{node.version}</span>{/if}
+          {#if node.build_label}<span class="label">{node.build_label}</span>{/if}
+        </p>
+        <div class="actions">
+          <button
+            title="What a screen plugged into this node shows"
+            onclick={() => (screenFor = screenFor === node.id ? null : node.id)}
+          >
+            Screen: {screenName(node.audio.screen)}
+          </button>
+          <button
+            title="Let this node make lyrics with AI while it isn't playing"
+            onclick={() => (aiFor = aiFor === node.id ? null : node.id)}
+          >
+            AI lyrics: {aiName(node)}
+          </button>
+          <button
+            title={online(node)
+              ? "Opens the node's own page, where its speaker, timing and other settings are"
+              : "The node isn't connected; it can be managed once it is"}
+            disabled={!online(node)}
+            onclick={() => manage(node)}
+          >
+            Manage
+          </button>
+          {#if kicking?.id === node.id}
+            <button class="danger" onclick={() => remove(node)}>Kick and wipe</button>
+            <button onclick={() => (kicking = null)}>Cancel</button>
+          {:else}
+            <button onclick={() => (kicking = node)}>Kick</button>
+          {/if}
+        </div>
       </div>
       {#if screenFor === node.id}
         <div class="screen">
@@ -413,10 +415,57 @@
     display: flex;
     gap: 8px;
   }
+
+  /* A joined node: its name and state, what it runs, then its buttons. */
+  .joined-node {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 10px;
+  }
+
+  .name {
+    font-size: 1.05rem;
+  }
+
+  .badge {
+    padding: 1px 9px;
+    border-radius: 999px;
+    border: 1px solid currentColor;
+    font-size: 0.78rem;
+  }
+
   .same {
     color: var(--ok);
   }
+
   .behind {
     color: var(--bad);
+  }
+
+  .facts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px 14px;
+    margin: 0;
+  }
+
+  .facts .label {
+    color: var(--text);
+    font-weight: 600;
+  }
+
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
   }
 </style>
