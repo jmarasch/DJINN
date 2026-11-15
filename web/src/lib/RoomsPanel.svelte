@@ -159,6 +159,18 @@
     }
   }
 
+  /** Takes a cast device out of its room, back to the list of devices found. */
+  async function removeCast(device: CastDevice) {
+    try {
+      casts = (await api.clearCastRoom(device.id)).devices
+      toast(`${device.name} is no longer in a room`)
+      win = null
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not remove it', true)
+      await load()
+    }
+  }
+
   const castState = (c: CastDevice) =>
     c.error ? c.error : c.active ? (c.buffering ? 'connecting' : c.playing ? 'playing' : 'casting') : 'not casting'
 
@@ -305,10 +317,29 @@
   {/each}
 </div>
 
-<section class="card wide nearby">
+<section
+  class="card wide nearby"
+  class:over={over === -1}
+  aria-label="Cast devices not in a room"
+  ondragover={(e) => {
+    if (dragging?.kind !== 'cast') return
+    e.preventDefault()
+    over = -1
+  }}
+  ondragleave={() => over === -1 && (over = null)}
+  ondrop={(e) => {
+    e.preventDefault()
+    const item = dragging
+    dragging = null
+    over = null
+    const device = item?.kind === 'cast' ? casts.find((c) => c.id === item.id) : undefined
+    if (device?.placed || device?.active) void removeCast(device)
+  }}
+>
   <h3>Cast devices</h3>
   <p class="small muted">
-    TVs and speakers DJINN can cast to. Drag one into a room to put it there; it then plays that room's music.
+    TVs and speakers DJINN can cast to. Drag one into a room to put it there; it then plays that room's music. Drag
+    one back here to take it out of its room.
   </p>
   <div class="chips">
     {#each nearby as device (device.id)}
@@ -536,6 +567,16 @@
       </label>
     {/if}
     {#if device.error}<p class="small bad">{device.error}</p>{/if}
+    {#if device.placed || device.active}
+      <section class="stack">
+        <h3>Remove</h3>
+        <p class="small muted">
+          Takes {device.name} out of {nameOf(device.room_id)} and stops casting to it. It goes back to the list of
+          devices found, and can be put in a room again.
+        </p>
+        <div><button class="danger" onclick={() => removeCast(device)}>Remove from {nameOf(device.room_id)}</button></div>
+      </section>
+    {/if}
   </FloatingWindow>
 {:else if win && win.kind === 'output' && winOutput}
   {@const output = winOutput}
@@ -682,6 +723,11 @@
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
+  }
+
+  .nearby.over {
+    border-color: var(--accent);
+    box-shadow: 0 0 12px var(--glow);
   }
 
   .bad {

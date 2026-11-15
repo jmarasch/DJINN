@@ -59,7 +59,7 @@ pub fn router() -> Router<AppState> {
         .route("/cast/{id}/start", post(start))
         .route("/cast/{id}/stop", post(stop))
         .route("/cast/{id}/volume", put(volume))
-        .route("/cast/{id}/room", put(set_room))
+        .route("/cast/{id}/room", put(set_room).delete(clear_room))
 }
 
 #[derive(Serialize)]
@@ -181,6 +181,37 @@ async fn discover(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json
 #[derive(Deserialize)]
 struct CastRoom {
     room_id: i64,
+}
+
+/// Takes a cast device out of its room: it stops casting if it was, and goes
+/// back to the list of devices that aren't placed.
+async fn clear_room(
+    _: AdminUser,
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<CastList>> {
+    let mut rooms = cast_rooms(&state).await?;
+    rooms.remove(&id);
+    let lines: Vec<String> = rooms
+        .iter()
+        .map(|(id, room)| format!("{id}\t{room}"))
+        .collect();
+    state
+        .store
+        .set_setting(CAST_ROOMS, &lines.join("\n"))
+        .await?;
+    state.caster.stop(&id).await;
+    let targets: Vec<String> = state
+        .caster
+        .active()
+        .into_iter()
+        .filter(|t| *t != id)
+        .collect();
+    state
+        .store
+        .set_setting(CAST_TARGETS, &targets.join("\n"))
+        .await?;
+    Ok(Json(cast_list(&state).await?))
 }
 
 /// Puts a cast device in a room: it plays that room's music from now on (a
@@ -775,6 +806,26 @@ mod tests {
             stream_path_in("t", patio.id),
             format!("/cast/t/live.mp3?room={}", patio.id)
         );
+        // Taking it out of its room puts it back with the devices not placed.
+        let (status, _) = call(
+            &state,
+            axum::http::Method::DELETE,
+            "/api/cast/tv-1/room",
+            None,
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(!cast_rooms(&state).await.unwrap().contains_key("tv-1"));
+        let (status, _) = call(
+            &state,
+            axum::http::Method::PUT,
+            "/api/cast/tv-1/room",
+            Some(&format!(r#"{{"room_id":{}}}"#, patio.id)),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
         // A room that's deleted sends its casts back to Main.
         state.store.delete_room(patio.id).await.unwrap();
         assert_eq!(

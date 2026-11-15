@@ -666,6 +666,7 @@ export const api = {
   stopCast: (id: string) => post<CastList>(`/cast/${encodeURIComponent(id)}/stop`),
   stopAllCasts: () => post<void>('/cast/stop-all'),
   newStreamLink: () => post<CastList>('/cast/new-link'),
+  clearCastRoom: (id: string) => del<CastList>(`/cast/${encodeURIComponent(id)}/room`),
   setCastRoom: (id: string, roomId: number) =>
     put<CastList>(`/cast/${encodeURIComponent(id)}/room`, { room_id: roomId }),
   setCastVolume: (id: string, level: number) => put<void>(`/cast/${encodeURIComponent(id)}/volume`, { level }),
