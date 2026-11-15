@@ -245,6 +245,13 @@
               : ''}{node.platform ? ` · ${systemName(node.platform)}` : ''}{node.version
               ? ` · ${node.version}`
               : ''}{#if node.build_label}{' · '}<b>{node.build_label}</b>{/if}
+            {#if online(node)}
+              {#if node.same_build}
+                <b class="same">· same build as Main</b>
+              {:else}
+                <b class="behind">· not Main's build yet</b>
+              {/if}
+            {/if}
           </span>
         </div>
         <button
@@ -405,5 +412,11 @@
   .buttons {
     display: flex;
     gap: 8px;
+  }
+  .same {
+    color: var(--ok);
+  }
+  .behind {
+    color: var(--bad);
   }
 </style>

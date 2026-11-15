@@ -467,6 +467,18 @@ fn note_label(node: i64, label: &str) {
     }
 }
 
+/// Whether a node runs what Main runs: with a test build, the same label
+/// (one run of the build script gives every program it makes the same one);
+/// otherwise the same version.
+fn same_build(node: &Node) -> bool {
+    let own = env!("DJINN_BUILD_LABEL");
+    if own.is_empty() {
+        node.version.as_deref() == Some(env!("DJINN_RELEASE_VERSION"))
+    } else {
+        label_of(node.id).as_deref() == Some(own)
+    }
+}
+
 fn label_of(node: i64) -> Option<String> {
     LABELS
         .lock()
@@ -690,6 +702,9 @@ struct ListedNode {
     audio: AudioSettings,
     /// "test <commit> ..." when the node runs a test build.
     build_label: Option<String>,
+    /// The node runs the same build as Main (the same test build, or the
+    /// same version when this isn't one).
+    same_build: bool,
     /// The speakers the node reported.
     speakers: Vec<serde_json::Value>,
     /// Its AI helper: what it reported, the model suggested and in use, and
@@ -724,6 +739,7 @@ async fn list(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json<Nod
             code: pairing_code(&node.node_id, &node.secret_hash),
             audio: AudioSettings::of(&node),
             build_label: label_of(node.id),
+            same_build: same_build(&node),
             speakers: node
                 .devices
                 .as_deref()

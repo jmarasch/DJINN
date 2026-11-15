@@ -1705,6 +1705,8 @@ export interface HouseNode {
   platform: string | null
   /** "test <commit> ..." when the node runs a test build. */
   build_label: string | null
+  /** Runs the same build as Main. */
+  same_build: boolean
   requested_at: number
   approved_at: number | null
   last_seen: number | null
