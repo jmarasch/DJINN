@@ -476,6 +476,7 @@ impl Node {
                     )
                     .header(crate::node_builds::BUILD_HEADER, own_build().await)
                     .header(crate::nodes::NODE_LABEL_HEADER, env!("DJINN_BUILD_LABEL"))
+                    .header(crate::nodes::NODE_ADDRESSES_HEADER, own_addresses())
                     .header(
                         crate::node_builds::SCHEMA_HEADER,
                         djinn_store::schema_version().to_string(),
@@ -1412,6 +1413,17 @@ fn announced_mains(wait: Duration) -> Vec<(String, String)> {
     }
     let _ = daemon.shutdown();
     found
+}
+
+/// This node's own home-network addresses for a check-in. Main sees only
+/// where the check-in seems to come from, which a router, NAT or VPN in
+/// between can change.
+fn own_addresses() -> String {
+    crate::banner::lan_addresses()
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 /// Where to look for Main, as URLs, most likely first and without the

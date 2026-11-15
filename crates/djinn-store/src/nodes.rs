@@ -55,6 +55,9 @@ pub struct Node {
     pub ai_report: Option<String>,
     /// Its other speakers, beyond `device`, as JSON; empty for none.
     pub extra_outputs: String,
+    /// The addresses the node reports for itself, one per line; empty until
+    /// it has said. `address` is only where its check-ins seem to come from.
+    pub addresses: String,
 }
 
 /// A node's speaker settings.
@@ -99,7 +102,7 @@ impl Store {
     pub async fn nodes(&self) -> Result<Vec<Node>> {
         Ok(sqlx::query_as(
             "SELECT id, node_id, name, secret_hash, status, room_id, address, version, platform,
-                    requested_at, approved_at, last_seen, device, delay_ms, trim, equalizer, offline, devices, free_run, screen, visual, cache_ahead, ai_help, ai_model, ai_report, extra_outputs
+                    requested_at, approved_at, last_seen, device, delay_ms, trim, equalizer, offline, devices, free_run, screen, visual, cache_ahead, ai_help, ai_model, ai_report, extra_outputs, addresses
              FROM nodes ORDER BY status = 'approved', name, id",
         )
         .fetch_all(&self.pool)
@@ -109,7 +112,7 @@ impl Store {
     pub async fn node_by_node_id(&self, node_id: &str) -> Result<Option<Node>> {
         Ok(sqlx::query_as(
             "SELECT id, node_id, name, secret_hash, status, room_id, address, version, platform,
-                    requested_at, approved_at, last_seen, device, delay_ms, trim, equalizer, offline, devices, free_run, screen, visual, cache_ahead, ai_help, ai_model, ai_report, extra_outputs
+                    requested_at, approved_at, last_seen, device, delay_ms, trim, equalizer, offline, devices, free_run, screen, visual, cache_ahead, ai_help, ai_model, ai_report, extra_outputs, addresses
              FROM nodes WHERE node_id = ?",
         )
         .bind(node_id)
@@ -120,7 +123,7 @@ impl Store {
     pub async fn node(&self, id: i64) -> Result<Option<Node>> {
         Ok(sqlx::query_as(
             "SELECT id, node_id, name, secret_hash, status, room_id, address, version, platform,
-                    requested_at, approved_at, last_seen, device, delay_ms, trim, equalizer, offline, devices, free_run, screen, visual, cache_ahead, ai_help, ai_model, ai_report, extra_outputs
+                    requested_at, approved_at, last_seen, device, delay_ms, trim, equalizer, offline, devices, free_run, screen, visual, cache_ahead, ai_help, ai_model, ai_report, extra_outputs, addresses
              FROM nodes WHERE id = ?",
         )
         .bind(id)
@@ -250,6 +253,17 @@ impl Store {
         .bind(id)
         .execute(&self.pool)
         .await?;
+        Ok(())
+    }
+
+    /// Saves the addresses a node reports for itself.
+    pub async fn set_node_addresses(&self, id: i64, addresses: &str) -> Result<()> {
+        sqlx::query("UPDATE nodes SET addresses = ? WHERE id = ? AND addresses != ?")
+            .bind(addresses)
+            .bind(id)
+            .bind(addresses)
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 

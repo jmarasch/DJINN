@@ -487,6 +487,58 @@ fn audio_visual(node: &Node) -> Option<crate::visuals::Visuals> {
 pub const NODE_VERSION_HEADER: &str = "x-djinn-version";
 /// A test build's label (commit, edits, time); absent from releases.
 pub const NODE_LABEL_HEADER: &str = "x-djinn-label";
+/// The node's own addresses on its network, comma separated.
+pub const NODE_ADDRESSES_HEADER: &str = "x-djinn-addresses";
+
+/// Most addresses kept for one node.
+const MAX_NODE_ADDRESSES: usize = 6;
+
+/// The home-network addresses in a node's report: private IPv4 only (what a
+/// node on a LAN has), at most `MAX_NODE_ADDRESSES`, no repeats. Anything
+/// else is dropped, so a node can't point Manage links at somewhere
+/// outside the house.
+pub fn parse_addresses(report: &str) -> Vec<std::net::Ipv4Addr> {
+    let mut found: Vec<std::net::Ipv4Addr> = Vec::new();
+    for part in report.split(',') {
+        if let Ok(ip) = part.trim().parse::<std::net::Ipv4Addr>() {
+            if ip.is_private() && !found.contains(&ip) && found.len() < MAX_NODE_ADDRESSES {
+                found.push(ip);
+            }
+        }
+    }
+    found
+}
+
+/// Where a node's page can be opened from here, most likely first: the
+/// addresses it reports for itself, then where its check-ins come from
+/// (which a router, NAT or VPN in between can change). The first that
+/// answers on the page's port wins; if none does, the first one.
+async fn reachable_address(node: &Node, port: u16) -> Option<String> {
+    let mut candidates: Vec<String> = node
+        .addresses
+        .lines()
+        .map(str::to_owned)
+        .filter(|a| !a.is_empty())
+        .collect();
+    if let Some(seen) = &node.address {
+        if !candidates.contains(seen) {
+            candidates.push(seen.clone());
+        }
+    }
+    for candidate in &candidates {
+        let Ok(ip) = candidate.parse::<std::net::IpAddr>() else {
+            continue;
+        };
+        let connect = tokio::net::TcpStream::connect((ip, port));
+        if matches!(
+            tokio::time::timeout(std::time::Duration::from_millis(700), connect).await,
+            Ok(Ok(_))
+        ) {
+            return Some(candidate.clone());
+        }
+    }
+    candidates.into_iter().next()
+}
 
 /// What each node's program calls itself, from its last check-in (kept in
 /// memory: a node says it again every few seconds).
@@ -580,9 +632,11 @@ async fn manage_link(
         .await?
         .filter(|node| node.status == "approved")
         .ok_or_else(ApiError::not_found)?;
-    let address = node.address.ok_or_else(|| {
-        ApiError::bad_request("this node hasn't checked in yet, so its address isn't known")
-    })?;
+    let address = reachable_address(&node, NODE_PAGE_PORT)
+        .await
+        .ok_or_else(|| {
+            ApiError::bad_request("this node hasn't checked in yet, so its address isn't known")
+        })?;
     let token = crate::security::random_hex(16)?;
     let now = djinn_store::now_ms();
     if let Ok(mut links) = MANAGE_LINKS.lock() {
@@ -663,6 +717,19 @@ async fn me(
         .store
         .node_seen(node.id, address.as_deref(), version.as_deref())
         .await?;
+    if let Some(report) = headers
+        .get(NODE_ADDRESSES_HEADER)
+        .and_then(|v| v.to_str().ok())
+    {
+        let own: Vec<String> = parse_addresses(report)
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        state
+            .store
+            .set_node_addresses(node.id, &own.join("\n"))
+            .await?;
+    }
     let running = crate::node_builds::Running::from_headers(&headers, node.version.as_deref());
     note_label(
         node.id,
@@ -1115,6 +1182,56 @@ async fn remove(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_node_reports_only_home_addresses() {
+        let found = parse_addresses(
+            "192.168.0.195, 100.84.45.127,8.8.8.8,127.0.0.1,fe80::1,192.168.0.195,10.0.0.7,junk",
+        );
+        assert_eq!(
+            found,
+            vec![
+                "192.168.0.195".parse::<std::net::Ipv4Addr>().unwrap(),
+                "10.0.0.7".parse().unwrap()
+            ]
+        );
+        assert!(parse_addresses("").is_empty());
+    }
+
+    #[tokio::test]
+    async fn manage_uses_the_address_that_answers_not_where_check_ins_come_from() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let store = djinn_store::Store::open_in_memory().await.unwrap();
+        store
+            .request_node_join(&JoinRequest {
+                node_id: "n1",
+                name: "Kitchen",
+                secret_hash: "aa",
+                // A router or VPN in between: nothing listens here.
+                address: Some("192.0.2.1"),
+                version: None,
+                platform: None,
+            })
+            .await
+            .unwrap();
+        let id = store.node_by_node_id("n1").await.unwrap().unwrap().id;
+        store
+            .set_node_addresses(id, "192.0.2.2\n127.0.0.1")
+            .await
+            .unwrap();
+        let node = store.node(id).await.unwrap().unwrap();
+        assert_eq!(
+            reachable_address(&node, port).await.as_deref(),
+            Some("127.0.0.1")
+        );
+        // Nothing answers: the first address the node reported.
+        drop(listener);
+        assert_eq!(
+            reachable_address(&node, port).await.as_deref(),
+            Some("192.0.2.2")
+        );
+    }
     use axum::body::Body;
 
     #[test]

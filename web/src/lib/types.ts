@@ -1705,6 +1705,8 @@ export interface HouseNode {
   status: 'pending' | 'approved'
   room_id: number
   address: string | null
+  /** The addresses the node says it has itself, one per line; empty until it says. */
+  addresses: string
   version: string | null
   platform: string | null
   /** "test <commit> ..." when the node runs a test build. */

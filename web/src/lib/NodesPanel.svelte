@@ -178,7 +178,7 @@
           {/if}
         </div>
         <p class="facts small muted">
-          {#if node.address}<span>{node.address}</span>{/if}
+          {#if node.addresses}<span>{node.addresses.split('\n').join(', ')}</span>{:else if node.address}<span>{node.address}</span>{/if}
           {#if node.platform}<span>{systemName(node.platform)}</span>{/if}
           {#if node.version}<span>{node.version}</span>{/if}
           {#if node.build_label}<span class="label">{node.build_label}</span>{/if}
