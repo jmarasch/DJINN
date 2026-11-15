@@ -90,7 +90,7 @@
     <ul class="codes">
       {#each recovery as c (c)}<li>{c}</li>{/each}
     </ul>
-    <div class="row">
+    <div class="actions">
       <button onclick={copyCodes}>Copy codes</button>
       <button class="primary" onclick={() => (recovery = null)}>I've saved them</button>
     </div>
@@ -99,7 +99,7 @@
     <!-- The QR code is an SVG DJINN made itself. -->
     <div class="qr">{@html setup.qr_svg}</div>
     <p class="small muted">Can't scan? Type this key into the app: <span class="mono">{setup.secret}</span></p>
-    <form class="row" onsubmit={confirm}>
+    <form class="actions" onsubmit={confirm}>
       <input bind:value={code} inputmode="numeric" autocomplete="one-time-code" maxlength="7" placeholder="123456" required aria-label="Code from the app" />
       <button class="primary" disabled={busy}>Turn on</button>
     </form>
@@ -107,18 +107,18 @@
   {:else if status.on}
     <p>On. Signing in asks for a code from your authenticator app. {status.recovery_codes_left} recovery {status.recovery_codes_left === 1 ? 'code' : 'codes'} left.</p>
     {#if starting}
-      <form class="row" onsubmit={begin}>
+      <form class="actions" onsubmit={begin}>
         <input type="password" bind:value={password} autocomplete="current-password" placeholder="Your password" required aria-label="Your password" />
         <button class="primary" disabled={busy}>Continue</button>
       </form>
     {:else if turningOff}
-      <form class="row" onsubmit={turnOff}>
+      <form class="actions" onsubmit={turnOff}>
         <input type="password" bind:value={password} autocomplete="current-password" placeholder="Your password" required aria-label="Your password" />
         <button disabled={busy}>Turn off</button>
       </form>
       {#if status.required}<p class="small muted">DJINN GO needs it for your account, so GO stops working until you turn it on again.</p>{/if}
     {:else}
-      <div class="row">
+      <div class="actions">
         <button onclick={() => (starting = true)} disabled={busy}>New phone or new codes</button>
         <button onclick={() => (turningOff = true)}>Turn off</button>
       </div>
@@ -129,7 +129,7 @@
       After your password, signing in also asks for a code from an app on your phone, so a stolen password isn't enough.
     </p>
     {#if starting}
-      <form class="row" onsubmit={begin}>
+      <form class="actions" onsubmit={begin}>
         <input type="password" bind:value={password} autocomplete="current-password" placeholder="Your password" required aria-label="Your password" />
         <button class="primary" disabled={busy}>Continue</button>
       </form>
@@ -141,13 +141,13 @@
 </section>
 
 <style>
-  .row {
+  .actions {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
   }
 
-  .row input {
+  .actions input {
     flex: 1;
     min-width: 0;
   }

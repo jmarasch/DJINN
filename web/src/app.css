@@ -181,9 +181,10 @@ button.round.big {
   box-shadow: var(--glow-strong);
 }
 
-/* Icon-only buttons inside rows stay flat. */
-li button,
-.row button:not(.round),
+/* Icon-only buttons inside rows stay flat (a primary or danger button never
+   is: it would lose its fill and its label with it). */
+li button:not(.primary):not(.danger),
+.row button:not(.round):not(.primary):not(.danger),
 .item button,
 .order button,
 .queue {
