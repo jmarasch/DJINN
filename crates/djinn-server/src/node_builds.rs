@@ -138,6 +138,13 @@ fn should_update(ours: &str, theirs: Option<&str>) -> bool {
     theirs.is_some_and(|theirs| crate::update::newer(ours, theirs))
 }
 
+/// Whether this release can open the node's database: a node on a newer
+/// test build has migrations a stable release doesn't know, and wouldn't
+/// start again after taking it.
+fn opens_its_database(ours: i64, running: &Running) -> bool {
+    running.schema.is_none_or(|theirs| theirs <= ours)
+}
+
 /// The update for `node`, if it's behind and the file is ready. Starts
 /// fetching the file if it isn't there yet (offered at a later check-in).
 pub fn offer(state: &AppState, node: &djinn_store::Node, running: &Running) -> Option<NodeUpdate> {
@@ -151,7 +158,9 @@ pub fn offer(state: &AppState, node: &djinn_store::Node, running: &Running) -> O
             sha256: build.sha256,
         });
     }
-    if !should_update(VERSION, running.version.as_deref()) {
+    if !should_update(VERSION, running.version.as_deref())
+        || !opens_its_database(djinn_store::schema_version(), running)
+    {
         return None;
     }
     let dir = builds_dir(state);
@@ -329,6 +338,19 @@ mod tests {
             !wants_local(&local, &running("2026.11.9-nightly", Some("old"), Some(53))),
             "never a program that can't open its database"
         );
+    }
+
+    #[test]
+    fn no_release_a_node_s_database_is_too_new_for() {
+        let running = |schema: Option<i64>| Running {
+            version: Some("2026.11.14-nightly".into()),
+            sha256: None,
+            schema,
+        };
+        assert!(opens_its_database(56, &running(Some(56))));
+        assert!(opens_its_database(56, &running(Some(50))));
+        assert!(opens_its_database(56, &running(None)), "an older node");
+        assert!(!opens_its_database(56, &running(Some(67))));
     }
 
     #[test]
