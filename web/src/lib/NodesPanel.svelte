@@ -1,4 +1,13 @@
 <script lang="ts">
+  /** "windows-x86_64" as a person would say it. */
+  function systemName(platform: string): string {
+    const [os, arch] = platform.split('-')
+    const system = os === 'windows' ? 'Windows' : os === 'linux' ? 'Linux' : os === 'macos' ? 'macOS' : os
+    const chip =
+      arch === 'x86_64' ? '64-bit' : arch === 'aarch64' ? 'ARM 64-bit' : arch === 'arm' ? 'ARM' : (arch ?? '')
+    return chip ? `${system}, ${chip}` : system
+  }
+
   // Admin > Nodes: other DJINN boxes that play a room on their own speakers.
   // Joining is off until switched on; each request is accepted with the
   // admin's password after checking its code matches the node's screen.
@@ -190,7 +199,7 @@
           <b>{node.name}</b>
           <span class="small muted">
             Code <b class="code">{node.code}</b> · {node.address ?? 'unknown address'}{node.platform
-              ? ` · ${node.platform}`
+              ? ` · ${systemName(node.platform)}`
               : ''} · asked {seen(node.requested_at)}
           </span>
         </div>
@@ -233,7 +242,9 @@
           <span class="small muted">
             {online(node) ? 'Connected' : `Last seen ${seen(node.last_seen)}`}{node.address
               ? ` · ${node.address}`
-              : ''}{node.version ? ` · ${node.version}` : ''}
+              : ''}{node.platform ? ` · ${systemName(node.platform)}` : ''}{node.version
+              ? ` · ${node.version}`
+              : ''}
           </span>
         </div>
         <button

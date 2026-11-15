@@ -52,31 +52,34 @@ fn valid_python(version: &str) -> bool {
     ok(parts.next()) && ok(parts.next()) && parts.next().is_none()
 }
 
-/// The platforms pip may pick wheels for on a node of this kind.
-fn platforms(arch: &str) -> Option<Vec<String>> {
-    if !matches!(arch, "x86_64" | "aarch64") {
-        return None;
+/// The platforms pip may pick wheels for on a node of this kind: Linux on
+/// either processor, or 64-bit Windows. Main builds any of them, whatever
+/// it runs on itself, since pip only downloads.
+fn platforms(os: &str, arch: &str) -> Option<Vec<String>> {
+    match (os, arch) {
+        ("linux", "x86_64" | "aarch64") => Some(
+            [
+                "manylinux2014",
+                "manylinux_2_17",
+                "manylinux_2_27",
+                "manylinux_2_28",
+                "linux",
+            ]
+            .iter()
+            .map(|p| format!("{p}_{arch}"))
+            .collect(),
+        ),
+        ("windows", "x86_64") => Some(vec!["win_amd64".to_owned()]),
+        _ => None,
     }
-    Some(
-        [
-            "manylinux2014",
-            "manylinux_2_17",
-            "manylinux_2_27",
-            "manylinux_2_28",
-            "linux",
-        ]
-        .iter()
-        .map(|p| format!("{p}_{arch}"))
-        .collect(),
-    )
 }
 
-/// The kit for a node with this Python and processor, using `model`: ready,
-/// being put together (ask again), or why it can't be.
-pub fn kit(state: &AppState, python: &str, arch: &str, model: &str) -> Kit {
-    if !valid_python(python) || platforms(arch).is_none() {
+/// The kit for a node with this system, Python and processor, using
+/// `model`: ready, being put together (ask again), or why it can't be.
+pub fn kit(state: &AppState, os: &str, python: &str, arch: &str, model: &str) -> Kit {
+    if !valid_python(python) || platforms(os, arch).is_none() {
         return Kit::Failed {
-            error: format!("nodes with Python {python} on {arch} can't help yet"),
+            error: format!("nodes with Python {python} on {os} {arch} can't help yet"),
         };
     }
     if !ai_listener::MODELS.contains(&model) {
@@ -84,7 +87,7 @@ pub fn kit(state: &AppState, python: &str, arch: &str, model: &str) -> Kit {
             error: "unknown model".into(),
         };
     }
-    let key = format!("{python}-{arch}-{model}");
+    let key = format!("{os}-{python}-{arch}-{model}");
     let known = kits(|k| k.get(&key).cloned());
     match &known {
         Some(Kit::Failed { .. }) | None => {}
@@ -98,9 +101,14 @@ pub fn kit(state: &AppState, python: &str, arch: &str, model: &str) -> Kit {
     }
     kits(|k| k.insert(key.clone(), Kit::Preparing));
     let d = ai_listener::dir(state);
-    let (python, arch, model) = (python.to_owned(), arch.to_owned(), model.to_owned());
+    let (os, python, arch, model) = (
+        os.to_owned(),
+        python.to_owned(),
+        arch.to_owned(),
+        model.to_owned(),
+    );
     tokio::spawn(async move {
-        let done = match build(&d, &python, &arch, &model).await {
+        let done = match build(&d, &os, &python, &arch, &model).await {
             Ok(files) => Kit::Ready { files },
             Err(error) => {
                 tracing::warn!(%error, "couldn't put together the AI kit for a node");
@@ -134,12 +142,13 @@ fn retry_due(key: &str) -> bool {
 /// Where a kit's file is on Main, if `path` is one of the kit's.
 pub fn file_of(
     state: &AppState,
+    os: &str,
     python: &str,
     arch: &str,
     model: &str,
     path: &str,
 ) -> Option<PathBuf> {
-    let key = format!("{python}-{arch}-{model}");
+    let key = format!("{os}-{python}-{arch}-{model}");
     let listed = kits(|k| match k.get(&key) {
         Some(Kit::Ready { files }) => files.iter().any(|f| f.path == path),
         _ => false,
@@ -149,23 +158,35 @@ pub fn file_of(
     }
     let d = ai_listener::dir(state);
     Some(match path.strip_prefix("wheels/") {
-        Some(wheel) => wheels_dir(&d, python, arch).join(wheel),
+        Some(wheel) => wheels_dir(&d, os, python, arch).join(wheel),
         None => d.join(path),
     })
 }
 
-fn wheels_dir(d: &Path, python: &str, arch: &str) -> PathBuf {
-    d.join("node-kit").join(format!("py{python}-{arch}"))
+/// Linux kits keep the folder names they always had.
+fn wheels_dir(d: &Path, os: &str, python: &str, arch: &str) -> PathBuf {
+    let name = if os == "linux" {
+        format!("py{python}-{arch}")
+    } else {
+        format!("py{python}-{os}-{arch}")
+    };
+    d.join("node-kit").join(name)
 }
 
-async fn build(d: &Path, python: &str, arch: &str, model: &str) -> Result<Vec<KitFile>, String> {
+async fn build(
+    d: &Path,
+    os: &str,
+    python: &str,
+    arch: &str,
+    model: &str,
+) -> Result<Vec<KitFile>, String> {
     if !ai_listener::installed(d) {
         return Err(
             "install the lyrics listener on Main first (Admin > AI); nodes get theirs from it"
                 .into(),
         );
     }
-    let wheels = wheels_dir(d, python, arch);
+    let wheels = wheels_dir(d, os, python, arch);
     // Kits made before they carried pip are made again.
     let has_pip_wheel = std::fs::read_dir(&wheels).is_ok_and(|entries| {
         entries
@@ -173,7 +194,7 @@ async fn build(d: &Path, python: &str, arch: &str, model: &str) -> Result<Vec<Ki
             .any(|e| e.file_name().to_string_lossy().starts_with("pip-"))
     });
     if !wheels.join(".done").is_file() || !has_pip_wheel {
-        fetch_wheels(d, &wheels, python, arch).await?;
+        fetch_wheels(d, &wheels, os, python, arch).await?;
     }
     ensure_model(d, model).await?;
     let mut files = Vec::new();
@@ -198,12 +219,18 @@ async fn build(d: &Path, python: &str, arch: &str, model: &str) -> Result<Vec<Ki
 
 /// Downloads the packages a node's Python needs: from the keepsake when
 /// it has them all, else from the package index (once).
-async fn fetch_wheels(d: &Path, wheels: &Path, python: &str, arch: &str) -> Result<(), String> {
+async fn fetch_wheels(
+    d: &Path,
+    wheels: &Path,
+    os: &str,
+    python: &str,
+    arch: &str,
+) -> Result<(), String> {
     let _ = tokio::fs::remove_dir_all(wheels).await;
     tokio::fs::create_dir_all(wheels)
         .await
         .map_err(|e| e.to_string())?;
-    let platforms = platforms(arch).unwrap_or_default();
+    let platforms = platforms(os, arch).unwrap_or_default();
     let download = |offline: Option<PathBuf>| {
         let mut c = Command::new(ai_listener::venv_python(d));
         c.current_dir(d)
@@ -242,12 +269,17 @@ async fn fetch_wheels(d: &Path, wheels: &Path, python: &str, arch: &str) -> Resu
             .is_ok_and(|s| s.success());
     }
     if !ok {
-        tracing::info!(python, arch, "fetching the AI packages for a node (once)");
+        tracing::info!(
+            os,
+            python,
+            arch,
+            "fetching the AI packages for a node (once)"
+        );
         ok = download(None).status().await.is_ok_and(|s| s.success());
     }
     if !ok {
         return Err(format!(
-            "couldn't get the listener's packages for Python {python} on {arch}"
+            "couldn't get the listener's packages for Python {python} on {os} {arch}"
         ));
     }
     tokio::fs::write(wheels.join(".done"), "1")
@@ -369,8 +401,14 @@ mod tests {
         assert!(!valid_python("3"));
         assert!(!valid_python("3.11; rm"));
         assert!(!valid_python("3.11.2"));
-        assert!(platforms("x86_64").is_some());
-        assert!(platforms("../x").is_none());
+        assert!(platforms("linux", "x86_64").is_some());
+        assert!(platforms("linux", "../x").is_none());
+        assert_eq!(
+            platforms("windows", "x86_64"),
+            Some(vec!["win_amd64".to_owned()])
+        );
+        assert!(platforms("windows", "aarch64").is_none());
+        assert!(platforms("macos", "x86_64").is_none());
     }
 
     #[test]
@@ -397,7 +435,9 @@ mod real {
     async fn kit_for_a_node() {
         let d = std::path::PathBuf::from(std::env::var("DJINN_KIT_TEST_DIR").unwrap());
         crate::ai_listener::write_pack(&d).await.unwrap();
-        let files = super::build(&d, "3.13", "x86_64", "tiny").await.unwrap();
+        let files = super::build(&d, "linux", "3.13", "x86_64", "tiny")
+            .await
+            .unwrap();
         let total: u64 = files.iter().map(|f| f.size).sum();
         println!("{} files, {} MB", files.len(), total / 1_000_000);
         assert!(files

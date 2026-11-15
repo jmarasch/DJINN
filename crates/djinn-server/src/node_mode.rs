@@ -190,6 +190,10 @@ pub struct Node {
     cache: Arc<crate::node_offline::Cache>,
     /// Main's last volume (f32 bits), for playing offline at the same level.
     volume: Arc<AtomicU32>,
+    /// When music from Main last arrived (the shared clock's microseconds, 0
+    /// for never). Being connected to Main's feed isn't playing: it stays
+    /// open while the room is quiet.
+    heard_us: Arc<std::sync::atomic::AtomicI64>,
     /// Browsers let in to manage this node (by a link from Main's Admin >
     /// Nodes > Manage), and until when.
     managers: Arc<Mutex<std::collections::HashMap<String, std::time::Instant>>>,
@@ -266,6 +270,7 @@ impl Node {
                 crate::node_offline::CACHE_LIMIT_BYTES,
             )),
             volume: Arc::new(AtomicU32::new(1.0f32.to_bits())),
+            heard_us: Arc::new(std::sync::atomic::AtomicI64::new(0)),
             managers: Arc::default(),
             updating: Arc::default(),
             update_failed: Arc::default(),
@@ -285,9 +290,17 @@ impl Node {
         Arc::clone(&self.ai)
     }
 
-    /// Playing music or drawing visuals for a screen: AI work must wait.
+    /// Playing music or drawing visuals for a screen: AI work must wait. A
+    /// quiet room isn't busy, though the node stays connected to Main's feed.
     pub(crate) fn busy(&self) -> bool {
-        self.status().playing || self.levels.watched(djinn_engine::clock::now_micros())
+        let now = djinn_engine::clock::now_micros();
+        self.music_arriving(now) || self.status().offline || self.levels.watched(now)
+    }
+
+    /// Whether music from Main arrived in the last few seconds.
+    fn music_arriving(&self, now: i64) -> bool {
+        let heard = self.heard_us.load(Ordering::Acquire);
+        heard != 0 && now - heard < MUSIC_GAP_US
     }
 
     /// The port this node's page listens on.
@@ -770,6 +783,9 @@ impl Node {
     }
 }
 
+/// How long without music from Main before the node counts as quiet.
+const MUSIC_GAP_US: i64 = 4_000_000;
+
 /// How long Main's music may be gone before playing from the cache (a
 /// shorter blip just waits).
 const OFFLINE_AFTER: Duration = Duration::from_secs(6);
@@ -1098,6 +1114,10 @@ impl Node {
             }
             if let Some((p, _, _)) = player.as_ref() {
                 for piece in pieces {
+                    if matches!(piece.mark, djinn_engine::Mark::Audio { .. }) {
+                        self.heard_us
+                            .store(djinn_engine::clock::now_micros().max(1), Ordering::Release);
+                    }
                     if let djinn_engine::Mark::Volume(v) = piece.mark {
                         self.volume.store(v.to_bits(), Ordering::Release);
                     }

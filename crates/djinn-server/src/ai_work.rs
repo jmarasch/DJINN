@@ -679,10 +679,17 @@ async fn node_result(
 
 #[derive(Deserialize)]
 struct KitAsk {
+    /// "linux" or "windows"; nodes before this field are Linux.
+    #[serde(default = "linux")]
+    os: String,
     python: String,
     arch: String,
     #[serde(default)]
     path: Option<String>,
+}
+
+fn linux() -> String {
+    "linux".to_owned()
 }
 
 /// The node's model: the admin's choice, else the one suggested for it.
@@ -709,14 +716,14 @@ async fn node_kit(
         if !crate::ai_kit::safe_path(&path) {
             return Err(ApiError::bad_request("not a kit file"));
         }
-        let file = crate::ai_kit::file_of(&state, &ask.python, &ask.arch, &model, &path)
+        let file = crate::ai_kit::file_of(&state, &ask.os, &ask.python, &ask.arch, &model, &path)
             .ok_or_else(ApiError::not_found)?;
         return match ServeFile::new(file).oneshot(request).await {
             Ok(response) => Ok(response.map(Body::new).into_response()),
             Err(e) => match e {},
         };
     }
-    let kit = crate::ai_kit::kit(&state, &ask.python, &ask.arch, &model);
+    let kit = crate::ai_kit::kit(&state, &ask.os, &ask.python, &ask.arch, &model);
     let code = match kit {
         crate::ai_kit::Kit::Ready { .. } => StatusCode::OK,
         crate::ai_kit::Kit::Preparing => StatusCode::ACCEPTED,

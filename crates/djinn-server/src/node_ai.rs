@@ -266,7 +266,8 @@ fn start(node: &Node, helper: &Helper, model: &str) -> std::io::Result<Child> {
     Ok(child)
 }
 
-/// The node's Python version ("3.11") and processor ("x86_64").
+/// The node's Python version ("3.11") and processor ("x86_64"; Windows and
+/// Python call the same processors "AMD64" and "ARM64").
 async fn python_kind(py: &Path) -> Result<(String, String), String> {
     let out = Command::new(py)
         .args([
@@ -279,7 +280,14 @@ async fn python_kind(py: &Path) -> Result<(String, String), String> {
     let text = String::from_utf8_lossy(&out.stdout);
     let mut parts = text.split_whitespace();
     match (parts.next(), parts.next()) {
-        (Some(v), Some(m)) => Ok((v.to_owned(), m.to_owned())),
+        (Some(v), Some(m)) => Ok((
+            v.to_owned(),
+            match m.to_ascii_lowercase().as_str() {
+                "amd64" | "x86_64" => "x86_64".to_owned(),
+                "arm64" | "aarch64" => "aarch64".to_owned(),
+                other => other.to_owned(),
+            },
+        )),
         _ => Err("couldn't tell which Python this is".into()),
     }
 }
@@ -313,7 +321,11 @@ async fn install(node: &Node, helper: &Helper, model: &str) -> Result<(), String
         let answer = client
             .get(format!("{main}/api/nodes/ai/kit"))
             .header(header::AUTHORIZATION, &auth)
-            .query(&[("python", python.as_str()), ("arch", arch.as_str())])
+            .query(&[
+                ("os", std::env::consts::OS),
+                ("python", python.as_str()),
+                ("arch", arch.as_str()),
+            ])
             .send()
             .await
             .map_err(|e| format!("can't reach Main: {e}"))?;
@@ -484,6 +496,7 @@ async fn fetch(
         .get(format!("{main}/api/nodes/ai/kit"))
         .header(header::AUTHORIZATION, &auth)
         .query(&[
+            ("os", std::env::consts::OS),
             ("python", python),
             ("arch", arch),
             ("path", file.path.as_str()),
