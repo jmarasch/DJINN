@@ -95,7 +95,7 @@
 />
 
 {#if shown === 'options'}
-<section class="card">
+<section class="card wide">
   <h2>Joining</h2>
   <p class="small muted">
     A node is another DJINN box, like a Raspberry Pi by a room's speakers. It plays that room's music in step with this
