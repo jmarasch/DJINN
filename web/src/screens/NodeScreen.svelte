@@ -13,6 +13,9 @@
   interface NodeStatus {
     pairing: 'setup' | 'waiting' | 'joined' | 'declined' | 'kicked' | 'changed'
     name: string
+    /** The DJINN it runs, and a test build's label (empty for a release). */
+    version?: string
+    build?: string
     main: string | null
     main_name: string | null
     /** Main's page for this node's screen (TV or lyrics), once joined. */
@@ -298,6 +301,10 @@
           {#if status.main_code}
             <dt>Main's security code</dt>
             <dd class="code">{status.main_code}</dd>
+          {/if}
+          {#if status.version}
+            <dt>Version</dt>
+            <dd>{status.version}{#if status.build}<br /><span class="small muted">{status.build}</span>{/if}</dd>
           {/if}
           {#if status.pairing === 'joined'}
             <dt>Cached songs</dt>

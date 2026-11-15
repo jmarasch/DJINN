@@ -110,6 +110,10 @@ impl Pairing {
 #[derive(Clone, Debug, Serialize)]
 pub struct Status {
     pub pairing: Pairing,
+    /// The DJINN this node runs, and a test build's label ("test build
+    /// <commit>, <when>"; empty for a release).
+    pub version: &'static str,
+    pub build: &'static str,
     /// This node's name, as Main lists it.
     pub name: String,
     /// Main's address, like "https://192.168.1.10:8066".
@@ -241,6 +245,8 @@ impl Node {
             store,
             cache_dir: Arc::new(cache_dir.clone()),
             status: Arc::new(RwLock::new(Status {
+                version: env!("DJINN_RELEASE_VERSION"),
+                build: env!("DJINN_BUILD_LABEL"),
                 pairing,
                 name,
                 main,
