@@ -114,13 +114,13 @@
     {:else if turningOff}
       <form class="actions" onsubmit={turnOff}>
         <input type="password" bind:value={password} autocomplete="current-password" placeholder="Your password" required aria-label="Your password" />
-        <button disabled={busy}>Turn off</button>
+        <button class="danger" disabled={busy}>Turn off</button>
       </form>
       {#if status.required}<p class="small muted">DJINN GO needs it for your account, so GO stops working until you turn it on again.</p>{/if}
     {:else}
       <div class="actions">
         <button onclick={() => (starting = true)} disabled={busy}>New phone or new codes</button>
-        <button onclick={() => (turningOff = true)}>Turn off</button>
+        <button class="danger" onclick={() => (turningOff = true)}>Turn off</button>
       </div>
     {/if}
   {:else}
