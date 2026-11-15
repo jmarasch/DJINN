@@ -14,6 +14,7 @@
   import Toasts from './lib/Toasts.svelte'
   import Admin from './screens/Admin.svelte'
   import { adminTabFor } from './lib/adminTabs'
+  import EditorWindow from './screens/EditorWindow.svelte'
   import { cycleTheme, theme } from './lib/theme.svelte'
   import BackgroundArt from './lib/BackgroundArt.svelte'
   import { appearance, loadAppearance } from './lib/appearance.svelte'
@@ -159,6 +160,8 @@
       {/if}
     {/if}
   </main>
+{:else if route.path.split('?')[0] === '/editor' && isAdmin()}
+  <EditorWindow />
 {:else}
   <!-- The frame: on phones a header (logo, room) with tabs along the bottom;
        on wide screens a side menu with the same tabs and the rest below. -->

@@ -1,32 +1,15 @@
 <script lang="ts">
-  // Admin > Library editor: the workspace, the library folders (read only
-  // or read and write, and the trash), and the compare. The whole editor sits behind the protected areas' lock.
-  import { takeEditorJump } from './editorJump.svelte'
-  import EditorWorkspace from './EditorWorkspace.svelte'
-  import LibraryCompare from './LibraryCompare.svelte'
-  import LibraryFolders from './LibraryFolders.svelte'
-  import Tabs from './Tabs.svelte'
-
-  /** A folder or search another page asked for. */
-  const start = takeEditorJump()
-
-  let view = $state<'editor' | 'folders' | 'compare'>('editor')
+  // Admin > Library editor: the editor opens in a window of its own, where
+  // the admin unlocks it every time it's opened.
+  import { openEditorWindow } from './editorJump.svelte'
 </script>
 
-<Tabs
-  items={[
-    ['editor', 'Editor'],
-    ['folders', 'Library folders'],
-    ['compare', 'Compare'],
-  ]}
-  active={view}
-  onselect={(id) => (view = id as 'editor' | 'folders' | 'compare')}
-/>
-
-{#if view === 'editor'}
-  <EditorWorkspace startFolder={start.folder} startSearch={start.search} />
-{:else if view === 'folders'}
-  <LibraryFolders />
-{:else}
-  <LibraryCompare />
-{/if}
+<section class="card wide">
+  <h2>Library editor</h2>
+  <p class="small muted">
+    Change tags, covers, file names and where files are kept, compare an album with MusicBrainz, Deezer, Apple or
+    Spotify, and look after the folders DJINN may change. It opens in a window of its own, full width, and asks for your
+    password every time it opens, so the rest of Admin stays out of the way.
+  </p>
+  <button class="primary" onclick={() => openEditorWindow()}>Open the library editor</button>
+</section>

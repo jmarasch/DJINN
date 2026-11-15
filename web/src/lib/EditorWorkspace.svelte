@@ -18,7 +18,16 @@
   import { toast } from './state.svelte'
   import type { EditorBatch, EditorChange, EditorField, EditorNode, EditorRenamed, EditorSong, EditTarget } from './types'
 
-  let { startFolder = '', startSearch = '' }: { startFolder?: string; startSearch?: string } = $props()
+  let {
+    startFolder = '',
+    startSearch = '',
+    windowed = false,
+  }: {
+    startFolder?: string
+    startSearch?: string
+    /** In the editor's own window: fills the whole height, with room for each pane. */
+    windowed?: boolean
+  } = $props()
 
   let target = $state<EditTarget>('database')
   let roots = $state<EditorNode[]>([])
@@ -606,7 +615,7 @@
     <p class="small">The editor is locked. <button class="link" onclick={unlock}>Unlock</button></p>
   </section>
 {:else}
-  <div class="editor" class:library={target === 'library'}>
+  <div class="editor" class:library={target === 'library'} class:fill={windowed}>
     <div class="top">
       <div class="toggle" role="group" aria-label="What you are editing">
         <button class:on={target === 'library'} onclick={() => setTarget('library')}>Library</button>
@@ -1032,6 +1041,55 @@
 
     .folders {
       max-height: 30vh;
+    }
+  }
+
+  /* In the editor's own window: the whole height, wide panes that each scroll. */
+  .editor.fill {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    box-sizing: border-box;
+  }
+
+  .fill .panes {
+    flex: 1;
+    min-height: 0;
+    grid-template-columns: minmax(240px, 22%) minmax(0, 1fr) minmax(300px, 25%);
+  }
+
+  .fill .folders {
+    max-height: none;
+    min-height: 0;
+  }
+
+  .fill .grid {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .fill .scroll {
+    flex: 1;
+    min-height: 0;
+    max-height: none;
+  }
+
+  .fill .side {
+    min-height: 0;
+    overflow: auto;
+  }
+
+  @container (max-width: 1150px) {
+    .fill .panes {
+      grid-template-columns: minmax(200px, 30%) minmax(0, 1fr);
+      overflow: auto;
+    }
+  }
+
+  @container (max-width: 640px) {
+    .fill .panes {
+      grid-template-columns: minmax(0, 1fr);
     }
   }
 
