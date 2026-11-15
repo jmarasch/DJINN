@@ -3,7 +3,7 @@
   import ScaleWarning from '../lib/ScaleWarning.svelte'
   import { onMount } from 'svelte'
   import { followNodeScreen } from '../lib/screenFollow'
-  import { announce, choose, order, pageUrl, toggleFullscreen } from '../lib/screenOrder.svelte'
+  import { announce, choose, onNodeScreen, order, pageUrl, toggleFullscreen } from '../lib/screenOrder.svelte'
   import ArtistSlideshow from '../lib/ArtistSlideshow.svelte'
   import { duration } from '../lib/format'
   import { reloadIfUpdated } from '../lib/state.svelte'
@@ -362,8 +362,12 @@
   {/if}
 
   <div class="corner" class:hidden={casting}>
-    <a href="/#/" target="_top" class="regular-display">Regular display</a>
-    {#if streamUrl}
+    <!-- A node's screen plays through the node's own speakers and has no
+         regular display to go to; only Full screen is any use there. -->
+    {#if !onNodeScreen}
+      <a href="/#/" target="_top" class="regular-display">Regular display</a>
+    {/if}
+    {#if streamUrl && !onNodeScreen}
       <button class:on={soundOn} onclick={toggleSound}>{soundOn ? 'Sound on' : 'Play sound here'}</button>
     {/if}
     <button onclick={goFullscreen}>Full screen</button>
