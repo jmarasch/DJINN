@@ -1,19 +1,9 @@
 <script lang="ts">
-  /** "windows-x86_64" as a person would say it. */
-  function systemName(platform: string): string {
-    const [os, arch] = platform.split('-')
-    const system = os === 'windows' ? 'Windows' : os === 'linux' ? 'Linux' : os === 'macos' ? 'macOS' : os
-    const chip =
-      arch === 'x86_64' ? '64-bit' : arch === 'aarch64' ? 'ARM 64-bit' : arch === 'arm' ? 'ARM' : (arch ?? '')
-    return chip ? `${system}, ${chip}` : system
-  }
-
-  // Admin > Nodes: other DJINN boxes that play a room on their own speakers.
-  // Joining is off until switched on; each request is accepted with the
-  // admin's password after checking its code matches the node's screen.
   import { onMount } from 'svelte'
   import { api } from './api'
+  import NodeAiSettings from './NodeAiSettings.svelte'
   import NodeScreenSettings from './NodeScreenSettings.svelte'
+  import { aiName, online, screenName, seen, systemName } from './nodeInfo'
   import { toast } from './state.svelte'
   import type { HouseNode, NodeList } from './types'
   import type { Visuals } from './visuals'
@@ -28,7 +18,6 @@
   let screenFor = $state<number | null>(null)
   /** The node whose AI lyrics settings are open. */
   let aiFor = $state<number | null>(null)
-  const AI_MODELS = ['tiny', 'base', 'small', 'medium']
   /** The house's visualizers, where a node's own start from. */
   let house = $state<Visuals | null>(null)
   $effect(() => {
@@ -105,57 +94,6 @@
     }
   }
 
-  function seen(ms: number | null): string {
-    if (!ms) return 'never'
-    const minutes = Math.round((Date.now() - ms) / 60_000)
-    if (minutes < 1) return 'just now'
-    if (minutes < 60) return `${minutes} min ago`
-    const hours = Math.round(minutes / 60)
-    if (hours < 48) return `${hours} h ago`
-    return new Date(ms).toLocaleDateString()
-  }
-  // Nodes check in every 5 seconds.
-  const online = (node: HouseNode) => !!node.last_seen && Date.now() - node.last_seen < 30_000
-
-  const PAGE_NAMES: Record<string, string> = { lyrics: 'Timed lyrics', visual: 'Visualizer', tv: 'TV page' }
-  /** A screen setting in a few words. */
-  function screenName(screen: string | undefined): string {
-    if (screen === 'status') return "The node's status"
-    if (screen === 'off') return 'Nothing (blank)'
-    return (screen ?? 'tv')
-      .split(',')
-      .map((p) => PAGE_NAMES[p] ?? p)
-      .join(', then ')
-  }
-
-  const AI_PHASES: Record<string, string> = {
-    off: 'Off',
-    installing: 'Installing',
-    ready: 'Ready',
-    working: 'Listening',
-    paused: 'Paused',
-    failed: 'Stopped by a problem',
-  }
-  /** The AI helper in a few words, for its button. */
-  function aiName(node: HouseNode): string {
-    if (!node.ai_help) return 'Off'
-    return AI_PHASES[node.ai.phase] ?? 'Starting'
-  }
-
-  async function setAi(node: HouseNode, help: boolean, model: string | null) {
-    try {
-      await api.setNodeAi(node.id, help, model)
-      await load()
-    } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not save', true)
-      await load()
-    }
-  }
-
-  function gb(mb: number | null): string {
-    return mb ? `${Math.round(mb / 1024)} GB memory` : 'memory unknown'
-  }
-
   /** What a screen plugged into the node shows. Kept here on Main, so it
    * can be set while the node is off; it changes within seconds once on. */
   async function setScreen(node: HouseNode, screen: string, visual: Visuals | null) {
@@ -170,7 +108,7 @@
   }
 </script>
 
-<div class="tabs" role="tablist">
+<div class="tabs wide" role="tablist">
   <button role="tab" aria-selected={shown === 'options'} class:active={shown === 'options'} onclick={() => (tab = 'options')}>
     Options
   </button>
@@ -309,42 +247,7 @@
         </div>
       {/if}
       {#if aiFor === node.id}
-        <div class="ai">
-          <label class="switch">
-            <input
-              type="checkbox"
-              checked={node.ai_help}
-              onchange={(e) => setAi(node, e.currentTarget.checked, node.ai_model)}
-            />
-            <b>Help with AI lyrics</b>
-          </label>
-          <p class="small muted">
-            Only while {node.name} plays nothing and its screen shows no visuals: it pauses the moment music or visuals
-            start, so playback is never affected. It gets everything it needs from this server, never the internet,
-            and deletes each song when done. Lyrics listening must be on in <a href="#/admin/ai">AI</a>.
-          </p>
-          <label>
-            Model
-            <select
-              value={node.ai_model ?? ''}
-              onchange={(e) => setAi(node, node.ai_help, e.currentTarget.value || null)}
-            >
-              <option value="">Suggested ({node.ai.suggested})</option>
-              {#each AI_MODELS as m (m)}<option value={m}>{m}</option>{/each}
-            </select>
-          </label>
-          <p class="small muted">
-            {node.ai.threads ? `${node.ai.threads} threads` : 'Processor unknown'} · {gb(node.ai.memory_mb)}{node.ai
-              .bench_ms
-              ? ` · speed test: ${(node.ai.bench_ms / 1000).toFixed(1)} s to hear 30 s`
-              : ''}{node.ai.secs_per_minute ? ` · about ${Math.round(node.ai.secs_per_minute)} s per minute of song` : ''}
-          </p>
-          {#if node.ai_help}
-            <p class="small" class:bad={node.ai.phase === 'failed'}>
-              {AI_PHASES[node.ai.phase] ?? 'Waiting for the node'}{node.ai.detail ? `: ${node.ai.detail}` : ''}
-            </p>
-          {/if}
-        </div>
+        <div class="ai"><NodeAiSettings {node} onchange={load} /></div>
       {/if}
       {#if kicking?.id === node.id}
         <p class="small muted">
@@ -380,18 +283,7 @@
   }
 
   .ai {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
     margin: 4px 0 12px;
-  }
-
-  .ai p {
-    margin: 0;
-  }
-
-  .bad {
-    color: var(--bad, #c0392b);
   }
 
   .node {
