@@ -109,7 +109,8 @@
     </select>
   </label>
   <NodeScreenSettings
-    screen={draft.screen ?? 'tv'}
+    canFollow
+    screen={draft.screen ?? ''}
     visual={draft.visual ?? null}
     onchange={(screen, visual) => {
       draft.screen = screen

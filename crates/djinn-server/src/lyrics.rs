@@ -575,7 +575,8 @@ async fn page(
         player,
         lyrics,
         queue: state.store.queue(room).await?,
-        join_url: state.join_url.get(),
+        // The room asked for, so phones join the room this screen is in.
+        join_url: crate::api::join_url_for(&state, query.room),
     })
     .into_response())
 }

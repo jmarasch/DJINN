@@ -4,6 +4,7 @@
   // coming up over a visual drawn in step with what the room's speakers
   // play. Public like the TV page; the styles and their turns are Admin >
   // Visualizers. Nothing playing shows the TV page instead.
+  import ScaleWarning from '../lib/ScaleWarning.svelte'
   import { onMount } from 'svelte'
   import NodeStage from '../lib/NodeStage.svelte'
   import type { Visuals } from '../lib/visuals'
@@ -45,6 +46,8 @@
 {:else if visuals}
   <NodeStage url={page} {visuals} {levels} />
 {/if}
+
+<ScaleWarning />
 
 <style>
   .message {

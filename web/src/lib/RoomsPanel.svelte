@@ -105,7 +105,10 @@
         timing = null
         void api.roomTiming(next.room).then((t) => (timing = t))
       }
-      if (next.kind === 'display' && !house) house = await api.visuals().catch(() => null)
+      if (next.kind === 'display') {
+        if (!house) house = await api.visuals().catch(() => null)
+        roomScreen = (await api.roomScreen(next.room)).screen
+      }
       if (next.kind === 'room') {
         renameTo = roomOf(next.room)?.name ?? ''
         deleting = false
@@ -121,6 +124,18 @@
       timing = await api.nudgeTiming(room, speaker.kind, speaker.id, speaker.output, ms)
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Could not change it', true)
+    }
+  }
+
+  /** What the open room's screens show unless a node has its own choice. */
+  let roomScreen = $state('tv')
+
+  async function setRoomScreen(room: number, screen: string) {
+    roomScreen = screen
+    try {
+      await api.setRoomScreen(room, screen)
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not save', true)
     }
   }
 
@@ -473,11 +488,24 @@
 {:else if win && win.kind === 'display' && winRoom}
   {@const room = winRoom}
   <FloatingWindow title="{room.name}: display" subtitle="What the room's screens show." onclose={() => (win = null)}>
+    <section class="stack">
+      <h3>Every screen in this room</h3>
+      <NodeScreenSettings noVisual screen={roomScreen} visual={null} onchange={(screen) => setRoomScreen(room.id, screen)} />
+      <p class="small muted">
+        A node can choose its own instead, below, on its own page or from its tray icon's Screen shows menu.
+      </p>
+    </section>
     {#each nodes.filter((n) => n.room_id === room.id) as node (node.id)}
       <section class="stack">
-        <h3>{node.name} <span class="small muted">shows: {screenName(node.audio.screen)}</span></h3>
+        <h3>
+          {node.name}
+          <span class="small muted"
+            >shows: {node.audio.screen ? screenName(node.audio.screen) : `${screenName(roomScreen)} (the room's)`}</span
+          >
+        </h3>
         <NodeScreenSettings
-          screen={node.audio.screen ?? 'tv'}
+          canFollow
+          screen={node.audio.screen ?? ''}
           visual={node.audio.visual ?? null}
           start={house}
           onchange={(screen, visual) => setScreen(node, screen, visual)}

@@ -39,7 +39,8 @@ pub struct Node {
     pub devices: Option<String>,
     /// Plays straight through instead of correcting itself against Main.
     pub free_run: bool,
-    /// What a screen plugged into it shows: "status", "off", or the pages to
+    /// Empty to follow its room's display setting. Otherwise its own: what a
+    /// screen plugged into it shows: "status", "off", or the pages to
     /// try in order ("lyrics", "visual", "tv"), joined by commas.
     pub screen: String,
     /// Its own visualizer settings as JSON, or empty to follow the house's.
@@ -171,8 +172,8 @@ impl Store {
                 } else {
                     sqlx::query(
                         "INSERT INTO nodes (node_id, name, secret_hash, status, address, version, platform,
-                                            requested_at, last_seen)
-                         VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?)",
+                                            requested_at, last_seen, screen)
+                         VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, '')",
                     )
                     .bind(request.node_id)
                     .bind(request.name)

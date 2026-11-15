@@ -104,7 +104,8 @@ struct JoinQuery {
     room: Option<i64>,
 }
 
-fn join_url_for(state: &AppState, room: Option<i64>) -> String {
+/// The address guests open, walking them into `room` (Main's needs none).
+pub(crate) fn join_url_for(state: &AppState, room: Option<i64>) -> String {
     match room.filter(|r| *r != djinn_store::MAIN_ROOM) {
         Some(room) => format!("{}/?room={room}", state.join_url.base()),
         None => state.join_url.get(),

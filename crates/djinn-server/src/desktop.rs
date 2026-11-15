@@ -33,7 +33,10 @@ pub fn start_tray(state: &AppState, listen: SocketAddr) -> Option<Tray> {
         TrayAction::ShowJoinCode => open_browser(&format!("{local}/join")),
         TrayAction::ShowTv => open_browser(&format!("{local}/tv")),
         // Only a node's menu has these.
-        TrayAction::StopMusic(_) | TrayAction::PickRoom(_) | TrayAction::OpenMain => {}
+        TrayAction::StopMusic(_)
+        | TrayAction::PickRoom(_)
+        | TrayAction::PickScreen(_)
+        | TrayAction::OpenMain => {}
         TrayAction::Quit => {
             tracing::info!("shutdown requested from the tray");
             shutdown.notify_one();
@@ -71,6 +74,7 @@ pub fn start_node_tray(listen: SocketAddr, shutdown: Arc<tokio::sync::Notify>) -
         TrayAction::ShowJoinCode => open_browser(&format!("{page}?code=1")),
         TrayAction::StopMusic(stop) => crate::node_mode::stop_music(stop),
         TrayAction::PickRoom(room) => crate::node_mode::pick_room(room),
+        TrayAction::PickScreen(index) => crate::node_mode::pick_screen(index),
         // Before joining there's no main DJINN yet; the status page says so.
         TrayAction::OpenMain => match crate::node_mode::main_page() {
             Some(main) => open_browser(&main),

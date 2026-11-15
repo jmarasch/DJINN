@@ -39,6 +39,8 @@ pub fn router() -> Router<AppState> {
         .route("/nodes/me/audio", put(put_my_audio))
         .route("/nodes/me/devices", post(put_my_devices))
         .route("/nodes/me/room", put(put_my_room))
+        .route("/nodes/me/screen", put(put_my_screen))
+        .route("/rooms/{id}/screen", get(room_screen).put(put_room_screen))
         .route("/nodes/song/{id}", get(song))
         .route("/nodes/{id}/audio", put(put_audio))
         .route("/nodes/{id}/screen", get(screen_of))
@@ -246,9 +248,10 @@ pub struct AudioSettings {
     /// Plays straight through instead of correcting itself against Main.
     #[serde(default)]
     pub free_run: bool,
-    /// What a screen plugged into it shows: "status", "off", or pages from
-    /// `SCREEN_PAGES` to try in order, joined by commas.
-    #[serde(default = "default_screen")]
+    /// Its own choice of what a screen plugged into it shows: "status",
+    /// "off", or pages from `SCREEN_PAGES` to try in order, joined by
+    /// commas. Empty to follow its room's display setting (`ROOM_SCREEN`).
+    #[serde(default)]
     pub screen: String,
     /// Its own visualizers instead of the house's (Admin > Visualizers);
     /// None to follow the house.
@@ -268,8 +271,29 @@ fn default_cache_ahead() -> i64 {
 /// speaker is playing, and Main's TV page.
 const SCREEN_PAGES: &[&str] = &["lyrics", "visual", "tv"];
 
-fn default_screen() -> String {
-    "tv".to_owned()
+/// Setting (per room, `room_key`): what the room's screens show unless a
+/// node has its own choice. The TV page when unset.
+pub const ROOM_SCREEN: &str = "screen";
+/// What a room's screens show when it hasn't said.
+const DEFAULT_SCREEN: &str = "tv";
+
+/// What `room`'s screens show by default.
+async fn room_default_screen(state: &AppState, room: i64) -> ApiResult<String> {
+    Ok(state
+        .store
+        .get_setting(&crate::jukebox::room_key(room, ROOM_SCREEN))
+        .await?
+        .filter(|s| !s.is_empty() && valid_screen(s))
+        .unwrap_or_else(|| DEFAULT_SCREEN.to_owned()))
+}
+
+/// What a node's screen shows: its own choice, else its room's.
+async fn shown_screen(state: &AppState, node: &Node) -> ApiResult<String> {
+    if node.screen.is_empty() {
+        room_default_screen(state, node.room_id).await
+    } else {
+        Ok(node.screen.clone())
+    }
 }
 
 /// The pages a screen setting tries, in order; None for the node's own page
@@ -281,6 +305,8 @@ fn screen_order(screen: &str) -> Option<Vec<&str>> {
     Some(screen.split(',').map(str::trim).collect())
 }
 
+/// A screen setting that names pages it can show (empty, following the
+/// room, is checked apart: only a node can follow).
 fn valid_screen(screen: &str) -> bool {
     let Some(order) = screen_order(screen) else {
         return true;
@@ -338,7 +364,7 @@ async fn save_audio(state: &AppState, id: i64, audio: &AudioSettings) -> ApiResu
     if let Some(visual) = &audio.visual {
         visual.check()?;
     }
-    if !valid_screen(&audio.screen) {
+    if !audio.screen.is_empty() && !valid_screen(&audio.screen) {
         return Err(ApiError::bad_request(
             "that's not something a screen can show",
         ));
@@ -460,6 +486,9 @@ struct MeAnswer {
     /// The page a screen plugged into the node shows; None for the node's
     /// own page (its status, or blank).
     screen: Option<String>,
+    /// What its screen shows (its own choice or its room's): "status",
+    /// "off", or the pages, as `AudioSettings::screen` has them.
+    shows: String,
     /// A newer DJINN for the node to put in place, when it's behind.
     update: Option<crate::node_builds::NodeUpdate>,
     /// The visualizers its screen draws: its own, or else the house's.
@@ -574,14 +603,15 @@ fn label_of(node: i64) -> Option<String> {
         .map(|(_, label)| label.clone())
 }
 
-/// The page on Main that a node's screen should show, or None for the
-/// node's own page. Pages opened this way check back (`screen_of`), so a
-/// change of setting reaches a screen already showing one.
+/// The page on Main that a node's screen should show, given what it shows
+/// (`shown_screen`), or None for the node's own page. Pages opened this way
+/// check back (`screen_of`), so a change of setting reaches a screen
+/// already showing one.
 /// With more than one page to try, or the visualizer, the page carries the
 /// order and switches between them itself. The visualizer's settings come
 /// in check-ins (`MeAnswer::visuals`), since the node draws it.
-fn screen_url(state: &AppState, node: &Node) -> Option<String> {
-    let order = screen_order(&node.screen)?;
+fn screen_url(state: &AppState, node: &Node, shown: &str) -> Option<String> {
+    let order = screen_order(shown)?;
     let page = if order.first() == Some(&"tv") {
         "tv"
     } else {
@@ -694,8 +724,9 @@ async fn screen_of(
         .await?
         .filter(|node| node.status == "approved")
         .ok_or_else(ApiError::not_found)?;
+    let shown = shown_screen(&state, &node).await?;
     Ok(Json(ScreenAnswer {
-        url: screen_url(&state, &node),
+        url: screen_url(&state, &node, &shown),
     }))
 }
 
@@ -744,6 +775,7 @@ async fn me(
         ..node
     };
     let audio = AudioSettings::of(&node);
+    let shows = shown_screen(&state, &node).await?;
     let upcoming = if node.status == "approved" {
         upcoming(&state, node.room_id, node.cache_ahead as usize).await?
     } else {
@@ -778,7 +810,8 @@ async fn me(
         upcoming,
         rooms,
         audio_room: state.rooms.audio_leader(node.room_id),
-        screen: screen_url(&state, &node),
+        screen: screen_url(&state, &node, &shows),
+        shows,
         update: crate::node_builds::offer(&state, &node, &running),
         visuals: match audio_visual(&node) {
             Some(own) => own,
@@ -1097,6 +1130,65 @@ async fn put_my_room(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[derive(Deserialize)]
+struct ScreenChoice {
+    /// What to show, as `AudioSettings::screen`; empty to follow the room.
+    screen: String,
+}
+
+/// The node's own choice of screen, from its tray icon.
+async fn put_my_screen(
+    State(state): State<AppState>,
+    NodeAuth(node): NodeAuth,
+    Json(body): Json<ScreenChoice>,
+) -> ApiResult<StatusCode> {
+    if node.status != "approved" {
+        return Err(ApiError::forbidden());
+    }
+    let mut audio = AudioSettings::of(&node);
+    audio.screen = body.screen;
+    save_audio(&state, node.id, &audio).await?;
+    tracing::info!(node = %node.name, screen = %audio.screen, "node's screen changed from its tray");
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Serialize)]
+struct RoomScreen {
+    screen: String,
+}
+
+/// What a room's screens show unless a node has its own choice.
+async fn room_screen(
+    _: AdminUser,
+    State(state): State<AppState>,
+    Path(room): Path<i64>,
+) -> ApiResult<Json<RoomScreen>> {
+    Ok(Json(RoomScreen {
+        screen: room_default_screen(&state, room).await?,
+    }))
+}
+
+async fn put_room_screen(
+    _: AdminUser,
+    State(state): State<AppState>,
+    Path(room): Path<i64>,
+    Json(body): Json<ScreenChoice>,
+) -> ApiResult<StatusCode> {
+    if !valid_screen(&body.screen) {
+        return Err(ApiError::bad_request(
+            "that's not something a screen can show",
+        ));
+    }
+    if !state.store.rooms().await?.iter().any(|r| r.id == room) {
+        return Err(ApiError::not_found());
+    }
+    state
+        .store
+        .set_setting(&crate::jukebox::room_key(room, ROOM_SCREEN), &body.screen)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 /// Settings changed on the node's own page.
 async fn put_my_audio(
     State(state): State<AppState>,
@@ -1324,27 +1416,45 @@ mod tests {
         assert_eq!(status, StatusCode::NOT_FOUND);
 
         let node = state.store.node(id).await.unwrap().unwrap();
+        // A new node follows its room, whose screens show the TV page.
+        assert_eq!(node.screen, "");
+        assert_eq!(shown_screen(&state, &node).await.unwrap(), "tv");
         assert_eq!(
-            screen_url(&state, &node).unwrap(),
+            screen_url(&state, &node, "tv").unwrap(),
             format!("http://main:8066/tv?room=1&screen_for={id}")
         );
-        let with = |screen: &str| Node {
-            screen: screen.to_owned(),
-            ..node.clone()
-        };
-        assert!(screen_url(&state, &with("lyrics"))
+        assert!(screen_url(&state, &node, "lyrics")
             .unwrap()
             .contains("/lyrics?room=1"));
-        assert_eq!(screen_url(&state, &with("status")), None);
-        assert_eq!(screen_url(&state, &with("off")), None);
+        assert_eq!(screen_url(&state, &node, "status"), None);
+        assert_eq!(screen_url(&state, &node, "off"), None);
         // An order: the first page that isn't the TV, which switches itself.
         assert_eq!(
-            screen_url(&state, &with("lyrics,visual,tv")).unwrap(),
+            screen_url(&state, &node, "lyrics,visual,tv").unwrap(),
             format!("http://main:8066/lyrics?room=1&screen_for={id}&order=lyrics,visual,tv")
         );
-        assert!(screen_url(&state, &with("tv,lyrics"))
+        assert!(screen_url(&state, &node, "tv,lyrics")
             .unwrap()
             .contains("/tv?room=1&screen_for=1&order=tv,lyrics"));
+
+        // The room's setting is what it shows, until the node has its own.
+        state
+            .store
+            .set_setting(ROOM_SCREEN, "lyrics,tv")
+            .await
+            .unwrap();
+        assert_eq!(shown_screen(&state, &node).await.unwrap(), "lyrics,tv");
+        let own = Node {
+            screen: "off".to_owned(),
+            ..node.clone()
+        };
+        assert_eq!(shown_screen(&state, &own).await.unwrap(), "off");
+        // Another room's setting is its own.
+        let other = Node {
+            room_id: 7,
+            ..node.clone()
+        };
+        assert_eq!(shown_screen(&state, &other).await.unwrap(), "tv");
     }
 
     #[test]

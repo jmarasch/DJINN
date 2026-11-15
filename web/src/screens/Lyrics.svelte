@@ -5,6 +5,7 @@
   // what's coming up down the right. On a node's screen this is also the
   // visualizer's page: the node draws the visual under it, and everything
   // here fades back so the visual stands out. The admin can turn it off.
+  import ScaleWarning from '../lib/ScaleWarning.svelte'
   import { onMount } from 'svelte'
   import { followNodeScreen } from '../lib/screenFollow'
   import {
@@ -25,6 +26,10 @@
   /** Which room this screen shows (Main when missing). */
   const room = new URLSearchParams(location.search).get('room')
   const roomPart = room ? `room=${encodeURIComponent(room)}` : ''
+  /** The join address for this screen's room (Main's needs none). */
+  const inRoom = (url: string) => (room && room !== '1' ? `${url.replace(/\/$/, '')}/?room=${encodeURIComponent(room)}` : url)
+  /** The QR code for it. */
+  const qrQuery = room && room !== '1' ? `&room=${encodeURIComponent(room)}` : ''
   let nowPlaying = $state<NowPlaying>({ current: null, position_ms: 0, up_next: null })
   let player = $state<PlayerState | null>(null)
   let queue = $state<QueueItem[]>([])
@@ -166,7 +171,7 @@
     })
     on<{ position_ms: number }>('position', (data) => setPosition(data.position_ms))
     on<QueueItem[]>('queue_changed', (data) => (queue = data))
-    on<{ url: string }>('address', (data) => (joinUrl = data.url))
+    on<{ url: string }>('address', (data) => (joinUrl = inRoom(data.url)))
     on<PlayerState>('player_state', (data) => {
       setPosition(position() + shift)
       player = data
@@ -266,7 +271,7 @@
       </aside>
     {/if}
     {#if joinUrl}
-      <img class="qr" src="/api/join/qr.svg?v={encodeURIComponent(joinUrl)}" alt="QR code to join" />
+      <img class="qr" src="/api/join/qr.svg?v={encodeURIComponent(joinUrl)}{qrQuery}" alt="QR code to join" />
     {/if}
   {/if}
   <div class="tools">
@@ -282,6 +287,8 @@
     <button onclick={goFullscreen}>Full screen</button>
   </div>
 </div>
+
+<ScaleWarning />
 
 <style>
   .page {

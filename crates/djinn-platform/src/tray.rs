@@ -1,6 +1,7 @@
 //! System tray icon for desktop installs: click to open DJINN, right-click
 //! for the join code, the TV page, and shutdown. A node's menu has its
-//! status page, its screen, Stop, its room and the room's join code.
+//! status page, its screen, Stop, its room, what its screen shows and the
+//! room's join code.
 //!
 //! Linux uses the StatusNotifierItem D-Bus protocol (KDE, and GNOME with
 //! the AppIndicator extension); Windows uses the native notification area.
@@ -28,6 +29,9 @@ pub enum TrayAction {
     StopMusic(bool),
     /// A node's room picked from the Room menu.
     PickRoom(i64),
+    /// A node's screen picked from the Screen menu: an index into
+    /// `SCREEN_CHOICES`.
+    PickScreen(usize),
     /// A node's "Open main DJINN": the main DJINN's own page.
     OpenMain,
     Quit,
@@ -48,6 +52,19 @@ const TV: &str = "tv";
 const QUIT: &str = "quit";
 const STOP: &str = "stop";
 const ROOM: &str = "room:";
+const SCREEN: &str = "screen:";
+
+/// What a node's Screen menu offers: the setting (as Main keeps it; empty
+/// follows the room) and its label.
+pub const SCREEN_CHOICES: &[(&str, &str)] = &[
+    ("", "Follow the room"),
+    ("tv", "TV page"),
+    ("lyrics,tv", "Lyrics, else TV page"),
+    ("lyrics,visual,tv", "Lyrics, else visualizer, else TV page"),
+    ("visual,tv", "Visualizer, else TV page"),
+    ("status", "Node status"),
+    ("off", "Off (blank)"),
+];
 const MAIN: &str = "main";
 
 /// Which menu the icon has.
@@ -67,6 +84,8 @@ enum Update {
     Picked(String),
     /// The rooms to offer and the one the node is in.
     Rooms(Vec<(i64, String)>, Option<i64>),
+    /// The node's own screen choice (empty: following the room), to tick.
+    Screen(String),
 }
 
 /// The running tray icon. Dropping it removes the icon.
@@ -83,6 +102,11 @@ impl RoomMenu {
     /// Offers `rooms` (id, name), ticking `current`.
     pub fn set(&self, rooms: Vec<(i64, String)>, current: Option<i64>) {
         let _ = self.0.send(Update::Rooms(rooms, current));
+    }
+
+    /// Ticks the node's own screen choice (empty: following the room).
+    pub fn set_screen(&self, own: &str) {
+        let _ = self.0.send(Update::Screen(own.to_owned()));
     }
 }
 
@@ -159,9 +183,17 @@ struct LiveMenu {
     /// What `rooms` lists, and its items.
     offered: Vec<(i64, String)>,
     room_items: Vec<(i64, CheckMenuItem)>,
+    screens: Submenu,
+    screen_items: Vec<CheckMenuItem>,
 }
 
 impl LiveMenu {
+    fn tick_screen(&self, own: &str) {
+        for (item, (value, _)) in self.screen_items.iter().zip(SCREEN_CHOICES) {
+            item.set_checked(*value == own);
+        }
+    }
+
     fn tick_room(&self, current: Option<i64>) {
         for (id, item) in &self.room_items {
             item.set_checked(Some(*id) == current);
@@ -199,6 +231,12 @@ impl LiveMenu {
                 self.stop.set_checked(self.stopped);
                 TrayAction::StopMusic(self.stopped)
             }
+            _ if id.starts_with(SCREEN) => {
+                let index: usize = id.strip_prefix(SCREEN)?.parse().ok()?;
+                let (value, _) = SCREEN_CHOICES.get(index)?;
+                self.tick_screen(value);
+                TrayAction::PickScreen(index)
+            }
             _ => {
                 let room = id.strip_prefix(ROOM)?.parse().ok()?;
                 self.tick_room(Some(room));
@@ -211,12 +249,25 @@ impl LiveMenu {
 fn build(tooltip: &str, kind: TrayMenu) -> Result<(TrayIcon, LiveMenu), TrayError> {
     let unavailable = |e: &dyn std::fmt::Display| TrayError::Unavailable(e.to_string());
     let menu = Menu::new();
+    let screen_items: Vec<CheckMenuItem> = SCREEN_CHOICES
+        .iter()
+        .enumerate()
+        .map(|(i, (value, label))| {
+            CheckMenuItem::with_id(format!("{SCREEN}{i}"), label, true, value.is_empty(), None)
+        })
+        .collect();
+    let screens = Submenu::new("Screen shows", true);
+    for item in &screen_items {
+        screens.append(item).map_err(|e| unavailable(&e))?;
+    }
     let live = LiveMenu {
         stop: CheckMenuItem::with_id(STOP, "Stop", true, false, None),
         stopped: false,
         rooms: Submenu::new("Room", false),
         offered: Vec::new(),
         room_items: Vec::new(),
+        screens,
+        screen_items,
     };
     let added = match kind {
         TrayMenu::Main => menu.append_items(&[
@@ -233,6 +284,7 @@ fn build(tooltip: &str, kind: TrayMenu) -> Result<(TrayIcon, LiveMenu), TrayErro
             &PredefinedMenuItem::separator(),
             &live.stop,
             &live.rooms,
+            &live.screens,
             &MenuItem::with_id(JOIN, "Show code", true, None),
             &PredefinedMenuItem::separator(),
             &MenuItem::with_id(QUIT, "Shut down", true, None),
@@ -291,6 +343,7 @@ fn run_until_quit(
                 }
             }
             Ok(Update::Rooms(rooms, current)) => menu.set_rooms(rooms, current),
+            Ok(Update::Screen(own)) => menu.tick_screen(&own),
             Ok(Update::Quit) | Err(mpsc::RecvTimeoutError::Disconnected) => return,
         }
     }

@@ -417,6 +417,9 @@ export const api = {
   nudgeTiming: (id: number, kind: TimingSpeaker['kind'], speaker: number, output: number, ms: number) =>
     post<RoomTiming>(`/rooms/${id}/timing`, { kind, id: speaker, output, ms }),
   nodes: () => get<NodeList>('/nodes'),
+  /** What a room's screens show unless a node has its own choice. */
+  roomScreen: (room: number) => get<{ screen: string }>(`/rooms/${room}/screen`),
+  setRoomScreen: (room: number, screen: string) => put<void>(`/rooms/${room}/screen`, { screen }),
   setNodeJoining: (joinOpen: boolean) => put<void>('/nodes/settings', { join_open: joinOpen }),
   acceptNode: (id: number, password: string) => post<void>(`/nodes/${id}/accept`, { password }),
   renameNode: (id: number, name: string) => patch<void>(`/nodes/${id}`, { name }),

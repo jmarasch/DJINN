@@ -145,6 +145,9 @@ pub struct Status {
     /// The page a plugged-in screen shows once joined (Main's TV page for
     /// this node's room).
     pub screen: Option<String>,
+    /// What its screen shows (its own choice, else its room's): "status",
+    /// "off" or the pages; None until Main says.
+    pub shows: Option<String>,
     /// The visualizers Main says its screen draws (its own or the house's).
     pub visuals: Option<crate::visuals::Visuals>,
     /// Main DJINNs heard on the network letting nodes join, while this node
@@ -255,6 +258,7 @@ impl Node {
                 cached: 0,
                 audio_room: None,
                 screen: None,
+                shows: None,
                 visuals: None,
                 mains: Vec::new(),
                 rooms: Vec::new(),
@@ -598,6 +602,7 @@ impl Node {
             }
             s.audio_room = answer["audio_room"].as_i64();
             s.screen = answer["screen"].as_str().map(str::to_owned);
+            s.shows = answer["shows"].as_str().map(str::to_owned);
             s.visuals = serde_json::from_value(answer["visuals"].clone()).ok();
             s.rooms = serde_json::from_value(answer["rooms"].clone()).unwrap_or_default();
         });
@@ -616,6 +621,9 @@ impl Node {
                 .map(|r| (r.id, r.name.clone()))
                 .collect();
             menu.set(rooms, status.room_id);
+            if let Some(own) = answer.pointer("/audio/screen").and_then(|s| s.as_str()) {
+                menu.set_screen(own);
+            }
         }
         if let Ok(upcoming) =
             serde_json::from_value::<Vec<crate::nodes::Upcoming>>(answer["upcoming"].clone())
@@ -2045,6 +2053,20 @@ static ROOM_MENU: std::sync::OnceLock<djinn_platform::tray::RoomMenu> = std::syn
 /// Rooms picked in the tray icon, for `serve`'s task to tell Main.
 static ROOM_PICKS: std::sync::OnceLock<tokio::sync::mpsc::UnboundedSender<i64>> =
     std::sync::OnceLock::new();
+/// Screens picked in the tray icon (the setting), for `serve`'s task to tell Main.
+static SCREEN_PICKS: std::sync::OnceLock<tokio::sync::mpsc::UnboundedSender<String>> =
+    std::sync::OnceLock::new();
+
+/// Sets what this node's screen shows on Main, from the tray icon's Screen
+/// menu (`djinn_platform::tray::SCREEN_CHOICES`).
+pub fn pick_screen(index: usize) {
+    if let (Some(picks), Some((value, _))) = (
+        SCREEN_PICKS.get(),
+        djinn_platform::tray::SCREEN_CHOICES.get(index),
+    ) {
+        let _ = picks.send((*value).to_owned());
+    }
+}
 
 /// The main DJINN's page for a browser, once joined.
 static MAIN_PAGE: Mutex<Option<String>> = Mutex::new(None);
@@ -2094,6 +2116,30 @@ impl Node {
             .put(format!("{main}/api/nodes/me/room"))
             .header("authorization", format!("Node {id}:{secret}"))
             .json(&serde_json::json!({ "room_id": room }))
+            .send()
+            .await?;
+        anyhow::ensure!(
+            response.status().is_success(),
+            "Main said {}",
+            response.status()
+        );
+        self.wake.notify_one();
+        Ok(())
+    }
+
+    /// Tells Main what this node's screen shows (empty: follow the room),
+    /// then checks in at once so the screen changes.
+    async fn set_screen(&self, screen: &str) -> anyhow::Result<()> {
+        let (main, pin) = self
+            .joined_main()
+            .await
+            .ok_or_else(|| anyhow::anyhow!("not joined to a main DJINN"))?;
+        let (id, secret) = self.identity().await?;
+        let client = pinned_client(Some(pin), Arc::new(Mutex::new(None)))?;
+        let response = client
+            .put(format!("{main}/api/nodes/me/screen"))
+            .header("authorization", format!("Node {id}:{secret}"))
+            .json(&serde_json::json!({ "screen": screen }))
             .send()
             .await?;
         anyhow::ensure!(
@@ -2204,6 +2250,17 @@ pub async fn serve(
             match mover.move_to_room(room).await {
                 Ok(()) => tracing::info!(room, "moved to another room from the tray"),
                 Err(e) => tracing::warn!(error = %format!("{e:#}"), "couldn't change rooms"),
+            }
+        }
+    });
+    let (screen_picks, mut screen_picked) = tokio::sync::mpsc::unbounded_channel();
+    let _ = SCREEN_PICKS.set(screen_picks);
+    let changer = node.clone();
+    tokio::spawn(async move {
+        while let Some(screen) = screen_picked.recv().await {
+            match changer.set_screen(&screen).await {
+                Ok(()) => tracing::info!(%screen, "screen changed from the tray"),
+                Err(e) => tracing::warn!(error = %format!("{e:#}"), "couldn't change the screen"),
             }
         }
     });

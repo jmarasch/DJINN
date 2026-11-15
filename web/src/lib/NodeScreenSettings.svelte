@@ -2,7 +2,8 @@
   // What a screen plugged into a node shows: its own status, nothing, or
   // pages tried in order (timed lyrics, the node's visualizer, the TV page),
   // and its own visualizers if it shouldn't follow the house's. In Admin >
-  // Nodes and on the node's page.
+  // Nodes and on the node's page, where a node can also follow its room's
+  // setting; and for a room's own setting, its screens' default.
   import { DEFAULT_VISUALS, type Visuals } from './visuals'
   import VisualsEditor from './VisualsEditor.svelte'
 
@@ -10,14 +11,20 @@
     screen,
     visual,
     start,
+    canFollow = false,
+    noVisual = false,
     onchange,
   }: {
-    /** 'status', 'off', or pages joined by commas. */
+    /** 'status', 'off', or pages joined by commas; '' follows the room. */
     screen: string
     /** The node's own visualizers, or null to follow the house's. */
     visual: Visuals | null
     /** Where its own start from when first made (the house's, if known). */
     start?: Visuals | null
+    /** A node's setting: it can follow its room's instead of its own. */
+    canFollow?: boolean
+    /** A room's setting: visualizers are each node's own. */
+    noVisual?: boolean
     onchange: (screen: string, visual: Visuals | null) => void
   } = $props()
 
@@ -27,7 +34,8 @@
     { page: 'visual', label: 'Visualizer', note: 'drawn by this node from what its speaker plays' },
     { page: 'tv', label: 'TV page', note: "what's playing and the queue; always works" },
   ]
-  const showsPages = $derived(screen !== 'status' && screen !== 'off')
+  const following = $derived(canFollow && screen === '')
+  const showsPages = $derived(!following && screen !== 'status' && screen !== 'off')
   /** The pages tried, in order, then the ones left out. */
   const order = $derived(showsPages ? (screen.split(',') as Page[]) : [])
   const rows = $derived([
@@ -60,12 +68,13 @@
   <label>
     On a screen plugged into this box
     <select
-      value={showsPages ? 'pages' : screen}
+      value={following ? 'room' : showsPages ? 'pages' : screen}
       onchange={(e) => {
         const value = e.currentTarget.value
-        setScreen(value === 'pages' ? 'lyrics,visual,tv' : value)
+        setScreen(value === 'pages' ? 'lyrics,visual,tv' : value === 'room' ? '' : value)
       }}
     >
+      {#if canFollow}<option value="room">What the room says (Admin &gt; Rooms &gt; Display settings)</option>{/if}
       <option value="pages">Lyrics, visualizer or TV page, in an order</option>
       <option value="status">This node's status</option>
       <option value="off">Nothing (blank screen)</option>
@@ -92,7 +101,7 @@
         </li>
       {/each}
     </ol>
-    {#if order.includes('visual')}
+    {#if order.includes('visual') && !noVisual}
       <label class="check">
         <input
           type="checkbox"

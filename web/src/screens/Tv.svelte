@@ -1,5 +1,6 @@
 <script lang="ts">
   // Full-screen now playing for a TV or spare tablet: no sign-in, read only.
+  import ScaleWarning from '../lib/ScaleWarning.svelte'
   import { onMount } from 'svelte'
   import { followNodeScreen } from '../lib/screenFollow'
   import { announce, choose, order, pageUrl, toggleFullscreen } from '../lib/screenOrder.svelte'
@@ -18,6 +19,10 @@
   /** Which room this screen shows (Main when missing). */
   const room = params.get('room')
   const roomQuery = room ? `room=${encodeURIComponent(room)}` : ''
+  /** The join address for this screen's room (Main's needs none). */
+  const inRoom = (url: string) => (room && room !== '1' ? `${url.replace(/\/$/, '')}/?room=${encodeURIComponent(room)}` : url)
+  /** The QR code for it. */
+  const qrQuery = room && room !== '1' ? `&room=${encodeURIComponent(room)}` : ''
 
   let nowPlaying = $state<NowPlaying>({ current: null, position_ms: 0, up_next: null })
   let player = $state<PlayerState | null>(null)
@@ -105,7 +110,7 @@
     })
     on<{ position_ms: number }>('position', (data) => setPosition(data.position_ms))
     on<QueueItem[]>('queue_changed', (data) => (queue = data))
-    on<{ url: string }>('address', (data) => (joinUrl = data.url))
+    on<{ url: string }>('address', (data) => (joinUrl = inRoom(data.url)))
     on<PlayerState>('player_state', (data) => {
       setPosition(position)
       player = data
@@ -295,7 +300,7 @@
     </main>
 
       <div class="join">
-        <img src="/api/join/qr.svg?v={encodeURIComponent(joinUrl)}" alt="QR code to join" />
+        <img src="/api/join/qr.svg?v={encodeURIComponent(joinUrl)}{qrQuery}" alt="QR code to join" />
         <div>
           <div class="join-title">Add a song</div>
           <div class="join-steps">
@@ -374,6 +379,8 @@
     }}
   ></audio>
 </div>
+
+<ScaleWarning />
 
 <style>
   .tv {

@@ -2,6 +2,7 @@
   // A node's own page: where it stands with its main DJINN. Before joining,
   // enter Main's address; then compare the codes and accept it on Main.
   // Once joined this page only shows status; leaving is Main's Kick.
+  import ScaleWarning from '../lib/ScaleWarning.svelte'
   import { onMount } from 'svelte'
   import NodeDiagnostics from '../lib/NodeDiagnostics.svelte'
   import NodeSpeakerSettings from '../lib/NodeSpeakerSettings.svelte'
@@ -21,6 +22,8 @@
     /** Main DJINNs heard on this network letting nodes join. */
     mains?: { name: string; address: string; joining: boolean }[]
     audio?: { screen?: string } | null
+    /** What its screen shows: its own choice, else its room's. */
+    shows?: string | null
     main_code: string | null
     code: string | null
     room_id: number | null
@@ -169,7 +172,7 @@
   const showForm = $derived(!!status && (status.pairing === 'setup' || editing))
 </script>
 
-{#if onScreen && status?.pairing === 'joined' && status.audio?.screen === 'off'}
+{#if onScreen && status?.pairing === 'joined' && status.shows === 'off'}
   <div class="blank"></div>
 {:else if stageUrl}
   {#key stageUrl}<NodeStage url={stageUrl} visuals={status?.visuals ?? null} />{/key}
@@ -346,6 +349,8 @@
   {/if}
 </main>
 {/if}
+
+{#if onScreen}<ScaleWarning />{/if}
 
 <style>
   .join {

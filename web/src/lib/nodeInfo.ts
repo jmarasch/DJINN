@@ -28,6 +28,7 @@ const PAGE_NAMES: Record<string, string> = { lyrics: 'Timed lyrics', visual: 'Vi
 export function screenName(screen: string | undefined): string {
   if (screen === 'status') return "The node's status"
   if (screen === 'off') return 'Nothing (blank)'
+  if (screen === '') return "What the room says"
   return (screen ?? 'tv')
     .split(',')
     .map((p) => PAGE_NAMES[p] ?? p)
