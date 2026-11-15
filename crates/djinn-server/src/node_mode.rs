@@ -586,6 +586,13 @@ impl Node {
             s.visuals = serde_json::from_value(answer["visuals"].clone()).ok();
             s.rooms = serde_json::from_value(answer["rooms"].clone()).unwrap_or_default();
         });
+        if let Ok(mut page) = MAIN_PAGE.lock() {
+            *page = self
+                .status()
+                .main
+                .filter(|_| joined)
+                .map(|m| browser_page(&m));
+        }
         if let Some(menu) = ROOM_MENU.get() {
             let status = self.status();
             let rooms = status
@@ -1933,6 +1940,23 @@ static ROOM_MENU: std::sync::OnceLock<djinn_platform::tray::RoomMenu> = std::syn
 static ROOM_PICKS: std::sync::OnceLock<tokio::sync::mpsc::UnboundedSender<i64>> =
     std::sync::OnceLock::new();
 
+/// The main DJINN's page for a browser, once joined.
+static MAIN_PAGE: Mutex<Option<String>> = Mutex::new(None);
+
+/// Where the tray icon's "Open main DJINN" goes: Main's address over plain
+/// HTTP (its port answers both), since a browser would balk at the
+/// certificate this node pins.
+pub fn main_page() -> Option<String> {
+    MAIN_PAGE.lock().ok()?.clone()
+}
+
+fn browser_page(main: &str) -> String {
+    match main.strip_prefix("https://") {
+        Some(rest) => format!("http://{rest}"),
+        None => main.to_owned(),
+    }
+}
+
 /// Stops (or plays again) the music on this node, from the tray icon.
 pub fn stop_music(stop: bool) {
     tracing::info!(stop, "music on this node stopped or started from the tray");
@@ -2105,6 +2129,18 @@ pub fn restart_requested() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn main_page_opens_over_plain_http() {
+        assert_eq!(
+            browser_page("https://192.168.1.10:8066"),
+            "http://192.168.1.10:8066"
+        );
+        assert_eq!(
+            browser_page("http://djinn.local:8066"),
+            "http://djinn.local:8066"
+        );
+    }
     use crate::state::AppState;
 
     #[test]
