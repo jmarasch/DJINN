@@ -1532,8 +1532,11 @@ export interface EditorSong {
   duration_ms: number | null
   /** Its folder allows changes to the file. */
   editable: boolean
-  /** Where it is inside its library folder, led by that folder's name. */
+  /** Where it is inside its library folder, led by that folder's name
+   * (for a file waiting in an import, the name it came with). */
   rel_path: string
+  /** Waiting in an import, not in the library yet. */
+  staged?: boolean
   /** What the file says (editing the library); null if it couldn't be read. */
   file: {
     title: string
@@ -1547,6 +1550,15 @@ export interface EditorSong {
     /** The file's other text tags (Composer, Comment, Label...). */
     extra?: Record<string, string>
   } | null
+}
+
+/** An album brought into the editor, waiting to go into the library. */
+export interface EditorImport {
+  batch: number
+  files: number
+  started_at: number
+  album: string | null
+  artist: string | null
 }
 
 export type CompareWhy = 'correction' | 'identified' | 'other'

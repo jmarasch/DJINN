@@ -30,7 +30,7 @@ pub fn router() -> Router<AppState> {
 }
 
 /// A folder inside a library folder, with no way out of it.
-async fn library_folder(state: &AppState, folder: &str) -> ApiResult<PathBuf> {
+pub(crate) async fn library_folder(state: &AppState, folder: &str) -> ApiResult<PathBuf> {
     let folder = PathBuf::from(folder.trim());
     let roots = crate::folders::library_roots(state).await?;
     if folder.as_os_str().is_empty()

@@ -14,6 +14,7 @@ import type {
   EditorNode,
   EditTarget,
   EditorChange,
+  EditorImport,
   EditorApplied,
   EditorBatch,
   EditorRenamed,
@@ -356,11 +357,46 @@ export const api = {
     get<ReleaseHit[]>(
       `/editor/release-search?source=${source}&artist=${encodeURIComponent(artist)}&album=${encodeURIComponent(album)}`,
     ),
-  /** A release's tracks, with these songs matched to them by title. */
-  editorRelease: (source: ReleaseSource, id: string, songIds: number[]) =>
+  /** A release's tracks, with these songs (or, `staged`, files waiting in
+   * an import) matched to them by title. */
+  editorRelease: (source: ReleaseSource, id: string, songIds: number[], staged = false) =>
     get<{ release: Release; matched: { id: number; track: number }[] }>(
-      `/editor/release?source=${source}&id=${encodeURIComponent(id)}&ids=${songIds.join(',')}`,
+      `/editor/release?source=${source}&id=${encodeURIComponent(id)}&ids=${songIds.join(',')}${staged ? '&import=true' : ''}`,
     ),
+  /** Albums brought into the editor to work on before they go into the library. */
+  editorImports: () => get<EditorImport[]>('/editor/imports'),
+  editorImportStart: () => post<{ batch: number }>('/editor/imports'),
+  /** One song file into an import; it must play. */
+  editorImportUpload: async (batch: number, file: File) => {
+    const res = await fetch(`/api/editor/imports/${batch}/files?name=${encodeURIComponent(file.name)}`, {
+      method: 'POST',
+      body: file,
+    })
+    const data = await res.json().catch(() => null)
+    if (!res.ok) throw new ApiError(res.status, data?.error ?? `Upload failed (${res.status})`)
+    return data as { id: number }
+  },
+  editorImportSongs: (batch: number) =>
+    get<{ total: number; editable: boolean; songs: EditorSong[] }>(`/editor/imports/${batch}/songs`),
+  /** The grid's changes, written into the waiting files. */
+  editorImportApply: (changes: EditorChange[]) => post<EditorApplied>('/editor/imports/apply', { changes }),
+  editorImportCover: async (ids: number[], file: File | null) => {
+    const query = `ids=${ids.join(',')}${file ? '' : '&remove=true'}`
+    const res = await fetch(`/api/editor/imports/cover?${query}`, { method: 'POST', body: file ?? new Blob([]) })
+    const data = await res.json().catch(() => null)
+    if (!res.ok) throw new ApiError(res.status, data?.error ?? `Request failed (${res.status})`)
+    return data as EditorApplied
+  },
+  /** Moves an import's files into a library folder, placed by `pattern`. */
+  editorImportAdd: (batch: number, folder: string, pattern: string, preview: boolean, ids: number[] = []) =>
+    post<{ files: EditorRenamed[]; batch: number | null }>(`/editor/imports/${batch}/add`, {
+      folder,
+      pattern,
+      preview,
+      ids,
+    }),
+  editorImportThrowAway: (batch: number) => del<EditorApplied>(`/editor/imports/${batch}`),
+  editorImportDropFile: (id: number) => del<EditorApplied>(`/editor/imports/files/${id}`),
   /** Where a release's cover is served from (through DJINN). */
   editorReleaseCover: (source: ReleaseSource, id: string) =>
     `/api/editor/release-cover?source=${source}&id=${encodeURIComponent(id)}`,

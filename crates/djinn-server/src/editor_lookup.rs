@@ -200,6 +200,9 @@ struct ReleaseQuery {
     /// The songs to lay out on it, by id, joined with commas.
     #[serde(default)]
     ids: String,
+    /// The ids are files waiting in an import, not library songs.
+    #[serde(default)]
+    import: bool,
 }
 
 #[derive(Serialize)]
@@ -232,12 +235,17 @@ async fn release(
         .filter_map(|i| i.trim().parse().ok())
         .take(2_000)
         .collect();
-    let mut songs = Vec::with_capacity(ids.len());
-    for id in ids {
-        if let Some(track) = state.store.track(id).await? {
-            songs.push((id, track.title, track.duration_ms));
+    let songs = if query.import {
+        crate::editor_import::titles_and_lengths(&state, &ids).await?
+    } else {
+        let mut songs = Vec::with_capacity(ids.len());
+        for id in ids {
+            if let Some(track) = state.store.track(id).await? {
+                songs.push((id, track.title, track.duration_ms));
+            }
         }
-    }
+        songs
+    };
     let matched = releases::match_songs(&found, &songs)
         .into_iter()
         .map(|(id, track)| Matched { id, track })

@@ -17,6 +17,7 @@
     target,
     canEdit,
     busy,
+    staged = false,
     onset,
     onremove,
     onreset,
@@ -30,6 +31,8 @@
     target: EditTarget
     canEdit: boolean
     busy: boolean
+    /** Files waiting in an import: no folder.jpg (they aren't in a folder of their own yet). */
+    staged?: boolean
     onset: (file: File) => Promise<void>
     onremove: () => Promise<void>
     onreset: () => Promise<void>
@@ -138,7 +141,9 @@
         Replace from a file...
       </button>
       <button class="small-button" disabled={!canEdit || busy || !count} onclick={onremove}>Remove cover</button>
-      {#if target === 'database'}
+      {#if staged}
+        <!-- Nothing else to go back to, and no folder for folder.jpg yet. -->
+      {:else if target === 'database'}
         <button class="small-button" disabled={busy || !count} onclick={onreset}>Use the files' cover</button>
       {:else}
         <button

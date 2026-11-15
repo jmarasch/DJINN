@@ -55,6 +55,27 @@ pub fn read(path: &Path, original_years: bool) -> Result<FileTags, String> {
     })
 }
 
+/// A file's length in ms, as a library check reads it (an MP3 with a
+/// varying bit rate and no length header is measured, see `mpeg`).
+pub fn length_ms(path: &Path) -> Option<i64> {
+    if path
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("mp3"))
+    {
+        if let Some(ms) = crate::mpeg::exact_duration_ms(path).filter(|d| *d > 0) {
+            return Some(ms);
+        }
+    }
+    let file = lofty::read_from_path(path).ok()?;
+    i64::try_from(
+        lofty::file::AudioFile::properties(&file)
+            .duration()
+            .as_millis(),
+    )
+    .ok()
+    .filter(|d| *d > 0)
+}
+
 /// Why the database and the file differ.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

@@ -106,7 +106,7 @@
     chosenHit = hit
     loadingRelease = true
     try {
-      const found = await unlocked(() => api.editorRelease(hit.source, hit.id, songs.map((s) => s.id)))
+      const found = await unlocked(() => api.editorRelease(hit.source, hit.id, songs.map((s) => s.id), !!songs[0]?.staged))
       release = found.release
       const next: (number | null)[] = found.release.tracks.map(() => null)
       for (const m of found.matched) next[m.track] = m.id

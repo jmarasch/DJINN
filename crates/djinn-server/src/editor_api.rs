@@ -276,7 +276,7 @@ enum Target {
 }
 
 #[derive(Deserialize)]
-struct Change {
+pub(crate) struct Change {
     id: i64,
     field: String,
     /// The new value; null to go back to the file's (database) or remove
@@ -306,7 +306,10 @@ pub(crate) struct Applied {
 }
 
 /// Groups the changes by song, in the order first seen, checking each.
-fn by_song(changes: Vec<Change>, database: bool) -> ApiResult<Vec<(i64, Vec<FieldValue>)>> {
+pub(crate) fn by_song(
+    changes: Vec<Change>,
+    database: bool,
+) -> ApiResult<Vec<(i64, Vec<FieldValue>)>> {
     if changes.is_empty() || changes.len() > MAX_CHANGES {
         return Err(ApiError::bad_request(format!(
             "send 1 to {MAX_CHANGES} changes"
@@ -943,7 +946,7 @@ pub(crate) fn safe_name(name: &str) -> String {
 
 /// A song's new place from the pattern, as folder names then the file name
 /// (without the extension); one part for a name in the same folder.
-fn name_from(pattern: &str, song: &EditorSong) -> Vec<String> {
+pub(crate) fn name_from(pattern: &str, song: &EditorSong) -> Vec<String> {
     let two = |n: Option<i64>| n.map(|n| format!("{n:02}")).unwrap_or_default();
     let text = |t: &Option<String>| t.clone().unwrap_or_default();
     let album_artist = song

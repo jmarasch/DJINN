@@ -23,6 +23,7 @@
     EditorChange,
     EditorCoreField,
     EditorField,
+    EditorImport,
     EditorNode,
     EditorRenamed,
     EditorSong,
@@ -41,6 +42,19 @@
   } = $props()
 
   let target = $state<EditTarget>('database')
+  /** An import being worked on (its number), instead of a library folder. */
+  let importing = $state<number | null>(null)
+  /** The grid edits files: the library's, or an import's (waiting, not in the library yet). */
+  const editingFiles = $derived(target === 'library' || importing !== null)
+  let imports = $state<EditorImport[]>([])
+  /** Files on their way into a new import: done of all. */
+  let uploading = $state<{ done: number; of: number } | null>(null)
+  let importInput = $state<HTMLInputElement | null>(null)
+  let importFolderInput = $state<HTMLInputElement | null>(null)
+  /** Where Add to the library puts an import's files. */
+  let addFolder = $state('')
+  let addPattern = $state('{album_artist}/{album}/{track} {title}')
+  let addPlan = $state<EditorRenamed[] | null>(null)
   let roots = $state<EditorNode[]>([])
   let children = $state<Record<string, EditorNode[]>>({})
   let open = $state<Record<string, boolean>>({})
@@ -126,7 +140,7 @@
   /** Other tags are in the files only, so their columns show on the Library side. */
   const shownColumns = $derived<Column[]>([
     ...FIELDS.filter((f) => !columns.hidden.includes(f.key)).map((f) => ({ ...f, number: f.narrow })),
-    ...(target === 'library'
+    ...(editingFiles
       ? columns.extra.map((name) => ({
           key: `x:${name}` as EditorField,
           label: tagLabel(name),
@@ -290,6 +304,8 @@
     if (!leaveChanges()) return
     pending = {}
     searching = ''
+    importing = null
+    addPlan = null
     selected = node.path
     moveTo = node.path
     chosen = null
@@ -303,6 +319,8 @@
     if (!clean || !leaveChanges()) return
     pending = {}
     selected = ''
+    importing = null
+    addPlan = null
     searching = clean
     searchText = clean
     chosen = null
@@ -312,10 +330,13 @@
   }
 
   async function loadSongs(offset: number) {
-    if (!selected && !searching) return
+    if (!selected && !searching && importing === null) return
     loading = true
     try {
-      const found = await api.editorSongs(selected, offset, target === 'library', searching)
+      const found =
+        importing !== null
+          ? await api.editorImportSongs(importing)
+          : await api.editorSongs(selected, offset, target === 'library', searching)
       songs = offset === 0 ? found.songs : [...songs, ...found.songs]
       total = found.total
       if (!chosen || !songs.some((s) => s.id === chosen?.id)) chosen = songs[0] ?? null
@@ -336,8 +357,15 @@
   }
 
   function setTarget(to: EditTarget) {
-    if (to === target || !leaveChanges()) return
+    if ((to === target && importing === null) || !leaveChanges()) return
     pending = {}
+    if (importing !== null) {
+      importing = null
+      addPlan = null
+      songs = []
+      total = 0
+      chosen = null
+    }
     if (fillField.startsWith('x:')) fillField = 'title'
     if (sortBy && sortBy.field.startsWith('x:')) sortBy = null
     renames = null
@@ -350,8 +378,161 @@
     if (await askToUnlock()) await loadRoots()
   }
 
+  // --- Imports: albums brought in to work on before they go into the library.
+
+  async function loadImports() {
+    try {
+      imports = await api.editorImports()
+    } catch {
+      imports = []
+    }
+  }
+
+  async function openImport(batch: number) {
+    if (importing === batch || !leaveChanges()) return
+    pending = {}
+    selected = ''
+    searching = ''
+    importing = batch
+    chosen = null
+    picked = {}
+    renames = null
+    addPlan = null
+    if (!addFolder) addFolder = roots.find((r) => r.editable)?.path ?? ''
+    await loadSongs(0)
+  }
+
+  const AUDIO = /\.(mp3|flac|m4a|mp4|aac|ogg|oga|wav)$/i
+
+  /** Brings song files in as a new import, one at a time, then opens it. */
+  async function importFiles(list: FileList | null) {
+    const files = [...(list ?? [])].filter((f) => AUDIO.test(f.name))
+    const left = (list?.length ?? 0) - files.length
+    if (!files.length) {
+      toast('No song files there', true)
+      return
+    }
+    if (!leaveChanges()) return
+    let batch: number
+    try {
+      batch = (await unlocked(() => api.editorImportStart())).batch
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not start the import', true)
+      return
+    }
+    // In track order as far as names go (disc folders, then numbers).
+    files.sort((a, b) => collator.compare(a.webkitRelativePath || a.name, b.webkitRelativePath || b.name))
+    uploading = { done: 0, of: files.length }
+    const problems: string[] = []
+    for (const file of files) {
+      try {
+        await unlocked(() => api.editorImportUpload(batch, file))
+      } catch (e) {
+        problems.push(`${file.name}: ${e instanceof Error ? e.message : 'failed'}`)
+      }
+      uploading = { done: uploading.done + 1, of: files.length }
+    }
+    uploading = null
+    await loadImports()
+    const done = files.length - problems.length
+    toast(
+      `${n(done)} songs brought in` +
+        (left ? `; ${n(left)} other files left out` : '') +
+        (problems.length ? `; ${problems.length} couldn't be: ${problems[0]}` : ''),
+      problems.length > 0,
+    )
+    if (done) {
+      pending = {}
+      importing = null
+      await openImport(batch)
+    }
+  }
+
+  async function throwAwayImport() {
+    if (importing === null) return
+    if (!confirm(`Throw this import away? Its ${songs.length} files are deleted; the library isn't touched.`)) return
+    try {
+      await unlocked(() => api.editorImportThrowAway(importing as number))
+      pending = {}
+      importing = null
+      songs = []
+      total = 0
+      chosen = null
+      addPlan = null
+      await loadImports()
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not throw it away', true)
+    }
+  }
+
+  /** Takes the picked songs out of the import (deleting the waiting copies). */
+  async function dropPicked() {
+    const list = pickedSongs
+    if (!list.length || !confirm(`Take ${list.length} songs out of this import? Their files are deleted.`)) return
+    for (const song of list) {
+      try {
+        await unlocked(() => api.editorImportDropFile(song.id))
+      } catch (e) {
+        toast(e instanceof Error ? e.message : 'Could not take it out', true)
+      }
+    }
+    picked = {}
+    addPlan = null
+    await loadImports()
+    await loadSongs(0)
+  }
+
+  /** Where Add to the library would put the import's songs (or, with
+   * `preview` false, puts them there and opens that folder). */
+  async function addToLibrary(preview: boolean) {
+    if (importing === null || !addFolder) return
+    if (changeCount) {
+      toast('Approve or throw away the changes first, so the songs go in as you see them', true)
+      return
+    }
+    const ids = pickedSongs.map((s) => s.id)
+    try {
+      if (preview) {
+        addPlan = (await unlocked(() => api.editorImportAdd(importing as number, addFolder, addPattern, true, ids))).files
+        return
+      }
+      const going = addPlan?.filter((p) => !p.problem).length ?? 0
+      if (!going || !confirm(`Add ${going} songs to the library? This can be undone from the history (Library side).`))
+        return
+      busy = true
+      const done = await unlocked(() => api.editorImportAdd(importing as number, addFolder, addPattern, false, ids))
+      const added = done.files.filter((f) => !f.problem)
+      const failed = done.files.filter((f) => f.problem)
+      toast(
+        `${n(added.length)} songs added to the library` +
+          (failed.length ? `; ${failed.length} weren't: ${failed[0].problem}` : ''),
+        failed.length > 0,
+      )
+      addPlan = failed.length ? failed : null
+      await loadImports()
+      await loadHistory()
+      const first = added[0]?.to
+      if (first && !imports.some((i) => i.batch === importing)) {
+        // Show them where they went, in the Library view.
+        importing = null
+        target = 'library'
+        selected = first.slice(0, Math.max(first.lastIndexOf('/'), first.lastIndexOf('\\')))
+        chosen = null
+        picked = {}
+        await loadSongs(0)
+      } else {
+        await loadSongs(0)
+      }
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not add them', true)
+    } finally {
+      busy = false
+    }
+  }
+
   onMount(async () => {
     await loadRoots()
+    void loadImports()
     if (startFolder) {
       selected = startFolder
       await loadSongs(0)
@@ -364,7 +545,7 @@
   function original(song: EditorSong, field: EditorField): string {
     if (field.startsWith('x:')) return song.file?.extra?.[field.slice(2)] ?? ''
     const own = field as EditorCoreField
-    const value = target === 'library' ? (song.file ? song.file[own] : undefined) : song[own]
+    const value = editingFiles ? (song.file ? song.file[own] : undefined) : song[own]
     return value === null || value === undefined ? '' : String(value)
   }
 
@@ -388,11 +569,12 @@
   }
 
   /** Changes to the files are only allowed in folders the admin allowed. */
-  const rowEditable = (song: EditorSong) => target === 'database' || (song.editable && !!song.file)
-  const canEdit = $derived(target === 'database' || songs.some((s) => s.editable))
+  const rowEditable = (song: EditorSong) =>
+    importing !== null || target === 'database' || (song.editable && !!song.file)
+  const canEdit = $derived(importing !== null || target === 'database' || songs.some((s) => s.editable))
   /** Songs with changes waiting that can't take them (library, view only). */
   const blocked = $derived(
-    target === 'library' ? songs.filter((s) => pending[s.id] && !s.editable).length : 0,
+    target === 'library' && importing === null ? songs.filter((s) => pending[s.id] && !s.editable).length : 0,
   )
 
   function startEdit(song: EditorSong, field: EditorField) {
@@ -550,12 +732,16 @@
     const songCount = Object.keys(pending).length
     if (
       target === 'library' &&
+      importing === null &&
       !confirm(`Write ${changes.length} changes into ${songCount} music files? This can be undone from the history.`)
     )
       return
     busy = true
     try {
-      const done = await unlocked(() => api.editorApply(target, changes))
+      const done = await unlocked(() =>
+        importing !== null ? api.editorImportApply(changes) : api.editorApply(target, changes),
+      )
+      addPlan = null
       pending = {}
       report(done.songs, done.failed, target === 'library' ? 'files written' : 'songs changed')
       await loadSongs(0)
@@ -630,6 +816,21 @@
   async function setCover(how: 'set' | 'remove' | 'reset', file: File | null = null, only: EditorSong[] | null = null) {
     const coverSongs = (only ?? coverSongsNow).filter((s) => target === 'database' || s.editable)
     if (!coverSongs.length) return
+    if (importing !== null) {
+      if (how === 'reset') return
+      busy = true
+      try {
+        const done = await unlocked(() => api.editorImportCover(coverSongs.map((s) => s.id), how === 'set' ? file : null))
+        report(done.songs, done.failed, 'waiting files changed')
+        await loadSongs(0)
+      } catch (e) {
+        toast(e instanceof Error ? e.message : 'Could not change the cover', true)
+      } finally {
+        busy = false
+        if (coverInput) coverInput.value = ''
+      }
+      return
+    }
     const where = target === 'library' ? 'into the files of' : 'for'
     const words = how === 'set' ? 'Use this cover' : how === 'remove' ? 'Take the cover out' : "Go back to the files' own cover"
     if (!confirm(`${words} ${where} ${coverSongs.length} songs?`)) return
@@ -796,14 +997,18 @@
     <p class="small">The editor is locked. <button class="link" onclick={unlock}>Unlock</button></p>
   </section>
 {:else}
-  <div class="editor" class:library={target === 'library'} class:fill={windowed}>
+  <div class="editor" class:library={editingFiles} class:fill={windowed}>
     <div class="top">
       <div class="toggle" role="group" aria-label="What you are editing">
-        <button class:on={target === 'library'} onclick={() => setTarget('library')}>Library</button>
-        <button class:on={target === 'database'} onclick={() => setTarget('database')}>Database</button>
+        <button class:on={target === 'library' && importing === null} onclick={() => setTarget('library')}>Library</button>
+        <button class:on={target === 'database' && importing === null} onclick={() => setTarget('database')}>Database</button>
+        {#if importing !== null}<button class="on">Import</button>{/if}
       </div>
       <p class="small muted">
-        {#if target === 'library'}
+        {#if importing !== null}
+          Working on an import: songs waiting in DJINN's own folder, not in the library yet. Approving writes the tags
+          into them; Add to the library (on the right) moves them into a music folder.
+        {:else if target === 'library'}
           Editing the tags in the music files themselves. Only folders you allowed can be changed, and every approval
           can be undone from the history.
         {:else}
@@ -814,6 +1019,53 @@
 
     <div class="panes">
       <aside class="folders">
+        <div class="imports">
+          <div class="imports-head">
+            <strong class="small">Imports</strong>
+            <input
+              type="file"
+              multiple
+              hidden
+              accept=".mp3,.flac,.m4a,.mp4,.aac,.ogg,.oga,.wav"
+              bind:this={importInput}
+              onchange={(e) => {
+                void importFiles(e.currentTarget.files)
+                e.currentTarget.value = ''
+              }}
+            />
+            <input
+              type="file"
+              hidden
+              webkitdirectory
+              bind:this={importFolderInput}
+              onchange={(e) => {
+                void importFiles(e.currentTarget.files)
+                e.currentTarget.value = ''
+              }}
+            />
+            <button class="small-button" disabled={!!uploading} onclick={() => importInput?.click()} title="Choose an album's song files"
+              >Files...</button
+            >
+            <button
+              class="small-button"
+              disabled={!!uploading}
+              onclick={() => importFolderInput?.click()}
+              title="Choose an album's folder (song files in it and its folders; anything else is left out)">Folder...</button
+            >
+          </div>
+          {#if uploading}
+            <p class="small muted">Bringing in {uploading.done + 1 > uploading.of ? uploading.of : uploading.done + 1} of {uploading.of}...</p>
+          {/if}
+          {#each imports as imp (imp.batch)}
+            <button class="label import-item" class:picked={importing === imp.batch} onclick={() => openImport(imp.batch)}>
+              {imp.album || `Import ${imp.batch}`}
+              <span class="count">{n(imp.files)}</span>
+              {#if imp.artist}<span class="mode">{imp.artist}</span>{/if}
+            </button>
+          {:else}
+            {#if !uploading}<p class="small muted">Bring in a new album to work on before it goes into the library.</p>{/if}
+          {/each}
+        </div>
         {#if roots.length}
           {@render branch(roots, 0)}
         {:else}
@@ -866,7 +1118,7 @@
                   {#each FIELDS.filter((f) => columns.hidden.includes(f.key)) as f (f.key)}<option value={f.key}>{f.label}</option>{/each}
                 </optgroup>
               {/if}
-              {#if target === 'library' && inFiles.length}
+              {#if editingFiles && inFiles.length}
                 <optgroup label="In these files">
                   {#each inFiles as name (name)}<option value="x:{name}">{tagLabel(name)}</option>{/each}
                 </optgroup>
@@ -880,7 +1132,7 @@
             </select>
             <button class="small-button" disabled={!addPick} onclick={addColumn}>Add</button>
           </div>
-          {#if target === 'database' && columns.extra.length}
+          {#if !editingFiles && columns.extra.length}
             <p class="small muted pad">
               Your other tag columns ({columns.extra.map(tagLabel).join(', ')}) show on the Library side: those tags are
               only in the files.
@@ -934,8 +1186,8 @@
                 {#each group.songs as song (song.id)}
                   <tr
                     class:chosen={chosen?.id === song.id}
-                    class:unreadable={target === 'library' && !rowEditable(song)}
-                    title={target === 'library' && !song.editable ? 'Read only folder' : undefined}
+                    class:unreadable={target === 'library' && importing === null && !rowEditable(song)}
+                    title={target === 'library' && importing === null && !song.editable ? 'Read only folder' : undefined}
                   >
                     <td class="pick">
                       <input
@@ -1019,7 +1271,7 @@
                   Clean up titles
                 </button>
               </div>
-              {#if target === 'library'}
+              {#if target === 'library' && importing === null}
                 <div class="tool">
                   <input bind:value={pattern} aria-label="File name pattern" class="pattern" />
                   <button class="small-button" onclick={() => previewMove('rename')}>Rename files...</button>
@@ -1118,7 +1370,9 @@
           <button class="small-button" disabled={!canEdit || busy || !coverSongsNow.length} onclick={() => setCover('remove')}>
             Remove cover
           </button>
-          {#if target === 'database'}
+          {#if importing !== null}
+            <!-- An import's covers are in its files; nothing else to go back to. -->
+          {:else if target === 'database'}
             <button class="small-button" disabled={busy || !coverSongsNow.length} onclick={() => setCover('reset')}>
               Use the files' cover
             </button>
@@ -1133,7 +1387,48 @@
             </button>
           {/if}
         </div>
-        {#if target === 'library' && chosen}
+        {#if importing !== null}
+          <div class="box add">
+            <div><strong>Add to the library</strong></div>
+            <label class="small"
+              >Into
+              <select bind:value={addFolder} onchange={() => (addPlan = null)}>
+                {#each roots.filter((r) => r.editable) as root (root.path)}<option value={root.path}>{root.name}</option>{/each}
+              </select>
+            </label>
+            {#if !roots.some((r) => r.editable)}
+              <p class="small bad">No library folder allows changes yet. Allow one under Library folders first.</p>
+            {/if}
+            <label class="small"
+              >Placed as
+              <input bind:value={addPattern} class="pattern" oninput={() => (addPlan = null)} aria-label="Where each song goes" />
+            </label>
+            <span class="small muted">{'{disc} {track} {title} {artist} {album} {album_artist} {year}'}; a / makes folders</span>
+            <p class="small muted">
+              {pickedSongs.length ? `The ${pickedSongs.length} picked songs` : `All ${songs.length} songs`} go in, named from their
+              tags.
+            </p>
+            <button class="small-button" disabled={busy || !addFolder} onclick={() => addToLibrary(true)}>Preview...</button>
+            {#if addPlan}
+              <ul class="changes">
+                {#each addPlan as p (p.id)}
+                  {@const [, to] = afterShared(p.from, p.to)}
+                  <li class="small" class:bad={!!p.problem}>
+                    <span class="mono">{to}</span>{#if p.problem}<em> ({p.problem})</em>{/if}
+                  </li>
+                {/each}
+              </ul>
+              <button class="primary" disabled={busy || !addPlan.some((p) => !p.problem)} onclick={() => addToLibrary(false)}>
+                Add {addPlan.filter((p) => !p.problem).length} songs to the library
+              </button>
+            {/if}
+            <div class="row-buttons">
+              <button class="small-button" disabled={busy || !pickedSongs.length} onclick={dropPicked}>Take picked out</button>
+              <button class="small-button danger" disabled={busy} onclick={throwAwayImport}>Throw this import away</button>
+            </div>
+          </div>
+        {/if}
+        {#if target === 'library' && importing === null && chosen}
           <div class="box">
             <div class="small muted">This song's file</div>
             <div class="small mono file-name" title={chosen.path}>{fileName(chosen.path)}</div>
@@ -1162,7 +1457,11 @@
           {#if review.length}
             <p class="small muted">
               {n(review.length)} changes to {n(Object.keys(pending).length)} songs, going
-              {target === 'library' ? 'into the files' : "into DJINN's database"}:
+              {importing !== null
+                ? 'into the waiting files'
+                : target === 'library'
+                  ? 'into the files'
+                  : "into DJINN's database"}:
             </p>
             <ul class="changes">
               {#each review.slice(0, 200) as c (`${c.id}-${c.field}`)}
@@ -1184,7 +1483,7 @@
             <button class="primary" disabled>Approve changes</button>
           {/if}
         </div>
-        {#if target === 'library'}
+        {#if target === 'library' && importing === null}
           <div class="box">
             <div class="small muted">Changes made to files</div>
             {#if history.length}
@@ -1215,7 +1514,8 @@
       <CoverWindow
         song={chosen}
         count={coverSongsNow.length}
-        {target}
+        target={importing !== null ? 'library' : target}
+        staged={importing !== null}
         {canEdit}
         {busy}
         onset={(file) => setCover('set', file)}
@@ -1686,6 +1986,42 @@
     background: none;
     box-shadow: none;
     cursor: zoom-in;
+  }
+
+  .imports {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding-bottom: 8px;
+    margin-bottom: 8px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .imports-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .imports-head strong {
+    flex: 1;
+  }
+
+  .import-item.picked {
+    outline: 1px solid var(--target);
+  }
+
+  .add label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    align-self: stretch;
+  }
+
+  .row-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
   }
 
   .review {
