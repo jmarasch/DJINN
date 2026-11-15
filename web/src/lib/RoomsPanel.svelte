@@ -12,16 +12,19 @@
   import NodeSettings from './NodeSettings.svelte'
   import { online, screenName } from './nodeInfo'
   import { app, toast } from './state.svelte'
-  import type { HouseNode, OutputConfig, Room, RoomTiming, TimingSpeaker } from './types'
+  import type { CastDevice, HouseNode, OutputConfig, Room, RoomTiming, TimingSpeaker } from './types'
   import type { Visuals } from './visuals'
 
   type Window =
     | { kind: 'room' | 'display' | 'plays' | 'rules' | 'timing'; room: number }
     | { kind: 'node' | 'output'; id: number }
+    | { kind: 'cast'; id: string }
 
   let rooms = $state<Room[]>([])
   let outputs = $state<OutputConfig[]>([])
   let nodes = $state<HouseNode[]>([])
+  let casts = $state<CastDevice[]>([])
+  let searching = $state(false)
   let newName = $state('')
   let win = $state<Window | null>(null)
   /** Each room's "when quiet" choices. */
@@ -33,16 +36,22 @@
   /** The house's visualizers, where a node's own start from. */
   let house = $state<Visuals | null>(null)
   /** What's being dragged, and the room it's over. */
-  let dragging = $state<{ kind: 'node' | 'output'; id: number } | null>(null)
+  let dragging = $state<{ kind: 'node' | 'output'; id: number } | { kind: 'cast'; id: string } | null>(null)
   let over = $state<number | null>(null)
 
   async function load() {
     try {
-      const [list, out, nodeList] = await Promise.all([api.rooms(), api.outputs(), api.nodes()])
+      const [list, out, nodeList, castList] = await Promise.all([
+        api.rooms(),
+        api.outputs(),
+        api.nodes(),
+        api.casts().catch(() => null),
+      ])
       rooms = list.rooms
       app.rooms = list.rooms
       outputs = out.outputs
       nodes = nodeList.nodes.filter((n) => n.status === 'approved')
+      if (castList) casts = castList.devices
       const others = rooms.filter((r) => r.id !== 1)
       const answers = await Promise.all(others.map((r) => api.roomQuiet(r.id)))
       quiet = Object.fromEntries(others.map((r, i) => [r.id, answers[i]]))
@@ -57,6 +66,7 @@
     const timer = setInterval(async () => {
       try {
         nodes = (await api.nodes()).nodes.filter((n) => n.status === 'approved')
+        casts = (await api.casts()).devices
       } catch {
         // The next one will do.
       }
@@ -123,12 +133,46 @@
     await load()
   }
 
+  /** Cast devices someone put in a room (or that are casting now). */
+  const placedCasts = (room: Room) => casts.filter((c) => (c.placed || c.active) && c.room_id === room.id)
+  /** Devices found that aren't in a room yet. */
+  const nearby = $derived(casts.filter((c) => !c.placed && !c.active))
+
+  async function search() {
+    searching = true
+    try {
+      casts = (await api.discoverCasts()).devices
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not search', true)
+    }
+    searching = false
+  }
+
+  /** Puts a cast device in a room; a cast already running moves with it. */
+  async function placeCast(device: CastDevice, room: number) {
+    try {
+      casts = (await api.setCastRoom(device.id, room)).devices
+      toast(`${device.name} is in ${nameOf(room)}`)
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not move it', true)
+      await load()
+    }
+  }
+
+  const castState = (c: CastDevice) =>
+    c.error ? c.error : c.active ? (c.buffering ? 'connecting' : c.playing ? 'playing' : 'casting') : 'not casting'
+
   /** Puts a dragged endpoint in `room`. */
   function dropOn(room: Room) {
     const item = dragging
     dragging = null
     over = null
     if (!item) return
+    if (item.kind === 'cast') {
+      const device = casts.find((c) => c.id === item.id)
+      if (device && (device.room_id !== room.id || !device.placed)) void placeCast(device, room.id)
+      return
+    }
     if (item.kind === 'node') {
       const node = nodes.find((n) => n.id === item.id)
       if (node && node.room_id !== room.id) void run(() => api.setNodeRoom(node.id, room.id), `${node.name} moved to ${room.name}`)
@@ -143,6 +187,10 @@
   const winNode = $derived.by(() => {
     const w = win
     return w?.kind === 'node' ? nodes.find((n) => n.id === w.id) : undefined
+  })
+  const winCast = $derived.by(() => {
+    const w = win
+    return w?.kind === 'cast' ? casts.find((c) => c.id === w.id) : undefined
   })
   const winOutput = $derived.by(() => {
     const w = win
@@ -202,7 +250,7 @@
         }}
       >
         <h4>Endpoints</h4>
-        <p class="small muted">Speakers and nodes. Drag one to another room, or click it for its settings.</p>
+        <p class="small muted">Speakers, nodes and cast devices. Drag one to another room, or click it for its settings.</p>
         <div class="chips">
           {#each outputs.filter((o) => o.room_id === room.id) as output (output.id)}
             <button
@@ -233,7 +281,22 @@
               {node.name}<span class="muted small"> · node</span>
             </button>
           {/each}
-          {#if !outputs.some((o) => o.room_id === room.id) && !nodes.some((n) => n.room_id === room.id)}
+          {#each placedCasts(room) as device (device.id)}
+            <button
+              class="chip"
+              draggable="true"
+              ondragstart={(e) => {
+                dragging = { kind: 'cast', id: device.id }
+                e.dataTransfer?.setData('text/plain', `cast:${device.id}`)
+              }}
+              ondragend={() => ((dragging = null), (over = null))}
+              onclick={() => open({ kind: 'cast', id: device.id })}
+            >
+              <span class="dot" class:on={device.active && !device.error}></span>
+              {device.name}<span class="muted small"> · cast</span>
+            </button>
+          {/each}
+          {#if !outputs.some((o) => o.room_id === room.id) && !nodes.some((n) => n.room_id === room.id) && !placedCasts(room).length}
             <span class="small muted">None yet. Drag one here.</span>
           {/if}
         </div>
@@ -241,6 +304,32 @@
     </section>
   {/each}
 </div>
+
+<section class="card wide nearby">
+  <h3>Cast devices</h3>
+  <p class="small muted">
+    TVs and speakers DJINN can cast to. Drag one into a room to put it there; it then plays that room's music.
+  </p>
+  <div class="chips">
+    {#each nearby as device (device.id)}
+      <button
+        class="chip"
+        draggable="true"
+        ondragstart={(e) => {
+          dragging = { kind: 'cast', id: device.id }
+          e.dataTransfer?.setData('text/plain', `cast:${device.id}`)
+        }}
+        ondragend={() => ((dragging = null), (over = null))}
+        onclick={() => open({ kind: 'cast', id: device.id })}
+      >
+        {device.name}<span class="muted small"> · {device.model ?? device.kind}</span>
+      </button>
+    {:else}
+      <span class="small muted">None waiting. Search to look again.</span>
+    {/each}
+    <button class="small-button" disabled={searching} onclick={search}>{searching ? 'Searching...' : 'Search again'}</button>
+  </div>
+</section>
 
 {#if win && (win.kind === 'plays') && winRoom}
   {@const room = winRoom}
@@ -407,6 +496,47 @@
   <FloatingWindow title={winNode.name} subtitle="Node in {nameOf(winNode.room_id)}" onclose={() => (win = null)}>
     <NodeSettings node={winNode} {rooms} onchange={load} onclose={() => (win = null)} />
   </FloatingWindow>
+{:else if win && win.kind === 'cast' && winCast}
+  {@const device = winCast}
+  <FloatingWindow title={device.name} subtitle="Cast device · {castState(device)}" onclose={() => (win = null)}>
+    <label class="field">
+      Room
+      <select value={device.room_id} onchange={(e) => placeCast(device, Number(e.currentTarget.value))}>
+        {#each rooms as room (room.id)}<option value={room.id}>{room.name}</option>{/each}
+      </select>
+    </label>
+    <p class="small muted">It plays {nameOf(device.room_id)}'s music while it's casting.</p>
+    <div class="actions">
+      {#if device.active}
+        <button class="danger" onclick={() => run(() => api.stopCast(device.id), `Stopped casting to ${device.name}`)}>
+          Stop casting
+        </button>
+      {:else}
+        <button class="primary" onclick={() => run(() => api.startCast(device.id, 'audio'), `Casting to ${device.name}`)}>
+          Cast the music
+        </button>
+        {#if device.screen}
+          <button onclick={() => run(() => api.startCast(device.id, 'page'), `Casting the TV page to ${device.name}`)}>
+            Cast the TV page
+          </button>
+        {/if}
+      {/if}
+    </div>
+    {#if device.active && !device.volume_fixed && device.volume !== null}
+      <label class="field">
+        Volume
+        <input
+          type="range"
+          min="0"
+          max="1"
+          step="0.01"
+          value={device.volume}
+          onchange={(e) => api.setCastVolume(device.id, Number(e.currentTarget.value)).catch(() => toast('Could not set the volume', true))}
+        />
+      </label>
+    {/if}
+    {#if device.error}<p class="small bad">{device.error}</p>{/if}
+  </FloatingWindow>
 {:else if win && win.kind === 'output' && winOutput}
   {@const output = winOutput}
   <FloatingWindow title={output.label} subtitle="This computer's speaker" onclose={() => (win = null)}>
@@ -546,6 +676,16 @@
   .stack h3 {
     margin: 0;
     font-size: 1rem;
+  }
+
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .bad {
+    color: var(--bad);
   }
 
   .links {

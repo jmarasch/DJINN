@@ -12,7 +12,7 @@ use axum::body::{Body, Bytes};
 use std::net::IpAddr;
 use std::time::Duration;
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
@@ -35,6 +35,9 @@ const CAST_TOKEN: &str = "cast_token";
 pub const PLAY_HERE: &str = "play_here";
 /// Setting key: devices being cast to, so casts resume after a restart.
 const CAST_TARGETS: &str = "cast_targets";
+/// Setting key: the room each cast device belongs to, as "id<TAB>room" lines.
+/// A device with no line (or whose room is gone) plays Main's music.
+const CAST_ROOMS: &str = "cast_rooms";
 /// How long to listen for devices.
 const DISCOVERY: Duration = Duration::from_secs(4);
 
@@ -56,6 +59,7 @@ pub fn router() -> Router<AppState> {
         .route("/cast/{id}/start", post(start))
         .route("/cast/{id}/stop", post(stop))
         .route("/cast/{id}/volume", put(volume))
+        .route("/cast/{id}/room", put(set_room))
 }
 
 #[derive(Serialize)]
@@ -103,26 +107,125 @@ async fn listen(
 }
 
 #[derive(Serialize)]
+struct CastDevice {
+    #[serde(flatten)]
+    status: CastStatus,
+    /// The room it plays; Main until it's put in another.
+    room_id: i64,
+    /// Someone put it in a room (the Rooms page lists those as endpoints).
+    placed: bool,
+}
+
+#[derive(Serialize)]
 struct CastList {
-    devices: Vec<CastStatus>,
+    devices: Vec<CastDevice>,
     /// Players connected to the stream (casts and TV pages).
     listeners: usize,
 }
 
-fn cast_list(state: &AppState) -> CastList {
-    CastList {
-        devices: state.caster.status(),
+/// Each device's room, from the saved lines; rooms that are gone count as Main.
+async fn cast_rooms(state: &AppState) -> ApiResult<std::collections::HashMap<String, i64>> {
+    let known: Vec<i64> = state.store.rooms().await?.iter().map(|r| r.id).collect();
+    let saved = state
+        .store
+        .get_setting(CAST_ROOMS)
+        .await?
+        .unwrap_or_default();
+    Ok(saved
+        .lines()
+        .filter_map(|line| {
+            let (id, room) = line.split_once('\t')?;
+            let room: i64 = room.trim().parse().ok()?;
+            known.contains(&room).then(|| (id.to_owned(), room))
+        })
+        .collect())
+}
+
+async fn room_of_cast(state: &AppState, id: &str) -> ApiResult<i64> {
+    Ok(cast_rooms(state)
+        .await?
+        .get(id)
+        .copied()
+        .unwrap_or(djinn_store::MAIN_ROOM))
+}
+
+async fn cast_list(state: &AppState) -> ApiResult<CastList> {
+    let rooms = cast_rooms(state).await?;
+    Ok(CastList {
+        devices: state
+            .caster
+            .status()
+            .into_iter()
+            .map(|status| CastDevice {
+                room_id: rooms
+                    .get(&status.device.id)
+                    .copied()
+                    .unwrap_or(djinn_store::MAIN_ROOM),
+                placed: rooms.contains_key(&status.device.id),
+                status,
+            })
+            .collect(),
         listeners: state.stream.as_ref().map_or(0, LiveStream::listeners),
-    }
+    })
 }
 
-async fn list(_: AdminUser, State(state): State<AppState>) -> Json<CastList> {
-    Json(cast_list(&state))
+async fn list(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json<CastList>> {
+    Ok(Json(cast_list(&state).await?))
 }
 
-async fn discover(_: AdminUser, State(state): State<AppState>) -> Json<CastList> {
+async fn discover(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json<CastList>> {
     state.caster.discover(DISCOVERY).await;
-    Json(cast_list(&state))
+    Ok(Json(cast_list(&state).await?))
+}
+
+#[derive(Deserialize)]
+struct CastRoom {
+    room_id: i64,
+}
+
+/// Puts a cast device in a room: it plays that room's music from now on (a
+/// cast already running is started again on the new stream).
+async fn set_room(
+    _: AdminUser,
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<CastRoom>,
+) -> ApiResult<Json<CastList>> {
+    if state.store.room(body.room_id).await?.is_none() {
+        return Err(ApiError::bad_request("there's no such room"));
+    }
+    let mut rooms = cast_rooms(&state).await?;
+    rooms.insert(id.clone(), body.room_id);
+    let lines: Vec<String> = rooms
+        .iter()
+        .map(|(id, room)| format!("{id}\t{room}"))
+        .collect();
+    state
+        .store
+        .set_setting(CAST_ROOMS, &lines.join("\n"))
+        .await?;
+    if let Some(running) = state
+        .caster
+        .status()
+        .into_iter()
+        .find(|s| s.device.id == id && s.active)
+    {
+        let mode = if running.page {
+            Mode::Page
+        } else {
+            Mode::Audio
+        };
+        state.caster.stop(&id).await;
+        for _ in 0..50 {
+            if !state.caster.active().contains(&id) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        start_cast(&state, &id, mode).await?;
+        save_targets(&state).await?;
+    }
+    Ok(Json(cast_list(&state).await?))
 }
 
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Deserialize)]
@@ -159,7 +262,7 @@ async fn start(
     let mode = body.map(|b| b.0.mode).unwrap_or_default();
     start_cast(&state, &id, mode).await?;
     save_targets(&state).await?;
-    Ok(Json(cast_list(&state)))
+    Ok(Json(cast_list(&state).await?))
 }
 
 async fn stop(
@@ -179,7 +282,7 @@ async fn stop(
         .store
         .set_setting(CAST_TARGETS, &targets.join("\n"))
         .await?;
-    Ok(Json(cast_list(&state)))
+    Ok(Json(cast_list(&state).await?))
 }
 
 async fn stop_all(_: AdminUser, State(state): State<AppState>) -> ApiResult<StatusCode> {
@@ -198,7 +301,7 @@ async fn new_link(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json
     }
     tracing::warn!("the live stream has a new address");
     recast(&state).await;
-    Ok(Json(cast_list(&state)))
+    Ok(Json(cast_list(&state).await?))
 }
 
 /// Starts every running cast again, for when its address changed (a new
@@ -243,7 +346,8 @@ async fn volume(
 }
 
 async fn start_cast(state: &AppState, id: &str, mode: Mode) -> ApiResult<()> {
-    if state.stream.is_none() {
+    let room = room_of_cast(state, id).await?;
+    if state.stream_for(room).is_none() {
         return Err(ApiError::new(
             StatusCode::SERVICE_UNAVAILABLE,
             "the audio stream isn't running",
@@ -254,7 +358,7 @@ async fn start_cast(state: &AppState, id: &str, mode: Mode) -> ApiResult<()> {
     let token = state.stream_token();
     let media = match mode {
         Mode::Audio => CastMedia::Stream {
-            url: format!("{base}{}", stream_path(&token)),
+            url: format!("{base}{}", stream_path_in(&token, room)),
             meta: Metadata {
                 title: "DJINN".to_owned(),
                 subtitle: "Scan the code to add songs".to_owned(),
@@ -269,7 +373,11 @@ async fn start_cast(state: &AppState, id: &str, mode: Mode) -> ApiResult<()> {
             }
             CastMedia::Page {
                 // The page plays the stream itself, so it gets the secret.
-                url: format!("{base}/tv?cast={token}"),
+                url: if room == djinn_store::MAIN_ROOM {
+                    format!("{base}/tv?cast={token}")
+                } else {
+                    format!("{base}/tv?cast={token}&room={room}")
+                },
             }
         }
     };
@@ -379,12 +487,30 @@ pub fn stream_path(token: &str) -> String {
     format!("/cast/{token}/live.mp3")
 }
 
+/// The stream a room's casts play: Main's, or `?room=` for another's.
+pub fn stream_path_in(token: &str, room: i64) -> String {
+    if room == djinn_store::MAIN_ROOM {
+        stream_path(token)
+    } else {
+        format!("{}?room={room}", stream_path(token))
+    }
+}
+
+#[derive(Deserialize)]
+struct LiveQuery {
+    /// Which room's music (Main's when missing).
+    room: Option<i64>,
+}
+
 async fn live(
     State(state): State<AppState>,
     Path(token): Path<String>,
+    Query(query): Query<LiveQuery>,
     headers: axum::http::HeaderMap,
 ) -> Response {
-    let Some(stream) = state.stream.as_ref().filter(|_| {
+    let room = query.room.unwrap_or(djinn_store::MAIN_ROOM);
+    let stream = state.stream_for(room);
+    let Some(stream) = stream.as_ref().filter(|_| {
         crate::security::same_secret(state.stream_token().as_bytes(), token.as_bytes())
     }) else {
         return StatusCode::NOT_FOUND.into_response();
@@ -396,13 +522,18 @@ async fn live(
         .and_then(|v| v.to_str().ok())
         .is_some_and(|v| v.trim() == "1");
     let title = if wants_titles {
-        Some(song_title(&state.jukebox.lock().await.now_playing()))
+        Some(song_title(
+            &state.sound_jukebox_for(room).lock().await.now_playing(),
+        ))
     } else {
         None
     };
+    let events = state
+        .room_events(room)
+        .unwrap_or_else(|| state.events.clone());
     live_response(
         stream,
-        title.map(|t| (t, state.events.subscribe())),
+        title.map(|t| (t, events.subscribe())),
         state.shutdown.subscribe(),
         (token, std::sync::Arc::clone(&state.cast_token)),
     )
@@ -601,6 +732,55 @@ mod tests {
         // Quotes would end the field early.
         let quoted = icy_block(Some("Don't Stop"));
         assert!(String::from_utf8_lossy(&quoted).contains("'Dont Stop';"));
+    }
+
+    #[tokio::test]
+    async fn a_cast_device_belongs_to_a_room_and_goes_back_to_main_without_it() {
+        use crate::test_util::{call, session};
+        use djinn_store::Role;
+        let state = crate::state::AppState::for_tests().await;
+        let admin = session(&state, "admin", Role::Admin).await;
+        let patio = state.store.create_room("Patio").await.unwrap();
+        // Not a room.
+        let (status, _) = call(
+            &state,
+            axum::http::Method::PUT,
+            "/api/cast/tv-1/room",
+            Some(r#"{"room_id":999}"#),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        let (status, _) = call(
+            &state,
+            axum::http::Method::PUT,
+            "/api/cast/tv-1/room",
+            Some(&format!(r#"{{"room_id":{}}}"#, patio.id)),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(room_of_cast(&state, "tv-1").await.unwrap(), patio.id);
+        assert_eq!(
+            room_of_cast(&state, "other").await.unwrap(),
+            djinn_store::MAIN_ROOM,
+            "devices with no room play Main's music"
+        );
+        // Main's stream keeps its old address; another room's names it.
+        assert_eq!(
+            stream_path_in("t", djinn_store::MAIN_ROOM),
+            "/cast/t/live.mp3"
+        );
+        assert_eq!(
+            stream_path_in("t", patio.id),
+            format!("/cast/t/live.mp3?room={}", patio.id)
+        );
+        // A room that's deleted sends its casts back to Main.
+        state.store.delete_room(patio.id).await.unwrap();
+        assert_eq!(
+            room_of_cast(&state, "tv-1").await.unwrap(),
+            djinn_store::MAIN_ROOM
+        );
     }
 
     #[tokio::test]

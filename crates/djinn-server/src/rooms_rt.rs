@@ -24,6 +24,8 @@ use crate::state::AppState;
 pub struct RoomPlayer {
     pub jukebox: Arc<Mutex<Jukebox>>,
     pub hub: Arc<Hub>,
+    /// The room's mix as a live MP3, for the casts placed in it.
+    pub stream: djinn_cast::stream::LiveStream,
     pub events: broadcast::Sender<ServerEvent>,
     /// Held so the engine plays while the room exists.
     _engine: Arc<Engine>,
@@ -109,6 +111,16 @@ impl AppState {
         }
     }
 
+    /// The live stream casts in `room` play: the room's own mix, or Main's
+    /// while a quiet room follows it.
+    pub fn stream_for(&self, room: i64) -> Option<djinn_cast::stream::LiveStream> {
+        let leader = self.rooms.audio_leader(room);
+        match self.rooms.player(leader) {
+            Some(player) if leader != MAIN_ROOM => Some(player.stream.clone()),
+            _ => self.stream.clone(),
+        }
+    }
+
     /// Where `room`'s player announces songs, queue changes and playback;
     /// None for Main, whose events go out on `AppState::events` with
     /// everything else.
@@ -163,12 +175,14 @@ async fn start_player(state: &AppState, room: i64) -> anyhow::Result<RoomPlayer>
     let (engine_tx, mut engine_rx) = mpsc::unbounded_channel();
     let (timed, timed_reader) = djinn_engine::timed_tap(4.0, rate);
     let hub = Hub::start(timed_reader, rate)?;
+    let (tap, tap_reader) = djinn_engine::stream_tap(4.0, rate);
+    let stream = djinn_cast::stream::LiveStream::start(tap_reader, rate)?;
     let engine = Arc::new(Engine::start_with_taps(
         EngineConfig {
             master_rate: rate,
             outputs: Vec::new(),
         },
-        None,
+        Some(tap),
         Some(timed),
         move |event| {
             let _ = engine_tx.send(event);
@@ -204,6 +218,7 @@ async fn start_player(state: &AppState, room: i64) -> anyhow::Result<RoomPlayer>
     Ok(RoomPlayer {
         jukebox,
         hub: Arc::new(hub),
+        stream,
         events,
         _engine: engine,
     })

@@ -1083,6 +1083,10 @@ export interface CastDevice {
   /** The device sets its own volume (a TV remote). */
   volume_fixed: boolean
   error: string | null
+  /** The room it plays; Main until it's put in another. */
+  room_id: number
+  /** Someone put it in a room. */
+  placed: boolean
 }
 
 export interface CastList {
