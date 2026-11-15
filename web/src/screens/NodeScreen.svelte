@@ -31,6 +31,8 @@
     speaker_ms: number | null
     offline: boolean
     cached: number
+    /** Stopped from the tray icon. */
+    stopped?: boolean
   }
 
   let status = $state<NodeStatus | null>(null)
@@ -62,6 +64,20 @@
   }
 
   const onScreen = new URLSearchParams(location.search).has('screen')
+  /** The tray icon's Show code: the party's join QR for this node's room. */
+  const showCode = new URLSearchParams(location.search).has('code')
+  let join = $state<{ url: string; room: string | null } | null>(null)
+  let joinProblem = $state('')
+
+  async function loadJoin() {
+    const res = await fetch('/api/node/join').catch(() => null)
+    if (res?.ok) {
+      join = await res.json()
+      joinProblem = ''
+    } else {
+      joinProblem = (await res?.json().catch(() => null))?.error ?? "Can't reach the main DJINN"
+    }
+  }
   /** Let in to manage this node (a link from the main DJINN's Admin > Nodes > Manage). */
   let managing = $state(false)
 
@@ -119,6 +135,7 @@
   onMount(() => {
     document.title = 'DJINN node'
     void load()
+    if (showCode) void loadJoin()
     void checkManaging()
     const timer = setInterval(load, 3000)
     return () => clearInterval(timer)
@@ -158,6 +175,23 @@
   {#key stageUrl}<NodeStage url={stageUrl} visuals={status?.visuals ?? null} />{/key}
 {/if}
 
+{#if showCode}
+  <main class="narrow">
+    <div class="card join">
+      <h1>Join the party</h1>
+      {#if join}
+        {#if join.room}<p class="muted">In {join.room}</p>{/if}
+        <img class="qr" src="/api/node/join/qr.svg?v={encodeURIComponent(join.url)}" alt="QR code for {join.url}" />
+        <p class="small">{join.url}</p>
+      {:else if joinProblem}
+        <p class="error">{joinProblem}</p>
+        <button onclick={loadJoin}>Try again</button>
+      {:else}
+        <p class="small muted"><span class="spinner" aria-hidden="true"></span> Asking the main DJINN...</p>
+      {/if}
+    </div>
+  </main>
+{:else}
 <main class="narrow" class:wide={managing}>
   {#if managing}
     <div class="managing">
@@ -221,7 +255,9 @@
         {#if status.problem}<p class="error">{status.problem}</p>{/if}
         {#if status.pairing === 'joined'}
           <p class="small">
-            {#if status.offline}
+            {#if status.stopped}
+              Stopped from this computer's tray icon. Untick Stop there to play again.
+            {:else if status.offline}
               The main DJINN can't be reached. Playing cached songs until it's back (or quiet, if this node is set to
               stop).
             {:else if status.playing}
@@ -309,8 +345,22 @@
     <NodeDiagnostics />
   {/if}
 </main>
+{/if}
 
 <style>
+  .join {
+    align-items: center;
+    text-align: center;
+  }
+
+  .qr {
+    width: min(320px, 80vw);
+    height: auto;
+    background: #fff;
+    padding: 12px;
+    border-radius: 12px;
+  }
+
   .waiting {
     align-self: center;
     width: min(180px, 50vw);

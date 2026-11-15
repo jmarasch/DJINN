@@ -32,6 +32,8 @@ pub fn start_tray(state: &AppState, listen: SocketAddr) -> Option<Tray> {
         }
         TrayAction::ShowJoinCode => open_browser(&format!("{local}/join")),
         TrayAction::ShowTv => open_browser(&format!("{local}/tv")),
+        // Only a node's menu has these.
+        TrayAction::StopMusic(_) | TrayAction::PickRoom(_) => {}
         TrayAction::Quit => {
             tracing::info!("shutdown requested from the tray");
             shutdown.notify_one();
@@ -64,7 +66,11 @@ pub fn start_node_tray(listen: SocketAddr, shutdown: Arc<tokio::sync::Notify>) -
     let page = format!("{}/node", local_url(listen));
     let tooltip = "DJINN node".to_owned();
     let result = Tray::spawn(tooltip, TrayMenu::Node, move |action| match action {
-        TrayAction::Open | TrayAction::ShowJoinCode | TrayAction::ShowTv => open_browser(&page),
+        TrayAction::Open => open_browser(&page),
+        TrayAction::ShowTv => open_browser(&format!("{page}?screen=1")),
+        TrayAction::ShowJoinCode => open_browser(&format!("{page}?code=1")),
+        TrayAction::StopMusic(stop) => crate::node_mode::stop_music(stop),
+        TrayAction::PickRoom(room) => crate::node_mode::pick_room(room),
         TrayAction::Quit => {
             tracing::info!("shutdown requested from the tray");
             shutdown.notify_one();
@@ -77,6 +83,7 @@ pub fn start_node_tray(listen: SocketAddr, shutdown: Arc<tokio::sync::Notify>) -
     match result {
         Ok(tray) => {
             tracing::info!("tray icon ready");
+            crate::node_mode::show_rooms_in(tray.room_menu());
             Some(tray)
         }
         Err(e) => {
