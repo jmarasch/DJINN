@@ -697,7 +697,13 @@ async fn party_headers(State(state): State<AppState>, request: Request, next: Ne
     let screen = security::SCREEN_PAGES.contains(&request.uri().path());
     let mut response = next.run(request).await;
     if screen {
-        security::set_headers(response.headers_mut(), security::SCREEN_CSP, origin.https);
+        // Nodes' pages may frame it from their own addresses too.
+        let nodes = crate::nodes::node_addresses(&state).await;
+        security::set_headers(
+            response.headers_mut(),
+            security::screen_csp(&nodes),
+            origin.https,
+        );
         response
             .headers_mut()
             .remove(axum::http::header::X_FRAME_OPTIONS);

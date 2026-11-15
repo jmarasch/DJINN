@@ -138,6 +138,20 @@ pub const SCREEN_CSP: HeaderValue = HeaderValue::from_static(
      connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; \
      frame-ancestors 'self' http://localhost:8066 http://127.0.0.1:8066",
 );
+/// `SCREEN_CSP` letting the node pages at `nodes` (their own addresses,
+/// port 8066) frame the page too, for a node's page opened by its address
+/// rather than as localhost. Only addresses: nothing else reaches the header.
+pub fn screen_csp(nodes: &[std::net::IpAddr]) -> HeaderValue {
+    let mut csp = SCREEN_CSP.to_str().unwrap_or_default().to_owned();
+    for ip in nodes {
+        match ip {
+            std::net::IpAddr::V4(v4) => csp.push_str(&format!(" http://{v4}:8066")),
+            std::net::IpAddr::V6(v6) => csp.push_str(&format!(" http://[{v6}]:8066")),
+        }
+    }
+    HeaderValue::from_str(&csp).unwrap_or(SCREEN_CSP)
+}
+
 /// Pages a node's screen shows in a frame.
 pub const SCREEN_PAGES: [&str; 2] = ["/tv", "/lyrics"];
 /// The same for DJINN GO's page.
@@ -460,6 +474,21 @@ impl Limiter {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn node_pages_may_frame_screens_from_their_own_addresses() {
+        let csp = screen_csp(&["192.168.0.20".parse().unwrap(), "fd00::5".parse().unwrap()]);
+        let csp = csp.to_str().unwrap();
+        assert!(
+            csp.contains("frame-ancestors 'self' http://localhost:8066"),
+            "{csp}"
+        );
+        assert!(
+            csp.ends_with(" http://192.168.0.20:8066 http://[fd00::5]:8066"),
+            "{csp}"
+        );
+        assert_eq!(screen_csp(&[]), SCREEN_CSP);
+    }
     use super::*;
     use axum::http::HeaderValue;
 

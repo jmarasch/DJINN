@@ -55,6 +55,28 @@ pub fn router() -> Router<AppState> {
         .route("/nodes/{id}", axum::routing::patch(update).delete(remove))
 }
 
+/// Every address accepted nodes have said they have, or seem to check in
+/// from: where a node's own page may be opened, to frame Main's screen pages.
+pub async fn node_addresses(state: &AppState) -> Vec<std::net::IpAddr> {
+    let Ok(nodes) = state.store.nodes().await else {
+        return Vec::new();
+    };
+    let mut out: Vec<std::net::IpAddr> = nodes
+        .iter()
+        .filter(|node| node.status == "approved")
+        .flat_map(|node| {
+            node.addresses
+                .lines()
+                .chain(node.address.as_deref())
+                .filter_map(|a| a.trim().parse().ok())
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
 /// SHA-256 of a secret, hex.
 pub fn hash_secret(secret: &str) -> String {
     crate::security::hex(&Sha256::digest(secret.as_bytes()))
