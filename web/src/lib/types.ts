@@ -1424,6 +1424,8 @@ export interface EditorNode {
   name: string
   path: string
   songs: number
+  /** It has folders of its own (an album folder has none). */
+  has_folders: boolean
   /** Library folders only: changes are allowed in it. */
   editable: boolean | null
 }
@@ -1431,8 +1433,12 @@ export interface EditorNode {
 /** What the editor changes: DJINN's own copy, or the files. */
 export type EditTarget = 'database' | 'library'
 
-/** The fields the editor's grid edits. */
-export type EditorField = 'title' | 'artist' | 'album' | 'album_artist' | 'track_no' | 'disc_no' | 'year' | 'genre'
+/** The fields the editor's grid has columns of its own for. */
+export type EditorCoreField = 'title' | 'artist' | 'album' | 'album_artist' | 'track_no' | 'disc_no' | 'year' | 'genre'
+
+/** What the editor changes: a field of its own, or one of the file's
+ * other tags ("x:Composer"; only in the files). */
+export type EditorField = EditorCoreField | `x:${string}`
 
 export interface EditorChange {
   id: number
@@ -1538,6 +1544,8 @@ export interface EditorSong {
     disc_no: number | null
     year: number | null
     genre: string | null
+    /** The file's other text tags (Composer, Comment, Label...). */
+    extra?: Record<string, string>
   } | null
 }
 

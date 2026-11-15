@@ -66,6 +66,9 @@ struct Node {
     name: String,
     path: String,
     songs: i64,
+    /// It has folders of its own; an album folder has none, so it gets no
+    /// open button.
+    has_folders: bool,
     /// Library folders only: whether changes are allowed in it.
     editable: Option<bool>,
 }
@@ -111,6 +114,7 @@ async fn tree(
                     .map(|n| n.to_string_lossy().into_owned())
                     .unwrap_or_else(|| path.clone()),
                 songs: listing.folders.iter().map(|f| f.songs).sum::<i64>() + listing.songs_here,
+                has_folders: !listing.folders.is_empty(),
                 editable: Some(editable.contains(&root)),
                 path,
             });
@@ -126,12 +130,19 @@ async fn tree(
         folders: listing
             .folders
             .into_iter()
-            .map(|FolderChild { name, songs }| Node {
-                path: join(&query.path, &name),
-                name,
-                songs,
-                editable: None,
-            })
+            .map(
+                |FolderChild {
+                     name,
+                     songs,
+                     has_folders,
+                 }| Node {
+                    path: join(&query.path, &name),
+                    name,
+                    songs,
+                    has_folders,
+                    editable: None,
+                },
+            )
             .collect(),
         songs_here: listing.songs_here,
     }))
@@ -303,6 +314,11 @@ fn by_song(changes: Vec<Change>, database: bool) -> ApiResult<Vec<(i64, Vec<Fiel
     }
     let mut out: Vec<(i64, Vec<FieldValue>)> = Vec::new();
     for change in changes {
+        if database && change.field.starts_with(writer::OTHER) {
+            return Err(ApiError::bad_request(
+                "other tags are only kept in the files; edit them on the Library side",
+            ));
+        }
         let value = FieldValue {
             field: change.field,
             value: change

@@ -14,9 +14,20 @@
   import { ApiError, api } from './api'
   import AlbumLayout from './AlbumLayout.svelte'
   import Art from './Art.svelte'
+  import CoverWindow from './CoverWindow.svelte'
+  import { COMMON_TAGS, MORE_TAGS, NUMBER_TAGS, tagLabel } from './editorTags'
   import { askToUnlock, unlocked } from './protected.svelte'
   import { toast } from './state.svelte'
-  import type { EditorBatch, EditorChange, EditorField, EditorNode, EditorRenamed, EditorSong, EditTarget } from './types'
+  import type {
+    EditorBatch,
+    EditorChange,
+    EditorCoreField,
+    EditorField,
+    EditorNode,
+    EditorRenamed,
+    EditorSong,
+    EditTarget,
+  } from './types'
 
   let {
     startFolder = '',
@@ -72,7 +83,7 @@
     if (layoutBox) layoutBox.scrollIntoView({ behavior: 'smooth', block: 'start' })
   })
 
-  const FIELDS: { key: EditorField; label: string; narrow?: boolean }[] = [
+  const FIELDS: { key: EditorCoreField; label: string; narrow?: boolean }[] = [
     { key: 'disc_no', label: 'Disc', narrow: true },
     { key: 'track_no', label: '#', narrow: true },
     { key: 'title', label: 'Title' },
@@ -82,8 +93,164 @@
     { key: 'year', label: 'Year', narrow: true },
     { key: 'genre', label: 'Genre' },
   ]
-  const LABEL = Object.fromEntries(FIELDS.map((f) => [f.key, f.label])) as Record<EditorField, string>
+  const LABEL: Record<string, string> = Object.fromEntries(FIELDS.map((f) => [f.key, f.label]))
   LABEL.track_no = 'Track'
+  /** A field's name in lists: its column's, or the other tag's. */
+  const labelOf = (field: EditorField) => (field.startsWith('x:') ? tagLabel(field.slice(2)) : (LABEL[field] ?? field))
+
+  // --- Columns: the grid's own (all but Title can be taken off) and the
+  // file's other tags added as columns. Kept per browser.
+  const COLUMNS_KEY = 'djinn.editor.columns'
+  type Columns = { hidden: string[]; extra: string[] }
+  type Column = { key: EditorField; label: string; narrow?: boolean; number?: boolean }
+
+  function loadColumns(): Columns {
+    try {
+      const saved = JSON.parse(localStorage.getItem(COLUMNS_KEY) ?? '{}')
+      const strings = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [])
+      return { hidden: strings(saved.hidden), extra: strings(saved.extra) }
+    } catch {
+      return { hidden: [], extra: [] }
+    }
+  }
+
+  let columns = $state<Columns>(loadColumns())
+  $effect(() => {
+    try {
+      localStorage.setItem(COLUMNS_KEY, JSON.stringify(columns))
+    } catch {
+      // Only remembered when the browser keeps it.
+    }
+  })
+
+  /** Other tags are in the files only, so their columns show on the Library side. */
+  const shownColumns = $derived<Column[]>([
+    ...FIELDS.filter((f) => !columns.hidden.includes(f.key)).map((f) => ({ ...f, number: f.narrow })),
+    ...(target === 'library'
+      ? columns.extra.map((name) => ({
+          key: `x:${name}` as EditorField,
+          label: tagLabel(name),
+          number: NUMBER_TAGS.has(name),
+        }))
+      : []),
+  ])
+
+  let addPick = $state('')
+  /** Other tags the shown files carry that have no column yet. */
+  const inFiles = $derived(
+    [...new Set(songs.flatMap((s) => Object.keys(s.file?.extra ?? {})))]
+      .filter((n) => !columns.extra.includes(n))
+      .sort((a, b) => tagLabel(a).localeCompare(tagLabel(b))),
+  )
+  const notShown = (list: [string, string][]) => list.filter(([n]) => !columns.extra.includes(n) && !inFiles.includes(n))
+
+  function addColumn() {
+    if (!addPick) return
+    if (addPick.startsWith('x:')) {
+      const name = addPick.slice(2)
+      if (!columns.extra.includes(name)) columns = { ...columns, extra: [...columns.extra, name] }
+    } else {
+      columns = { ...columns, hidden: columns.hidden.filter((h) => h !== addPick) }
+    }
+    addPick = ''
+  }
+
+  function removeColumn(field: EditorField) {
+    if (field === 'title') return
+    if (field.startsWith('x:')) columns = { ...columns, extra: columns.extra.filter((n) => n !== field.slice(2)) }
+    else columns = { ...columns, hidden: [...columns.hidden, field] }
+    if (sortBy?.field === field) sortBy = null
+    if (fillField === field) fillField = 'title'
+  }
+
+  // --- Sorting and grouping. Rows sort by the values as they are (not the
+  // changes waiting), so a row doesn't jump away while it's being edited.
+  // With no column chosen they come folder by folder, by disc and track.
+  type SortField = EditorField | 'file'
+  let sortBy = $state<{ field: SortField; desc: boolean } | null>(null)
+  let groupBy = $state<'' | 'disc_no' | 'album' | 'folder'>('')
+  const GROUPS: { key: typeof groupBy; label: string }[] = [
+    { key: '', label: 'Nothing' },
+    { key: 'disc_no', label: 'Disc' },
+    { key: 'album', label: 'Album' },
+    { key: 'folder', label: 'Folder' },
+  ]
+  const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
+  const folderOf = (song: EditorSong) => {
+    const rel = song.rel_path || song.path
+    return rel.slice(0, Math.max(rel.lastIndexOf('/'), rel.lastIndexOf('\\')))
+  }
+
+  function sortOn(field: SortField) {
+    if (sortBy?.field !== field) sortBy = { field, desc: false }
+    else if (!sortBy.desc) sortBy = { field, desc: true }
+    else sortBy = null
+  }
+
+  /** Two values in order, empty ones last whichever way it sorts. */
+  function compareValues(a: string, b: string, number: boolean, desc = false): number {
+    if (!a || !b) return a === b ? 0 : a ? -1 : 1
+    const c = number && !Number.isNaN(Number(a)) && !Number.isNaN(Number(b)) ? Number(a) - Number(b) : collator.compare(a, b)
+    return desc ? -c : c
+  }
+
+  const isNumber = (field: SortField) =>
+    field === 'track_no' || field === 'disc_no' || field === 'year' || (field.startsWith('x:') && NUMBER_TAGS.has(field.slice(2)))
+
+  function fieldOrder(a: EditorSong, b: EditorSong, field: SortField, desc = false): number {
+    if (field === 'file') return compareValues(fileName(a.path), fileName(b.path), false, desc)
+    return compareValues(original(a, field), original(b, field), isNumber(field), desc)
+  }
+
+  function groupKey(song: EditorSong): string {
+    if (groupBy === 'disc_no') return original(song, 'disc_no') || '1'
+    if (groupBy === 'album') return original(song, 'album')
+    if (groupBy === 'folder') return folderOf(song)
+    return ''
+  }
+
+  /** The songs in the grid's order. */
+  const view = $derived.by(() => {
+    const list = [...songs]
+    list.sort((a, b) => {
+      if (groupBy) {
+        const g = compareValues(groupKey(a), groupKey(b), groupBy === 'disc_no')
+        if (g) return g
+      }
+      if (sortBy) {
+        const c = fieldOrder(a, b, sortBy.field, sortBy.desc)
+        if (c) return c
+      }
+      return (
+        collator.compare(folderOf(a), folderOf(b)) ||
+        fieldOrder(a, b, 'disc_no') ||
+        fieldOrder(a, b, 'track_no') ||
+        fieldOrder(a, b, 'file')
+      )
+    })
+    return list
+  })
+  const position = $derived(new Map(view.map((s, i) => [s.id, i])))
+
+  const groups = $derived.by(() => {
+    if (!groupBy) return [{ key: '', label: '', songs: view }]
+    const out: { key: string; label: string; songs: EditorSong[] }[] = []
+    for (const song of view) {
+      const key = groupKey(song)
+      const last = out[out.length - 1]
+      if (last && last.key === key) last.songs.push(song)
+      else
+        out.push({
+          key,
+          label:
+            groupBy === 'disc_no' ? `Disc ${key}` : groupBy === 'album' ? key || 'No album' : key || 'The library folder',
+          songs: [song],
+        })
+    }
+    return out
+  })
+
+  let coverOpen = $state(false)
 
   const n = (x: number) => x.toLocaleString()
 
@@ -171,6 +338,8 @@
   function setTarget(to: EditTarget) {
     if (to === target || !leaveChanges()) return
     pending = {}
+    if (fillField.startsWith('x:')) fillField = 'title'
+    if (sortBy && sortBy.field.startsWith('x:')) sortBy = null
     renames = null
     target = to
     void loadSongs(0)
@@ -193,7 +362,9 @@
 
   /** A field as it stands now: the file's tag when editing the library, DJINN's otherwise. */
   function original(song: EditorSong, field: EditorField): string {
-    const value = target === 'library' ? (song.file ? song.file[field] : undefined) : song[field]
+    if (field.startsWith('x:')) return song.file?.extra?.[field.slice(2)] ?? ''
+    const own = field as EditorCoreField
+    const value = target === 'library' ? (song.file ? song.file[own] : undefined) : song[own]
     return value === null || value === undefined ? '' : String(value)
   }
 
@@ -250,7 +421,7 @@
     const next = { ...picked }
     if (e.shiftKey && lastPicked !== null) {
       const [a, b] = [Math.min(lastPicked, index), Math.max(lastPicked, index)]
-      for (const s of songs.slice(a, b + 1)) next[s.id] = true
+      for (const s of view.slice(a, b + 1)) next[s.id] = true
     } else {
       next[song.id] = on
     }
@@ -258,13 +429,19 @@
     lastPicked = index
   }
 
-  const pickedSongs = $derived(songs.filter((s) => picked[s.id]))
+  const pickedSongs = $derived(view.filter((s) => picked[s.id]))
   const allPicked = $derived(songs.length > 0 && pickedSongs.length === songs.length)
   /** The songs the tools work on: those picked, else every song shown. */
-  const toolSongs = $derived(pickedSongs.length ? pickedSongs : songs)
+  const toolSongs = $derived(pickedSongs.length ? pickedSongs : view)
 
   function pickAll(on: boolean) {
     picked = on ? Object.fromEntries(songs.map((s) => [s.id, true])) : {}
+  }
+
+  function pickGroup(list: EditorSong[], on: boolean) {
+    const next = { ...picked }
+    for (const s of list) next[s.id] = on
+    picked = next
   }
 
   /** The tools only touch songs that can be changed. */
@@ -593,9 +770,13 @@
     {#each nodes as node (node.path)}
       <li>
         <div class="node" class:picked={selected === node.path}>
-          <button class="twisty" aria-label={open[node.path] ? 'Close' : 'Open'} onclick={() => toggle(node)}>
-            {open[node.path] ? '−' : '+'}
-          </button>
+          {#if node.has_folders}
+            <button class="twisty" aria-label={open[node.path] ? 'Close' : 'Open'} onclick={() => toggle(node)}>
+              {open[node.path] ? '−' : '+'}
+            </button>
+          {:else}
+            <span class="twisty" aria-hidden="true"></span>
+          {/if}
           <button class="label" onclick={() => choose(node)} title={node.path}>
             {node.name}
             <span class="count">{n(node.songs)}</span>
@@ -667,6 +848,44 @@
               {searching ? "these songs' folders" : 'this folder'} (make it read and write under Library folders){:else if target ===
               'library' && searching}· songs in read only folders are dimmed{:else}· click a cell to change it{/if}
           </p>
+          <div class="view pad">
+            <label class="small"
+              >Group by
+              <select bind:value={groupBy}>
+                {#each GROUPS as g (g.key)}<option value={g.key}>{g.label}</option>{/each}
+              </select>
+            </label>
+            {#if sortBy}
+              <button class="link small" onclick={() => (sortBy = null)}>Back to folder order</button>
+            {/if}
+            <span class="grow"></span>
+            <select bind:value={addPick} aria-label="Column to add">
+              <option value="">Add a column...</option>
+              {#if columns.hidden.length}
+                <optgroup label="Columns taken off">
+                  {#each FIELDS.filter((f) => columns.hidden.includes(f.key)) as f (f.key)}<option value={f.key}>{f.label}</option>{/each}
+                </optgroup>
+              {/if}
+              {#if target === 'library' && inFiles.length}
+                <optgroup label="In these files">
+                  {#each inFiles as name (name)}<option value="x:{name}">{tagLabel(name)}</option>{/each}
+                </optgroup>
+              {/if}
+              <optgroup label="Common tags">
+                {#each notShown(COMMON_TAGS) as [name, label] (name)}<option value="x:{name}">{label}</option>{/each}
+              </optgroup>
+              <optgroup label="More tags">
+                {#each notShown(MORE_TAGS) as [name, label] (name)}<option value="x:{name}">{label}</option>{/each}
+              </optgroup>
+            </select>
+            <button class="small-button" disabled={!addPick} onclick={addColumn}>Add</button>
+          </div>
+          {#if target === 'database' && columns.extra.length}
+            <p class="small muted pad">
+              Your other tag columns ({columns.extra.map(tagLabel).join(', ')}) show on the Library side: those tags are
+              only in the files.
+            </p>
+          {/if}
           <div class="scroll">
             <table>
               <thead>
@@ -674,12 +893,45 @@
                   <th class="pick">
                     <input type="checkbox" aria-label="Pick every song" checked={allPicked} onchange={(e) => pickAll(e.currentTarget.checked)} />
                   </th>
-                  {#each FIELDS as f (f.key)}<th>{f.label}</th>{/each}
-                  <th>File</th>
+                  {#each shownColumns as col (col.key)}
+                    <th aria-sort={sortBy?.field === col.key ? (sortBy.desc ? 'descending' : 'ascending') : undefined}>
+                      <span class="head">
+                        <button class="sort" title="Sort by {col.label}" onclick={() => sortOn(col.key)}>
+                          {col.label}{#if sortBy?.field === col.key}<span class="arrow">{sortBy.desc ? '▼' : '▲'}</span>{/if}
+                        </button>
+                        {#if col.key !== 'title'}
+                          <button class="drop" aria-label="Take the {col.label} column off" title="Take this column off" onclick={() => removeColumn(col.key)}
+                            >×</button
+                          >
+                        {/if}
+                      </span>
+                    </th>
+                  {/each}
+                  <th aria-sort={sortBy?.field === 'file' ? (sortBy.desc ? 'descending' : 'ascending') : undefined}>
+                    <button class="sort" title="Sort by file name" onclick={() => sortOn('file')}>
+                      File{#if sortBy?.field === 'file'}<span class="arrow">{sortBy.desc ? '▼' : '▲'}</span>{/if}
+                    </button>
+                  </th>
                 </tr>
               </thead>
               <tbody>
-                {#each songs as song, i (song.id)}
+                {#each groups as group (group.key)}
+                  {#if groupBy}
+                    <tr class="group">
+                      <td class="pick">
+                        <input
+                          type="checkbox"
+                          aria-label="Pick every song in {group.label}"
+                          checked={group.songs.every((s) => picked[s.id])}
+                          onchange={(e) => pickGroup(group.songs, e.currentTarget.checked)}
+                        />
+                      </td>
+                      <td colspan={shownColumns.length + 1}>
+                        <strong>{group.label}</strong> <span class="muted">· {n(group.songs.length)} songs</span>
+                      </td>
+                    </tr>
+                  {/if}
+                {#each group.songs as song (song.id)}
                   <tr
                     class:chosen={chosen?.id === song.id}
                     class:unreadable={target === 'library' && !rowEditable(song)}
@@ -690,10 +942,10 @@
                         type="checkbox"
                         aria-label="Pick {song.title}"
                         checked={!!picked[song.id]}
-                        onclick={(e) => pick(song, i, e)}
+                        onclick={(e) => pick(song, position.get(song.id) ?? 0, e)}
                       />
                     </td>
-                    {#each FIELDS as f (f.key)}
+                    {#each shownColumns as f (f.key)}
                       <td
                         class:narrow={f.narrow}
                         class:pending={isPending(song, f.key)}
@@ -707,7 +959,7 @@
                             use:focusSelect
                             onkeydown={(e) => onKey(e, song)}
                             onblur={() => finishEdit(song, true)}
-                            inputmode={f.narrow ? 'numeric' : undefined}
+                            inputmode={f.number ? 'numeric' : undefined}
                           />
                         {:else}
                           {shown(song, f.key)}
@@ -716,6 +968,7 @@
                     {/each}
                     <td class="mono muted" title={song.rel_path}>{fileName(song.path)}</td>
                   </tr>
+                {/each}
                 {/each}
               </tbody>
             </table>
@@ -733,7 +986,7 @@
               </div>
               <div class="tool">
                 <select bind:value={fillField} aria-label="Field to set">
-                  {#each FIELDS as f (f.key)}<option value={f.key}>{LABEL[f.key]}</option>{/each}
+                  {#each shownColumns as f (f.key)}<option value={f.key}>{labelOf(f.key)}</option>{/each}
                 </select>
                 <input bind:value={fillValue} placeholder="Value (empty clears it)" aria-label="Value" />
                 <button class="small-button" onclick={fill}>Set</button>
@@ -837,7 +1090,9 @@
         <div class="box art">
           <div class="small muted">Album art</div>
           {#if chosen}
-            <Art hash={chosen.art_hash} size={200} round={8} />
+            <button class="cover-open" title="Open the cover: bigger, and search for another online" onclick={() => (coverOpen = true)}>
+              <Art hash={chosen.art_hash} size={200} round={8} />
+            </button>
             <div class="small">{chosen.album ?? ''}</div>
           {:else}
             <p class="small muted">Choose a song to see its album's cover.</p>
@@ -912,7 +1167,7 @@
             <ul class="changes">
               {#each review.slice(0, 200) as c (`${c.id}-${c.field}`)}
                 <li class="small">
-                  <span class="muted">{c.song} · {LABEL[c.field]}:</span>
+                  <span class="muted">{c.song} · {labelOf(c.field)}:</span>
                   <s>{c.from || '(empty)'}</s> → <b>{c.to || '(empty)'}</b>
                   <button class="link" aria-label="Leave this one" onclick={() => undoOne(c.id, c.field)}>×</button>
                 </li>
@@ -956,6 +1211,20 @@
         {/if}
       </aside>
     </div>
+    {#if coverOpen && chosen}
+      <CoverWindow
+        song={chosen}
+        count={coverSongsNow.length}
+        {target}
+        {canEdit}
+        {busy}
+        onset={(file) => setCover('set', file)}
+        onremove={() => setCover('remove')}
+        onreset={() => setCover('reset')}
+        onfolderart={makeFolderArt}
+        onclose={() => (coverOpen = false)}
+      />
+    {/if}
     {#if layoutSongs}
       <div bind:this={layoutBox}>
         <AlbumLayout songs={layoutSongs} onapply={useLayout} onclose={() => (layoutSongs = null)} />
@@ -1155,6 +1424,7 @@
   }
 
   .label {
+    display: block;
     flex: 1;
     min-width: 0;
     text-align: left;
@@ -1174,7 +1444,8 @@
   }
 
   .mode {
-    display: block;
+    display: inline;
+    margin-left: 6px;
     font-size: 0.72rem;
     color: var(--muted);
   }
@@ -1348,6 +1619,73 @@
 
   .file-name {
     overflow-wrap: anywhere;
+  }
+
+  .view {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .view label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .grow {
+    flex: 1;
+  }
+
+  .head {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+  }
+
+  th button.sort,
+  th button.drop {
+    padding: 0;
+    border: 0;
+    background: none;
+    box-shadow: none;
+    font: inherit;
+    font-weight: 700;
+    color: inherit;
+    white-space: nowrap;
+  }
+
+  .arrow {
+    margin-left: 4px;
+    font-size: 0.7em;
+    color: var(--target);
+  }
+
+  th button.drop {
+    width: 18px;
+    color: var(--muted);
+    opacity: 0;
+  }
+
+  th:hover button.drop,
+  th button.drop:focus-visible {
+    opacity: 1;
+  }
+
+  tr.group td {
+    background: color-mix(in srgb, var(--target) 12%, transparent);
+    border-bottom: 1px solid var(--target);
+    cursor: default;
+    max-width: none;
+  }
+
+  .cover-open {
+    padding: 0;
+    border: 0;
+    background: none;
+    box-shadow: none;
+    cursor: zoom-in;
   }
 
   .review {

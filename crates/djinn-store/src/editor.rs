@@ -12,6 +12,8 @@ use crate::{Result, Store};
 pub struct FolderChild {
     pub name: String,
     pub songs: i64,
+    /// It has folders of its own (an album folder has none).
+    pub has_folders: bool,
 }
 
 /// What a folder holds directly.
@@ -55,9 +57,10 @@ impl Store {
         let sep = separator(folder);
         let prefix = format!("{}{sep}", folder.trim_end_matches(['/', '\\']));
         let cut = i64::try_from(prefix.chars().count()).unwrap_or(0);
-        let rows: Vec<(Option<String>, i64)> = sqlx::query_as(
+        let rows: Vec<(Option<String>, i64, bool)> = sqlx::query_as(
             "SELECT CASE WHEN instr(rest, ?1) > 0 THEN substr(rest, 1, instr(rest, ?1) - 1) END AS seg,
-                    count(*)
+                    count(*),
+                    max(instr(substr(rest, instr(rest, ?1) + 1), ?1) > 0)
              FROM (SELECT substr(path, ?3 + 1) AS rest FROM tracks
                    WHERE removed_at IS NULL AND substr(path, 1, ?3) = ?2)
              GROUP BY seg ORDER BY lower(seg)",
@@ -69,9 +72,13 @@ impl Store {
         .await?;
         let mut folders = Vec::new();
         let mut songs_here = 0;
-        for (seg, count) in rows {
+        for (seg, count, has_folders) in rows {
             match seg {
-                Some(name) => folders.push(FolderChild { name, songs: count }),
+                Some(name) => folders.push(FolderChild {
+                    name,
+                    songs: count,
+                    has_folders,
+                }),
                 None => songs_here = count,
             }
         }
@@ -240,6 +247,9 @@ mod tests {
         let artist = store.folder_listing("/pool/A/Artist One").await.unwrap();
         assert_eq!(artist.folders.len(), 2);
         assert_eq!(artist.songs_here, 0);
+        // Album folders have no folders of their own; the others do.
+        assert!(root.folders.iter().all(|f| f.has_folders));
+        assert!(artist.folders.iter().all(|f| !f.has_folders));
         // A folder with a similar name isn't inside it.
         let (songs, total) = store.editor_songs("/pool", 0, 100).await.unwrap();
         assert_eq!((songs.len() as i64, total), (5, 5));

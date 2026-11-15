@@ -2,6 +2,7 @@
 //! what DJINN's database holds for the song, field by field, and why they
 //! differ. Reads only; neither the files nor the database change.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use djinn_store::{CompareRow, ScannedTrack, TagEdit};
@@ -21,6 +22,10 @@ pub struct FileTags {
     pub disc_no: Option<i64>,
     pub year: Option<i64>,
     pub genre: Option<String>,
+    /// The file's other text tags (composer, comment, label...) by their
+    /// name in [`crate::write::other_tag_key`], from its main tag.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub extra: BTreeMap<String, String>,
 }
 
 /// Reads a file's tags; the error says why it couldn't be read.
@@ -44,6 +49,9 @@ pub fn read(path: &Path, original_years: bool) -> Result<FileTags, String> {
         disc_no: track.disc_no,
         year: track.year,
         genre: track.genre,
+        extra: lofty::file::TaggedFileExt::primary_tag(&file)
+            .map(crate::write::other_tags)
+            .unwrap_or_default(),
     })
 }
 
@@ -190,6 +198,7 @@ mod tests {
             disc_no: None,
             year: Some(1999),
             genre: Some("Rock".into()),
+            extra: BTreeMap::new(),
         }
     }
 
