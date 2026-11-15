@@ -28,6 +28,8 @@ pub enum TrayAction {
     StopMusic(bool),
     /// A node's room picked from the Room menu.
     PickRoom(i64),
+    /// A node's "Open main DJINN": the main DJINN's own page.
+    OpenMain,
     Quit,
     /// Windows is signing out or shutting down, or an installer asked
     /// DJINN to close. Shut down quickly.
@@ -46,6 +48,7 @@ const TV: &str = "tv";
 const QUIT: &str = "quit";
 const STOP: &str = "stop";
 const ROOM: &str = "room:";
+const MAIN: &str = "main";
 
 /// Which menu the icon has.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -190,6 +193,7 @@ impl LiveMenu {
             JOIN => TrayAction::ShowJoinCode,
             TV => TrayAction::ShowTv,
             QUIT => TrayAction::Quit,
+            MAIN => TrayAction::OpenMain,
             STOP => {
                 self.stopped = !self.stopped;
                 self.stop.set_checked(self.stopped);
@@ -224,7 +228,9 @@ fn build(tooltip: &str, kind: TrayMenu) -> Result<(TrayIcon, LiveMenu), TrayErro
         ]),
         TrayMenu::Node => menu.append_items(&[
             &MenuItem::with_id(OPEN, "Node status", true, None),
-            &MenuItem::with_id(TV, "Open DJINN", true, None),
+            &MenuItem::with_id(TV, "Node TV page", true, None),
+            &MenuItem::with_id(MAIN, "Open main DJINN", true, None),
+            &PredefinedMenuItem::separator(),
             &live.stop,
             &live.rooms,
             &MenuItem::with_id(JOIN, "Show code", true, None),
