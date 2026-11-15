@@ -1,4 +1,5 @@
 /target
+/target-windows
 *.db
 *.db-shm
 *.db-wal
