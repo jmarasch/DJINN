@@ -118,7 +118,7 @@
 
   async function nudge(room: number, speaker: TimingSpeaker, ms: number) {
     try {
-      timing = await api.nudgeTiming(room, speaker.kind, speaker.id, ms)
+      timing = await api.nudgeTiming(room, speaker.kind, speaker.id, speaker.output, ms)
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Could not change it', true)
     }
@@ -278,7 +278,7 @@
               onclick={() => open({ kind: 'node', id: node.id })}
             >
               <span class="dot" class:on={online(node)}></span>
-              {node.name}<span class="muted small"> · node</span>
+              {node.name}<span class="muted small"> · node{(node.audio.outputs ?? []).length ? `, ${(node.audio.outputs ?? []).length + 1} speakers` : ''}</span>
             </button>
           {/each}
           {#each placedCasts(room) as device (device.id)}
@@ -421,7 +421,7 @@
       <p class="small muted">No speakers or nodes in this room yet.</p>
     {:else}
       <ul class="timing">
-        {#each timing.speakers as speaker (speaker.kind + speaker.id)}
+        {#each timing.speakers as speaker (`${speaker.kind}-${speaker.id}-${speaker.output}`)}
           <li>
             <span class="who">
               {speaker.name}

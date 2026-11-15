@@ -35,41 +35,72 @@
     }, delay)
   }
 
-  const deviceId = $derived(draft.device ?? '')
+  /** Most speakers one node plays to, the first included. */
+  const MAX_OUTPUTS = 6
 
 </script>
 
+{#snippet speakerBlock(o: { device: string | null; delay_ms: number; trim: number }, title: string, remove?: () => void)}
+  {@const others = [draft.device, ...(draft.outputs ?? []).map((x) => x.device)].filter((d) => d && d !== o.device)}
+  <div class="output">
+    <div class="output-head">
+      <b>{title}</b>
+      {#if remove}<button class="small-button danger" onclick={remove}>Remove</button>{/if}
+    </div>
+    <label>
+      Speaker
+      <select
+        value={o.device ?? ''}
+        onchange={(e) => {
+          o.device = e.currentTarget.value || null
+          changed(0)
+        }}
+      >
+        <option value="">System default</option>
+        {#each speakers.filter((s) => (!s.is_default || s.id === o.device) && !others.includes(s.id)) as speaker (speaker.id)}
+          <option value={speaker.id}>{speaker.name}</option>
+        {/each}
+        {#if o.device && !speakers.some((s) => s.id === o.device)}
+          <option value={o.device}>A speaker that isn't connected now</option>
+        {/if}
+      </select>
+    </label>
+    <label>
+      Delay: {o.delay_ms} ms
+      <input type="range" min="0" max="1000" step="5" bind:value={o.delay_ms} oninput={() => changed()} />
+    </label>
+    <label>
+      Volume trim: {Math.round(o.trim * 100)}%
+      <input type="range" min="0" max="1" step="0.01" bind:value={o.trim} oninput={() => changed()} />
+    </label>
+  </div>
+{/snippet}
+
 <div class="speaker">
-  <label>
-    Speaker
-    <select
-      value={deviceId}
-      onchange={(e) => {
-        draft.device = e.currentTarget.value || null
-        changed(0)
-      }}
-    >
-      <option value="">System default</option>
-      {#each speakers.filter((s) => !s.is_default || s.id === deviceId) as speaker (speaker.id)}
-        <option value={speaker.id}>{speaker.name}</option>
-      {/each}
-      {#if draft.device && !speakers.some((s) => s.id === draft.device)}
-        <option value={draft.device}>A speaker that isn't connected now</option>
-      {/if}
-    </select>
-  </label>
-  <label>
-    Delay: {draft.delay_ms} ms
-    <input type="range" min="0" max="1000" step="5" bind:value={draft.delay_ms} oninput={() => changed()} />
-  </label>
+  {@render speakerBlock(draft, (draft.outputs ?? []).length ? 'Speaker 1' : 'Speaker')}
+  {#each draft.outputs ?? [] as output, i (i)}
+    {@render speakerBlock(output, `Speaker ${i + 2}`, () => {
+      draft.outputs = (draft.outputs ?? []).filter((_, j) => j !== i)
+      changed(0)
+    })}
+  {/each}
+  {#if (draft.outputs ?? []).length < MAX_OUTPUTS - 1}
+    <div>
+      <button
+        onclick={() => {
+          draft.outputs = [...(draft.outputs ?? []), { device: null, delay_ms: draft.delay_ms, trim: 1 }]
+          changed(0)
+        }}
+      >
+        Add another speaker
+      </button>
+    </div>
+  {/if}
   <p class="small muted">
-    Holds this node's sound back, for speakers that lag (Bluetooth adds 100 to 300 ms). Raise it until the node and the
-    main speakers sound like one.
+    Every speaker plays everything, each in step with the main DJINN. Delay holds one back, for speakers that lag
+    (Bluetooth adds 100 to 300 ms); raise it until they sound like one. A speaker that isn't connected is skipped and
+    the rest keep playing. Room timing nudges each one too.
   </p>
-  <label>
-    Volume trim: {Math.round(draft.trim * 100)}%
-    <input type="range" min="0" max="1" step="0.01" bind:value={draft.trim} oninput={() => changed()} />
-  </label>
   <label>
     If the main DJINN can't be reached
     <select bind:value={draft.offline} onchange={() => changed(0)}>
@@ -144,6 +175,21 @@
     display: flex;
     flex-direction: column;
     gap: 4px;
+  }
+
+  .output {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+  }
+
+  .output-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
   }
 
   label.check {

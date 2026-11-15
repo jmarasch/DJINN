@@ -215,6 +215,19 @@ impl FromRequestParts<AppState> for NodeAuth {
     }
 }
 
+/// How many speakers a node may play to at once, the first included.
+pub const MAX_NODE_OUTPUTS: usize = 6;
+
+/// One more speaker on a node: its own device, delay and volume trim.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct OutputSettings {
+    /// Device id; None for the system default.
+    pub device: Option<String>,
+    pub delay_ms: i64,
+    /// Volume trim, 0 to 1.
+    pub trim: f64,
+}
+
 /// A node's speaker settings as pages and nodes see them.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct AudioSettings {
@@ -223,6 +236,10 @@ pub struct AudioSettings {
     pub delay_ms: i64,
     /// Volume trim, 0 to 1.
     pub trim: f64,
+    /// The node's other speakers, beyond the first (`device`, `delay_ms` and
+    /// `trim`); each plays everything in step with its own delay and trim.
+    #[serde(default)]
+    pub outputs: Vec<OutputSettings>,
     pub equalizer: EqualizerSettings,
     /// "stop" or "cached".
     pub offline: String,
@@ -282,6 +299,7 @@ impl AudioSettings {
             device: node.device.clone(),
             delay_ms: node.delay_ms,
             trim: node.trim,
+            outputs: serde_json::from_str(&node.extra_outputs).unwrap_or_default(),
             equalizer: node
                 .equalizer
                 .as_deref()
@@ -307,6 +325,16 @@ async fn save_audio(state: &AppState, id: i64, audio: &AudioSettings) -> ApiResu
             "those speaker settings are out of range",
         ));
     }
+    if audio.outputs.len() >= MAX_NODE_OUTPUTS
+        || audio
+            .outputs
+            .iter()
+            .any(|o| !(0..=2000).contains(&o.delay_ms) || !(0.0..=1.0).contains(&o.trim))
+    {
+        return Err(ApiError::bad_request(
+            "those speaker settings are out of range",
+        ));
+    }
     if let Some(visual) = &audio.visual {
         visual.check()?;
     }
@@ -324,6 +352,11 @@ async fn save_audio(state: &AppState, id: i64, audio: &AudioSettings) -> ApiResu
         None => String::new(),
     };
     let device = audio.device.as_deref().filter(|d| !d.is_empty());
+    let extra_outputs = if audio.outputs.is_empty() {
+        String::new()
+    } else {
+        serde_json::to_string(&audio.outputs)?
+    };
     state
         .store
         .set_node_audio(
@@ -338,6 +371,7 @@ async fn save_audio(state: &AppState, id: i64, audio: &AudioSettings) -> ApiResu
                 screen: &audio.screen,
                 visual: &visual,
                 cache_ahead: audio.cache_ahead,
+                extra_outputs: &extra_outputs,
             },
         )
         .await?;
@@ -1682,6 +1716,107 @@ mod tests {
         let (status, body) = send(&state, Method::GET, "/api/nodes/me", None, node, true).await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
         assert!(body.contains("unknown node"));
+    }
+
+    #[tokio::test]
+    async fn a_node_can_play_to_several_speakers_and_each_is_timed() {
+        let state = AppState::for_tests().await;
+        let admin = admin_with_password(&state).await;
+        let cookie = Some(("cookie", admin.as_str()));
+        state.store.set_setting(NODES_JOIN, "1").await.unwrap();
+        send(
+            &state,
+            Method::POST,
+            "/api/nodes/join",
+            Some(JOIN),
+            None,
+            true,
+        )
+        .await;
+        let id = state
+            .store
+            .node_by_node_id("kitchen-0001")
+            .await
+            .unwrap()
+            .unwrap()
+            .id;
+        state.store.approve_node(id, 1).await.unwrap();
+        let signed = format!("Node kitchen-0001:{SECRET}");
+        let node = Some(("authorization", signed.as_str()));
+        let audio = |outputs: &str| {
+            format!(
+                r#"{{"device":"hw:1","delay_ms":0,"trim":1.0,"outputs":{outputs},"offline":"stop","equalizer":{{"enabled":false,"bands_db":[0,0,0,0,0,0,0,0,0,0,0,0],"output_gain_db":0}}}}"#
+            )
+        };
+        let path = format!("/api/nodes/{id}/audio");
+        let (status, _) = send(
+            &state,
+            Method::PUT,
+            &path,
+            Some(&audio(r#"[{"device":"hw:2","delay_ms":30,"trim":0.5}]"#)),
+            cookie,
+            false,
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        let (_, me) = send(&state, Method::GET, "/api/nodes/me", None, node, true).await;
+        assert!(
+            me.contains(r#""outputs":[{"device":"hw:2","delay_ms":30,"trim":0.5}]"#),
+            "{me}"
+        );
+        // Out of range, and too many.
+        for bad in [
+            r#"[{"device":null,"delay_ms":9000,"trim":0.5}]"#.to_owned(),
+            r#"[{"device":null,"delay_ms":0,"trim":2}]"#.to_owned(),
+            format!(
+                "[{}]",
+                [r#"{"device":null,"delay_ms":0,"trim":1}"#; MAX_NODE_OUTPUTS].join(",")
+            ),
+        ] {
+            let (status, _) = send(
+                &state,
+                Method::PUT,
+                &path,
+                Some(&audio(&bad)),
+                cookie,
+                false,
+            )
+            .await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{bad}");
+        }
+        // The room's timing lists each speaker, and moves the second alone.
+        let (_, timing) = send(
+            &state,
+            Method::GET,
+            "/api/rooms/1/timing",
+            None,
+            cookie,
+            false,
+        )
+        .await;
+        assert!(
+            timing.contains("Kitchen, speaker 1") && timing.contains("Kitchen, speaker 2"),
+            "{timing}"
+        );
+        let (status, timing) = send(
+            &state,
+            Method::POST,
+            "/api/rooms/1/timing",
+            Some(&format!(
+                r#"{{"kind":"node","id":{id},"output":1,"ms":10}}"#
+            )),
+            cookie,
+            false,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{timing}");
+        let node = state.store.node(id).await.unwrap().unwrap();
+        assert_eq!(node.delay_ms, 0);
+        assert!(
+            node.extra_outputs.contains(r#""delay_ms":40"#),
+            "{}",
+            node.extra_outputs
+        );
     }
 
     #[tokio::test]

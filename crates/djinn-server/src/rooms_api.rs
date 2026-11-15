@@ -305,6 +305,8 @@ struct TimingSpeaker {
     /// "output" or "node".
     kind: &'static str,
     id: i64,
+    /// Which of a node's speakers (0 is its first); 0 for this computer's.
+    output: usize,
     name: String,
     delay_ms: i64,
 }
@@ -329,24 +331,42 @@ async fn timing_speakers(state: &AppState, room: i64) -> ApiResult<Vec<TimingSpe
         .map(|o| TimingSpeaker {
             kind: "output",
             id: o.id,
+            output: 0,
             name: o.label,
             delay_ms: o.delay_ms,
         })
         .collect();
-    speakers.extend(
-        state
-            .store
-            .nodes()
-            .await?
-            .into_iter()
-            .filter(|n| n.status == "approved" && same(n.room_id))
-            .map(|n| TimingSpeaker {
+    for node in state
+        .store
+        .nodes()
+        .await?
+        .into_iter()
+        .filter(|n| n.status == "approved" && same(n.room_id))
+    {
+        let extra: Vec<crate::nodes::OutputSettings> =
+            serde_json::from_str(&node.extra_outputs).unwrap_or_default();
+        let several = !extra.is_empty();
+        speakers.push(TimingSpeaker {
+            kind: "node",
+            id: node.id,
+            output: 0,
+            name: if several {
+                format!("{}, speaker 1", node.name)
+            } else {
+                node.name.clone()
+            },
+            delay_ms: node.delay_ms,
+        });
+        for (i, output) in extra.iter().enumerate() {
+            speakers.push(TimingSpeaker {
                 kind: "node",
-                id: n.id,
-                name: n.name,
-                delay_ms: n.delay_ms,
-            }),
-    );
+                id: node.id,
+                output: i + 1,
+                name: format!("{}, speaker {}", node.name, i + 2),
+                delay_ms: output.delay_ms,
+            });
+        }
+    }
     Ok(speakers)
 }
 
@@ -368,6 +388,9 @@ async fn timing(
 struct Nudge {
     kind: String,
     id: i64,
+    /// Which of a node's speakers (the first when missing).
+    #[serde(default)]
+    output: usize,
     /// Later (positive) or earlier (negative), in ms.
     ms: i64,
 }
@@ -376,11 +399,17 @@ struct Nudge {
 /// the music reaches it, so moving one earlier than zero holds all the
 /// others back instead; the earliest always sits at zero. None if it would
 /// go past the longest delay allowed.
-fn nudged(speakers: &[TimingSpeaker], kind: &str, id: i64, ms: i64) -> Option<Vec<i64>> {
+fn nudged(
+    speakers: &[TimingSpeaker],
+    kind: &str,
+    id: i64,
+    output: usize,
+    ms: i64,
+) -> Option<Vec<i64>> {
     let mut delays: Vec<i64> = speakers
         .iter()
         .map(|s| {
-            if s.kind == kind && s.id == id {
+            if s.kind == kind && s.id == id && s.output == output {
                 s.delay_ms + ms
             } else {
                 s.delay_ms
@@ -407,28 +436,65 @@ async fn nudge(
     let speakers = timing_speakers(&state, id).await?;
     if !speakers
         .iter()
-        .any(|s| s.kind == body.kind && s.id == body.id)
+        .any(|s| s.kind == body.kind && s.id == body.id && s.output == body.output)
     {
         return Err(ApiError::not_found());
     }
-    let delays =
-        nudged(&speakers, &body.kind, body.id, body.ms.clamp(-1000, 1000)).ok_or_else(|| {
-            ApiError::bad_request(format!(
-                "that would hold a speaker back more than {MAX_TIMING_MS} ms"
-            ))
-        })?;
+    let delays = nudged(
+        &speakers,
+        &body.kind,
+        body.id,
+        body.output,
+        body.ms.clamp(-1000, 1000),
+    )
+    .ok_or_else(|| {
+        ApiError::bad_request(format!(
+            "that would hold a speaker back more than {MAX_TIMING_MS} ms"
+        ))
+    })?;
     let outputs = state.store.outputs().await?;
-    for (speaker, delay) in speakers.iter().zip(delays) {
-        if speaker.delay_ms == delay {
+    // A node's speakers change together, so its extra ones are written once.
+    let mut nodes_changed: Vec<i64> = Vec::new();
+    for (speaker, delay) in speakers.iter().zip(&delays) {
+        if speaker.delay_ms == *delay {
             continue;
         }
         if speaker.kind == "node" {
-            state.store.set_node_delay(speaker.id, delay).await?;
+            if !nodes_changed.contains(&speaker.id) {
+                nodes_changed.push(speaker.id);
+            }
         } else if let Some(output) = outputs.iter().find(|o| o.id == speaker.id) {
             state
                 .store
-                .update_output(output.id, output.enabled, output.volume_trim, delay)
+                .update_output(output.id, output.enabled, output.volume_trim, *delay)
                 .await?;
+        }
+    }
+    for node_id in nodes_changed {
+        let delay_of = |output: usize| {
+            speakers
+                .iter()
+                .zip(&delays)
+                .find(|(s, _)| s.kind == "node" && s.id == node_id && s.output == output)
+                .map(|(_, d)| *d)
+        };
+        if let Some(first) = delay_of(0) {
+            state.store.set_node_delay(node_id, first).await?;
+        }
+        if let Some(node) = state.store.node(node_id).await? {
+            let mut extra: Vec<crate::nodes::OutputSettings> =
+                serde_json::from_str(&node.extra_outputs).unwrap_or_default();
+            for (i, output) in extra.iter_mut().enumerate() {
+                if let Some(delay) = delay_of(i + 1) {
+                    output.delay_ms = delay;
+                }
+            }
+            if !extra.is_empty() {
+                state
+                    .store
+                    .set_node_extra_outputs(node_id, &serde_json::to_string(&extra)?)
+                    .await?;
+            }
         }
     }
     crate::rooms_rt::apply_outputs(&state).await?;
@@ -451,6 +517,7 @@ mod tests {
         TimingSpeaker {
             kind,
             id,
+            output: 0,
             name: String::new(),
             delay_ms,
         }
@@ -460,13 +527,13 @@ mod tests {
     fn moving_a_speaker_earlier_than_zero_holds_the_others_back() {
         let room = [speaker("output", 1, 0), speaker("node", 7, 40)];
         // Later and earlier, within what's there.
-        assert_eq!(nudged(&room, "node", 7, 10), Some(vec![0, 50]));
-        assert_eq!(nudged(&room, "node", 7, -40), Some(vec![0, 0]));
+        assert_eq!(nudged(&room, "node", 7, 0, 10), Some(vec![0, 50]));
+        assert_eq!(nudged(&room, "node", 7, 0, -40), Some(vec![0, 0]));
         // Earlier than the earliest: the rest wait instead.
-        assert_eq!(nudged(&room, "node", 7, -60), Some(vec![20, 0]));
-        assert_eq!(nudged(&room, "output", 1, -15), Some(vec![0, 55]));
+        assert_eq!(nudged(&room, "node", 7, 0, -60), Some(vec![20, 0]));
+        assert_eq!(nudged(&room, "output", 1, 0, -15), Some(vec![0, 55]));
         // Not past the longest delay.
-        assert_eq!(nudged(&room, "node", 7, MAX_TIMING_MS), None);
+        assert_eq!(nudged(&room, "node", 7, 0, MAX_TIMING_MS), None);
     }
     use crate::test_util::{call, get_body, session};
     use axum::http::Method;

@@ -414,8 +414,8 @@ export const api = {
   playSyncTone: (id: number) => post<void>(`/rooms/${id}/sync-tone`),
   roomTiming: (id: number) => get<RoomTiming>(`/rooms/${id}/timing`),
   /** Moves one speaker later (+ms) or earlier (-ms). */
-  nudgeTiming: (id: number, kind: TimingSpeaker['kind'], speaker: number, ms: number) =>
-    post<RoomTiming>(`/rooms/${id}/timing`, { kind, id: speaker, ms }),
+  nudgeTiming: (id: number, kind: TimingSpeaker['kind'], speaker: number, output: number, ms: number) =>
+    post<RoomTiming>(`/rooms/${id}/timing`, { kind, id: speaker, output, ms }),
   nodes: () => get<NodeList>('/nodes'),
   setNodeJoining: (joinOpen: boolean) => put<void>('/nodes/settings', { join_open: joinOpen }),
   acceptNode: (id: number, password: string) => post<void>(`/nodes/${id}/accept`, { password }),

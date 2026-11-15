@@ -53,6 +53,8 @@ pub struct Node {
     /// What it last reported about its AI helper, as JSON.
     #[serde(skip)]
     pub ai_report: Option<String>,
+    /// Its other speakers, beyond `device`, as JSON; empty for none.
+    pub extra_outputs: String,
 }
 
 /// A node's speaker settings.
@@ -66,6 +68,8 @@ pub struct NodeAudio<'a> {
     pub screen: &'a str,
     pub visual: &'a str,
     pub cache_ahead: i64,
+    /// Its other speakers, as JSON.
+    pub extra_outputs: &'a str,
 }
 
 /// A node asking to join.
@@ -95,7 +99,7 @@ impl Store {
     pub async fn nodes(&self) -> Result<Vec<Node>> {
         Ok(sqlx::query_as(
             "SELECT id, node_id, name, secret_hash, status, room_id, address, version, platform,
-                    requested_at, approved_at, last_seen, device, delay_ms, trim, equalizer, offline, devices, free_run, screen, visual, cache_ahead, ai_help, ai_model, ai_report
+                    requested_at, approved_at, last_seen, device, delay_ms, trim, equalizer, offline, devices, free_run, screen, visual, cache_ahead, ai_help, ai_model, ai_report, extra_outputs
              FROM nodes ORDER BY status = 'approved', name, id",
         )
         .fetch_all(&self.pool)
@@ -105,7 +109,7 @@ impl Store {
     pub async fn node_by_node_id(&self, node_id: &str) -> Result<Option<Node>> {
         Ok(sqlx::query_as(
             "SELECT id, node_id, name, secret_hash, status, room_id, address, version, platform,
-                    requested_at, approved_at, last_seen, device, delay_ms, trim, equalizer, offline, devices, free_run, screen, visual, cache_ahead, ai_help, ai_model, ai_report
+                    requested_at, approved_at, last_seen, device, delay_ms, trim, equalizer, offline, devices, free_run, screen, visual, cache_ahead, ai_help, ai_model, ai_report, extra_outputs
              FROM nodes WHERE node_id = ?",
         )
         .bind(node_id)
@@ -116,7 +120,7 @@ impl Store {
     pub async fn node(&self, id: i64) -> Result<Option<Node>> {
         Ok(sqlx::query_as(
             "SELECT id, node_id, name, secret_hash, status, room_id, address, version, platform,
-                    requested_at, approved_at, last_seen, device, delay_ms, trim, equalizer, offline, devices, free_run, screen, visual, cache_ahead, ai_help, ai_model, ai_report
+                    requested_at, approved_at, last_seen, device, delay_ms, trim, equalizer, offline, devices, free_run, screen, visual, cache_ahead, ai_help, ai_model, ai_report, extra_outputs
              FROM nodes WHERE id = ?",
         )
         .bind(id)
@@ -251,7 +255,7 @@ impl Store {
 
     pub async fn set_node_audio(&self, id: i64, audio: &NodeAudio<'_>) -> Result<bool> {
         let result = sqlx::query(
-            "UPDATE nodes SET device = ?, delay_ms = ?, trim = ?, equalizer = ?, offline = ?, free_run = ?, screen = ?, visual = ?, cache_ahead = ? WHERE id = ?",
+            "UPDATE nodes SET device = ?, delay_ms = ?, trim = ?, equalizer = ?, offline = ?, free_run = ?, screen = ?, visual = ?, cache_ahead = ?, extra_outputs = ? WHERE id = ?",
         )
         .bind(audio.device)
         .bind(audio.delay_ms.clamp(0, 2000))
@@ -262,9 +266,20 @@ impl Store {
         .bind(audio.screen)
         .bind(audio.visual)
         .bind(audio.cache_ahead.clamp(1, 50))
+        .bind(audio.extra_outputs)
         .bind(id)
         .execute(&self.pool)
         .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
+    /// Sets a node's other speakers (the room timing tool changes their delays).
+    pub async fn set_node_extra_outputs(&self, id: i64, outputs: &str) -> Result<bool> {
+        let result = sqlx::query("UPDATE nodes SET extra_outputs = ? WHERE id = ?")
+            .bind(outputs)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
         Ok(result.rows_affected() > 0)
     }
 

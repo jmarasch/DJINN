@@ -1752,6 +1752,9 @@ export interface NodeAudio {
   delay_ms: number
   /** Volume trim, 0 to 1. */
   trim: number
+  /** More speakers on the same node, each with its own device, delay and
+   * trim; the first is `device`, `delay_ms` and `trim` above. */
+  outputs?: NodeOutput[]
   equalizer: EqualizerSettings
   /** What to do once Main is gone and what was loaded has played. */
   offline: 'stop' | 'cached'
@@ -1764,6 +1767,13 @@ export interface NodeAudio {
   visual?: import('./visuals').Visuals | null
   /** Songs, playing and coming up, the node keeps copies of. */
   cache_ahead?: number
+}
+
+/** One more speaker on a node. */
+export interface NodeOutput {
+  device: string | null
+  delay_ms: number
+  trim: number
 }
 
 export interface NodeSpeaker {
@@ -1798,6 +1808,8 @@ export interface RoomList {
 export interface TimingSpeaker {
   kind: 'output' | 'node'
   id: number
+  /** Which of a node's speakers (0 is its first). */
+  output: number
   name: string
   delay_ms: number
 }

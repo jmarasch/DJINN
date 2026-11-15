@@ -870,7 +870,7 @@ impl Node {
 
     /// Plays Main's music while joined, reconnecting when the feed drops.
     async fn run_audio(self) {
-        let mut player: Option<(djinn_engine::NodePlayer, u32, Option<String>)> = None;
+        let mut player: Option<Players> = None;
         let mut offline: Option<crate::node_offline::OfflinePlayer> = None;
         let mut lost_since: Option<std::time::Instant> = None;
         loop {
@@ -1047,7 +1047,7 @@ impl Node {
         &self,
         main: &str,
         pin: &str,
-        player: &mut Option<(djinn_engine::NodePlayer, u32, Option<String>)>,
+        player: &mut Option<Players>,
     ) -> anyhow::Result<()> {
         use futures_util::StreamExt;
         let (id, secret) = self.identity().await?;
@@ -1068,29 +1068,55 @@ impl Node {
             .unwrap_or(48_000);
         let mut settings_rx = self.audio.subscribe();
         let audio = settings_rx.borrow_and_update().clone();
-        let device = audio.as_ref().and_then(|a| a.device.clone());
+        let wanted = devices_of(audio.as_ref());
         if player
             .as_ref()
-            .is_none_or(|(_, r, d)| *r != rate || *d != device)
+            .is_none_or(|p| p.rate != rate || p.wanted != wanted)
         {
             *player = None;
-            let offset = Arc::clone(&self.offset);
-            let settings = node_settings(audio.as_ref());
-            let wanted = device.clone();
-            let levels = self.levels.clone();
-            let started = tokio::task::spawn_blocking(move || {
-                djinn_engine::NodePlayer::start(wanted, rate, settings, offset, levels)
-            })
-            .await?;
-            self.report_speakers(main, pin).await;
-            match started {
-                Ok(p) => *player = Some((p, rate, device)),
-                Err(e) => anyhow::bail!("can't open this computer's speakers: {e}"),
+            let mut list = Vec::new();
+            for (index, device) in wanted.iter().cloned().enumerate() {
+                let offset = Arc::clone(&self.offset);
+                let settings = output_settings(audio.as_ref(), index);
+                // Only the first speaker's measurements draw the visualizer.
+                let levels = if index == 0 {
+                    self.levels.clone()
+                } else {
+                    djinn_engine::Levels::new()
+                };
+                let started = tokio::task::spawn_blocking(move || {
+                    djinn_engine::NodePlayer::start(device, rate, settings, offset, levels)
+                })
+                .await?;
+                if index == 0 {
+                    self.report_speakers(main, pin).await;
+                }
+                match started {
+                    Ok(p) => list.push((index, p)),
+                    Err(e) if index == 0 => {
+                        anyhow::bail!("can't open this computer's speakers: {e}")
+                    }
+                    // The others are skipped (a Bluetooth speaker that's
+                    // off, say); the rest still play.
+                    Err(e) => {
+                        tracing::warn!(output = index + 1, error = %e, "can't open one of this node's speakers");
+                        self.update(|s| {
+                            s.audio_problem =
+                                Some(format!("can't open speaker {}: {e}", index + 1));
+                        });
+                    }
+                }
             }
+            *player = Some(Players { rate, wanted, list });
         }
         self.update(|s| {
             s.playing = true;
-            s.audio_problem = None;
+            if player
+                .as_ref()
+                .is_none_or(|p| p.list.len() == p.wanted.len())
+            {
+                s.audio_problem = None;
+            }
         });
         let room = (self.status().room_id, self.status().audio_room);
         let mut buffer = Vec::new();
@@ -1103,17 +1129,21 @@ impl Node {
                 .ok_or_else(|| anyhow::anyhow!("Main sent something odd"))?;
             if settings_rx.has_changed().unwrap_or(false) {
                 let audio = settings_rx.borrow_and_update().clone();
-                let device = audio.as_ref().and_then(|a| a.device.clone());
-                if player.as_ref().is_some_and(|(_, _, d)| *d != device) {
-                    // Another speaker: open it on the next connection.
+                if player
+                    .as_ref()
+                    .is_some_and(|p| p.wanted != devices_of(audio.as_ref()))
+                {
+                    // Other speakers: open them on the next connection.
                     *player = None;
                     break;
                 }
-                if let Some((p, _, _)) = player.as_ref() {
-                    p.set(node_settings(audio.as_ref()))?;
+                if let Some(p) = player.as_ref() {
+                    for (index, one) in &p.list {
+                        one.set(output_settings(audio.as_ref(), *index))?;
+                    }
                 }
             }
-            if let Some((p, _, _)) = player.as_ref() {
+            if let Some(p) = player.as_ref() {
                 for piece in pieces {
                     if matches!(piece.mark, djinn_engine::Mark::Audio { .. }) {
                         self.heard_us
@@ -1122,10 +1152,14 @@ impl Node {
                     if let djinn_engine::Mark::Volume(v) = piece.mark {
                         self.volume.store(v.to_bits(), Ordering::Release);
                     }
-                    p.piece(piece)?;
+                    for (_, one) in &p.list {
+                        one.piece(piece.clone())?;
+                    }
                 }
-                let error = p.error_ms();
-                self.update(|s| s.speaker_ms = Some(error));
+                if let Some((_, first)) = p.list.first() {
+                    let error = first.error_ms();
+                    self.update(|s| s.speaker_ms = Some(error));
+                }
             }
             if self.status().pairing != Pairing::Joined || MUSIC_STOPPED.load(Ordering::Acquire) {
                 *player = None;
@@ -1430,6 +1464,42 @@ fn best_address(addresses: &[std::net::Ipv4Addr]) -> Option<std::net::Ipv4Addr> 
         .filter(|ip| !ip.is_loopback() && !ip.is_link_local())
         .min_by_key(|ip| rank(ip))
         .copied()
+}
+
+/// The speakers a node plays to: one player each, all fed the same music
+/// (each keeps in step with Main's clock on its own, whatever its device's
+/// own clock does).
+struct Players {
+    rate: u32,
+    /// The devices asked for (None for the system default), first speaker
+    /// first; what's compared to see if they changed.
+    wanted: Vec<Option<String>>,
+    /// The ones that opened, with their place in `wanted`.
+    list: Vec<(usize, djinn_engine::NodePlayer)>,
+}
+
+/// The devices the settings ask for: the first speaker, then any others.
+fn devices_of(audio: Option<&crate::nodes::AudioSettings>) -> Vec<Option<String>> {
+    match audio {
+        Some(a) => std::iter::once(a.device.clone())
+            .chain(a.outputs.iter().map(|o| o.device.clone()))
+            .collect(),
+        None => vec![None],
+    }
+}
+
+/// The settings for speaker `index` (0 is the first): the node's shared
+/// equalizer and mode, with that speaker's own delay and trim.
+fn output_settings(
+    audio: Option<&crate::nodes::AudioSettings>,
+    index: usize,
+) -> djinn_engine::NodeSettings {
+    let mut settings = node_settings(audio);
+    if let Some(output) = audio.and_then(|a| index.checked_sub(1).and_then(|i| a.outputs.get(i))) {
+        settings.delay_ms = output.delay_ms.clamp(0, 2000) as u32;
+        settings.trim = output.trim.clamp(0.0, 1.0) as f32;
+    }
+    settings
 }
 
 /// The player's settings from Main's.
