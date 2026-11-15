@@ -150,6 +150,17 @@ pub struct Status {
     /// Main DJINNs heard on the network letting nodes join, while this node
     /// hasn't got one. Other nodes don't announce this.
     pub mains: Vec<FoundMain>,
+    /// Main's rooms, for the tray icon's Room menu.
+    pub rooms: Vec<RoomChoice>,
+    /// Stopped from the tray icon: plays nothing until it's unticked.
+    pub stopped: bool,
+}
+
+/// A room on Main this node can be moved to.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RoomChoice {
+    pub id: i64,
+    pub name: String,
 }
 
 /// A main DJINN heard on the network.
@@ -240,6 +251,8 @@ impl Node {
                 screen: None,
                 visuals: None,
                 mains: Vec::new(),
+                rooms: Vec::new(),
+                stopped: false,
             })),
             wake: Arc::new(Notify::new()),
             offset: Arc::new(AtomicI64::new(0)),
@@ -535,7 +548,24 @@ impl Node {
             s.audio_room = answer["audio_room"].as_i64();
             s.screen = answer["screen"].as_str().map(str::to_owned);
             s.visuals = serde_json::from_value(answer["visuals"].clone()).ok();
+            s.rooms = serde_json::from_value(answer["rooms"].clone()).unwrap_or_default();
         });
+        if let Ok(mut page) = MAIN_PAGE.lock() {
+            *page = self
+                .status()
+                .main
+                .filter(|_| joined)
+                .map(|m| browser_page(&m));
+        }
+        if let Some(menu) = ROOM_MENU.get() {
+            let status = self.status();
+            let rooms = status
+                .rooms
+                .iter()
+                .map(|r| (r.id, r.name.clone()))
+                .collect();
+            menu.set(rooms, status.room_id);
+        }
         if let Ok(upcoming) =
             serde_json::from_value::<Vec<crate::nodes::Upcoming>>(answer["upcoming"].clone())
         {
@@ -694,7 +724,8 @@ impl Node {
             format!("can't put it in place: {e}")
         })?;
         tracing::info!(version = %update.version, "updated from Main; starting again");
-        crate::update::restart(&exe).map_err(|e| format!("can't start again: {e}"))
+        start_again();
+        Ok(())
     }
 }
 
@@ -796,6 +827,22 @@ impl Node {
                 tokio::time::sleep(Duration::from_secs(2)).await;
                 continue;
             };
+            if MUSIC_STOPPED.load(Ordering::Acquire) {
+                // Stopped from the tray: nothing plays, Main's or cached.
+                player = None;
+                offline = None;
+                lost_since = None;
+                self.update(|s| {
+                    s.playing = false;
+                    s.offline = false;
+                    s.stopped = true;
+                });
+                tokio::time::sleep(Duration::from_millis(500)).await;
+                continue;
+            }
+            if self.status().stopped {
+                self.update(|s| s.stopped = false);
+            }
             if offline.is_some() || self.status().offline {
                 // Back to Main's music as soon as it answers.
                 if !self.main_answers(&main, &pin).await {
@@ -1018,7 +1065,7 @@ impl Node {
                 let error = p.error_ms();
                 self.update(|s| s.speaker_ms = Some(error));
             }
-            if self.status().pairing != Pairing::Joined {
+            if self.status().pairing != Pairing::Joined || MUSIC_STOPPED.load(Ordering::Acquire) {
                 *player = None;
                 break;
             }
@@ -1505,6 +1552,8 @@ pub fn router(node: Node) -> Router {
         // joins, then Main's TV page for its room.
         .route("/screen", get(|| async { Redirect::to("/node?screen=1") }))
         .route("/api/node/status", get(status))
+        .route("/api/node/join", get(join_code))
+        .route("/api/node/join/qr.svg", get(join_qr))
         .route("/api/node/connect", post(connect))
         .route("/api/node/ask-again", post(ask_again))
         .route("/api/node/audio", get(get_audio).put(put_audio))
@@ -1787,14 +1836,11 @@ async fn restart(
     headers: axum::http::HeaderMap,
 ) -> ApiResult<StatusCode> {
     must_manage(&node, &headers)?;
-    let exe = std::env::current_exe().map_err(anyhow::Error::from)?;
     tracing::info!("restarting, as asked on the node's page");
     tokio::spawn(async move {
         // Let the answer go out first.
         tokio::time::sleep(Duration::from_millis(300)).await;
-        if let Err(e) = crate::update::restart(&exe) {
-            tracing::warn!(error = %e, "couldn't restart");
-        }
+        start_again();
     });
     Ok(StatusCode::ACCEPTED)
 }
@@ -1841,12 +1887,152 @@ async fn ask_again(State(node): State<Node>) -> ApiResult<Json<Status>> {
     Ok(Json(node.status()))
 }
 
-/// Runs this box as a node until asked to stop.
+/// "Stop" ticked in the tray icon.
+static MUSIC_STOPPED: AtomicBool = AtomicBool::new(false);
+/// The tray icon's Room menu, kept current from each check-in.
+static ROOM_MENU: std::sync::OnceLock<djinn_platform::tray::RoomMenu> = std::sync::OnceLock::new();
+/// Rooms picked in the tray icon, for `serve`'s task to tell Main.
+static ROOM_PICKS: std::sync::OnceLock<tokio::sync::mpsc::UnboundedSender<i64>> =
+    std::sync::OnceLock::new();
+
+/// The main DJINN's page for a browser, once joined.
+static MAIN_PAGE: Mutex<Option<String>> = Mutex::new(None);
+
+/// Where the tray icon's "Open main DJINN" goes: Main's address over plain
+/// HTTP (its port answers both), since a browser would balk at the
+/// certificate this node pins.
+pub fn main_page() -> Option<String> {
+    MAIN_PAGE.lock().ok()?.clone()
+}
+
+fn browser_page(main: &str) -> String {
+    match main.strip_prefix("https://") {
+        Some(rest) => format!("http://{rest}"),
+        None => main.to_owned(),
+    }
+}
+
+/// Stops (or plays again) the music on this node, from the tray icon.
+pub fn stop_music(stop: bool) {
+    tracing::info!(stop, "music on this node stopped or started from the tray");
+    MUSIC_STOPPED.store(stop, Ordering::Release);
+}
+
+/// Moves this node to `room` on Main, from the tray icon.
+pub fn pick_room(room: i64) {
+    if let Some(picks) = ROOM_PICKS.get() {
+        let _ = picks.send(room);
+    }
+}
+
+/// Keeps the tray icon's Room menu current.
+pub fn show_rooms_in(menu: djinn_platform::tray::RoomMenu) {
+    let _ = ROOM_MENU.set(menu);
+}
+
+impl Node {
+    /// Tells Main to move this node to `room`, then checks in at once.
+    async fn move_to_room(&self, room: i64) -> anyhow::Result<()> {
+        let (main, pin) = self
+            .joined_main()
+            .await
+            .ok_or_else(|| anyhow::anyhow!("not joined to a main DJINN"))?;
+        let (id, secret) = self.identity().await?;
+        let client = pinned_client(Some(pin), Arc::new(Mutex::new(None)))?;
+        let response = client
+            .put(format!("{main}/api/nodes/me/room"))
+            .header("authorization", format!("Node {id}:{secret}"))
+            .json(&serde_json::json!({ "room_id": room }))
+            .send()
+            .await?;
+        anyhow::ensure!(
+            response.status().is_success(),
+            "Main said {}",
+            response.status()
+        );
+        self.wake.notify_one();
+        Ok(())
+    }
+
+    /// The link guests scan to join the party in this node's room, from Main.
+    async fn join_url(&self) -> anyhow::Result<String> {
+        let (main, pin) = self
+            .joined_main()
+            .await
+            .ok_or_else(|| anyhow::anyhow!("this node hasn't joined a main DJINN"))?;
+        let room = self.status().room_id.unwrap_or(djinn_store::MAIN_ROOM);
+        let client = pinned_client(Some(pin), Arc::new(Mutex::new(None)))?;
+        let answer: serde_json::Value = client
+            .get(format!("{main}/api/join?room={room}"))
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
+        answer["url"]
+            .as_str()
+            .map(str::to_owned)
+            .ok_or_else(|| anyhow::anyhow!("Main sent no join link"))
+    }
+}
+
+#[derive(Serialize)]
+struct JoinCode {
+    url: String,
+    room: Option<String>,
+}
+
+/// The party's join link for this node's room, and the room's name.
+async fn join_code(State(node): State<Node>) -> ApiResult<Json<JoinCode>> {
+    let url = node
+        .join_url()
+        .await
+        .map_err(|e| ApiError::new(StatusCode::BAD_GATEWAY, format!("{e:#}")))?;
+    let status = node.status();
+    let room = status
+        .rooms
+        .iter()
+        .find(|r| Some(r.id) == status.room_id)
+        .map(|r| r.name.clone());
+    Ok(Json(JoinCode { url, room }))
+}
+
+async fn join_qr(State(node): State<Node>) -> ApiResult<impl axum::response::IntoResponse> {
+    let url = node
+        .join_url()
+        .await
+        .map_err(|e| ApiError::new(StatusCode::BAD_GATEWAY, format!("{e:#}")))?;
+    Ok((
+        [(axum::http::header::CONTENT_TYPE, "image/svg+xml")],
+        crate::api::qr_svg(&url)?,
+    ))
+}
+
+/// Asks the node to stop, set by `serve`.
+static STOP: std::sync::OnceLock<Arc<tokio::sync::Notify>> = std::sync::OnceLock::new();
+/// Start the program again once stopped (after an update, or asked to).
+static RESTART: AtomicBool = AtomicBool::new(false);
+
+/// Stops the node and starts its program again. Shutting down first
+/// matters on Windows, where starting again only starts a second copy: the
+/// first has to let go of the port and the database for it.
+fn start_again() {
+    RESTART.store(true, Ordering::Release);
+    if let Some(stop) = STOP.get() {
+        stop.notify_one();
+    }
+}
+
+/// Runs this box as a node until `stop` notifies (the tray, Ctrl+C,
+/// SIGTERM) or it starts itself again.
 pub async fn serve(
     store: Store,
     db_path: &Path,
     listen: std::net::SocketAddr,
+    stop: Arc<tokio::sync::Notify>,
+    until: impl std::future::Future<Output = ()> + Send + 'static,
 ) -> anyhow::Result<()> {
+    let _ = STOP.set(Arc::clone(&stop));
     let cache_dir = db_path
         .parent()
         .map_or_else(|| PathBuf::from("node-cache"), |dir| dir.join("node-cache"));
@@ -1858,24 +2044,57 @@ pub async fn serve(
     tokio::spawn(node.clone().run_clock());
     tokio::spawn(node.clone().run_audio());
     tokio::spawn(node.clone().run_cache());
+    let (picks, mut picked) = tokio::sync::mpsc::unbounded_channel();
+    let _ = ROOM_PICKS.set(picks);
+    let mover = node.clone();
+    tokio::spawn(async move {
+        while let Some(room) = picked.recv().await {
+            match mover.move_to_room(room).await {
+                Ok(()) => tracing::info!(room, "moved to another room from the tray"),
+                Err(e) => tracing::warn!(error = %format!("{e:#}"), "couldn't change rooms"),
+            }
+        }
+    });
     let browsing = node.clone();
     std::thread::Builder::new()
         .name("djinn-find-mains".to_owned())
         .spawn(move || browsing.find_mains())?;
-    let listener = tokio::net::TcpListener::bind(listen).await?;
+    let listener = crate::bind(listen).await?;
     tracing::info!(%listen, "running as a node; its page is at /node");
     axum::serve(listener, router(node))
-        .with_graceful_shutdown(async {
-            let _ = tokio::signal::ctrl_c().await;
-        })
+        .with_graceful_shutdown(until)
         .await?;
-    store.close().await;
+    tracing::info!("closing the database");
+    if tokio::time::timeout(Duration::from_secs(5), store.close())
+        .await
+        .is_err()
+    {
+        tracing::warn!("the database was still busy; closing anyway");
+    }
+    tracing::info!("shut down");
     Ok(())
+}
+
+/// Whether the node stopped to start again.
+pub fn restart_requested() -> bool {
+    RESTART.load(Ordering::Acquire)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn main_page_opens_over_plain_http() {
+        assert_eq!(
+            browser_page("https://192.168.1.10:8066"),
+            "http://192.168.1.10:8066"
+        );
+        assert_eq!(
+            browser_page("http://djinn.local:8066"),
+            "http://djinn.local:8066"
+        );
+    }
     use crate::state::AppState;
 
     #[test]

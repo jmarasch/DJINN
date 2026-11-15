@@ -38,6 +38,7 @@ pub fn router() -> Router<AppState> {
         .route("/nodes/me", get(me))
         .route("/nodes/me/audio", put(put_my_audio))
         .route("/nodes/me/devices", post(put_my_devices))
+        .route("/nodes/me/room", put(put_my_room))
         .route("/nodes/song/{id}", get(song))
         .route("/nodes/{id}/audio", put(put_audio))
         .route("/nodes/{id}/screen", get(screen_of))
@@ -400,11 +401,21 @@ async fn upcoming(state: &AppState, room: i64, limit: usize) -> ApiResult<Vec<Up
         .collect())
 }
 
+/// A room a node's tray icon offers.
+#[derive(Serialize)]
+struct RoomChoice {
+    id: i64,
+    name: String,
+}
+
 #[derive(Serialize)]
 struct MeAnswer {
     status: String,
     name: String,
     room_id: i64,
+    /// Every room, for the node's tray icon to switch between (only once
+    /// accepted).
+    rooms: Vec<RoomChoice>,
     server_name: String,
     audio: AudioSettings,
     /// Songs to cache, in play order (only once accepted).
@@ -585,9 +596,24 @@ async fn me(
     } else {
         Vec::new()
     };
+    let rooms = if node.status == "approved" {
+        state
+            .store
+            .rooms()
+            .await?
+            .into_iter()
+            .map(|r| RoomChoice {
+                id: r.id,
+                name: r.name,
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
     Ok(Json(MeAnswer {
         audio,
         upcoming,
+        rooms,
         audio_room: state.rooms.audio_leader(node.room_id),
         screen: screen_url(&state, &node),
         update: crate::node_builds::offer(&state, &node, &running),
@@ -845,6 +871,27 @@ async fn put_audio(
         return Err(ApiError::not_found());
     }
     save_audio(&state, id, &body).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+struct MyRoom {
+    room_id: i64,
+}
+
+/// A room picked from the node's tray icon, by someone at the node.
+async fn put_my_room(
+    State(state): State<AppState>,
+    NodeAuth(node): NodeAuth,
+    Json(body): Json<MyRoom>,
+) -> ApiResult<StatusCode> {
+    if node.status != "approved" {
+        return Err(ApiError::forbidden());
+    }
+    if !state.store.set_node_room(node.id, body.room_id).await? {
+        return Err(ApiError::bad_request("there's no such room"));
+    }
+    tracing::info!(node = %node.name, room = body.room_id, "node moved to another room from its tray");
     Ok(StatusCode::NO_CONTENT)
 }
 

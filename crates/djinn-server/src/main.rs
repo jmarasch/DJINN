@@ -212,7 +212,28 @@ async fn run() -> anyhow::Result<()> {
                 ),
             );
         }
-        return node_mode::serve(store, &config.database.path, config.server.listen).await;
+        let stop = std::sync::Arc::new(Notify::new());
+        let tray = if config.server.tray && !cli.no_tray {
+            desktop::start_node_tray(config.server.listen, std::sync::Arc::clone(&stop))
+        } else {
+            None
+        };
+        let until = shutdown_signal(std::sync::Arc::clone(&stop));
+        node_mode::serve(
+            store,
+            &config.database.path,
+            config.server.listen,
+            stop,
+            until,
+        )
+        .await?;
+        drop(tray);
+        if node_mode::restart_requested() {
+            let exe = std::env::current_exe().context("finding this program")?;
+            tracing::info!("starting again");
+            update::restart(&exe).context("starting again failed")?;
+        }
+        return Ok(());
     }
     tokio::spawn(async {
         let mut hourly = tokio::time::interval(std::time::Duration::from_secs(60 * 60));
@@ -555,7 +576,7 @@ pub fn write_banner(path: &std::path::Path, text: &str) {
 
 /// Binds the listen address. Right after an update restart the old process
 /// may still hold it for a moment, so keep trying for a few seconds.
-async fn bind(addr: std::net::SocketAddr) -> std::io::Result<tokio::net::TcpListener> {
+pub(crate) async fn bind(addr: std::net::SocketAddr) -> std::io::Result<tokio::net::TcpListener> {
     let restarted = std::env::var_os(update::RESTARTED).is_some();
     let mut tries = 0;
     loop {

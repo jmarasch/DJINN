@@ -1,5 +1,6 @@
 //! System tray icon for desktop installs: click to open DJINN, right-click
-//! for the join code, the TV page, and shutdown.
+//! for the join code, the TV page, and shutdown. A node's menu has its
+//! status page, its screen, Stop, its room and the room's join code.
 //!
 //! Linux uses the StatusNotifierItem D-Bus protocol (KDE, and GNOME with
 //! the AppIndicator extension); Windows uses the native notification area.
@@ -13,16 +14,22 @@ use std::sync::mpsc;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
+use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
 use tray_icon::{Icon, MouseButton, TrayIcon, TrayIconBuilder, TrayIconEvent};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum TrayAction {
-    /// Left click or "Open DJINN".
+    /// Left click, "Open DJINN" (a node's "Node status").
     Open,
     ShowJoinCode,
-    /// The full-screen now-playing page, for a TV.
+    /// The full-screen now-playing page, for a TV (a node's "Open DJINN").
     ShowTv,
+    /// A node's "Stop" tick box: stop (`true`) or play again its music.
+    StopMusic(bool),
+    /// A node's room picked from the Room menu.
+    PickRoom(i64),
+    /// A node's "Open main DJINN": the main DJINN's own page.
+    OpenMain,
     Quit,
     /// Windows is signing out or shutting down, or an installer asked
     /// DJINN to close. Shut down quickly.
@@ -39,11 +46,44 @@ const OPEN: &str = "open";
 const JOIN: &str = "join";
 const TV: &str = "tv";
 const QUIT: &str = "quit";
+const STOP: &str = "stop";
+const ROOM: &str = "room:";
+const MAIN: &str = "main";
+
+/// Which menu the icon has.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum TrayMenu {
+    /// The jukebox: open, join code, TV page, shut down.
+    Main,
+    /// A node: its status page, its screen, stop its music, its room, the
+    /// room's join code, shut down.
+    Node,
+}
+
+/// What the tray's thread is told.
+enum Update {
+    Quit,
+    /// A menu item was picked (its id).
+    Picked(String),
+    /// The rooms to offer and the one the node is in.
+    Rooms(Vec<(i64, String)>, Option<i64>),
+}
 
 /// The running tray icon. Dropping it removes the icon.
 pub struct Tray {
-    quit: mpsc::Sender<()>,
+    updates: mpsc::Sender<Update>,
     thread: Option<JoinHandle<()>>,
+}
+
+/// Keeps a node's Room menu current, from any thread.
+#[derive(Clone)]
+pub struct RoomMenu(mpsc::Sender<Update>);
+
+impl RoomMenu {
+    /// Offers `rooms` (id, name), ticking `current`.
+    pub fn set(&self, rooms: Vec<(i64, String)>, current: Option<i64>) {
+        let _ = self.0.send(Update::Rooms(rooms, current));
+    }
 }
 
 impl Tray {
@@ -51,15 +91,17 @@ impl Tray {
     /// not block for long.
     pub fn spawn(
         tooltip: String,
+        kind: TrayMenu,
         on_action: impl Fn(TrayAction) + Send + Sync + 'static,
     ) -> Result<Self, TrayError> {
-        let (quit, quit_rx) = mpsc::channel();
+        let (updates, updates_rx) = mpsc::channel();
         let (ready_tx, ready_rx) = mpsc::channel();
+        let picked = updates.clone();
         let thread = std::thread::Builder::new()
             .name("djinn-tray".to_owned())
             .spawn(move || {
-                let tray = match build(&tooltip) {
-                    Ok(tray) => tray,
+                let (tray, mut menu) = match build(&tooltip, kind) {
+                    Ok(built) => built,
                     Err(e) => {
                         let _ = ready_tx.send(Err(e));
                         return;
@@ -71,21 +113,27 @@ impl Tray {
                     let on_action = std::sync::Arc::clone(&on_action);
                     session::watch(move || on_action(TrayAction::SessionEnding));
                 }
-                install_handlers(on_action);
+                install_handlers(std::sync::Arc::clone(&on_action), picked);
                 let _ = ready_tx.send(Ok(()));
-                run_until_quit(&quit_rx);
+                run_until_quit(&updates_rx, &mut menu, &*on_action);
                 drop(tray);
+                drop(menu);
             })
             .map_err(|e| TrayError::Unavailable(e.to_string()))?;
 
         match ready_rx.recv() {
             Ok(Ok(())) => Ok(Self {
-                quit,
+                updates,
                 thread: Some(thread),
             }),
             Ok(Err(e)) => Err(e),
             Err(_) => Err(TrayError::Unavailable("tray thread exited".to_owned())),
         }
+    }
+
+    /// For keeping a node's Room menu current.
+    pub fn room_menu(&self) -> RoomMenu {
+        RoomMenu(self.updates.clone())
     }
 }
 
@@ -95,24 +143,102 @@ impl Drop for Tray {
     fn drop(&mut self) {
         #[cfg(windows)]
         session::DONE.store(true, std::sync::atomic::Ordering::Release);
-        let _ = self.quit.send(());
+        let _ = self.updates.send(Update::Quit);
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
     }
 }
 
-fn build(tooltip: &str) -> Result<TrayIcon, TrayError> {
+/// The menu items whose state changes, kept on the tray's thread (they
+/// can't leave it).
+struct LiveMenu {
+    stop: CheckMenuItem,
+    stopped: bool,
+    rooms: Submenu,
+    /// What `rooms` lists, and its items.
+    offered: Vec<(i64, String)>,
+    room_items: Vec<(i64, CheckMenuItem)>,
+}
+
+impl LiveMenu {
+    fn tick_room(&self, current: Option<i64>) {
+        for (id, item) in &self.room_items {
+            item.set_checked(Some(*id) == current);
+        }
+    }
+
+    fn set_rooms(&mut self, rooms: Vec<(i64, String)>, current: Option<i64>) {
+        if rooms != self.offered {
+            for (_, item) in self.room_items.drain(..) {
+                let _ = self.rooms.remove(&item);
+            }
+            for (id, name) in &rooms {
+                let item = CheckMenuItem::with_id(format!("{ROOM}{id}"), name, true, false, None);
+                if self.rooms.append(&item).is_ok() {
+                    self.room_items.push((*id, item));
+                }
+            }
+            self.rooms.set_enabled(!rooms.is_empty());
+            self.offered = rooms;
+        }
+        self.tick_room(current);
+    }
+
+    /// What picking `id` means, setting the tick marks to match (the menu
+    /// may or may not have flipped them itself).
+    fn picked(&mut self, id: &str) -> Option<TrayAction> {
+        Some(match id {
+            OPEN => TrayAction::Open,
+            JOIN => TrayAction::ShowJoinCode,
+            TV => TrayAction::ShowTv,
+            QUIT => TrayAction::Quit,
+            MAIN => TrayAction::OpenMain,
+            STOP => {
+                self.stopped = !self.stopped;
+                self.stop.set_checked(self.stopped);
+                TrayAction::StopMusic(self.stopped)
+            }
+            _ => {
+                let room = id.strip_prefix(ROOM)?.parse().ok()?;
+                self.tick_room(Some(room));
+                TrayAction::PickRoom(room)
+            }
+        })
+    }
+}
+
+fn build(tooltip: &str, kind: TrayMenu) -> Result<(TrayIcon, LiveMenu), TrayError> {
     let unavailable = |e: &dyn std::fmt::Display| TrayError::Unavailable(e.to_string());
     let menu = Menu::new();
-    menu.append_items(&[
-        &MenuItem::with_id(OPEN, "Open DJINN", true, None),
-        &MenuItem::with_id(JOIN, "Show join QR code", true, None),
-        &MenuItem::with_id(TV, "Open TV page", true, None),
-        &PredefinedMenuItem::separator(),
-        &MenuItem::with_id(QUIT, "Shut down DJINN", true, None),
-    ])
-    .map_err(|e| unavailable(&e))?;
+    let live = LiveMenu {
+        stop: CheckMenuItem::with_id(STOP, "Stop", true, false, None),
+        stopped: false,
+        rooms: Submenu::new("Room", false),
+        offered: Vec::new(),
+        room_items: Vec::new(),
+    };
+    let added = match kind {
+        TrayMenu::Main => menu.append_items(&[
+            &MenuItem::with_id(OPEN, "Open DJINN", true, None),
+            &MenuItem::with_id(JOIN, "Show join QR code", true, None),
+            &MenuItem::with_id(TV, "Open TV page", true, None),
+            &PredefinedMenuItem::separator(),
+            &MenuItem::with_id(QUIT, "Shut down DJINN", true, None),
+        ]),
+        TrayMenu::Node => menu.append_items(&[
+            &MenuItem::with_id(OPEN, "Node status", true, None),
+            &MenuItem::with_id(TV, "Node TV page", true, None),
+            &MenuItem::with_id(MAIN, "Open main DJINN", true, None),
+            &PredefinedMenuItem::separator(),
+            &live.stop,
+            &live.rooms,
+            &MenuItem::with_id(JOIN, "Show code", true, None),
+            &PredefinedMenuItem::separator(),
+            &MenuItem::with_id(QUIT, "Shut down", true, None),
+        ]),
+    };
+    added.map_err(|e| unavailable(&e))?;
     let icon =
         Icon::from_rgba(icon_rgba(ICON_SIZE), ICON_SIZE, ICON_SIZE).map_err(|e| unavailable(&e))?;
     TrayIconBuilder::new()
@@ -122,11 +248,16 @@ fn build(tooltip: &str) -> Result<TrayIcon, TrayError> {
         .with_title("DJINN")
         .with_icon(icon)
         .build()
+        .map(|tray| (tray, live))
         .map_err(|e| unavailable(&e))
 }
 
-fn install_handlers(on_action: std::sync::Arc<impl Fn(TrayAction) + Send + Sync + 'static>) {
-    let on_click = std::sync::Arc::clone(&on_action);
+/// Clicks on the icon go straight to `on_action`; menu picks go to the
+/// tray's thread, which owns the items they may change.
+fn install_handlers(
+    on_action: std::sync::Arc<impl Fn(TrayAction) + Send + Sync + 'static>,
+    picked: mpsc::Sender<Update>,
+) {
     TrayIconEvent::set_event_handler(Some(move |event| {
         if let TrayIconEvent::Click {
             button: MouseButton::Left,
@@ -134,30 +265,33 @@ fn install_handlers(on_action: std::sync::Arc<impl Fn(TrayAction) + Send + Sync 
             ..
         } = event
         {
-            on_click(TrayAction::Open);
+            on_action(TrayAction::Open);
         }
     }));
     MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
-        let action = match event.id().as_ref() {
-            OPEN => TrayAction::Open,
-            JOIN => TrayAction::ShowJoinCode,
-            TV => TrayAction::ShowTv,
-            QUIT => TrayAction::Quit,
-            _ => return,
-        };
-        on_action(action);
+        let _ = picked.send(Update::Picked(event.id().as_ref().to_owned()));
     }));
 }
 
-/// Waits for the quit signal. On Windows this thread must also pump window
-/// messages, or the icon never sees clicks.
-fn run_until_quit(quit: &mpsc::Receiver<()>) {
+/// Handles updates until told to quit. On Windows this thread must also
+/// pump window messages, or the icon never sees clicks.
+fn run_until_quit(
+    updates: &mpsc::Receiver<Update>,
+    menu: &mut LiveMenu,
+    on_action: &dyn Fn(TrayAction),
+) {
     loop {
         #[cfg(windows)]
         pump_messages();
-        match quit.recv_timeout(Duration::from_millis(30)) {
+        match updates.recv_timeout(Duration::from_millis(30)) {
             Err(mpsc::RecvTimeoutError::Timeout) => {}
-            _ => return,
+            Ok(Update::Picked(id)) => {
+                if let Some(action) = menu.picked(&id) {
+                    on_action(action);
+                }
+            }
+            Ok(Update::Rooms(rooms, current)) => menu.set_rooms(rooms, current),
+            Ok(Update::Quit) | Err(mpsc::RecvTimeoutError::Disconnected) => return,
         }
     }
 }

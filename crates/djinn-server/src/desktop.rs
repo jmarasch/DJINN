@@ -3,7 +3,7 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use djinn_platform::tray::{Tray, TrayAction};
+use djinn_platform::tray::{Tray, TrayAction, TrayMenu};
 
 use crate::state::AppState;
 
@@ -20,7 +20,7 @@ pub fn start_tray(state: &AppState, listen: SocketAddr) -> Option<Tray> {
     let session_ending = Arc::clone(&state.session_ending);
     let tooltip = format!("DJINN jukebox\n{}", state.join_url.get());
 
-    let result = Tray::spawn(tooltip, move |action| match action {
+    let result = Tray::spawn(tooltip, TrayMenu::Main, move |action| match action {
         TrayAction::Open => {
             // Until the admin exists, the useful page is setup.
             let token = bootstrap.lock().ok().and_then(|t| t.clone());
@@ -32,6 +32,8 @@ pub fn start_tray(state: &AppState, listen: SocketAddr) -> Option<Tray> {
         }
         TrayAction::ShowJoinCode => open_browser(&format!("{local}/join")),
         TrayAction::ShowTv => open_browser(&format!("{local}/tv")),
+        // Only a node's menu has these.
+        TrayAction::StopMusic(_) | TrayAction::PickRoom(_) | TrayAction::OpenMain => {}
         TrayAction::Quit => {
             tracing::info!("shutdown requested from the tray");
             shutdown.notify_one();
@@ -45,6 +47,48 @@ pub fn start_tray(state: &AppState, listen: SocketAddr) -> Option<Tray> {
     match result {
         Ok(tray) => {
             tracing::info!("tray icon ready");
+            Some(tray)
+        }
+        Err(e) => {
+            tracing::info!(error = %e, "running without a tray icon");
+            None
+        }
+    }
+}
+
+/// The tray icon for a node: opens the node's page, or shuts it down by
+/// notifying `shutdown`. Windows asking DJINN to close does the same.
+pub fn start_node_tray(listen: SocketAddr, shutdown: Arc<tokio::sync::Notify>) -> Option<Tray> {
+    if !has_desktop() {
+        tracing::info!("no desktop session, running without a tray icon");
+        return None;
+    }
+    let page = format!("{}/node", local_url(listen));
+    let tooltip = "DJINN node".to_owned();
+    let result = Tray::spawn(tooltip, TrayMenu::Node, move |action| match action {
+        TrayAction::Open => open_browser(&page),
+        TrayAction::ShowTv => open_browser(&format!("{page}?screen=1")),
+        TrayAction::ShowJoinCode => open_browser(&format!("{page}?code=1")),
+        TrayAction::StopMusic(stop) => crate::node_mode::stop_music(stop),
+        TrayAction::PickRoom(room) => crate::node_mode::pick_room(room),
+        // Before joining there's no main DJINN yet; the status page says so.
+        TrayAction::OpenMain => match crate::node_mode::main_page() {
+            Some(main) => open_browser(&main),
+            None => open_browser(&page),
+        },
+        TrayAction::Quit => {
+            tracing::info!("shutdown requested from the tray");
+            shutdown.notify_one();
+        }
+        TrayAction::SessionEnding => {
+            tracing::info!("Windows asked DJINN to close (sign-out, shutdown, or an installer)");
+            shutdown.notify_one();
+        }
+    });
+    match result {
+        Ok(tray) => {
+            tracing::info!("tray icon ready");
+            crate::node_mode::show_rooms_in(tray.room_menu());
             Some(tray)
         }
         Err(e) => {

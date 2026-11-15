@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026.11.14 (November 14, 2026)
+
+### Nodes on Windows
+
+- **A node's page stays up on Windows.** Started from the Start menu, a node shut its own page down at once, so Admin > Nodes > Manage couldn't open it.
+- **Restarting and updating a node on Windows works.** The old copy now lets go before the new one starts.
+- **A tray icon for nodes, on Windows and Linux:** Node status, Node TV page, Open main DJINN, Stop (silences the music on that computer until unticked), Room (moves the node to another room), Show code (the QR code for joining the party in the node's room) and Shut down.
+- **Main never offers a node a release older than its database.** A node on a newer test build keeps what it has.
+
 ## 2026.11.12 (November 12, 2026)
 
 ### New look
