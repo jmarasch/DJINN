@@ -6,6 +6,7 @@
   interface Diagnostics {
     version: string
     build: string
+    label: string
     platform: string
     uptime_secs: number
     addresses: string[]
@@ -102,7 +103,8 @@
   {#if facts}
     <dl>
       <dt>Version</dt>
-      <dd>{facts.version} <span class="muted small">build {facts.build}</span></dd>
+      <dd>{facts.version} <span class="muted small">build {facts.build}</span>{#if facts.label}
+          <b>{facts.label}</b>{/if}</dd>
       <dt>System</dt>
       <dd>{facts.platform}, {facts.threads} threads</dd>
       <dt>Running for</dt>

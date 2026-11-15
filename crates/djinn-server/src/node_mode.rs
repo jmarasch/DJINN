@@ -475,6 +475,7 @@ impl Node {
                         env!("DJINN_RELEASE_VERSION"),
                     )
                     .header(crate::node_builds::BUILD_HEADER, own_build().await)
+                    .header(crate::nodes::NODE_LABEL_HEADER, env!("DJINN_BUILD_LABEL"))
                     .header(
                         crate::node_builds::SCHEMA_HEADER,
                         djinn_store::schema_version().to_string(),
@@ -1773,6 +1774,8 @@ struct Diagnostics {
     version: &'static str,
     /// The start of this program's SHA-256 (test builds share a version).
     build: String,
+    /// "test <commit> ..." for a test build, empty for releases.
+    label: &'static str,
     platform: String,
     uptime_secs: u64,
     addresses: Vec<String>,
@@ -1825,6 +1828,7 @@ async fn diagnostics(
     Ok(Json(Diagnostics {
         version: env!("CARGO_PKG_VERSION"),
         build: build.chars().take(12).collect(),
+        label: env!("DJINN_BUILD_LABEL"),
         platform: format!("{} {}", std::env::consts::OS, std::env::consts::ARCH),
         uptime_secs: STARTED.get().map_or(0, |s| s.elapsed().as_secs()),
         addresses,
@@ -2127,9 +2131,24 @@ pub async fn serve(
         .spawn(move || browsing.find_mains())?;
     let listener = crate::bind(listen).await?;
     tracing::info!(%listen, "running as a node; its page is at /node");
-    axum::serve(listener, router(node))
-        .with_graceful_shutdown(until)
-        .await?;
+    // A page left open on the node (its live updates never end) would keep
+    // a graceful shutdown waiting for ever, and an old copy running beside
+    // the new one after an update; so open connections get a few seconds.
+    let ending = Arc::new(Notify::new());
+    let signal = Arc::clone(&ending);
+    let serving = std::future::IntoFuture::into_future(
+        axum::serve(listener, router(node)).with_graceful_shutdown(async move {
+            until.await;
+            signal.notify_one();
+        }),
+    );
+    tokio::select! {
+        served = serving => served?,
+        () = async {
+            ending.notified().await;
+            tokio::time::sleep(Duration::from_secs(3)).await;
+        } => tracing::info!("open pages didn't close in time; closing anyway"),
+    }
     tracing::info!("closing the database");
     if tokio::time::timeout(Duration::from_secs(5), store.close())
         .await

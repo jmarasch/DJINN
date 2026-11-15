@@ -8,6 +8,10 @@ pre-build = [
     "apt-get update && apt-get install -y --no-install-recommends libasound2-dev:$CROSS_DEB_ARCH",
 ]
 
+# A test build's label reaches the build inside the container.
+[build.env]
+passthrough = ["DJINN_BUILD_LABEL"]
+
 # The ARMv6 build needs Debian's multiarch folder for pkg-config. Set these
 # when building (cc-rs already compiles bundled C code for ARMv6 on this
 # target; tract's ARMv7 NEON kernels are only used where the CPU has them,

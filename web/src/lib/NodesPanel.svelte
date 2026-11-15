@@ -244,7 +244,7 @@
               ? ` · ${node.address}`
               : ''}{node.platform ? ` · ${systemName(node.platform)}` : ''}{node.version
               ? ` · ${node.version}`
-              : ''}
+              : ''}{#if node.build_label}{' · '}<b>{node.build_label}</b>{/if}
           </span>
         </div>
         <button

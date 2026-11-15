@@ -161,6 +161,9 @@ struct About {
     version: &'static str,
     commit: &'static str,
     commit_date: &'static str,
+    /// A test build says so, with its commit, edits and time; empty for
+    /// releases and nightlies.
+    build_label: &'static str,
     repository: String,
     contact: &'static str,
     check_updates: bool,
@@ -187,6 +190,7 @@ async fn about_info(state: &AppState) -> ApiResult<About> {
         version: env!("DJINN_RELEASE_VERSION"),
         commit: env!("DJINN_COMMIT"),
         commit_date: env!("DJINN_COMMIT_DATE"),
+        build_label: env!("DJINN_BUILD_LABEL"),
         repository: format!("https://github.com/{REPOSITORY}"),
         contact: CONTACT,
         check_updates: settings::flag(&state.store, CHECK_UPDATES, true).await?,

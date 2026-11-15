@@ -58,6 +58,13 @@ fn main() {
         "stable"
     };
     println!("cargo:rustc-env=DJINN_CHANNEL={channel}");
+    // A test build made on a developer's computer says so (the script that
+    // builds it sets this); releases and nightlies from GitHub have none.
+    println!("cargo:rerun-if-env-changed=DJINN_BUILD_LABEL");
+    println!(
+        "cargo:rustc-env=DJINN_BUILD_LABEL={}",
+        std::env::var("DJINN_BUILD_LABEL").unwrap_or_default()
+    );
 
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         let icon = "../../packaging/windows/djinn.ico";

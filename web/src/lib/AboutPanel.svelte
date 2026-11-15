@@ -21,6 +21,7 @@
   <section class="card">
     <img class="shiny" src="/images/logo.webp" alt="" />
     <h2>DJINN {about.version}</h2>
+    {#if about.build_label}<p><b>{about.build_label}</b></p>{/if}
     <p class="small muted">
       A party jukebox by New Terra Studios.{#if about.commit}{' '}Build {about.commit}{about.commit_date ? `, ${about.commit_date}` : ''}.{/if}
     </p>

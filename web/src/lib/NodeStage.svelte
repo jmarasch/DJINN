@@ -40,6 +40,9 @@
   /** The latest measurement, or null while the speaker isn't open. */
   let latest: SoundFrame | null = null
   let heardAt = 0
+  /** Main's page hasn't said a word yet: shown after a while, with the
+   * address, since a blocked or unreachable frame is only black. */
+  let unheard = $state(false)
 
   const settings = $derived(visuals ?? DEFAULT_VISUALS)
   const rotation = $derived(settings.styles.filter((s) => !tooMuch.includes(s)))
@@ -119,12 +122,16 @@
       if (e.source !== frame?.contentWindow || e.origin !== origin) return
       if (e.data?.djinn === 'screen-mode' && typeof e.data.mode === 'string') {
         mode = e.data.mode
+        unheard = false
         if (typeof e.data.song === 'number') song = e.data.song
         tell()
       }
     }
     window.addEventListener('message', onMessage)
     const timer = setInterval(tell, 500)
+    const waited = setTimeout(() => {
+      if (!mode) unheard = true
+    }, 10_000)
 
     let raf = 0
     const loop = (now: number) => {
@@ -152,6 +159,7 @@
       events.close()
       window.removeEventListener('message', onMessage)
       clearInterval(timer)
+      clearTimeout(waited)
       cancelAnimationFrame(raf)
       chip?.dispose()
     }
@@ -162,6 +170,12 @@
   <canvas bind:this={canvas} class:shown={mode === 'visual' && !onChip}></canvas>
   <canvas bind:this={glCanvas} class:shown={mode === 'visual' && onChip}></canvas>
   <iframe bind:this={frame} src={url} title="DJINN screen" allow="fullscreen" onload={tell}></iframe>
+  {#if unheard}
+    <p class="unheard">
+      Main's screen page isn't answering here. This box is asking for {url}. Open that address in this
+      computer's browser to see why (a firewall, or the browser asking to allow local network access).
+    </p>
+  {/if}
 </div>
 
 <style>
@@ -179,6 +193,20 @@
     width: 100%;
     height: 100%;
     border: 0;
+  }
+
+  .unheard {
+    position: absolute;
+    left: 1.5rem;
+    right: 1.5rem;
+    bottom: 1.5rem;
+    margin: 0;
+    padding: 0.8rem 1rem;
+    border-radius: 12px;
+    background: rgb(255 255 255 / 0.1);
+    color: #d9d3ec;
+    font-size: 1rem;
+    pointer-events: none;
   }
 
   canvas {

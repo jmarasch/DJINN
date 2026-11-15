@@ -251,6 +251,12 @@ async fn run() -> anyhow::Result<()> {
             until,
         )
         .await?;
+        // Whatever is slow to wind down (a worker, a speaker, the tray), this
+        // copy ends within seconds: a second copy must never run beside it.
+        std::thread::spawn(|| {
+            std::thread::sleep(std::time::Duration::from_secs(8));
+            std::process::exit(0);
+        });
         drop(tray);
         if node_mode::restart_requested() {
             let exe = std::env::current_exe().context("finding this program")?;

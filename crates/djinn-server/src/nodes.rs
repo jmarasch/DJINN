@@ -451,6 +451,30 @@ fn audio_visual(node: &Node) -> Option<crate::visuals::Visuals> {
 
 /// The header a node's check-in says its version in.
 pub const NODE_VERSION_HEADER: &str = "x-djinn-version";
+/// A test build's label (commit, edits, time); absent from releases.
+pub const NODE_LABEL_HEADER: &str = "x-djinn-label";
+
+/// What each node's program calls itself, from its last check-in (kept in
+/// memory: a node says it again every few seconds).
+static LABELS: std::sync::Mutex<Vec<(i64, String)>> = std::sync::Mutex::new(Vec::new());
+
+fn note_label(node: i64, label: &str) {
+    if let Ok(mut labels) = LABELS.lock() {
+        labels.retain(|(id, _)| *id != node);
+        if !label.is_empty() {
+            labels.push((node, label.to_owned()));
+        }
+    }
+}
+
+fn label_of(node: i64) -> Option<String> {
+    LABELS
+        .lock()
+        .ok()?
+        .iter()
+        .find(|(id, _)| *id == node)
+        .map(|(_, label)| label.clone())
+}
 
 /// The page on Main that a node's screen should show, or None for the
 /// node's own page. Pages opened this way check back (`screen_of`), so a
@@ -594,6 +618,14 @@ async fn me(
         .node_seen(node.id, address.as_deref(), version.as_deref())
         .await?;
     let running = crate::node_builds::Running::from_headers(&headers, node.version.as_deref());
+    note_label(
+        node.id,
+        &headers
+            .get(NODE_LABEL_HEADER)
+            .and_then(|v| v.to_str().ok())
+            .map(|v| v.chars().take(80).collect::<String>())
+            .unwrap_or_default(),
+    );
     let node = Node {
         version: version.or(node.version),
         ..node
@@ -656,6 +688,8 @@ struct ListedNode {
     /// The code the node's own screen shows, to compare.
     code: String,
     audio: AudioSettings,
+    /// "test <commit> ..." when the node runs a test build.
+    build_label: Option<String>,
     /// The speakers the node reported.
     speakers: Vec<serde_json::Value>,
     /// Its AI helper: what it reported, the model suggested and in use, and
@@ -689,6 +723,7 @@ async fn list(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json<Nod
         .map(|node| ListedNode {
             code: pairing_code(&node.node_id, &node.secret_hash),
             audio: AudioSettings::of(&node),
+            build_label: label_of(node.id),
             speakers: node
                 .devices
                 .as_deref()

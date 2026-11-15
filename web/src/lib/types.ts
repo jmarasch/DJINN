@@ -1159,6 +1159,8 @@ export interface About {
   version: string
   commit: string
   commit_date: string
+  /** A test build's label (commit, edits, time); empty for releases. */
+  build_label: string
   repository: string
   contact: string
   check_updates: boolean
@@ -1701,6 +1703,8 @@ export interface HouseNode {
   address: string | null
   version: string | null
   platform: string | null
+  /** "test <commit> ..." when the node runs a test build. */
+  build_label: string | null
   requested_at: number
   approved_at: number | null
   last_seen: number | null
