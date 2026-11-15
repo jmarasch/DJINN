@@ -66,7 +66,14 @@
     if (!res.ok) throw new Error((await res.json().catch(() => null))?.error ?? 'Could not save')
   }
 
-  const onScreen = new URLSearchParams(location.search).has('screen')
+  // Once joined, the node's page opens on its display (what its room or its
+  // own choice says): from its tray icon, its address, or the kiosk (which
+  // asks with ?screen=1). ?status=1 (the tray's Node status, and a manage
+  // link from the main DJINN) asks for the status and settings instead.
+  const startParams = new URLSearchParams(location.search)
+  const kiosk = startParams.has('screen')
+  const askedStatus = startParams.has('status') || startParams.has('manage') || startParams.has('back')
+  const onScreen = kiosk || (!askedStatus && !startParams.has('code'))
   /** The tray icon's Show code: the party's join QR for this node's room. */
   const showCode = new URLSearchParams(location.search).has('code')
   let join = $state<{ url: string; room: string | null } | null>(null)
@@ -94,6 +101,8 @@
     if (token || back) {
       params.delete('manage')
       params.delete('back')
+      // A reload stays on the status page.
+      params.set('status', '1')
       const rest = params.toString()
       history.replaceState(null, '', location.pathname + (rest ? `?${rest}` : ''))
     }
@@ -129,6 +138,8 @@
       // On the box's own screen (the kiosk opens /screen): Main's page for
       // it once joined, in a frame over this node's visualizer (`NodeStage`).
       stageUrl = onScreen && status?.pairing === 'joined' && status.screen ? status.screen : null
+      // A display set to Off is a blank screen on the kiosk; opened from the
+      // tray or the node's address, the status page is more use than black.
       if (!name && status) name = status.name
     } catch {
       unreachable = true
@@ -172,7 +183,7 @@
   const showForm = $derived(!!status && (status.pairing === 'setup' || editing))
 </script>
 
-{#if onScreen && status?.pairing === 'joined' && status.shows === 'off'}
+{#if kiosk && status?.pairing === 'joined' && status.shows === 'off'}
   <div class="blank"></div>
 {:else if stageUrl}
   {#key stageUrl}<NodeStage url={stageUrl} visuals={status?.visuals ?? null} />{/key}
@@ -316,6 +327,9 @@
           </p>
         {/if}
         {#if error}<p class="error">{error}</p>{/if}
+        {#if status.pairing === 'joined' && status.screen}
+          <p><a href="/node">Show the display</a></p>
+        {/if}
         {#if status.pairing === 'joined' && !managing}
           <p class="small muted">
             To change this node's settings, open it from the main DJINN: Admin &gt; Nodes &gt; Manage.

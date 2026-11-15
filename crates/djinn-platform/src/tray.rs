@@ -20,10 +20,12 @@ use tray_icon::{Icon, MouseButton, TrayIcon, TrayIconBuilder, TrayIconEvent};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum TrayAction {
-    /// Left click, "Open DJINN" (a node's "Node status").
+    /// Left click, "Open DJINN" (on a node, its display).
     Open,
+    /// A node's "Node status": its status and settings page.
+    Status,
     ShowJoinCode,
-    /// The full-screen now-playing page, for a TV (a node's "Open DJINN").
+    /// The full-screen now-playing page, for a TV (a node's "Show display").
     ShowTv,
     /// A node's "Stop" tick box: stop (`true`) or play again its music.
     StopMusic(bool),
@@ -47,6 +49,7 @@ pub enum TrayError {
 }
 
 const OPEN: &str = "open";
+const STATUS: &str = "status";
 const JOIN: &str = "join";
 const TV: &str = "tv";
 const QUIT: &str = "quit";
@@ -222,6 +225,7 @@ impl LiveMenu {
     fn picked(&mut self, id: &str) -> Option<TrayAction> {
         Some(match id {
             OPEN => TrayAction::Open,
+            STATUS => TrayAction::Status,
             JOIN => TrayAction::ShowJoinCode,
             TV => TrayAction::ShowTv,
             QUIT => TrayAction::Quit,
@@ -278,8 +282,8 @@ fn build(tooltip: &str, kind: TrayMenu) -> Result<(TrayIcon, LiveMenu), TrayErro
             &MenuItem::with_id(QUIT, "Shut down DJINN", true, None),
         ]),
         TrayMenu::Node => menu.append_items(&[
-            &MenuItem::with_id(OPEN, "Node status", true, None),
-            &MenuItem::with_id(TV, "Node TV page", true, None),
+            &MenuItem::with_id(TV, "Show display", true, None),
+            &MenuItem::with_id(STATUS, "Node status", true, None),
             &MenuItem::with_id(MAIN, "Open main DJINN", true, None),
             &PredefinedMenuItem::separator(),
             &live.stop,
