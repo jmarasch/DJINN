@@ -54,6 +54,10 @@
   const waiting = $derived(list?.nodes.filter((n) => n.status === 'pending') ?? [])
   const joined = $derived(list?.nodes.filter((n) => n.status === 'approved') ?? [])
 
+  /** Options first, then the nodes; opens on the nodes once there are some. */
+  let tab = $state<'options' | 'nodes' | null>(null)
+  const shown = $derived(tab ?? (list?.nodes.length ? 'nodes' : 'options'))
+
   async function setJoining(open: boolean) {
     try {
       await api.setNodeJoining(open)
@@ -166,6 +170,16 @@
   }
 </script>
 
+<div class="tabs" role="tablist">
+  <button role="tab" aria-selected={shown === 'options'} class:active={shown === 'options'} onclick={() => (tab = 'options')}>
+    Options
+  </button>
+  <button role="tab" aria-selected={shown === 'nodes'} class:active={shown === 'nodes'} onclick={() => (tab = 'nodes')}>
+    Nodes{waiting.length ? ` (${waiting.length} asking to join)` : joined.length ? ` (${joined.length})` : ''}
+  </button>
+</div>
+
+{#if shown === 'options'}
 <section class="card">
   <h2>Joining</h2>
   <p class="small muted">
@@ -188,9 +202,9 @@
     </p>
   {/if}
 </section>
-
+{:else}
 {#if waiting.length}
-  <section class="card">
+  <section class="card wide">
     <h3>Asking to join</h3>
     <p class="small muted">Check that the code matches the one on the node's screen before accepting.</p>
     {#each waiting as node (node.id)}
@@ -224,7 +238,7 @@
 {/if}
 
 {#if list}
-  <section class="card">
+  <section class="card wide">
     <h3>Joined</h3>
     {#if joined.length === 0}
       <p class="small muted">No nodes yet.</p>
@@ -340,8 +354,27 @@
     {/each}
   </section>
 {/if}
+{/if}
 
 <style>
+  /* The page lays its cards in columns; the tabs and the node lists take the full width. */
+  .tabs,
+  .wide {
+    grid-column: 1 / -1;
+  }
+
+  .tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+
+  .tabs button.active {
+    border-color: var(--accent);
+    box-shadow: 0 0 10px var(--glow);
+  }
+
   .screen {
     margin: 4px 0 12px;
   }
