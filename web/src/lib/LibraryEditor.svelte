@@ -5,6 +5,7 @@
   import EditorWorkspace from './EditorWorkspace.svelte'
   import LibraryCompare from './LibraryCompare.svelte'
   import LibraryFolders from './LibraryFolders.svelte'
+  import Tabs from './Tabs.svelte'
 
   /** A folder or search another page asked for. */
   const start = takeEditorJump()
@@ -12,17 +13,15 @@
   let view = $state<'editor' | 'folders' | 'compare'>('editor')
 </script>
 
-<div class="tabs" role="tablist">
-  <button role="tab" aria-selected={view === 'editor'} class:active={view === 'editor'} onclick={() => (view = 'editor')}>
-    Editor
-  </button>
-  <button role="tab" aria-selected={view === 'folders'} class:active={view === 'folders'} onclick={() => (view = 'folders')}>
-    Library folders
-  </button>
-  <button role="tab" aria-selected={view === 'compare'} class:active={view === 'compare'} onclick={() => (view = 'compare')}>
-    Compare
-  </button>
-</div>
+<Tabs
+  items={[
+    ['editor', 'Editor'],
+    ['folders', 'Library folders'],
+    ['compare', 'Compare'],
+  ]}
+  active={view}
+  onselect={(id) => (view = id as 'editor' | 'folders' | 'compare')}
+/>
 
 {#if view === 'editor'}
   <EditorWorkspace startFolder={start.folder} startSearch={start.search} />
@@ -31,16 +30,3 @@
 {:else}
   <LibraryCompare />
 {/if}
-
-<style>
-  .tabs {
-    display: flex;
-    gap: 8px;
-    margin-bottom: 12px;
-  }
-
-  .tabs button.active {
-    border-color: var(--accent);
-    box-shadow: 0 0 10px var(--glow);
-  }
-</style>

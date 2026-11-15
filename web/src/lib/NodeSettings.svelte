@@ -119,7 +119,7 @@
       <button class="danger" onclick={kick}>Kick and wipe</button>
       <button onclick={() => (kicking = false)}>Cancel</button>
     {:else}
-      <button onclick={() => (kicking = true)}>Kick</button>
+      <button class="danger" onclick={() => (kicking = true)}>Kick</button>
     {/if}
   </div>
   {#if kicking}

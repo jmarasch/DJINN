@@ -1,12 +1,10 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { api } from './api'
-  import NodeAiSettings from './NodeAiSettings.svelte'
-  import NodeScreenSettings from './NodeScreenSettings.svelte'
-  import { aiName, online, screenName, seen, systemName } from './nodeInfo'
+  import { online, seen, systemName } from './nodeInfo'
+  import Tabs from './Tabs.svelte'
   import { toast } from './state.svelte'
   import type { HouseNode, NodeList } from './types'
-  import type { Visuals } from './visuals'
 
   let list = $state<NodeList | null>(null)
   let failed = $state(false)
@@ -14,16 +12,6 @@
   let accepting = $state<HouseNode | null>(null)
   let password = $state('')
   let kicking = $state<HouseNode | null>(null)
-  /** The node whose screen settings are open. */
-  let screenFor = $state<number | null>(null)
-  /** The node whose AI lyrics settings are open. */
-  let aiFor = $state<number | null>(null)
-  /** The house's visualizers, where a node's own start from. */
-  let house = $state<Visuals | null>(null)
-  $effect(() => {
-    if (screenFor !== null && !house) api.visuals().then((v) => (house = v)).catch(() => {})
-  })
-
   async function load() {
     try {
       list = await api.nodes()
@@ -94,28 +82,17 @@
     }
   }
 
-  /** What a screen plugged into the node shows. Kept here on Main, so it
-   * can be set while the node is off; it changes within seconds once on. */
-  async function setScreen(node: HouseNode, screen: string, visual: Visuals | null) {
-    node.audio = { ...node.audio, screen, visual }
-    try {
-      await api.setNodeAudio(node.id, node.audio)
-      await load()
-    } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not save', true)
-      await load()
-    }
-  }
 </script>
 
-<div class="tabs wide" role="tablist">
-  <button role="tab" aria-selected={shown === 'options'} class:active={shown === 'options'} onclick={() => (tab = 'options')}>
-    Options
-  </button>
-  <button role="tab" aria-selected={shown === 'nodes'} class:active={shown === 'nodes'} onclick={() => (tab = 'nodes')}>
-    Nodes{waiting.length ? ` (${waiting.length} asking to join)` : joined.length ? ` (${joined.length})` : ''}
-  </button>
-</div>
+<Tabs
+  wide
+  items={[
+    ['options', 'Options'],
+    ['nodes', 'Nodes'],
+  ]}
+  active={shown}
+  onselect={(id) => (tab = id as 'options' | 'nodes')}
+/>
 
 {#if shown === 'options'}
 <section class="card">
@@ -208,18 +185,6 @@
         </p>
         <div class="actions">
           <button
-            title="What a screen plugged into this node shows"
-            onclick={() => (screenFor = screenFor === node.id ? null : node.id)}
-          >
-            Screen: {screenName(node.audio.screen)}
-          </button>
-          <button
-            title="Let this node make lyrics with AI while it isn't playing"
-            onclick={() => (aiFor = aiFor === node.id ? null : node.id)}
-          >
-            AI lyrics: {aiName(node)}
-          </button>
-          <button
             title={online(node)
               ? "Opens the node's own page, where its speaker, timing and other settings are"
               : "The node isn't connected; it can be managed once it is"}
@@ -232,23 +197,10 @@
             <button class="danger" onclick={() => remove(node)}>Kick and wipe</button>
             <button onclick={() => (kicking = null)}>Cancel</button>
           {:else}
-            <button onclick={() => (kicking = node)}>Kick</button>
+            <button class="danger" onclick={() => (kicking = node)}>Kick</button>
           {/if}
         </div>
       </div>
-      {#if screenFor === node.id}
-        <div class="screen">
-          <NodeScreenSettings
-            screen={node.audio.screen ?? 'tv'}
-            visual={node.audio.visual ?? null}
-            start={house}
-            onchange={(screen, visual) => setScreen(node, screen, visual)}
-          />
-        </div>
-      {/if}
-      {#if aiFor === node.id}
-        <div class="ai"><NodeAiSettings {node} onchange={load} /></div>
-      {/if}
       {#if kicking?.id === node.id}
         <p class="small muted">
           {node.name} is shut out at once and wipes every cached song, now if it's connected or when it next starts.
@@ -260,32 +212,6 @@
 {/if}
 
 <style>
-  /* The page lays its cards in columns; the tabs and the node lists take the full width. */
-  .tabs,
-  .wide {
-    grid-column: 1 / -1;
-  }
-
-  .tabs {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-bottom: 12px;
-  }
-
-  .tabs button.active {
-    border-color: var(--accent);
-    box-shadow: 0 0 10px var(--glow);
-  }
-
-  .screen {
-    margin: 4px 0 12px;
-  }
-
-  .ai {
-    margin: 4px 0 12px;
-  }
-
   .node {
     display: flex;
     flex-wrap: wrap;
