@@ -66,7 +66,16 @@
 
   onMount(async () => {
     const albumId = first?.album_id
-    if (albumId == null) return
+    // Not one DJINN has looked up (an import, or new to it): search for it
+    // by its tags straight away, on Deezer, which needs no account and
+    // answers quickly. Other sources are one choice away.
+    if (albumId == null) {
+      if (artist.trim() || album.trim()) {
+        source = 'deezer'
+        await runSearch()
+      }
+      return
+    }
     searching = true
     try {
       const found = await unlocked(() => api.editorAlbumReleases(albumId))
@@ -90,6 +99,10 @@
 
   async function search(e: SubmitEvent) {
     e.preventDefault()
+    await runSearch()
+  }
+
+  async function runSearch() {
     searching = true
     try {
       hits = await unlocked(() => api.editorReleaseSearch(source, artist, album))

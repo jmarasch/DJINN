@@ -123,7 +123,11 @@ async fn set_spotify(
 }
 
 fn lookup_failed(e: impl std::fmt::Display) -> ApiError {
-    ApiError::new(StatusCode::BAD_GATEWAY, e.to_string())
+    // The library's error type labels everything as the scan's; a lookup's
+    // message says enough on its own.
+    let text = e.to_string();
+    let text = text.strip_prefix("scan task failed: ").unwrap_or(&text);
+    ApiError::new(StatusCode::BAD_GATEWAY, text.to_owned())
 }
 
 async fn contact(state: &AppState) -> ApiResult<Option<String>> {

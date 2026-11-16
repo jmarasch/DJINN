@@ -1202,7 +1202,7 @@
           <input
             type="search"
             bind:value={searchText}
-            placeholder="Find songs by artist, title or album (a | b finds either)"
+            placeholder="Find songs in your library by artist, title or album (a | b finds either)"
             aria-label="Find songs"
           />
           <button class="small-button" type="submit" disabled={!searchText.trim()}>Find</button>
@@ -1218,6 +1218,89 @@
               {searching ? "these songs' folders" : 'this folder'} (make it read and write under Library folders){:else if target ===
               'library' && searching}· songs in read only folders are dimmed{:else}· click a cell to change it{/if}
           </p>
+          {#if canEdit && songs.length}
+            <div class="online pad">
+              <div class="tool">
+                <strong class="small">Look up online</strong>
+                <span class="small muted"
+                  >{pickedSongs.length ? `for the ${changeable.length} picked songs` : `for every song shown (${changeable.length})`}</span
+                >
+              </div>
+              <div class="tool">
+                <span class="small muted">Album:</span>
+                <button
+                  class="small-button"
+                  disabled={!chosen && !pickedSongs.length}
+                  onclick={openLayout}
+                  title="Search MusicBrainz, Deezer, Apple Music or Spotify for the album, lay the songs on its tracks and take its titles, numbers, artists, year and cover"
+                >
+                  Find album info...
+                </button>
+                <button
+                  class="small-button"
+                  disabled={!chosen}
+                  onclick={() => (coverOpen = true)}
+                  title="Covers from MusicBrainz, Deezer, Apple Music and Spotify, side by side"
+                >
+                  Find a cover...
+                </button>
+                <button
+                  class="small-button"
+                  disabled={!!lyricsBusy}
+                  onclick={identifyBySound}
+                  title="Each song's fingerprint to AcoustID, then MusicBrainz: title, artist, album, year and genre come in as changes to approve (needs the AcoustID key and MusicBrainz contact)"
+                >
+                  Identify by sound
+                </button>
+                {#if chosen?.album_id != null}
+                  <button
+                    class="small-button"
+                    onclick={numbersFromMusicBrainz}
+                    title="Track and disc numbers for the chosen song's album, from its track list on MusicBrainz, matched by title"
+                  >
+                    Numbers from MusicBrainz
+                  </button>
+                {/if}
+              </div>
+              <div class="tool">
+                <span class="small muted">Lyrics:</span>
+                <button
+                  class="small-button"
+                  disabled={!!lyricsBusy}
+                  onclick={() => lyricsTool('find')}
+                  title="The song's own lyrics (a .lrc beside it or its tags), then LRCLIB"
+                >
+                  Find lyrics
+                </button>
+                <button
+                  class="small-button"
+                  disabled={!!lyricsBusy}
+                  onclick={() => lyricsTool('generate')}
+                  title="The AI listener (Admin > AI) listens to songs with no lyrics and writes them; it may get words wrong"
+                >
+                  Generate with AI
+                </button>
+                <button
+                  class="small-button"
+                  disabled={!!lyricsBusy}
+                  onclick={() => lyricsTool('timed')}
+                  title="For songs with words but no timing: LRCLIB's timed lyrics when it has them, otherwise the AI listener times the words"
+                >
+                  Make timed
+                </button>
+                {#if lyricsBusy}<span class="small muted">{lyricsBusy}</span>{/if}
+              </div>
+              {#if noLyrics.length}
+                <div class="tool offer">
+                  <span class="small">{noLyrics.length} songs have no lyrics anywhere.</span>
+                  <button class="small-button" disabled={!!lyricsBusy} onclick={() => lyricsTool('generate', noLyrics)}>
+                    Generate them with AI
+                  </button>
+                  <button class="link small" onclick={() => (noLyrics = [])}>Not now</button>
+                </div>
+              {/if}
+            </div>
+          {/if}
           <div class="view pad">
             <label class="small"
               >Group by
@@ -1372,73 +1455,12 @@
                 </button>
                 <button
                   class="small-button"
-                  disabled={!chosen && !pickedSongs.length}
-                  onclick={openLayout}
-                  title="Compare the album with its releases on MusicBrainz (or search MusicBrainz, Deezer or Apple), lay the songs on the right tracks and take the tags and cover"
-                >
-                  Album layout...
-                </button>
-                <button
-                  class="small-button"
-                  disabled={chosen?.album_id == null}
-                  onclick={numbersFromMusicBrainz}
-                  title="Track and disc numbers for the chosen song's album, from its track list on MusicBrainz, matched by title"
-                >
-                  Numbers from MusicBrainz
-                </button>
-                <button
-                  class="small-button"
                   onclick={cleanTitles}
                   title="Takes off a leading track number and leftovers like (Official Video) or [HD]"
                 >
                   Clean up titles
                 </button>
               </div>
-              <div class="tool">
-                <span class="small muted">Lyrics:</span>
-                <button
-                  class="small-button"
-                  disabled={!!lyricsBusy}
-                  onclick={() => lyricsTool('find')}
-                  title="The song's own lyrics (a .lrc beside it or its tags), then LRCLIB"
-                >
-                  Find lyrics
-                </button>
-                <button
-                  class="small-button"
-                  disabled={!!lyricsBusy}
-                  onclick={() => lyricsTool('generate')}
-                  title="The AI listener (Admin > AI) listens to songs with no lyrics and writes them; it may get words wrong"
-                >
-                  Generate with AI
-                </button>
-                <button
-                  class="small-button"
-                  disabled={!!lyricsBusy}
-                  onclick={() => lyricsTool('timed')}
-                  title="For songs with words but no timing: LRCLIB's timed lyrics when it has them, otherwise the AI listener times the words"
-                >
-                  Make timed
-                </button>
-                <button
-                  class="small-button"
-                  disabled={!!lyricsBusy}
-                  onclick={identifyBySound}
-                  title="Each song's fingerprint to AcoustID, then MusicBrainz: title, artist, album, year and genre come in as changes to approve (needs the AcoustID key and MusicBrainz contact)"
-                >
-                  Identify by sound
-                </button>
-                {#if lyricsBusy}<span class="small muted">{lyricsBusy}</span>{/if}
-              </div>
-              {#if noLyrics.length}
-                <div class="tool offer">
-                  <span class="small">{noLyrics.length} songs have no lyrics anywhere.</span>
-                  <button class="small-button" disabled={!!lyricsBusy} onclick={() => lyricsTool('generate', noLyrics)}>
-                    Generate them with AI
-                  </button>
-                  <button class="link small" onclick={() => (noLyrics = [])}>Not now</button>
-                </div>
-              {/if}
               {#if target === 'library' && importing === null}
                 <div class="tool">
                   <input bind:value={pattern} aria-label="File name pattern" class="pattern" />
@@ -2156,6 +2178,15 @@
     display: block;
     font-size: 0.75em;
     color: var(--target);
+  }
+
+  .online {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 0 10px 6px;
+    border: 1px solid var(--target);
+    border-radius: 8px;
   }
 
   .offer {

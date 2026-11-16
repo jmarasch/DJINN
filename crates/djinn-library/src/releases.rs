@@ -91,14 +91,38 @@ async fn get<T: serde::de::DeserializeOwned>(
     query: &[(&str, &str)],
     what: &str,
 ) -> Result<T, LibraryError> {
-    let response = client
-        .get(url)
-        .query(query)
-        .send()
-        .await
-        .and_then(reqwest::Response::error_for_status)
-        .map_err(|e| failed(what, e))?;
-    response.json().await.map_err(|e| failed(what, e))
+    // A busy service (MusicBrainz says 503 when it's had too many asks,
+    // others 429) gets a few more tries, waiting as it says or a little
+    // longer each time.
+    for attempt in 1u64..=4 {
+        let response = client
+            .get(url)
+            .query(query)
+            .send()
+            .await
+            .map_err(|e| failed(what, e))?;
+        let status = response.status();
+        let busy = status == reqwest::StatusCode::TOO_MANY_REQUESTS
+            || status == reqwest::StatusCode::SERVICE_UNAVAILABLE;
+        if busy && attempt < 4 {
+            let wait = response
+                .headers()
+                .get(reqwest::header::RETRY_AFTER)
+                .and_then(|v| v.to_str().ok()?.parse::<u64>().ok())
+                .map_or(Duration::from_secs(2 * attempt), Duration::from_secs)
+                .min(Duration::from_secs(10));
+            tokio::time::sleep(wait).await;
+            continue;
+        }
+        if busy {
+            return Err(LibraryError::Task(format!(
+                "{what} is busy right now; try again in a minute"
+            )));
+        }
+        let response = response.error_for_status().map_err(|e| failed(what, e))?;
+        return response.json().await.map_err(|e| failed(what, e));
+    }
+    Err(LibraryError::Task(format!("{what} didn't answer")))
 }
 
 /// A MusicBrainz call, spaced to its one-a-second limit.
