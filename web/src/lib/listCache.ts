@@ -12,8 +12,17 @@ export const jumpCache = new Map<string, Jump[]>()
 /** How big a list's rows are, per layout, so a list can open at full height. */
 export const rowSizes = new Map<string, { height: number; columns: number }>()
 
+const listeners = new Set<() => void>()
+
 /** Call when the library changes. */
 export function clearListCache() {
   listCache.clear()
   jumpCache.clear()
+  for (const fn of listeners) fn()
+}
+
+/** Runs `fn` whenever the list cache is cleared. */
+export function onListCacheClear(fn: () => void): () => void {
+  listeners.add(fn)
+  return () => listeners.delete(fn)
 }

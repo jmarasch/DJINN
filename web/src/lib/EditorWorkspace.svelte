@@ -17,6 +17,7 @@
   import CoverWindow from './CoverWindow.svelte'
   import { COMMON_TAGS, MORE_TAGS, NUMBER_TAGS, tagLabel } from './editorTags'
   import { FOLDER_LAYOUTS, folderInfo, fromFileName, type FolderInfo, type FolderLayout } from './importLayout'
+  import { clearListCache } from './listCache'
   import { askToUnlock, unlocked } from './protected.svelte'
   import { toast } from './state.svelte'
   import type {
@@ -288,6 +289,41 @@
     }
   }
 
+  /** Reloads the folder tree on the left (and opens the folders leading to `openTo`). */
+  async function refreshTree(openTo = '') {
+    await loadRoots()
+    const nextOpen = { ...open }
+    if (openTo) {
+      const root = roots.find(
+        (r) => openTo === r.path || openTo.startsWith(`${r.path}/`) || openTo.startsWith(`${r.path}\\`),
+      )
+      if (root) {
+        const sep = openTo.includes('\\') && !openTo.includes('/') ? '\\' : '/'
+        const rest = openTo
+          .slice(root.path.length)
+          .replace(/^[\\/]+/, '')
+          .split(/[\\/]/)
+          .filter(Boolean)
+        let cur = root.path
+        if (rest.length) nextOpen[cur] = true
+        for (let i = 0; i < rest.length - 1; i++) {
+          cur = `${cur}${sep}${rest[i]}`
+          nextOpen[cur] = true
+        }
+      }
+    }
+    const nextChildren: Record<string, EditorNode[]> = {}
+    for (const path of Object.keys(nextOpen).filter((p) => nextOpen[p])) {
+      try {
+        nextChildren[path] = (await api.editorTree(path)).folders
+      } catch {
+        delete nextOpen[path]
+      }
+    }
+    children = nextChildren
+    open = nextOpen
+  }
+
   async function toggle(node: EditorNode) {
     if (open[node.path]) {
       open = { ...open, [node.path]: false }
@@ -395,11 +431,36 @@
 
   // --- Imports: albums brought in to work on before they go into the library.
 
+  let pickedImports = $state<Record<number, boolean>>({})
+  let lastPickedImport = $state<number | null>(null)
+  const pickedImportBatches = $derived(imports.filter((i) => pickedImports[i.batch]).map((i) => i.batch))
+  const allImportsPicked = $derived(imports.length > 0 && pickedImportBatches.length === imports.length)
+
+  function pickImport(batch: number, index: number, e: MouseEvent) {
+    const on = !pickedImports[batch]
+    const next = { ...pickedImports }
+    if (e.shiftKey && lastPickedImport !== null) {
+      const [a, b] = [Math.min(lastPickedImport, index), Math.max(lastPickedImport, index)]
+      for (const imp of imports.slice(a, b + 1)) next[imp.batch] = true
+    } else {
+      next[batch] = on
+    }
+    pickedImports = next
+    lastPickedImport = index
+  }
+
+  function pickAllImports(on: boolean) {
+    pickedImports = on ? Object.fromEntries(imports.map((i) => [i.batch, true])) : {}
+  }
+
   async function loadImports() {
     try {
       imports = await api.editorImports()
+      const valid = new Set(imports.map((i) => i.batch))
+      pickedImports = Object.fromEntries(Object.entries(pickedImports).filter(([b]) => valid.has(Number(b))))
     } catch {
       imports = []
+      pickedImports = {}
     }
   }
 
@@ -531,20 +592,33 @@
     }
   }
 
-  async function throwAwayImport() {
-    if (importing === null) return
-    if (!confirm(`Throw this import away? Its ${songs.length} files are deleted; the library isn't touched.`)) return
+  async function throwAwayImports() {
+    const batches = pickedImportBatches.length ? pickedImportBatches : importing !== null ? [importing] : []
+    if (!batches.length) return
+    const current = importing
+    busy = true
     try {
-      await unlocked(() => api.editorImportThrowAway(importing as number))
-      pending = {}
-      importing = null
-      songs = []
-      total = 0
-      chosen = null
-      addPlan = null
+      for (const batch of batches) {
+        try {
+          await unlocked(() => api.editorImportThrowAway(batch))
+        } catch (e) {
+          toast(e instanceof Error ? e.message : 'Could not throw it away', true)
+        }
+      }
+      pickedImports = {}
+      lastPickedImport = null
       await loadImports()
-    } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not throw it away', true)
+      if (current !== null && batches.includes(current)) {
+        pending = {}
+        importing = null
+        songs = []
+        total = 0
+        chosen = null
+        addPlan = null
+        if (imports.length) await openImport(imports[0].batch)
+      }
+    } finally {
+      busy = false
     }
   }
 
@@ -595,12 +669,18 @@
       await loadImports()
       await loadHistory()
       const first = added[0]?.to
-      if (first && !imports.some((i) => i.batch === importing)) {
+      const dest = first ? first.slice(0, Math.max(first.lastIndexOf('/'), first.lastIndexOf('\\'))) : ''
+      if (added.length > 0) {
+        clearListCache()
+        await refreshTree(dest)
+      }
+      if (dest && !imports.some((i) => i.batch === importing)) {
         // Show them where they went, in the Library view.
         importing = null
         importMode = false
         target = 'library'
-        selected = first.slice(0, Math.max(first.lastIndexOf('/'), first.lastIndexOf('\\')))
+        selected = dest
+        moveTo = dest
         chosen = null
         picked = {}
         await loadSongs(0)
@@ -963,6 +1043,7 @@
       addPlan = null
       pending = {}
       report(done.songs, done.failed, target === 'library' ? 'files written' : 'songs changed')
+      clearListCache()
       await loadSongs(0)
       if (target === 'library') await loadHistory()
     } catch (e) {
@@ -988,6 +1069,8 @@
     try {
       const done = await unlocked(() => api.editorUndo(batch.batch))
       report(done.songs, done.failed, 'files put back')
+      clearListCache()
+      await refreshTree(selected)
       await loadSongs(0)
       await loadHistory()
     } catch (e) {
@@ -1069,6 +1152,7 @@
     try {
       const done = await unlocked(() => api.editorCover(target, coverSongs.map((s) => s.id), file, how))
       report(done.songs, done.failed, target === 'library' ? 'files written' : 'songs changed')
+      clearListCache()
       await loadSongs(0)
       if (target === 'library') await loadHistory()
     } catch (e) {
@@ -1163,6 +1247,8 @@
       const moved = done.files.filter((f) => !f.problem).length
       toast(`${n(moved)} files ${words.done}`)
       renames = null
+      clearListCache()
+      await refreshTree(selected)
       await loadSongs(0)
       await loadHistory()
     } catch (e) {
@@ -1300,13 +1386,38 @@
                   : ''}...
               </p>
             {/if}
-            <strong class="small">Imports</strong>
-            {#each imports as imp (imp.batch)}
-              <button class="label import-item" class:picked={importing === imp.batch} onclick={() => openImport(imp.batch)}>
-                {imp.album || `Import ${imp.batch}`}
-                <span class="count">{n(imp.files)}</span>
-                {#if imp.artist}<span class="mode">{imp.artist}</span>{/if}
-              </button>
+            <div class="imports-head">
+              {#if imports.length}
+                <input
+                  type="checkbox"
+                  class="import-check"
+                  aria-label="Pick every import"
+                  checked={allImportsPicked}
+                  onchange={(e) => pickAllImports(e.currentTarget.checked)}
+                />
+              {/if}
+              <strong class="small">Imports</strong>
+              {#if pickedImportBatches.length}
+                <button class="small-button danger" disabled={busy} onclick={throwAwayImports}>
+                  {pickedImportBatches.length > 1 ? 'Throw these imports away' : 'Throw this import away'}
+                </button>
+              {/if}
+            </div>
+            {#each imports as imp, i (imp.batch)}
+              <div class="node">
+                <input
+                  type="checkbox"
+                  class="import-check"
+                  aria-label="Pick {imp.album || `Import ${imp.batch}`}"
+                  checked={!!pickedImports[imp.batch]}
+                  onclick={(e) => pickImport(imp.batch, i, e)}
+                />
+                <button class="label import-item" class:picked={importing === imp.batch} onclick={() => openImport(imp.batch)}>
+                  {imp.album || `Import ${imp.batch}`}
+                  <span class="count">{n(imp.files)}</span>
+                  {#if imp.artist}<span class="mode">{imp.artist}</span>{/if}
+                </button>
+              </div>
             {:else}
               {#if !uploading}<p class="small muted">None yet. Bring in an album to work on it before it goes into the library.</p>{/if}
             {/each}
@@ -1756,7 +1867,9 @@
             {/if}
             <div class="row-buttons">
               <button class="small-button" disabled={busy || !pickedSongs.length} onclick={dropPicked}>Take picked out</button>
-              <button class="small-button danger" disabled={busy} onclick={throwAwayImport}>Throw this import away</button>
+              <button class="small-button danger" disabled={busy} onclick={throwAwayImports}>
+                {pickedImportBatches.length > 1 ? 'Throw these imports away' : 'Throw this import away'}
+              </button>
             </div>
           </div>
         {/if}
@@ -2015,7 +2128,8 @@
     padding: 4px 8px;
   }
 
-  .pick input {
+  .pick input,
+  .import-check {
     width: auto;
     margin: 0;
     padding: 0;
@@ -2392,6 +2506,7 @@
   .imports-head {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 6px;
   }
 

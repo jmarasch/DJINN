@@ -1,6 +1,6 @@
 <script lang="ts" generics="T">
   import { tick, untrack, type Snippet } from 'svelte'
-  import { listCache, rowSizes } from './listCache'
+  import { listCache, onListCacheClear, rowSizes } from './listCache'
   import type { Page } from './types'
 
   let {
@@ -156,8 +156,12 @@
     })
   })
 
+  let cacheVersion = $state(0)
+  $effect(() => onListCacheClear(() => cacheVersion++))
+
   $effect(() => {
     const k = cacheKey
+    void cacheVersion
     untrack(() => {
       generation++
       loading = false

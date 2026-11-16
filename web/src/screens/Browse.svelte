@@ -14,7 +14,7 @@
   import LikeCount from '../lib/LikeCount.svelte'
   import JumpStrip from '../lib/JumpStrip.svelte'
   import { watchScroll } from '../lib/scrollWatch.svelte'
-  import { jumpCache } from '../lib/listCache'
+  import { jumpCache, onListCacheClear } from '../lib/listCache'
   import TrackRow from '../lib/TrackRow.svelte'
   import TrackTile from '../lib/TrackTile.svelte'
   import type { AlbumFilter, AlbumSort, ArtistSort, GenreMap, Jump, LyricsFilter, Track, TrackSort } from '../lib/types'
@@ -112,8 +112,17 @@
       (tab === 'songs' && (sort === 'year' || sort === 'oldest')),
   )
   const newestFirst = $derived((tab === 'albums' ? albumSort : sort) === 'year')
+  let cacheVersion = $state(0)
+  $effect(() =>
+    onListCacheClear(() => {
+      cacheVersion++
+      genres = null
+    }),
+  )
+
   $effect(() => {
     const k = jumpKey
+    void cacheVersion
     const cached = jumpCache.get(k)
     jumps = cached ?? []
     if (cached || tab === 'genres') return
