@@ -392,8 +392,13 @@ impl Lrclib {
         if let Some(album) = query.album.filter(|a| !a.is_empty()) {
             params.push(("album_name", album.to_owned()));
         }
-        if let Some(ms) = query.duration_ms.filter(|ms| *ms > 0) {
-            params.push(("duration", ((ms + 500) / 1000).to_string()));
+        // LRCLIB refuses a length of 0 seconds; a shorter one is left out.
+        if let Some(secs) = query
+            .duration_ms
+            .map(|ms| (ms + 500) / 1000)
+            .filter(|s| *s > 0)
+        {
+            params.push(("duration", secs.to_string()));
         }
         let response = self
             .client

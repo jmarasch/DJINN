@@ -880,7 +880,14 @@ impl Services {
         let Some(url) = pick_deezer(&search.data, name) else {
             return Fetch::NotFound;
         };
-        let Some(response) = send(self.web.get(url)).await else {
+        let mut answer = None;
+        for url in deezer_picture_urls(url) {
+            if let Some(response) = send(self.web.get(&url)).await {
+                answer = Some(response);
+                break;
+            }
+        }
+        let Some(response) = answer else {
             return Fetch::Failed;
         };
         match response.bytes().await {
@@ -1338,6 +1345,21 @@ struct DeezerArtist {
     picture_big: String,
 }
 
+/// Where to fetch a Deezer picture from, in order. Deezer's API names
+/// `cdn-images.dzcdn.net`, which has refused every request at times (403)
+/// while its other hosts serve the same files, so those are tried first.
+pub(crate) fn deezer_picture_urls(url: &str) -> Vec<String> {
+    const MAIN: &str = "https://cdn-images.dzcdn.net/";
+    match url.strip_prefix(MAIN) {
+        Some(rest) => vec![
+            format!("https://e-cdns-images.dzcdn.net/{rest}"),
+            format!("https://cdns-images.dzcdn.net/{rest}"),
+            url.to_owned(),
+        ],
+        None => vec![url.to_owned()],
+    }
+}
+
 fn pick_deezer<'a>(artists: &'a [DeezerArtist], name: &str) -> Option<&'a str> {
     let wanted = simplify(name);
     artists
@@ -1440,6 +1462,23 @@ mod tests {
             Some("https://x/artist/b/500x500.jpg")
         );
         assert_eq!(pick_deezer(&results, "Nobody"), None);
+    }
+
+    #[test]
+    fn deezer_pictures_try_the_hosts_that_answer_first() {
+        let urls = deezer_picture_urls("https://cdn-images.dzcdn.net/images/cover/ab/500x500.jpg");
+        assert_eq!(
+            urls,
+            [
+                "https://e-cdns-images.dzcdn.net/images/cover/ab/500x500.jpg",
+                "https://cdns-images.dzcdn.net/images/cover/ab/500x500.jpg",
+                "https://cdn-images.dzcdn.net/images/cover/ab/500x500.jpg",
+            ]
+        );
+        assert_eq!(
+            deezer_picture_urls("https://other/x.jpg"),
+            ["https://other/x.jpg"]
+        );
     }
 
     #[test]

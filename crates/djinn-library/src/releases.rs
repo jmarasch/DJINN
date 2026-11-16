@@ -886,28 +886,51 @@ pub async fn cover(
             .map(|i| i.url),
     };
     let Some(url) = url else { return Ok(None) };
-    let allowed = reqwest::Url::parse(&url).ok().is_some_and(|u| {
-        u.scheme() == "https"
-            && u.host_str().is_some_and(|h| {
-                h == "coverartarchive.org"
-                    || h.ends_with(".dzcdn.net")
-                    || h.ends_with(".mzstatic.com")
-            })
-    });
-    if !allowed {
+    let allowed = |url: &str| {
+        reqwest::Url::parse(url).ok().is_some_and(|u| {
+            u.scheme() == "https"
+                && u.host_str().is_some_and(|h| {
+                    h == "coverartarchive.org"
+                        || h.ends_with(".dzcdn.net")
+                        || h.ends_with(".mzstatic.com")
+                })
+        })
+    };
+    if !allowed(&url) {
         return Ok(None);
     }
-    let response = client(AGENT)?
-        .get(&url)
-        .send()
-        .await
-        .map_err(|e| failed("the cover's site", e))?;
-    if response.status() == reqwest::StatusCode::NOT_FOUND {
-        return Ok(None);
+    // Deezer's main picture host refuses at times; its others don't.
+    let mut last = None;
+    let mut found = None;
+    for url in crate::online::deezer_picture_urls(&url) {
+        if !allowed(&url) {
+            continue;
+        }
+        let response = match client(AGENT)?.get(&url).send().await {
+            Ok(r) => r,
+            Err(e) => {
+                last = Some(failed("the cover's site", e));
+                continue;
+            }
+        };
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        match response.error_for_status() {
+            Ok(r) => {
+                found = Some(r);
+                break;
+            }
+            Err(e) => last = Some(failed("the cover's site", e)),
+        }
     }
+    let Some(response) = found else {
+        return match last {
+            Some(e) => Err(e),
+            None => Ok(None),
+        };
+    };
     let bytes = response
-        .error_for_status()
-        .map_err(|e| failed("the cover's site", e))?
         .bytes()
         .await
         .map_err(|e| failed("the cover's site", e))?;

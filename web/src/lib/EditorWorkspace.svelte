@@ -16,6 +16,7 @@
   import Art from './Art.svelte'
   import CoverWindow from './CoverWindow.svelte'
   import { COMMON_TAGS, MORE_TAGS, NUMBER_TAGS, tagLabel } from './editorTags'
+  import { FOLDER_LAYOUTS, folderInfo, fromFileName, type FolderInfo, type FolderLayout } from './importLayout'
   import { askToUnlock, unlocked } from './protected.svelte'
   import { toast } from './state.svelte'
   import type {
@@ -42,13 +43,20 @@
   } = $props()
 
   let target = $state<EditTarget>('database')
-  /** An import being worked on (its number), instead of a library folder. */
+  /** Import mode: albums brought in to work on before they go into the
+   * library, listed on the left instead of the library's folders. */
+  let importMode = $state(false)
+  /** The import being worked on (its number). */
   let importing = $state<number | null>(null)
+  /** How a folder being brought in is laid out, and whether its folder
+   * names fill tags the files are missing. */
+  let folderLayout = $state<FolderLayout>('album')
+  let fillFromFolders = $state(true)
   /** The grid edits files: the library's, or an import's (waiting, not in the library yet). */
-  const editingFiles = $derived(target === 'library' || importing !== null)
+  const editingFiles = $derived(target === 'library' || importMode)
   let imports = $state<EditorImport[]>([])
-  /** Files on their way into a new import: done of all. */
-  let uploading = $state<{ done: number; of: number } | null>(null)
+  /** Files on their way in: done of all, in how many imports. */
+  let uploading = $state<{ done: number; of: number; imports: number } | null>(null)
   let importInput = $state<HTMLInputElement | null>(null)
   let importFolderInput = $state<HTMLInputElement | null>(null)
   /** Where Add to the library puts an import's files. */
@@ -189,7 +197,9 @@
   const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
   const folderOf = (song: EditorSong) => {
     const rel = song.rel_path || song.path
-    return rel.slice(0, Math.max(rel.lastIndexOf('/'), rel.lastIndexOf('\\')))
+    // A name with no folder in it (an import's) is in no folder, not cut short.
+    const cut = Math.max(rel.lastIndexOf('/'), rel.lastIndexOf('\\'))
+    return cut < 0 ? '' : rel.slice(0, cut)
   }
 
   function sortOn(field: SortField) {
@@ -302,6 +312,7 @@
     pending = {}
     searching = ''
     importing = null
+    importMode = false
     addPlan = null
     selected = node.path
     noLyrics = []
@@ -318,6 +329,7 @@
     pending = {}
     selected = ''
     importing = null
+    importMode = false
     addPlan = null
     searching = clean
     noLyrics = []
@@ -356,9 +368,10 @@
   }
 
   function setTarget(to: EditTarget) {
-    if ((to === target && importing === null) || !leaveChanges()) return
+    if ((to === target && !importMode) || !leaveChanges()) return
     pending = {}
-    if (importing !== null) {
+    if (importMode) {
+      importMode = false
       importing = null
       addPlan = null
       songs = []
@@ -387,11 +400,29 @@
     }
   }
 
+  /** Import mode: the imports on the left; the newest opens. */
+  async function enterImport() {
+    if (importMode || !leaveChanges()) return
+    pending = {}
+    importMode = true
+    importing = null
+    selected = ''
+    searching = ''
+    songs = []
+    total = 0
+    chosen = null
+    picked = {}
+    renames = null
+    await loadImports()
+    if (imports.length) await openImport(imports[0].batch)
+  }
+
   async function openImport(batch: number) {
     if (importing === batch || !leaveChanges()) return
     pending = {}
     selected = ''
     searching = ''
+    importMode = true
     importing = batch
     chosen = null
     noLyrics = []
@@ -404,8 +435,10 @@
 
   const AUDIO = /\.(mp3|flac|m4a|mp4|aac|ogg|oga|wav)$/i
 
-  /** Brings song files in as a new import, one at a time, then opens it. */
-  async function importFiles(list: FileList | null) {
+  /** Brings song files in: chosen files as one import; a folder split
+   * into one import per album as `folderLayout` says, its folder names
+   * filling tags the files are missing when `fillFromFolders` is on. */
+  async function importFiles(list: FileList | null, fromFolder: boolean) {
     const files = [...(list ?? [])].filter((f) => AUDIO.test(f.name))
     const left = (list?.length ?? 0) - files.length
     if (!files.length) {
@@ -413,38 +446,85 @@
       return
     }
     if (!leaveChanges()) return
-    let batch: number
-    try {
-      batch = (await unlocked(() => api.editorImportStart())).batch
-    } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not start the import', true)
-      return
-    }
+    const layout: FolderLayout = fromFolder ? folderLayout : 'together'
     // In track order as far as names go (disc folders, then numbers).
     files.sort((a, b) => collator.compare(a.webkitRelativePath || a.name, b.webkitRelativePath || b.name))
-    uploading = { done: 0, of: files.length }
-    const problems: string[] = []
+    const groups = new Map<string, { file: File; info: FolderInfo }[]>()
     for (const file of files) {
-      try {
-        await unlocked(() => api.editorImportUpload(batch, file))
-      } catch (e) {
-        problems.push(`${file.name}: ${e instanceof Error ? e.message : 'failed'}`)
+      const info = folderInfo(file.webkitRelativePath || file.name, layout)
+      const group = groups.get(info.group) ?? []
+      group.push({ file, info })
+      groups.set(info.group, group)
+    }
+    uploading = { done: 0, of: files.length, imports: groups.size }
+    const problems: string[] = []
+    const batches: number[] = []
+    let filled = 0
+    try {
+      for (const group of groups.values()) {
+        const batch = (await unlocked(() => api.editorImportStart())).batch
+        const placed = new Map<number, FolderInfo>()
+        for (const { file, info } of group) {
+          try {
+            const { id } = await unlocked(() => api.editorImportUpload(batch, file))
+            placed.set(id, info)
+          } catch (e) {
+            problems.push(`${file.name}: ${e instanceof Error ? e.message : 'failed'}`)
+          }
+          uploading = { ...uploading, done: uploading.done + 1 }
+        }
+        if (!placed.size) continue
+        batches.push(batch)
+        if (fromFolder && fillFromFolders && layout !== 'together') {
+          const rows = (await api.editorImportSongs(batch)).songs
+          const changes: EditorChange[] = []
+          for (const row of rows) {
+            const info = placed.get(row.id)
+            const tags = row.file
+            if (!info || !tags) continue
+            const fill = (field: EditorField, now: unknown, value: string | number | null) => {
+              if (value !== null && value !== '' && (now === null || now === undefined || now === '')) {
+                changes.push({ id: row.id, field, value: String(value) })
+              }
+            }
+            // A file with no title tag shows its name as the title: take the
+            // track number off the front of it (and keep it as the number).
+            const named = fromFileName(row.rel_path)
+            const stem = row.rel_path.replace(/\.[^.]+$/, '')
+            if (tags.title === stem && named.track !== null) {
+              changes.push({ id: row.id, field: 'title', value: named.title })
+              fill('track_no', tags.track_no, named.track)
+            }
+            fill('album', tags.album, info.album)
+            fill('artist', tags.artist, info.artist)
+            fill('album_artist', tags.album_artist, info.artist)
+            fill('disc_no', tags.disc_no, info.disc)
+            fill('year', tags.year, info.year)
+          }
+          if (changes.length) {
+            await unlocked(() => api.editorImportApply(changes))
+            filled += changes.length
+          }
+        }
       }
-      uploading = { done: uploading.done + 1, of: files.length }
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not bring them in', true)
     }
     uploading = null
     await loadImports()
     const done = files.length - problems.length
     toast(
       `${n(done)} songs brought in` +
+        (batches.length > 1 ? ` as ${batches.length} imports` : '') +
+        (filled ? `; ${filled} missing tags filled from folder names` : '') +
         (left ? `; ${n(left)} other files left out` : '') +
         (problems.length ? `; ${problems.length} couldn't be: ${problems[0]}` : ''),
       problems.length > 0,
     )
-    if (done) {
+    if (batches.length) {
       pending = {}
       importing = null
-      await openImport(batch)
+      await openImport(batches[0])
     }
   }
 
@@ -515,6 +595,7 @@
       if (first && !imports.some((i) => i.batch === importing)) {
         // Show them where they went, in the Library view.
         importing = null
+        importMode = false
         target = 'library'
         selected = first.slice(0, Math.max(first.lastIndexOf('/'), first.lastIndexOf('\\')))
         chosen = null
@@ -1127,14 +1208,14 @@
   <div class="editor" class:library={editingFiles} class:fill={windowed}>
     <div class="top">
       <div class="toggle" role="group" aria-label="What you are editing">
-        <button class:on={target === 'library' && importing === null} onclick={() => setTarget('library')}>Library</button>
-        <button class:on={target === 'database' && importing === null} onclick={() => setTarget('database')}>Database</button>
-        {#if importing !== null}<button class="on">Import</button>{/if}
+        <button class:on={target === 'library' && !importMode} onclick={() => setTarget('library')}>Library</button>
+        <button class:on={target === 'database' && !importMode} onclick={() => setTarget('database')}>Database</button>
+        <button class:on={importMode} onclick={enterImport}>Import</button>
       </div>
       <p class="small muted">
-        {#if importing !== null}
-          Working on an import: songs waiting in DJINN's own folder, not in the library yet. Approving writes the tags
-          into them; Add to the library (on the right) moves them into a music folder.
+        {#if importMode}
+          Bring in new albums and work on them before they go into the library. They wait in DJINN's own folder;
+          approving writes the tags into them, and Add to the library (on the right) moves them into a music folder.
         {:else if target === 'library'}
           Editing the tags in the music files themselves. Only folders you allowed can be changed, and every approval
           can be undone from the history.
@@ -1146,9 +1227,8 @@
 
     <div class="panes">
       <aside class="folders">
-        <div class="imports">
-          <div class="imports-head">
-            <strong class="small">Imports</strong>
+        {#if importMode}
+          <div class="imports">
             <input
               type="file"
               multiple
@@ -1156,7 +1236,7 @@
               accept=".mp3,.flac,.m4a,.mp4,.aac,.ogg,.oga,.wav"
               bind:this={importInput}
               onchange={(e) => {
-                void importFiles(e.currentTarget.files)
+                void importFiles(e.currentTarget.files, false)
                 e.currentTarget.value = ''
               }}
             />
@@ -1166,34 +1246,49 @@
               webkitdirectory
               bind:this={importFolderInput}
               onchange={(e) => {
-                void importFiles(e.currentTarget.files)
+                void importFiles(e.currentTarget.files, true)
                 e.currentTarget.value = ''
               }}
             />
-            <button class="small-button" disabled={!!uploading} onclick={() => importInput?.click()} title="Choose an album's song files"
-              >Files...</button
-            >
-            <button
-              class="small-button"
-              disabled={!!uploading}
-              onclick={() => importFolderInput?.click()}
-              title="Choose an album's folder (song files in it and its folders; anything else is left out)">Folder...</button
-            >
+            <strong class="small">Bring in</strong>
+            <div class="imports-head">
+              <button class="small-button" disabled={!!uploading} onclick={() => importFolderInput?.click()}>A folder...</button>
+              <button class="small-button" disabled={!!uploading} onclick={() => importInput?.click()} title="Song files you pick go in as one import"
+                >Song files...</button
+              >
+            </div>
+            <fieldset class="layout-choice">
+              <legend class="small muted">The folder is laid out as</legend>
+              {#each FOLDER_LAYOUTS as l (l.key)}
+                <label class="check small">
+                  <input type="radio" name="folder-layout" value={l.key} bind:group={folderLayout} />
+                  <span>{l.label}<span class="muted example">{l.example}</span></span>
+                </label>
+              {/each}
+              <label class="check small">
+                <input type="checkbox" bind:checked={fillFromFolders} disabled={folderLayout === 'together'} />
+                <span>Fill missing album, artist, disc and year from folder names</span>
+              </label>
+            </fieldset>
+            {#if uploading}
+              <p class="small muted">
+                Bringing in {Math.min(uploading.done + 1, uploading.of)} of {uploading.of}{uploading.imports > 1
+                  ? ` (${uploading.imports} albums)`
+                  : ''}...
+              </p>
+            {/if}
+            <strong class="small">Imports</strong>
+            {#each imports as imp (imp.batch)}
+              <button class="label import-item" class:picked={importing === imp.batch} onclick={() => openImport(imp.batch)}>
+                {imp.album || `Import ${imp.batch}`}
+                <span class="count">{n(imp.files)}</span>
+                {#if imp.artist}<span class="mode">{imp.artist}</span>{/if}
+              </button>
+            {:else}
+              {#if !uploading}<p class="small muted">None yet. Bring in an album to work on it before it goes into the library.</p>{/if}
+            {/each}
           </div>
-          {#if uploading}
-            <p class="small muted">Bringing in {uploading.done + 1 > uploading.of ? uploading.of : uploading.done + 1} of {uploading.of}...</p>
-          {/if}
-          {#each imports as imp (imp.batch)}
-            <button class="label import-item" class:picked={importing === imp.batch} onclick={() => openImport(imp.batch)}>
-              {imp.album || `Import ${imp.batch}`}
-              <span class="count">{n(imp.files)}</span>
-              {#if imp.artist}<span class="mode">{imp.artist}</span>{/if}
-            </button>
-          {:else}
-            {#if !uploading}<p class="small muted">Bring in a new album to work on before it goes into the library.</p>{/if}
-          {/each}
-        </div>
-        {#if roots.length}
+        {:else if roots.length}
           {@render branch(roots, 0)}
         {:else}
           <p class="small muted">No library folders.</p>
@@ -1201,6 +1296,8 @@
       </aside>
 
       <section class="grid">
+        <!-- Finding is for the library; an import's songs are all shown. -->
+        {#if !importMode}
         <form
           class="find pad"
           onsubmit={(e) => {
@@ -1216,7 +1313,10 @@
           />
           <button class="small-button" type="submit" disabled={!searchText.trim()}>Find</button>
         </form>
-        {#if !selected && !searching && importing === null}
+        {/if}
+        {#if importMode && importing === null}
+          <p class="small muted pad">Bring in an album on the left, or choose one of the imports there.</p>
+        {:else if !selected && !searching && importing === null}
           <p class="small muted pad">Choose a folder on the left, or find songs, to see them here.</p>
         {:else}
           <p class="small muted pad">
@@ -1678,7 +1778,7 @@
             </button>
             <button class="small-button" disabled={busy} onclick={() => (pending = {})}>Throw them away</button>
           {:else}
-            <p class="small muted">No changes yet. Click a cell to change it, or use the tools under the grid.</p>
+            <p class="small muted">No changes yet. Click a cell to change it, or use the tools above and below the grid.</p>
             <button class="primary" disabled>Approve changes</button>
           {/if}
         </div>
@@ -2251,8 +2351,23 @@
     gap: 6px;
   }
 
-  .imports-head strong {
-    flex: 1;
+  .layout-choice {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin: 4px 0 8px;
+    padding: 6px 8px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+  }
+
+  .layout-choice .check {
+    align-items: flex-start;
+  }
+
+  .example {
+    display: block;
+    font-size: 0.85em;
   }
 
   .import-item.picked {

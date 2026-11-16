@@ -61,7 +61,9 @@
   /** The song's folder inside its library folder. */
   const folderOf = (song: EditorSong) => {
     const rel = song.rel_path || song.path
-    return rel.slice(0, Math.max(rel.lastIndexOf('/'), rel.lastIndexOf('\\')))
+    // A name with no folder in it (an import's) is in no folder, not cut short.
+    const cut = Math.max(rel.lastIndexOf('/'), rel.lastIndexOf('\\'))
+    return cut < 0 ? '' : rel.slice(0, cut)
   }
 
   onMount(async () => {
@@ -175,7 +177,12 @@
     if (take.cover && chosenHit) {
       const res = await fetch(api.editorReleaseCover(chosenHit.source, chosenHit.id))
       if (res.ok) cover = await res.blob()
-      else toast("This release has no cover to take; the tags are still taken", true)
+      else if (res.status === 404) toast('This release has no cover to take; the tags are still taken', true)
+      else
+        toast(
+          `Couldn't get the cover (${(await res.json().catch(() => null))?.error ?? 'the site refused'}); the tags are still taken. Find a cover can try the other sources.`,
+          true,
+        )
     }
     onapply(changes, cover)
   }
