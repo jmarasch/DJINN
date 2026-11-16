@@ -169,7 +169,11 @@ struct Outcomes {
 }
 
 async fn ai_on(state: &AppState) -> ApiResult<bool> {
-    Ok(settings::flag(&state.store, crate::ai_work::WORK_ON, false).await?)
+    Ok(
+        crate::ai_listener::installed(&crate::ai_listener::dir(state))
+            || settings::flag(&state.store, crate::ai_work::WORK_ON, false).await?
+            || crate::ai_work::has_other_workers(state).await?,
+    )
 }
 
 fn outcome(id: i64, result: &'static str) -> Outcome {
@@ -236,16 +240,18 @@ async fn find(
     }))
 }
 
-/// Asks the AI for these songs (an import's: once it's in the library).
+/// Asks the AI for these songs (waking the local listener if installed).
 async fn ask_ai(state: &AppState, staged: bool, ids: &[i64], kind: &str) -> ApiResult<()> {
     if ids.is_empty() {
         return Ok(());
     }
     if staged {
         state.store.set_import_ai_want(ids, kind).await?;
+        crate::ai_work::clear_import_attempts(state, ids);
     } else {
         state.store.ai_ask(ids, kind).await?;
     }
+    crate::ai_work::wake_listener(state).await;
     Ok(())
 }
 

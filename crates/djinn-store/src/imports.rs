@@ -116,6 +116,25 @@ impl Store {
         Ok(())
     }
 
+    /// Clears the pending AI lyrics request on an import file.
+    pub async fn clear_import_ai_want(&self, id: i64) -> Result<()> {
+        sqlx::query("UPDATE import_files SET ai_want = NULL WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Import files waiting for AI lyrics work.
+    pub async fn import_ai_wanted(&self) -> Result<Vec<ImportFile>> {
+        Ok(sqlx::query_as(
+            "SELECT id, batch, name, path, size, added_at, ai_want FROM import_files
+             WHERE ai_want IS NOT NULL ORDER BY id",
+        )
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
     /// Forgets files (added to the library, or thrown away).
     pub async fn remove_import_files(&self, ids: &[i64]) -> Result<()> {
         let ids = id_list(ids);

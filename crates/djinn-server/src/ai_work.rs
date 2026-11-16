@@ -409,6 +409,227 @@ enum Asker {
     Node,
 }
 
+/// Whether any external worker (other worker keys, or approved nodes set to
+/// help with AI) exists besides this computer's own listener.
+pub async fn has_other_workers(state: &AppState) -> anyhow::Result<bool> {
+    if keys(state)
+        .await?
+        .iter()
+        .any(|k| k.name != crate::ai_listener::LOCAL_KEY_NAME)
+    {
+        return Ok(true);
+    }
+    Ok(state
+        .store
+        .nodes()
+        .await?
+        .into_iter()
+        .any(|n| n.status == "approved" && n.ai_help))
+}
+
+#[derive(Clone)]
+struct ImportLease {
+    worker: String,
+    kind: String,
+    taken_at: i64,
+    attempts: i64,
+    moved_to: Option<i64>,
+}
+
+static IMPORT_JOBS: Mutex<Option<HashMap<(usize, i64), ImportLease>>> = Mutex::new(None);
+
+fn state_key(state: &AppState) -> usize {
+    std::sync::Arc::as_ptr(&state.art_dir) as usize
+}
+
+fn with_imports<T>(f: impl FnOnce(&mut HashMap<(usize, i64), ImportLease>) -> T) -> T {
+    let mut guard = IMPORT_JOBS.lock().unwrap_or_else(|e| e.into_inner());
+    f(guard.get_or_insert_with(HashMap::new))
+}
+
+/// Whether an import file is currently leased to a worker.
+pub fn import_working(state: &AppState, file_id: i64) -> bool {
+    let key = (state_key(state), file_id);
+    let cut = djinn_store::now_ms() - LEASE_MS;
+    with_imports(|m| m.get(&key).is_some_and(|l| l.taken_at > cut))
+}
+
+/// Clears prior failure counts on import files when asked again.
+pub fn clear_import_attempts(state: &AppState, ids: &[i64]) {
+    let sk = state_key(state);
+    let cut = djinn_store::now_ms() - LEASE_MS;
+    with_imports(|m| {
+        for &id in ids {
+            let key = (sk, id);
+            if let Some(lease) = m.get_mut(&key) {
+                if lease.taken_at <= cut {
+                    m.remove(&key);
+                } else {
+                    lease.attempts = 0;
+                }
+            }
+        }
+    });
+}
+
+/// Remembers that an import file was moved into the library while a worker
+/// held it, so its result lands on the new track.
+pub fn note_import_moved(state: &AppState, file_id: i64, track_id: i64) {
+    let key = (state_key(state), file_id);
+    with_imports(|m| {
+        if let Some(lease) = m.get_mut(&key) {
+            lease.moved_to = Some(track_id);
+        }
+    });
+}
+
+async fn worker_busy(state: &AppState, worker: &str) -> bool {
+    let sk = state_key(state);
+    let cut = djinn_store::now_ms() - LEASE_MS;
+    let holding_import = with_imports(|m| {
+        m.iter()
+            .any(|(&(k, _), l)| k == sk && l.worker == worker && l.taken_at > cut)
+    });
+    holding_import
+        || state
+            .store
+            .ai_worker_busy(worker, LEASE_MS)
+            .await
+            .unwrap_or(false)
+}
+
+/// Wakes the local listener if installed so on-demand editor work starts
+/// straight away even when background listening is off.
+pub async fn wake_listener(state: &AppState) {
+    if !crate::ai_listener::installed(&crate::ai_listener::dir(state)) {
+        return;
+    }
+    if crate::ai_listener::is_running()
+        && !worker_busy(state, crate::ai_listener::LOCAL_KEY_NAME).await
+    {
+        crate::ai_listener::stop_worker().await;
+    }
+    if let Err(e) = crate::ai_listener::start_worker(state).await {
+        tracing::warn!(error = %e, "couldn't start the lyrics listener");
+    }
+}
+
+fn codec_for_path(path: &std::path::Path) -> Option<String> {
+    let ext = path.extension()?.to_str()?.to_ascii_lowercase();
+    let codec = match ext.as_str() {
+        "mp3" => "mpeg",
+        "m4a" | "mp4" => "mp4",
+        "flac" => "flac",
+        "ogg" | "oga" => "vorbis",
+        "wav" => "wav",
+        "aac" => "aac",
+        _ => return None,
+    };
+    Some(codec.to_owned())
+}
+
+async fn claim_imports(
+    state: &AppState,
+    worker: &str,
+    max: usize,
+) -> ApiResult<Vec<djinn_store::AiJob>> {
+    let wanted = state.store.import_ai_wanted().await?;
+    if wanted.is_empty() || max == 0 {
+        return Ok(Vec::new());
+    }
+    let sk = state_key(state);
+    let now = djinn_store::now_ms();
+    let cut = now - LEASE_MS;
+    let candidates: Vec<djinn_store::ImportFile> = with_imports(|m| {
+        wanted
+            .into_iter()
+            .filter(|f| {
+                m.get(&(sk, f.id))
+                    .is_none_or(|l| l.taken_at <= cut && l.attempts < djinn_store::MAX_ATTEMPTS)
+            })
+            .collect()
+    });
+    if candidates.is_empty() {
+        return Ok(Vec::new());
+    }
+    let original_years = djinn_library::original_years(&state.store).await?;
+    let (ready, stale) = tokio::task::spawn_blocking(move || {
+        let mut ready: Vec<djinn_store::AiJob> = Vec::new();
+        let mut stale: Vec<i64> = Vec::new();
+        for file in candidates {
+            let Some(kind) = file.ai_want.clone() else {
+                continue;
+            };
+            let path = std::path::PathBuf::from(&file.path);
+            let duration_ms = djinn_library::compare::length_ms(&path);
+            let local = djinn_library::lyrics::local(&path);
+            let needs = match kind.as_str() {
+                "listen" => local.is_none(),
+                "sync" => local
+                    .as_ref()
+                    .is_some_and(|l| l.synced.is_none() && l.plain.is_some() && !l.instrumental),
+                _ => false,
+            };
+            if !needs {
+                stale.push(file.id);
+                continue;
+            }
+            if ready.len() >= max {
+                continue;
+            }
+            let tags = djinn_library::compare::read(&path, original_years).unwrap_or_default();
+            let plain = if kind == "sync" {
+                local.and_then(|l| l.plain)
+            } else {
+                None
+            };
+            ready.push(djinn_store::AiJob {
+                track_id: -file.id,
+                kind,
+                artist: tags.artist.or(tags.album_artist),
+                title: tags.title,
+                album: tags.album,
+                duration_ms,
+                codec: codec_for_path(&path),
+                plain,
+            });
+        }
+        (ready, stale)
+    })
+    .await
+    .map_err(anyhow::Error::from)?;
+    for id in stale {
+        state.store.clear_import_ai_want(id).await?;
+        with_imports(|m| {
+            m.remove(&(sk, id));
+        });
+    }
+    let claimed = with_imports(|m| {
+        let mut out = Vec::new();
+        for job in ready {
+            let file_id = -job.track_id;
+            let entry = m.entry((sk, file_id)).or_insert_with(|| ImportLease {
+                worker: worker.to_owned(),
+                kind: job.kind.clone(),
+                taken_at: 0,
+                attempts: 0,
+                moved_to: None,
+            });
+            if entry.taken_at > cut || entry.attempts >= djinn_store::MAX_ATTEMPTS {
+                continue;
+            }
+            entry.worker = worker.to_owned();
+            entry.kind.clone_from(&job.kind);
+            entry.taken_at = now;
+            entry.attempts += 1;
+            entry.moved_to = None;
+            out.push(job);
+        }
+        out
+    });
+    Ok(claimed)
+}
+
 async fn hand_out(state: &AppState, name: &str, asker: Asker, body: Next) -> ApiResult<Batch> {
     seen(name, |s| {
         s.node = asker == Asker::Node;
@@ -421,23 +642,27 @@ async fn hand_out(state: &AppState, name: &str, asker: Asker, body: Next) -> Api
         wait_secs: Some(WAIT_SECS),
         held,
     };
-    if !settings::flag(&state.store, WORK_ON, false).await? {
-        return Ok(nothing(None));
-    }
+    let work_on = settings::flag(&state.store, WORK_ON, false).await?;
     // A node keeps its own rules (it asks only while it isn't playing or
     // showing visuals); Main's rules are for Main's own work.
-    if asker == Asker::Keyed {
-        if let Some(held) = crate::background::held(state).await {
-            return Ok(nothing(Some(held)));
-        }
-    }
-    let max = i64::try_from(body.max.clamp(1, BATCH_MAX)).unwrap_or(1);
-    let listen = settings::flag(&state.store, WORK_NEW, true).await?;
-    let sync = settings::flag(&state.store, WORK_SYNC, false).await?;
+    let held = if asker == Asker::Keyed {
+        crate::background::held(state).await
+    } else {
+        None
+    };
+    let background = work_on && held.is_none();
+    let max_usize = body.max.clamp(1, BATCH_MAX);
+    let max = i64::try_from(max_usize).unwrap_or(1);
+    let listen = background && settings::flag(&state.store, WORK_NEW, true).await?;
+    let sync = background && settings::flag(&state.store, WORK_SYNC, false).await?;
     let lookups_off = lookups_off(state).await?;
     let mut prepare = false;
     let jobs = if asker == Asker::Node {
-        let mut jobs = state.store.ai_claim_prepared(name, max).await?;
+        let mut jobs = if background {
+            state.store.ai_claim_prepared(name, max).await?
+        } else {
+            Vec::new()
+        };
         if jobs.is_empty() {
             jobs = state
                 .store
@@ -446,35 +671,47 @@ async fn hand_out(state: &AppState, name: &str, asker: Asker, body: Next) -> Api
         }
         jobs
     } else {
-        // This computer's own listener isolates vocals for helping nodes
-        // first, keeping a few songs ready for each.
-        if name == crate::ai_listener::LOCAL_KEY_NAME && body.can_isolate {
-            sweep_vocals(state).await?;
-            let nodes = i64::try_from(helping_nodes()).unwrap_or(0);
-            prepare = nodes > 0
-                && settings::flag(&state.store, VOCALS_FOR_NODES, true).await?
-                && state.store.ai_prepared_count().await?
-                    < (nodes * PREPARED_PER_NODE).min(PREPARED_MAX);
+        let mut jobs = claim_imports(state, name, max_usize).await?;
+        let left = max - i64::try_from(jobs.len()).unwrap_or(max);
+        if left > 0 {
+            // This computer's own listener isolates vocals for helping nodes
+            // first, keeping a few songs ready for each.
+            if background && name == crate::ai_listener::LOCAL_KEY_NAME && body.can_isolate {
+                sweep_vocals(state).await?;
+                let nodes = i64::try_from(helping_nodes()).unwrap_or(0);
+                prepare = nodes > 0
+                    && settings::flag(&state.store, VOCALS_FOR_NODES, true).await?
+                    && state.store.ai_prepared_count().await?
+                        < (nodes * PREPARED_PER_NODE).min(PREPARED_MAX);
+            }
+            let more = state
+                .store
+                .ai_claim(
+                    name,
+                    listen,
+                    sync,
+                    lookups_off,
+                    if prepare { 1 } else { left },
+                    LEASE_MS,
+                )
+                .await?;
+            jobs.extend(more);
         }
-        state
-            .store
-            .ai_claim(
-                name,
-                listen,
-                sync,
-                lookups_off,
-                if prepare { 1 } else { max },
-                LEASE_MS,
-            )
-            .await?
+        jobs
     };
     if jobs.is_empty() {
-        return Ok(nothing(None));
+        if !work_on && name == crate::ai_listener::LOCAL_KEY_NAME && !worker_busy(state, name).await
+        {
+            tokio::spawn(async {
+                crate::ai_listener::stop_worker().await;
+            });
+        }
+        return Ok(nothing(if work_on { held } else { None }));
     }
     let jobs = jobs
         .into_iter()
         .map(|job| {
-            let vocals = !prepare && vocals_file(state, job.track_id).is_file();
+            let vocals = job.track_id > 0 && !prepare && vocals_file(state, job.track_id).is_file();
             Job {
                 job,
                 prepare,
@@ -499,20 +736,50 @@ async fn next(
 
 /// A song's audio (or its isolated vocals), only to the worker that holds it.
 async fn send_song(state: &AppState, name: &str, id: i64, request: Request) -> ApiResult<Response> {
-    match state.store.ai_holder(id).await? {
-        Some((holder, _)) if holder == name => {}
-        _ => return Err(ApiError::forbidden()),
-    }
-    let vocals = vocals_file(state, id);
-    let path = if vocals.is_file() {
-        vocals
+    let path: std::path::PathBuf = if id < 0 {
+        let key = (state_key(state), -id);
+        let file_id = -id;
+        let cut = djinn_store::now_ms() - LEASE_MS;
+        let moved_to = with_imports(|m| {
+            m.get(&key)
+                .filter(|l| l.worker == name && l.taken_at > cut)
+                .map(|l| l.moved_to)
+        })
+        .ok_or_else(ApiError::forbidden)?;
+        if let Some(track_id) = moved_to {
+            state
+                .store
+                .track_path(track_id)
+                .await?
+                .ok_or_else(ApiError::not_found)?
+                .into()
+        } else {
+            state
+                .store
+                .import_files_by_id(&[file_id])
+                .await?
+                .into_iter()
+                .next()
+                .ok_or_else(ApiError::not_found)?
+                .path
+                .into()
+        }
     } else {
-        state
-            .store
-            .track_path(id)
-            .await?
-            .ok_or_else(ApiError::not_found)?
-            .into()
+        match state.store.ai_holder(id).await? {
+            Some((holder, _)) if holder == name => {}
+            _ => return Err(ApiError::forbidden()),
+        }
+        let vocals = vocals_file(state, id);
+        if vocals.is_file() {
+            vocals
+        } else {
+            state
+                .store
+                .track_path(id)
+                .await?
+                .ok_or_else(ApiError::not_found)?
+                .into()
+        }
     };
     match ServeFile::new(path).oneshot(request).await {
         Ok(response) => Ok(response.map(Body::new).into_response()),
@@ -540,20 +807,33 @@ struct Outcome {
     elapsed_ms: Option<u64>,
 }
 
-async fn take_result(
+fn record_seen(name: &str, failed: bool, elapsed_ms: Option<u64>, audio_ms: Option<u64>) {
+    seen(name, |s| {
+        if failed {
+            s.failed += 1;
+        } else {
+            s.done += 1;
+        }
+        if let (Some(work), Some(audio)) = (elapsed_ms, audio_ms) {
+            if !failed && audio > 0 {
+                s.work_ms += work;
+                s.audio_ms += audio;
+                #[allow(clippy::cast_precision_loss)]
+                {
+                    s.secs_per_minute = Some(s.work_ms as f64 / s.audio_ms as f64 * 60.0);
+                }
+            }
+        }
+    });
+}
+
+async fn finish_track_result(
     state: &AppState,
     name: &str,
     id: i64,
-    body: Outcome,
-) -> ApiResult<StatusCode> {
-    let Some((holder, kind)) = state.store.ai_holder(id).await? else {
-        return Err(ApiError::conflict(
-            "that song isn't held by a worker any more",
-        ));
-    };
-    if holder != name {
-        return Err(ApiError::forbidden());
-    }
+    kind: &str,
+    body: &Outcome,
+) -> ApiResult<()> {
     let kind_number = if kind == "sync" { 2 } else { 1 };
     let failure = match (&body.lrc, &body.error) {
         // An instrumental has no lyrics to make: finished, nothing stored.
@@ -574,23 +854,98 @@ async fn take_result(
         .flatten()
         .and_then(|t| t.duration_ms)
         .and_then(|d| u64::try_from(d).ok());
-    seen(name, |s| {
-        if failure.is_some() {
-            s.failed += 1;
-        } else {
-            s.done += 1;
-        }
-        if let (Some(work), Some(audio)) = (body.elapsed_ms, audio_ms) {
-            if failure.is_none() && audio > 0 {
-                s.work_ms += work;
-                s.audio_ms += audio;
-                #[allow(clippy::cast_precision_loss)]
-                {
-                    s.secs_per_minute = Some(s.work_ms as f64 / s.audio_ms as f64 * 60.0);
-                }
+    record_seen(name, failure.is_some(), body.elapsed_ms, audio_ms);
+    Ok(())
+}
+
+async fn store_import_result(file: &djinn_store::ImportFile, body: &Outcome) -> Option<String> {
+    match (&body.lrc, &body.error) {
+        (None, Some(error)) if error == "instrumental" => None,
+        (Some(text), _) => {
+            if text.len() as u64 > djinn_library::lyrics_import::MAX_FILE_BYTES {
+                return Some("the lyrics are too big".into());
             }
+            if let Some(why) = djinn_library::lyrics_import::suspicious(text) {
+                return Some(format!("the lyrics look like code or markup ({why})"));
+            }
+            if !matches!(
+                djinn_library::lyrics_import::content(text),
+                djinn_library::lyrics_import::Content::Lyrics(_)
+            ) {
+                return Some("there are no lyrics in it".into());
+            }
+            let lrc_path = std::path::Path::new(&file.path).with_extension("lrc");
+            tokio::fs::write(lrc_path, text)
+                .await
+                .err()
+                .map(|e| e.to_string())
         }
-    });
+        (None, Some(error)) => Some(error.chars().take(200).collect()),
+        (None, None) => Some("sent nothing".to_owned()),
+    }
+}
+
+async fn take_result(
+    state: &AppState,
+    name: &str,
+    id: i64,
+    body: Outcome,
+) -> ApiResult<StatusCode> {
+    if id < 0 {
+        let key = (state_key(state), -id);
+        let file_id = -id;
+        let lease = with_imports(|m| m.get(&key).cloned())
+            .ok_or_else(|| ApiError::conflict("that song isn't held by a worker any more"))?;
+        if lease.worker != name {
+            return Err(ApiError::forbidden());
+        }
+        if let Some(track_id) = lease.moved_to {
+            with_imports(|m| m.remove(&key));
+            finish_track_result(state, name, track_id, &lease.kind, &body).await?;
+            return Ok(StatusCode::NO_CONTENT);
+        }
+        let Some(file) = state
+            .store
+            .import_files_by_id(&[file_id])
+            .await?
+            .into_iter()
+            .next()
+        else {
+            with_imports(|m| m.remove(&key));
+            return Err(ApiError::conflict(
+                "that song isn't held by a worker any more",
+            ));
+        };
+        let failure = store_import_result(&file, &body).await;
+        if failure.is_none() || lease.attempts >= djinn_store::MAX_ATTEMPTS {
+            with_imports(|m| m.remove(&key));
+            state.store.clear_import_ai_want(file_id).await?;
+        } else {
+            with_imports(|m| {
+                if let Some(entry) = m.get_mut(&key) {
+                    entry.taken_at = 0;
+                }
+            });
+        }
+        let path = std::path::PathBuf::from(&file.path);
+        let audio_ms =
+            tokio::task::spawn_blocking(move || djinn_library::compare::length_ms(&path))
+                .await
+                .ok()
+                .flatten()
+                .and_then(|d| u64::try_from(d).ok());
+        record_seen(name, failure.is_some(), body.elapsed_ms, audio_ms);
+        return Ok(StatusCode::NO_CONTENT);
+    }
+    let Some((holder, kind)) = state.store.ai_holder(id).await? else {
+        return Err(ApiError::conflict(
+            "that song isn't held by a worker any more",
+        ));
+    };
+    if holder != name {
+        return Err(ApiError::forbidden());
+    }
+    finish_track_result(state, name, id, &kind, &body).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -926,5 +1281,169 @@ mod tests {
             state.store.ai_counts(false, LEASE_MS).await.unwrap().done,
             1
         );
+    }
+
+    #[tokio::test]
+    async fn editor_asked_and_import_jobs_run_even_when_background_work_is_off() {
+        let dir = std::env::temp_dir().join(format!("djinn-ai-ondemand-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("art")).unwrap();
+        let state = AppState::for_tests_in(&dir).await;
+        let admin = session(&state, "admin", djinn_store::Role::Admin).await;
+        state
+            .store
+            .set_setting(crate::protected::LEVEL, "off")
+            .await
+            .unwrap();
+        // Background AI work is explicitly off.
+        crate::settings::set_flag(&state.store, WORK_ON, false)
+            .await
+            .unwrap();
+
+        // Add a library song (no lyrics yet) and a staged import file.
+        state
+            .store
+            .save_scanned(&[ScannedTrack {
+                path: "/m/Asked.mp3".into(),
+                title: "Asked".into(),
+                artist: Some("Band".into()),
+                duration_ms: Some(30_000),
+                ..Default::default()
+            }])
+            .await
+            .unwrap();
+        let track_id = state.store.compare_rows().await.unwrap()[0].id;
+        let fixture = std::fs::read(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../djinn-engine/tests/fixtures/gapless_a.flac"),
+        )
+        .unwrap();
+        let import_path = dir.join("waiting.flac");
+        std::fs::write(&import_path, &fixture).unwrap();
+        let batch = state.store.next_import_batch().await.unwrap();
+        let import_id = state
+            .store
+            .add_import_file(
+                batch,
+                "01 Waiting.flac",
+                &import_path.to_string_lossy(),
+                i64::try_from(fixture.len()).unwrap(),
+                None,
+            )
+            .await
+            .unwrap();
+
+        // Create a worker key.
+        let made = axum::http::Request::builder()
+            .method(Method::POST)
+            .uri("/api/ai-work/keys")
+            .header("cookie", &admin)
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"name":"on-demand-pc"}"#))
+            .unwrap();
+        let res = crate::app(state.clone()).oneshot(made).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(res.into_body(), 1 << 20)
+            .await
+            .unwrap();
+        let text = String::from_utf8_lossy(&bytes);
+        let key = text
+            .split("\"key\":\"")
+            .nth(1)
+            .and_then(|b| b.split('"').next())
+            .unwrap()
+            .to_owned();
+
+        // Ask the AI for both the staged import song and the library song from the editor.
+        for body in [
+            format!(r#"{{"ids":[{import_id}],"staged":true}}"#),
+            format!(r#"{{"ids":[{track_id}],"staged":false}}"#),
+        ] {
+            let req = axum::http::Request::builder()
+                .method(Method::POST)
+                .uri("/api/editor/lyrics/generate")
+                .header("cookie", &admin)
+                .header("content-type", "application/json")
+                .body(Body::from(body))
+                .unwrap();
+            let res = crate::app(state.clone()).oneshot(req).await.unwrap();
+            assert_eq!(res.status(), StatusCode::OK);
+        }
+
+        let worker_call = |method: Method, path: String, body: String| {
+            let state = state.clone();
+            let key = key.clone();
+            async move {
+                let req = axum::http::Request::builder()
+                    .method(method)
+                    .uri(path.as_str())
+                    .header("authorization", format!("Worker {key}"))
+                    .header("content-type", "application/json")
+                    .extension(axum::extract::ConnectInfo(std::net::SocketAddr::from((
+                        [192, 168, 1, 20],
+                        4000,
+                    ))))
+                    .body(Body::from(body))
+                    .unwrap();
+                let res = crate::app(state).oneshot(req).await.unwrap();
+                let status = res.status();
+                let bytes = axum::body::to_bytes(res.into_body(), 2 << 20)
+                    .await
+                    .unwrap();
+                (status, bytes)
+            }
+        };
+
+        // Worker claims both jobs even though WORK_ON is false.
+        let (status, bytes) = worker_call(
+            Method::POST,
+            "/api/ai-work/next".into(),
+            r#"{"max":5}"#.into(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let batch_json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let jobs = batch_json["jobs"].as_array().unwrap();
+        assert_eq!(jobs.len(), 2, "{batch_json}");
+        assert!(jobs.iter().any(|j| j["track_id"] == -import_id));
+        assert!(jobs.iter().any(|j| j["track_id"] == track_id));
+        assert!(import_working(&state, import_id));
+
+        // Worker fetches the import audio via its negative id.
+        let (status, audio) = worker_call(
+            Method::GET,
+            format!("/api/ai-work/song/{}", -import_id),
+            String::new(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(audio.as_ref(), fixture.as_slice());
+
+        // Worker posts AI lyrics for the import song -> sidecar .lrc written, ai_want cleared.
+        let import_lrc = r#"{"lrc":"[ar:Band]\n[ti:Waiting]\n[by:lyrics-listener (AI-generated; model=m)]\n\n[00:00.00](AI-generated lyrics)\n[00:01.00]waiting words"}"#;
+        let (status, _) = worker_call(
+            Method::POST,
+            format!("/api/ai-work/result/{}", -import_id),
+            import_lrc.into(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        assert!(import_path.with_extension("lrc").is_file());
+        assert!(!import_working(&state, import_id));
+        assert!(state.store.import_ai_wanted().await.unwrap().is_empty());
+
+        // Worker posts AI lyrics for the library song -> saved with ai=1.
+        let track_lrc = r#"{"lrc":"[ar:Band]\n[ti:Asked]\n[by:lyrics-listener (AI-generated; model=m)]\n\n[00:00.00](AI-generated lyrics)\n[00:01.00]asked words"}"#;
+        let (status, _) = worker_call(
+            Method::POST,
+            format!("/api/ai-work/result/{track_id}"),
+            track_lrc.into(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        let got = state.store.lyrics(track_id).await.unwrap().unwrap();
+        assert_eq!((got.ai, got.plain.as_deref()), (1, Some("asked words")));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

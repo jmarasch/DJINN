@@ -246,7 +246,12 @@ async fn drop_file(
 // --- The grid ---
 
 /// A waiting file as the editor's grid shows a song, from its tags.
-fn as_song(file: &ImportFile, tags: &FileTags, art_hash: Option<String>) -> EditorSong {
+fn as_song(
+    file: &ImportFile,
+    tags: &FileTags,
+    art_hash: Option<String>,
+    working: bool,
+) -> EditorSong {
     let path = Path::new(&file.path);
     let lyrics = match djinn_library::lyrics::local(path) {
         Some(f) if f.synced.is_some() => 2,
@@ -268,7 +273,13 @@ fn as_song(file: &ImportFile, tags: &FileTags, art_hash: Option<String>) -> Edit
         art_hash,
         duration_ms: compare::length_ms(path),
         lyrics,
-        ai_job: file.ai_want.as_ref().map(|k| format!("{k} after adding")),
+        ai_job: file.ai_want.as_ref().map(|k| {
+            if working {
+                format!("{k} working")
+            } else {
+                format!("{k} asked")
+            }
+        }),
     }
 }
 
@@ -296,6 +307,11 @@ struct Songs {
 async fn read_files(state: &AppState, files: Vec<ImportFile>) -> ApiResult<Vec<Row>> {
     let original_years = djinn_library::original_years(&state.store).await?;
     let art = state.art_dir.clone();
+    let working: std::collections::HashSet<i64> = files
+        .iter()
+        .filter(|f| crate::ai_work::import_working(state, f.id))
+        .map(|f| f.id)
+        .collect();
     Ok(tokio::task::spawn_blocking(move || {
         files
             .iter()
@@ -311,7 +327,12 @@ async fn read_files(state: &AppState, files: Vec<ImportFile>) -> ApiResult<Vec<R
                     ..FileTags::default()
                 };
                 Row {
-                    song: as_song(file, tags.as_ref().unwrap_or(&fallback), art_hash),
+                    song: as_song(
+                        file,
+                        tags.as_ref().unwrap_or(&fallback),
+                        art_hash,
+                        working.contains(&file.id),
+                    ),
                     file: tags,
                     editable: true,
                     rel_path: file.name.clone(),
@@ -547,29 +568,46 @@ async fn add_to_library(
     let edit_batch = state.store.next_file_batch().await?;
     let mut added = Vec::new();
     let mut done_ids = Vec::new();
+    let mut ai_lyrics: std::collections::HashMap<i64, (String, i64)> =
+        std::collections::HashMap::new();
     for file in &mut planned {
         if file.problem.is_some() {
             continue;
         }
         let (from, to) = (PathBuf::from(&file.from), PathBuf::from(&file.to));
-        let moved = tokio::task::spawn_blocking(move || -> std::io::Result<()> {
-            if let Some(parent) = to.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            move_across(&from, &to)?;
-            // Lyrics found for it go beside it, where the library reads them.
-            let lrc = from.with_extension("lrc");
-            if lrc.is_file() && !to.with_extension("lrc").exists() {
-                let _ = move_across(&lrc, &to.with_extension("lrc"));
-            }
-            Ok(())
-        })
-        .await
-        .map_err(anyhow::Error::from)?;
+        let moved =
+            tokio::task::spawn_blocking(move || -> std::io::Result<Option<(String, i64)>> {
+                if let Some(parent) = to.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                move_across(&from, &to)?;
+                // Lyrics found for it go beside it, where the library reads them;
+                // AI-made/synced ones go into DJINN's lyrics table instead.
+                let lrc = from.with_extension("lrc");
+                let mut ai_lrc = None;
+                if lrc.is_file() {
+                    if let Ok(text) = std::fs::read_to_string(&lrc) {
+                        if let Some(info) = djinn_library::lyrics_import::header(&text).ai_info() {
+                            let _ = std::fs::remove_file(&lrc);
+                            ai_lrc = Some((text, info.kind));
+                        } else if !to.with_extension("lrc").exists() {
+                            let _ = move_across(&lrc, &to.with_extension("lrc"));
+                        }
+                    } else if !to.with_extension("lrc").exists() {
+                        let _ = move_across(&lrc, &to.with_extension("lrc"));
+                    }
+                }
+                Ok(ai_lrc)
+            })
+            .await
+            .map_err(anyhow::Error::from)?;
         match moved {
-            Ok(()) => {
+            Ok(ai_lrc) => {
                 added.push(file.to.clone());
                 done_ids.push(file.id);
+                if let Some(ai_lrc) = ai_lrc {
+                    ai_lyrics.insert(file.id, ai_lrc);
+                }
             }
             Err(e) => file.problem = Some(e.to_string()),
         }
@@ -600,11 +638,22 @@ async fn add_to_library(
                 })
                 .unwrap_or(djinn_store::NewLyrics::NONE);
             state.store.save_read_lyrics(track, mtime, &new).await?;
+            if let Some((ai_text, kind)) = ai_lyrics.get(&file.id) {
+                let _ = crate::lyrics_import::store_from_worker(
+                    &state,
+                    track,
+                    ai_text,
+                    *kind,
+                    crate::ai_listener::LOCAL_KEY_NAME,
+                )
+                .await;
+            }
             if let Some(kind) = files
                 .iter()
                 .find(|f| f.id == file.id)
                 .and_then(|f| f.ai_want.clone())
             {
+                crate::ai_work::note_import_moved(&state, file.id, track);
                 want.push((track, kind));
             }
         }
@@ -838,7 +887,7 @@ mod tests {
             &state,
             "POST",
             &format!("/api/editor/imports/{batch}/files?name=a.flac"),
-            song,
+            song.clone(),
             &admin,
         )
         .await;
@@ -856,6 +905,65 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         assert!(!std::path::Path::new(&waiting[0].path).exists());
         assert!(state.store.import_batches().await.unwrap().is_empty());
+
+        // AI-generated lyrics made for a staged import move into the DB as AI lyrics,
+        // without placing an AI .lrc file into the library folder.
+        let (_, started) = send(&state, "POST", "/api/editor/imports", vec![], &admin).await;
+        let batch = started["batch"].as_i64().unwrap();
+        let (status, up) = send(
+            &state,
+            "POST",
+            &format!("/api/editor/imports/{batch}/files?name=02%20AI.flac"),
+            song,
+            &admin,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let ai_file_id = up["id"].as_i64().unwrap();
+        let changes = format!(
+            r#"{{"changes":[{{"id":{ai_file_id},"field":"title","value":"AITrack"}},{{"id":{ai_file_id},"field":"album_artist","value":"Band"}},{{"id":{ai_file_id},"field":"album","value":"Record"}},{{"id":{ai_file_id},"field":"track_no","value":"2"}}]}}"#
+        );
+        let (status, _) = send(
+            &state,
+            "POST",
+            "/api/editor/imports/apply",
+            changes.into_bytes(),
+            &admin,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let waiting = state.store.import_files(batch).await.unwrap();
+        std::fs::write(
+            std::path::Path::new(&waiting[0].path).with_extension("lrc"),
+            "[ar:Band]\n[ti:AITrack]\n[by:lyrics-listener (AI-generated; model=small)]\n\n[00:00.00](AI-generated lyrics)\n[00:01.00]generated words\n",
+        )
+        .unwrap();
+        let add_body = format!(
+            r#"{{"folder":"{}","pattern":"{{album_artist}}/{{album}}/{{track}} {{title}}"}}"#,
+            music.to_string_lossy()
+        );
+        let (status, done) = send(
+            &state,
+            "POST",
+            &format!("/api/editor/imports/{batch}/add"),
+            add_body.into_bytes(),
+            &admin,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{done}");
+        let ai_dest = music.join("Band").join("Record").join("02 AITrack.flac");
+        assert!(ai_dest.is_file());
+        assert!(!ai_dest.with_extension("lrc").exists());
+        let ai_track_id = state
+            .store
+            .track_id_at(&ai_dest.to_string_lossy())
+            .await
+            .unwrap()
+            .unwrap();
+        let stored = state.store.lyrics(ai_track_id).await.unwrap().unwrap();
+        assert_eq!(stored.ai, 1);
+        assert_eq!(stored.source, "bulk");
+        assert_eq!(stored.plain.as_deref(), Some("generated words"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

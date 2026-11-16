@@ -80,9 +80,9 @@ impl Store {
             "SELECT t.id AS track_id, q.kind, t.artist, t.title, t.album, t.duration_ms, t.codec,
                     CASE WHEN q.kind = 'sync' THEN l.plain END AS plain
              FROM ai_asked q JOIN tracks t ON t.id = q.track_id
-             JOIN lyrics l ON l.track_id = t.id
+             LEFT JOIN lyrics l ON l.track_id = t.id
              WHERE t.removed_at IS NULL
-               AND ((q.kind = 'listen' AND l.source = 'none' AND l.instrumental = 0)
+               AND ((q.kind = 'listen' AND (l.track_id IS NULL OR (l.source = 'none' AND l.instrumental = 0)))
                     OR (q.kind = 'sync' AND l.synced IS NULL AND l.plain IS NOT NULL
                         AND l.instrumental = 0))
                AND NOT EXISTS (SELECT 1 FROM ai_jobs j WHERE j.track_id = t.id
@@ -224,6 +224,19 @@ impl Store {
         .bind(track_id)
         .fetch_optional(&self.pool)
         .await?)
+    }
+
+    /// Whether `worker` currently holds an active lease on any track job.
+    pub async fn ai_worker_busy(&self, worker: &str, lease_ms: i64) -> Result<bool> {
+        let cut = now_ms() - lease_ms;
+        Ok(sqlx::query_scalar::<_, i64>(
+            "SELECT EXISTS (SELECT 1 FROM ai_jobs WHERE worker = ?1 AND status = 'working' AND taken_at > ?2)",
+        )
+        .bind(worker)
+        .bind(cut)
+        .fetch_one(&self.pool)
+        .await?
+            != 0)
     }
 
     /// Asks workers for these songs before any others: make lyrics

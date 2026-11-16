@@ -108,6 +108,18 @@ fn with<T>(f: impl FnOnce(&mut Inner) -> T) -> T {
     f(guard.get_or_insert_with(Inner::default))
 }
 
+fn child_running(inner: &mut Inner) -> bool {
+    inner
+        .child
+        .as_mut()
+        .is_some_and(|c| matches!(c.try_wait(), Ok(None)))
+}
+
+/// Whether the local lyrics listener child process is currently running.
+pub fn is_running() -> bool {
+    with(child_running)
+}
+
 fn note(line: impl Into<String>) {
     with(|i| {
         i.log.push(line.into());
@@ -234,10 +246,7 @@ struct Status {
 async fn status(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json<Status>> {
     let d = dir(&state);
     let (installing, running, error, log) = with(|i| {
-        let running = i
-            .child
-            .as_mut()
-            .is_some_and(|c| matches!(c.try_wait(), Ok(None)));
+        let running = child_running(i);
         (i.installing, running, i.error.clone(), i.log.clone())
     });
     let lines: Vec<String> = log.iter().rev().take(40).rev().cloned().collect();
@@ -564,11 +573,7 @@ pub async fn start_worker(state: &AppState) -> anyhow::Result<()> {
     if !installed(&d) {
         anyhow::bail!("install the listener first");
     }
-    if with(|i| {
-        i.child
-            .as_mut()
-            .is_some_and(|c| matches!(c.try_wait(), Ok(None)))
-    }) {
+    if is_running() {
         return Ok(());
     }
     let key = local_key(state, &d).await?;

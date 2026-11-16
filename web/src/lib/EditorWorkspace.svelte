@@ -182,9 +182,8 @@
     if (fillField === field) fillField = 'title'
   }
 
-  // --- Sorting and grouping. Rows sort by the values as they are (not the
-  // changes waiting), so a row doesn't jump away while it's being edited.
-  // With no column chosen they come folder by folder, by disc and track.
+  // --- Sorting and grouping. Rows sort and group by the values shown
+  // (including changes waiting), or folder by folder, by disc and track.
   type SortField = EditorField | 'file'
   let sortBy = $state<{ field: SortField; desc: boolean } | null>(null)
   let groupBy = $state<'' | 'disc_no' | 'album' | 'folder'>('')
@@ -203,6 +202,10 @@
   }
 
   function sortOn(field: SortField) {
+    if (editing) {
+      const song = songs.find((s) => s.id === editing?.id)
+      if (song) finishEdit(song, true)
+    }
     if (sortBy?.field !== field) sortBy = { field, desc: false }
     else if (!sortBy.desc) sortBy = { field, desc: true }
     else sortBy = null
@@ -220,12 +223,12 @@
 
   function fieldOrder(a: EditorSong, b: EditorSong, field: SortField, desc = false): number {
     if (field === 'file') return compareValues(fileName(a.path), fileName(b.path), false, desc)
-    return compareValues(original(a, field), original(b, field), isNumber(field), desc)
+    return compareValues(shown(a, field), shown(b, field), isNumber(field), desc)
   }
 
   function groupKey(song: EditorSong): string {
-    if (groupBy === 'disc_no') return original(song, 'disc_no') || '1'
-    if (groupBy === 'album') return original(song, 'album')
+    if (groupBy === 'disc_no') return shown(song, 'disc_no') || '1'
+    if (groupBy === 'album') return shown(song, 'album')
     if (groupBy === 'folder') return folderOf(song)
     return ''
   }
@@ -721,7 +724,7 @@
   /** Songs Find lyrics found nothing for anywhere, to offer the AI. */
   let noLyrics = $state<number[]>([])
 
-  const AI_NOTE = " The AI listener is off, so they'll wait until it's turned on (Admin > AI > Lyrics listening)."
+  const AI_NOTE = ' Install the AI listener in Admin > AI > Lyrics listening first, so it can do them.'
 
   function aiLabel(job: string | null): string {
     if (!job) return ''
@@ -752,7 +755,6 @@
       )
       const count = (r: string) => done.songs.filter((s) => s.result === r).length
       const asked = count('asked')
-      const later = staged ? ' once the import is added to the library' : ''
       if (kind === 'find') {
         noLyrics = done.songs.filter((s) => s.result === 'none').map((s) => s.id)
         const failed = done.songs.find((s) => s.result === 'failed')
@@ -767,14 +769,14 @@
       } else if (kind === 'timed') {
         toast(
           `${count('timed')} timed from LRCLIB` +
-            (asked ? `; the AI will time the words of ${asked}${later}` : '') +
+            (asked ? `; the AI will time the words of ${asked}` : '') +
             (count('skipped') ? `; ${count('skipped')} have no words to time` : '') +
             (asked && !done.ai_on ? `.${AI_NOTE}` : ''),
         )
       } else {
         noLyrics = []
         toast(
-          (asked ? `The AI will make lyrics for ${asked} songs${later}` : 'Every song has lyrics already') +
+          (asked ? `The AI will make lyrics for ${asked} songs` : 'Every song has lyrics already') +
             (count('had') && asked ? `; ${count('had')} have some already` : '') +
             (asked && !done.ai_on ? `.${AI_NOTE}` : ''),
         )
@@ -786,6 +788,27 @@
       lyricsBusy = ''
     }
   }
+
+  $effect(() => {
+    if (!songs.some((s) => s.ai_job)) return
+    const timer = setInterval(async () => {
+      if (loading || busy || lyricsBusy || (!selected && !searching && importing === null)) return
+      try {
+        const found =
+          importing !== null
+            ? await api.editorImportSongs(importing)
+            : await api.editorSongs(selected, 0, target === 'library', searching)
+        const byId = new Map(found.songs.map((s) => [s.id, s]))
+        songs = songs.map((s) => {
+          const fresh = byId.get(s.id)
+          return fresh ? { ...s, lyrics: fresh.lyrics, ai_job: fresh.ai_job } : s
+        })
+      } catch {
+        // Tried again on the next tick.
+      }
+    }, 4000)
+    return () => clearInterval(timer)
+  })
 
   /** Looks songs up by their sound and puts what's found in as changes to approve. */
   async function identifyBySound() {
@@ -1458,7 +1481,12 @@
                   {#each shownColumns as col (col.key)}
                     <th aria-sort={sortBy?.field === col.key ? (sortBy.desc ? 'descending' : 'ascending') : undefined}>
                       <span class="head">
-                        <button class="sort" title="Sort by {col.label}" onclick={() => sortOn(col.key)}>
+                        <button
+                          class="sort"
+                          title="Sort by {col.label}"
+                          onmousedown={(e) => e.preventDefault()}
+                          onclick={() => sortOn(col.key)}
+                        >
                           {col.label}{#if sortBy?.field === col.key}<span class="arrow">{sortBy.desc ? '▼' : '▲'}</span>{/if}
                         </button>
                         {#if col.key !== 'title'}
@@ -1471,7 +1499,12 @@
                   {/each}
                   <th>Lyrics</th>
                   <th aria-sort={sortBy?.field === 'file' ? (sortBy.desc ? 'descending' : 'ascending') : undefined}>
-                    <button class="sort" title="Sort by file name" onclick={() => sortOn('file')}>
+                    <button
+                      class="sort"
+                      title="Sort by file name"
+                      onmousedown={(e) => e.preventDefault()}
+                      onclick={() => sortOn('file')}
+                    >
                       File{#if sortBy?.field === 'file'}<span class="arrow">{sortBy.desc ? '▼' : '▲'}</span>{/if}
                     </button>
                   </th>
@@ -2119,6 +2152,10 @@
     min-width: 8ch;
     padding: 1px 4px;
     font: inherit;
+  }
+
+  td.narrow input.cell {
+    min-width: 0;
   }
 
   tr.chosen td {
