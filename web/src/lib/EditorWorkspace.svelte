@@ -1205,7 +1205,7 @@
     <p class="small">The editor is locked. <button class="link" onclick={unlock}>Unlock</button></p>
   </section>
 {:else}
-  <div class="editor" class:library={editingFiles} class:fill={windowed}>
+  <div class="editor" class:library={target === 'library' && !importMode} class:import={importMode} class:fill={windowed}>
     <div class="top">
       <div class="toggle" role="group" aria-label="What you are editing">
         <button class:on={target === 'library' && !importMode} onclick={() => setTarget('library')}>Library</button>
@@ -1844,9 +1844,16 @@
     box-shadow: 0 0 14px var(--glow);
   }
 
+  /* What's being edited, by colour: the library's files neon green, an
+     import neon pink, DJINN's own copy the page's accent. */
   .editor.library {
-    --target: #e8a317;
-    box-shadow: 0 0 14px rgb(232 163 23 / 0.4);
+    --target: #39ff6a;
+    box-shadow: 0 0 16px rgb(57 255 106 / 0.45);
+  }
+
+  .editor.import {
+    --target: #ff2e7e;
+    box-shadow: 0 0 16px rgb(255 46 126 / 0.5);
   }
 
   .top {
