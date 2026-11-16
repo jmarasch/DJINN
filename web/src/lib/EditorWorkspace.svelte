@@ -1207,7 +1207,7 @@
           />
           <button class="small-button" type="submit" disabled={!searchText.trim()}>Find</button>
         </form>
-        {#if !selected && !searching}
+        {#if !selected && !searching && importing === null}
           <p class="small muted pad">Choose a folder on the left, or find songs, to see them here.</p>
         {:else}
           <p class="small muted pad">
