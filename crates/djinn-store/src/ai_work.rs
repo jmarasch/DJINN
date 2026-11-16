@@ -74,8 +74,28 @@ impl Store {
         let now = now_ms();
         let lease_cut = now - lease_ms;
         let mut tx = self.write().await?;
-        let mut jobs: Vec<AiJob> = Vec::new();
-        if listen {
+        // Songs an admin asked for come first, whatever `listen` and `sync`
+        // say, while they still need it and haven't failed three times.
+        let mut jobs: Vec<AiJob> = sqlx::query_as(
+            "SELECT t.id AS track_id, q.kind, t.artist, t.title, t.album, t.duration_ms, t.codec,
+                    CASE WHEN q.kind = 'sync' THEN l.plain END AS plain
+             FROM ai_asked q JOIN tracks t ON t.id = q.track_id
+             JOIN lyrics l ON l.track_id = t.id
+             WHERE t.removed_at IS NULL
+               AND ((q.kind = 'listen' AND l.source = 'none' AND l.instrumental = 0)
+                    OR (q.kind = 'sync' AND l.synced IS NULL AND l.plain IS NOT NULL
+                        AND l.instrumental = 0))
+               AND NOT EXISTS (SELECT 1 FROM ai_jobs j WHERE j.track_id = t.id
+                   AND ((j.status IN ('working', 'prepared') AND j.taken_at > ?1)
+                        OR (j.status = 'failed' AND j.attempts >= 3 AND j.kind = q.kind)))
+             ORDER BY q.asked_at LIMIT ?2",
+        )
+        .bind(lease_cut)
+        .bind(limit)
+        .fetch_all(&mut *tx)
+        .await?;
+        let left = limit - i64::try_from(jobs.len()).unwrap_or(limit);
+        if listen && left > 0 {
             let found: Vec<AiJob> = sqlx::query_as(concat!(
                 "SELECT t.id AS track_id, 'listen' AS kind, t.artist, t.title, t.album, t.duration_ms,
                         t.codec, NULL AS plain
@@ -88,7 +108,7 @@ impl Store {
             ))
             .bind(lease_cut)
             .bind(lookups_off)
-            .bind(limit)
+            .bind(left)
             .fetch_all(&mut *tx)
             .await?;
             jobs.extend(found);
@@ -111,6 +131,9 @@ impl Store {
             .await?;
             jobs.extend(found);
         }
+        // An asked song the usual rounds found too goes once.
+        let mut seen = std::collections::HashSet::new();
+        jobs.retain(|job| seen.insert(job.track_id));
         for job in &jobs {
             sqlx::query(
                 "INSERT INTO ai_jobs (track_id, kind, status, worker, taken_at, attempts)
@@ -203,8 +226,44 @@ impl Store {
         .await?)
     }
 
+    /// Asks workers for these songs before any others: make lyrics
+    /// (`listen`) or time the words they have (`sync`). Returns how many.
+    pub async fn ai_ask(&self, ids: &[i64], kind: &str) -> Result<u64> {
+        let list = format!(
+            "[{}]",
+            ids.iter().map(i64::to_string).collect::<Vec<_>>().join(",")
+        );
+        // A song asked again gets a fresh go, failed tries forgotten.
+        sqlx::query(
+            "DELETE FROM ai_jobs WHERE status IN ('failed', 'done') AND kind = ?2
+               AND track_id IN (SELECT value FROM json_each(?1))",
+        )
+        .bind(&list)
+        .bind(kind)
+        .execute(&self.pool)
+        .await?;
+        let done = sqlx::query(
+            "INSERT INTO ai_asked (track_id, kind, asked_at)
+             SELECT t.id, ?2, ?3 FROM tracks t
+             WHERE t.id IN (SELECT value FROM json_each(?1)) AND t.removed_at IS NULL
+             ON CONFLICT (track_id) DO UPDATE SET kind = excluded.kind, asked_at = excluded.asked_at",
+        )
+        .bind(&list)
+        .bind(kind)
+        .bind(now_ms())
+        .execute(&self.pool)
+        .await?;
+        Ok(done.rows_affected())
+    }
+
     /// The worker is done with a song: it worked, or `error` says why not.
     pub async fn ai_finish(&self, track_id: i64, error: Option<&str>) -> Result<()> {
+        if error.is_none() {
+            sqlx::query("DELETE FROM ai_asked WHERE track_id = ?")
+                .bind(track_id)
+                .execute(&self.pool)
+                .await?;
+        }
         sqlx::query("UPDATE ai_jobs SET status = ?, finished_at = ?, error = ? WHERE track_id = ?")
             .bind(if error.is_some() { "failed" } else { "done" })
             .bind(now_ms())
@@ -264,6 +323,69 @@ impl Store {
 mod tests {
     use super::*;
     use crate::{NewLyrics, ScannedTrack};
+
+    #[tokio::test]
+    async fn songs_asked_for_go_first_whatever_the_settings() {
+        let store = Store::open_in_memory().await.unwrap();
+        let song = |t: &str| ScannedTrack {
+            path: format!("/m/{t}.flac"),
+            title: t.into(),
+            artist: Some("Band".into()),
+            duration_ms: Some(200_000),
+            ..Default::default()
+        };
+        store
+            .save_scanned(&[song("Silent"), song("Words")])
+            .await
+            .unwrap();
+        let ids: Vec<i64> = store
+            .compare_rows()
+            .await
+            .unwrap()
+            .iter()
+            .map(|r| r.id)
+            .collect();
+        store
+            .save_read_lyrics(ids[0], 1, &NewLyrics::NONE)
+            .await
+            .unwrap();
+        let plain = NewLyrics {
+            synced: None,
+            plain: Some("la la"),
+            instrumental: false,
+            source: "file",
+        };
+        store.save_read_lyrics(ids[1], 1, &plain).await.unwrap();
+        let lease = 30 * 60 * 1000;
+        // Neither kind is on, and LRCLIB hasn't been asked: nothing.
+        assert!(store
+            .ai_claim("pc", false, false, false, 10, lease)
+            .await
+            .unwrap()
+            .is_empty());
+        assert_eq!(store.ai_ask(&[ids[1]], "sync").await.unwrap(), 1);
+        assert_eq!(store.ai_ask(&[ids[0]], "listen").await.unwrap(), 1);
+        let batch = store
+            .ai_claim("pc", true, true, true, 10, lease)
+            .await
+            .unwrap();
+        // Asked ones in the order asked, each once.
+        assert_eq!(
+            batch
+                .iter()
+                .map(|j| (j.track_id, j.kind.as_str()))
+                .collect::<Vec<_>>(),
+            [(ids[1], "sync"), (ids[0], "listen")]
+        );
+        assert_eq!(batch[0].plain.as_deref(), Some("la la"));
+        // Done: no longer asked.
+        store.ai_finish(ids[1], None).await.unwrap();
+        let left: i64 = sqlx::query_scalar("SELECT count(*) FROM ai_asked")
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+        assert_eq!(left, 1);
+    }
 
     #[tokio::test]
     async fn songs_are_handed_out_once_with_a_lease_and_can_be_retried() {

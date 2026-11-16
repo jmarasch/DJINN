@@ -14,7 +14,9 @@ import type {
   EditorNode,
   EditTarget,
   EditorChange,
+  EditorHeard,
   EditorImport,
+  EditorLyricsOutcomes,
   EditorApplied,
   EditorBatch,
   EditorRenamed,
@@ -363,6 +365,17 @@ export const api = {
     get<{ release: Release; matched: { id: number; track: number }[] }>(
       `/editor/release?source=${source}&id=${encodeURIComponent(id)}&ids=${songIds.join(',')}${staged ? '&import=true' : ''}`,
     ),
+  /** Lyrics for songs: their own, then LRCLIB (`staged`: files waiting in an import). */
+  editorLyricsFind: (ids: number[], staged: boolean) =>
+    post<EditorLyricsOutcomes>('/editor/lyrics/find', { ids, staged }),
+  /** Timed lyrics for songs with words only: LRCLIB's, else the AI times them. */
+  editorLyricsTimed: (ids: number[], staged: boolean) =>
+    post<EditorLyricsOutcomes>('/editor/lyrics/timed', { ids, staged }),
+  /** The AI listener makes lyrics for songs that have none. */
+  editorLyricsGenerate: (ids: number[], staged: boolean) =>
+    post<EditorLyricsOutcomes>('/editor/lyrics/generate', { ids, staged }),
+  /** Songs looked up by their sound (AcoustID, then MusicBrainz). */
+  editorIdentify: (ids: number[], staged: boolean) => post<EditorHeard[]>('/editor/identify', { ids, staged }),
   /** Albums brought into the editor to work on before they go into the library. */
   editorImports: () => get<EditorImport[]>('/editor/imports'),
   editorImportStart: () => post<{ batch: number }>('/editor/imports'),

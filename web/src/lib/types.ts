@@ -1537,6 +1537,11 @@ export interface EditorSong {
   rel_path: string
   /** Waiting in an import, not in the library yet. */
   staged?: boolean
+  /** Its lyrics: 0 none, 1 words, 2 timed. */
+  lyrics: number
+  /** AI lyrics work asked for or under way, like "listen asked", "sync
+   * working" or (an import's) "listen after adding". */
+  ai_job: string | null
   /** What the file says (editing the library); null if it couldn't be read. */
   file: {
     title: string
@@ -1550,6 +1555,32 @@ export interface EditorSong {
     /** The file's other text tags (Composer, Comment, Label...). */
     extra?: Record<string, string>
   } | null
+}
+
+/** What the editor's lyrics tools did with each song. */
+export interface EditorLyricsOutcomes {
+  songs: {
+    id: number
+    /** had, timed, words, instrumental, none, asked (the AI), skipped or failed. */
+    result: string
+    error?: string
+  }[]
+  /** The AI listener takes work; asked songs wait until it does. */
+  ai_on: boolean
+}
+
+/** What a song's sound was identified as, if anything. */
+export interface EditorHeard {
+  id: number
+  found: {
+    score: number
+    title: string
+    artist: string
+    album: string | null
+    year: number | null
+    genre: string | null
+  } | null
+  error?: string
 }
 
 /** An album brought into the editor, waiting to go into the library. */

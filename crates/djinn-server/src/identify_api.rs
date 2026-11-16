@@ -55,7 +55,7 @@ async fn identify_status(state: &AppState) -> ApiResult<IdentifyStatus> {
     })
 }
 
-async fn key(state: &AppState) -> ApiResult<String> {
+pub(crate) async fn key(state: &AppState) -> ApiResult<String> {
     Ok(state
         .store
         .get_setting(ACOUSTID_KEY)
@@ -65,7 +65,7 @@ async fn key(state: &AppState) -> ApiResult<String> {
         .to_owned())
 }
 
-async fn contact(state: &AppState) -> ApiResult<String> {
+pub(crate) async fn contact(state: &AppState) -> ApiResult<String> {
     Ok(state
         .store
         .get_setting(settings::MUSICBRAINZ_CONTACT)

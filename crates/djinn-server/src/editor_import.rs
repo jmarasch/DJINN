@@ -199,6 +199,7 @@ async fn delete_files(state: &AppState, files: Vec<ImportFile>) -> ApiResult<usi
             // Only ever inside the imports folder.
             if path.starts_with(&root) {
                 let _ = std::fs::remove_file(path);
+                let _ = std::fs::remove_file(path.with_extension("lrc"));
                 if let Some(dir) = path.parent() {
                     let _ = std::fs::remove_dir(dir);
                 }
@@ -246,6 +247,12 @@ async fn drop_file(
 
 /// A waiting file as the editor's grid shows a song, from its tags.
 fn as_song(file: &ImportFile, tags: &FileTags, art_hash: Option<String>) -> EditorSong {
+    let path = Path::new(&file.path);
+    let lyrics = match djinn_library::lyrics::local(path) {
+        Some(f) if f.synced.is_some() => 2,
+        Some(f) if f.plain.is_some() => 1,
+        _ => 0,
+    };
     EditorSong {
         id: file.id,
         path: file.path.clone(),
@@ -259,7 +266,9 @@ fn as_song(file: &ImportFile, tags: &FileTags, art_hash: Option<String>) -> Edit
         genre: tags.genre.clone(),
         album_id: None,
         art_hash,
-        duration_ms: compare::length_ms(Path::new(&file.path)),
+        duration_ms: compare::length_ms(path),
+        lyrics,
+        ai_job: file.ai_want.as_ref().map(|k| format!("{k} after adding")),
     }
 }
 
@@ -547,7 +556,13 @@ async fn add_to_library(
             if let Some(parent) = to.parent() {
                 std::fs::create_dir_all(parent)?;
             }
-            move_across(&from, &to)
+            move_across(&from, &to)?;
+            // Lyrics found for it go beside it, where the library reads them.
+            let lrc = from.with_extension("lrc");
+            if lrc.is_file() && !to.with_extension("lrc").exists() {
+                let _ = move_across(&lrc, &to.with_extension("lrc"));
+            }
+            Ok(())
         })
         .await
         .map_err(anyhow::Error::from)?;
@@ -565,9 +580,34 @@ async fn add_to_library(
     if !added.is_empty() {
         crate::library_api::reread(&state, &added).await?;
     }
+    let mut want: Vec<(i64, String)> = Vec::new();
     for file in planned.iter().filter(|f| f.problem.is_none()) {
         let (size, mtime) = stat(Path::new(&file.to)).unwrap_or((0, 0));
         let track = state.store.track_id_at(&file.to).await?;
+        if let Some(track) = track {
+            // Its lyrics now, not when the background reading gets to it.
+            let to = PathBuf::from(&file.to);
+            let lyrics = tokio::task::spawn_blocking(move || djinn_library::lyrics::local(&to))
+                .await
+                .map_err(anyhow::Error::from)?;
+            let new = lyrics
+                .as_ref()
+                .map(|f| djinn_store::NewLyrics {
+                    synced: f.synced.as_deref(),
+                    plain: f.plain.as_deref(),
+                    instrumental: f.instrumental,
+                    source: f.source.as_str(),
+                })
+                .unwrap_or(djinn_store::NewLyrics::NONE);
+            state.store.save_read_lyrics(track, mtime, &new).await?;
+            if let Some(kind) = files
+                .iter()
+                .find(|f| f.id == file.id)
+                .and_then(|f| f.ai_want.clone())
+            {
+                want.push((track, kind));
+            }
+        }
         let name = files
             .iter()
             .find(|f| f.id == file.id)
@@ -587,6 +627,13 @@ async fn add_to_library(
                 made_by: Some(user.id),
             })
             .await?;
+    }
+    // AI work asked for while it waited.
+    for kind in ["listen", "sync"] {
+        let ids: Vec<i64> = want.iter().filter(|w| w.1 == kind).map(|w| w.0).collect();
+        if !ids.is_empty() {
+            state.store.ai_ask(&ids, kind).await?;
+        }
     }
     audit(
         &state,
@@ -713,6 +760,35 @@ mod tests {
         assert_eq!(status, StatusCode::OK, "{done}");
         assert_eq!(done["songs"], 1, "{done}");
 
+        // Lyrics beside the waiting file (as Find lyrics leaves them), and
+        // AI work asked for, which waits until it's in the library.
+        let waiting = state.store.import_files(batch).await.unwrap()[0]
+            .path
+            .clone();
+        std::fs::write(
+            std::path::Path::new(&waiting).with_extension("lrc"),
+            "[00:01.00]la la\n",
+        )
+        .unwrap();
+        let (status, asked) = send(
+            &state,
+            "POST",
+            "/api/editor/lyrics/generate",
+            format!(r#"{{"ids":[{one}],"staged":true}}"#).into_bytes(),
+            &admin,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{asked}");
+        assert_eq!(
+            asked["songs"][0]["result"], "had",
+            "it has lyrics now: {asked}"
+        );
+        state
+            .store
+            .set_import_ai_want(&[one], "sync")
+            .await
+            .unwrap();
+
         // Previewed, then added: filed by its tags and taken in by the library.
         let add = format!(
             r#"{{"folder":"{}","pattern":"{{album_artist}}/{{album}}/{{track}} {{title}}","preview":true}}"#,
@@ -735,6 +811,11 @@ mod tests {
             .unwrap()
             .expect("the library took it in");
         assert_eq!(state.store.track(id).await.unwrap().unwrap().title, "First");
+        // Its lyrics came along and were read at once; the AI ask is queued.
+        assert!(filed.with_extension("lrc").is_file());
+        let songs = state.store.editor_songs_by_id(&[id]).await.unwrap();
+        assert_eq!(songs[0].lyrics, 2);
+        assert_eq!(songs[0].ai_job.as_deref(), Some("sync asked"));
         assert!(state.store.import_batches().await.unwrap().is_empty());
 
         // Undo from the history takes it out again.

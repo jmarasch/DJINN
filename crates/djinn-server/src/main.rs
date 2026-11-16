@@ -32,6 +32,7 @@ mod editor_api;
 mod editor_files;
 mod editor_import;
 mod editor_lookup;
+mod editor_lyrics;
 mod error;
 mod events;
 mod folders;

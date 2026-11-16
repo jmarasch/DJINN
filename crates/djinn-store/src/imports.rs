@@ -18,6 +18,8 @@ pub struct ImportFile {
     pub path: String,
     pub size: i64,
     pub added_at: i64,
+    /// AI lyrics work to ask for once it's in the library: "listen" or "sync".
+    pub ai_want: Option<String>,
 }
 
 /// An import: how many files it holds, and when it was started.
@@ -82,7 +84,7 @@ impl Store {
     /// The files of an import, in the order they came.
     pub async fn import_files(&self, batch: i64) -> Result<Vec<ImportFile>> {
         Ok(sqlx::query_as(
-            "SELECT id, batch, name, path, size, added_at FROM import_files
+            "SELECT id, batch, name, path, size, added_at, ai_want FROM import_files
              WHERE batch = ? ORDER BY id",
         )
         .bind(batch)
@@ -94,12 +96,24 @@ impl Store {
     pub async fn import_files_by_id(&self, ids: &[i64]) -> Result<Vec<ImportFile>> {
         let ids = id_list(ids);
         Ok(sqlx::query_as(
-            "SELECT id, batch, name, path, size, added_at FROM import_files
+            "SELECT id, batch, name, path, size, added_at, ai_want FROM import_files
              WHERE id IN (SELECT value FROM json_each(?)) ORDER BY id",
         )
         .bind(ids)
         .fetch_all(&self.pool)
         .await?)
+    }
+
+    /// Notes AI lyrics work to ask for once these files are in the library.
+    pub async fn set_import_ai_want(&self, ids: &[i64], kind: &str) -> Result<()> {
+        sqlx::query(
+            "UPDATE import_files SET ai_want = ?2 WHERE id IN (SELECT value FROM json_each(?1))",
+        )
+        .bind(id_list(ids))
+        .bind(kind)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 
     /// Forgets files (added to the library, or thrown away).

@@ -307,6 +307,7 @@
     importing = null
     addPlan = null
     selected = node.path
+    noLyrics = []
     moveTo = node.path
     chosen = null
     picked = {}
@@ -322,6 +323,7 @@
     importing = null
     addPlan = null
     searching = clean
+    noLyrics = []
     searchText = clean
     chosen = null
     picked = {}
@@ -395,6 +397,7 @@
     searching = ''
     importing = batch
     chosen = null
+    noLyrics = []
     picked = {}
     renames = null
     addPlan = null
@@ -631,6 +634,121 @@
 
   function fill() {
     for (const song of changeable) setPending(song, fillField, fillValue)
+  }
+
+  // --- Lyrics and identifying by sound, for the songs the tools work on.
+
+  /** What the lyrics tools are doing, for the button row. */
+  let lyricsBusy = $state('')
+  /** Songs Find lyrics found nothing for anywhere, to offer the AI. */
+  let noLyrics = $state<number[]>([])
+
+  const AI_NOTE = " The AI listener is off, so they'll wait until it's turned on (Admin > AI > Lyrics listening)."
+
+  function aiLabel(job: string | null): string {
+    if (!job) return ''
+    const [kind, ...rest] = job.split(' ')
+    const when = rest.join(' ')
+    const what = kind === 'sync' ? 'timing' : 'making'
+    if (when === 'working') return `AI ${what}`
+    if (when === 'after adding') return `AI ${what} once added`
+    return `AI ${what} soon`
+  }
+
+  async function lyricsTool(kind: 'find' | 'timed' | 'generate', ids: number[] = changeable.map((s) => s.id)) {
+    if (!ids.length) return
+    const staged = importing !== null
+    lyricsBusy =
+      kind === 'find'
+        ? `Looking for lyrics for ${ids.length} songs...`
+        : kind === 'timed'
+          ? `Looking for timed lyrics for ${ids.length} songs...`
+          : 'Asking the AI...'
+    try {
+      const done = await unlocked(() =>
+        kind === 'find'
+          ? api.editorLyricsFind(ids, staged)
+          : kind === 'timed'
+            ? api.editorLyricsTimed(ids, staged)
+            : api.editorLyricsGenerate(ids, staged),
+      )
+      const count = (r: string) => done.songs.filter((s) => s.result === r).length
+      const asked = count('asked')
+      const later = staged ? ' once the import is added to the library' : ''
+      if (kind === 'find') {
+        noLyrics = done.songs.filter((s) => s.result === 'none').map((s) => s.id)
+        const failed = done.songs.find((s) => s.result === 'failed')
+        toast(
+          `Lyrics: ${count('timed')} timed and ${count('words')} as words found` +
+            (count('had') ? `, ${count('had')} had some already` : '') +
+            (count('instrumental') ? `, ${count('instrumental')} instrumental` : '') +
+            (noLyrics.length ? `, ${noLyrics.length} not found` : '') +
+            (failed ? `; LRCLIB didn't answer: ${failed.error}` : ''),
+          !!failed,
+        )
+      } else if (kind === 'timed') {
+        toast(
+          `${count('timed')} timed from LRCLIB` +
+            (asked ? `; the AI will time the words of ${asked}${later}` : '') +
+            (count('skipped') ? `; ${count('skipped')} have no words to time` : '') +
+            (asked && !done.ai_on ? `.${AI_NOTE}` : ''),
+        )
+      } else {
+        noLyrics = []
+        toast(
+          (asked ? `The AI will make lyrics for ${asked} songs${later}` : 'Every song has lyrics already') +
+            (count('had') && asked ? `; ${count('had')} have some already` : '') +
+            (asked && !done.ai_on ? `.${AI_NOTE}` : ''),
+        )
+      }
+      await loadSongs(0)
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'The lyrics tool failed', true)
+    } finally {
+      lyricsBusy = ''
+    }
+  }
+
+  /** Looks songs up by their sound and puts what's found in as changes to approve. */
+  async function identifyBySound() {
+    const list = changeable
+    if (!list.length) return
+    lyricsBusy = `Listening to ${list.length} songs and asking AcoustID (a second or two each)...`
+    try {
+      const heard = await unlocked(() =>
+        api.editorIdentify(
+          list.map((s) => s.id),
+          importing !== null,
+        ),
+      )
+      let found = 0
+      let changes = 0
+      for (const h of heard) {
+        const song = songs.find((s) => s.id === h.id)
+        if (!song || !h.found) continue
+        found++
+        const set = (field: EditorField, value: string | number | null) => {
+          if (value === null || value === '' || String(value) === shown(song, field)) return
+          setPending(song, field, String(value))
+          changes++
+        }
+        set('title', h.found.title)
+        set('artist', h.found.artist)
+        set('album', h.found.album)
+        set('year', h.found.year)
+        if (!shown(song, 'genre')) set('genre', h.found.genre)
+      }
+      const missed = heard.length - found
+      toast(
+        `${found} of ${heard.length} songs recognized` +
+          (missed ? ` (${missed} not)` : '') +
+          (changes ? `; ${changes} changes are waiting under Preview and approve` : '; their tags already say so'),
+      )
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not identify them', true)
+    } finally {
+      lyricsBusy = ''
+    }
   }
 
   /** Track numbers 1, 2, 3... in the grid's order, for each album and disc. */
@@ -1159,6 +1277,7 @@
                       </span>
                     </th>
                   {/each}
+                  <th>Lyrics</th>
                   <th aria-sort={sortBy?.field === 'file' ? (sortBy.desc ? 'descending' : 'ascending') : undefined}>
                     <button class="sort" title="Sort by file name" onclick={() => sortOn('file')}>
                       File{#if sortBy?.field === 'file'}<span class="arrow">{sortBy.desc ? '▼' : '▲'}</span>{/if}
@@ -1178,7 +1297,7 @@
                           onchange={(e) => pickGroup(group.songs, e.currentTarget.checked)}
                         />
                       </td>
-                      <td colspan={shownColumns.length + 1}>
+                      <td colspan={shownColumns.length + 2}>
                         <strong>{group.label}</strong> <span class="muted">· {n(group.songs.length)} songs</span>
                       </td>
                     </tr>
@@ -1218,6 +1337,10 @@
                         {/if}
                       </td>
                     {/each}
+                    <td class="lyrics-cell" class:muted={!song.lyrics}>
+                      {song.lyrics === 2 ? 'Timed' : song.lyrics === 1 ? 'Words' : 'None'}
+                      {#if song.ai_job}<span class="ai-job">{aiLabel(song.ai_job)}</span>{/if}
+                    </td>
                     <td class="mono muted" title={song.rel_path}>{fileName(song.path)}</td>
                   </tr>
                 {/each}
@@ -1271,6 +1394,51 @@
                   Clean up titles
                 </button>
               </div>
+              <div class="tool">
+                <span class="small muted">Lyrics:</span>
+                <button
+                  class="small-button"
+                  disabled={!!lyricsBusy}
+                  onclick={() => lyricsTool('find')}
+                  title="The song's own lyrics (a .lrc beside it or its tags), then LRCLIB"
+                >
+                  Find lyrics
+                </button>
+                <button
+                  class="small-button"
+                  disabled={!!lyricsBusy}
+                  onclick={() => lyricsTool('generate')}
+                  title="The AI listener (Admin > AI) listens to songs with no lyrics and writes them; it may get words wrong"
+                >
+                  Generate with AI
+                </button>
+                <button
+                  class="small-button"
+                  disabled={!!lyricsBusy}
+                  onclick={() => lyricsTool('timed')}
+                  title="For songs with words but no timing: LRCLIB's timed lyrics when it has them, otherwise the AI listener times the words"
+                >
+                  Make timed
+                </button>
+                <button
+                  class="small-button"
+                  disabled={!!lyricsBusy}
+                  onclick={identifyBySound}
+                  title="Each song's fingerprint to AcoustID, then MusicBrainz: title, artist, album, year and genre come in as changes to approve (needs the AcoustID key and MusicBrainz contact)"
+                >
+                  Identify by sound
+                </button>
+                {#if lyricsBusy}<span class="small muted">{lyricsBusy}</span>{/if}
+              </div>
+              {#if noLyrics.length}
+                <div class="tool offer">
+                  <span class="small">{noLyrics.length} songs have no lyrics anywhere.</span>
+                  <button class="small-button" disabled={!!lyricsBusy} onclick={() => lyricsTool('generate', noLyrics)}>
+                    Generate them with AI
+                  </button>
+                  <button class="link small" onclick={() => (noLyrics = [])}>Not now</button>
+                </div>
+              {/if}
               {#if target === 'library' && importing === null}
                 <div class="tool">
                   <input bind:value={pattern} aria-label="File name pattern" class="pattern" />
@@ -1978,6 +2146,22 @@
     border-bottom: 1px solid var(--target);
     cursor: default;
     max-width: none;
+  }
+
+  .lyrics-cell {
+    cursor: default;
+  }
+
+  .ai-job {
+    display: block;
+    font-size: 0.75em;
+    color: var(--target);
+  }
+
+  .offer {
+    padding: 6px 8px;
+    border: 1px solid var(--target);
+    border-radius: 8px;
   }
 
   .cover-open {

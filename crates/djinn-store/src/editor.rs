@@ -40,6 +40,26 @@ pub struct EditorSong {
     pub album_id: Option<i64>,
     pub art_hash: Option<String>,
     pub duration_ms: Option<i64>,
+    /// Its lyrics: 0 none, 1 words, 2 timed.
+    pub lyrics: i64,
+    /// AI lyrics work asked for or under way: "listen" or "sync", then
+    /// " asked" or " working" (an import's: " after adding").
+    pub ai_job: Option<String>,
+}
+
+/// The columns of an [`EditorSong`], over `tracks t` and `albums a`.
+macro_rules! editor_columns {
+    () => {
+        "SELECT t.id, t.path, t.title, t.artist, t.album, t.album_artist, t.track_no,
+                t.disc_no, t.year, t.genre, t.album_id,
+                coalesce(t.art_hash, a.art_hash, a.online_art_hash) AS art_hash, t.duration_ms,
+                coalesce((SELECT CASE WHEN l.synced IS NOT NULL THEN 2
+                                      WHEN l.plain IS NOT NULL THEN 1 ELSE 0 END
+                          FROM lyrics l WHERE l.track_id = t.id), 0) AS lyrics,
+                coalesce((SELECT j.kind || ' working' FROM ai_jobs j
+                          WHERE j.track_id = t.id AND j.status IN ('working', 'prepared')),
+                         (SELECT q.kind || ' asked' FROM ai_asked q WHERE q.track_id = t.id)) AS ai_job"
+    };
 }
 
 /// The separator a path uses: `\` on Windows, `/` elsewhere.
@@ -98,14 +118,12 @@ impl Store {
         let sep = separator(folder);
         let prefix = format!("{}{sep}", folder.trim_end_matches(['/', '\\']));
         let cut = i64::try_from(prefix.chars().count()).unwrap_or(0);
-        let rows = sqlx::query_as(
-            "SELECT t.id, t.path, t.title, t.artist, t.album, t.album_artist, t.track_no,
-                    t.disc_no, t.year, t.genre, t.album_id,
-                    coalesce(t.art_hash, a.art_hash, a.online_art_hash) AS art_hash, t.duration_ms
-             FROM tracks t LEFT JOIN albums a ON a.id = t.album_id
+        let rows = sqlx::query_as(concat!(
+            editor_columns!(),
+            " FROM tracks t LEFT JOIN albums a ON a.id = t.album_id
              WHERE t.removed_at IS NULL AND substr(t.path, 1, ?1) = ?2
-             ORDER BY t.path LIMIT ?3 OFFSET ?4",
-        )
+             ORDER BY t.path LIMIT ?3 OFFSET ?4"
+        ))
         .bind(cut)
         .bind(&prefix)
         .bind(limit.clamp(1, 1000))
@@ -150,10 +168,8 @@ impl Store {
             return Ok(Vec::new());
         }
         Ok(sqlx::query_as(concat!(
-            "SELECT t.id, t.path, t.title, t.artist, t.album, t.album_artist, t.track_no,
-                    t.disc_no, t.year, t.genre, t.album_id,
-                    coalesce(t.art_hash, a.art_hash, a.online_art_hash) AS art_hash, t.duration_ms
-             FROM tracks t LEFT JOIN albums a ON a.id = t.album_id
+            editor_columns!(),
+            " FROM tracks t LEFT JOIN albums a ON a.id = t.album_id
              WHERE t.removed_at IS NULL AND (",
             finds!("1"), " OR ", finds!("2"), " OR ", finds!("3"), " OR ", finds!("4"), " OR ", finds!("5"),
             ") ORDER BY lower(coalesce(t.album_artist, t.artist, '')), lower(coalesce(t.album, '')),
@@ -199,14 +215,12 @@ impl Store {
             "[{}]",
             ids.iter().map(i64::to_string).collect::<Vec<_>>().join(",")
         );
-        Ok(sqlx::query_as(
-            "SELECT t.id, t.path, t.title, t.artist, t.album, t.album_artist, t.track_no,
-                    t.disc_no, t.year, t.genre, t.album_id,
-                    coalesce(t.art_hash, a.art_hash, a.online_art_hash) AS art_hash, t.duration_ms
-             FROM tracks t LEFT JOIN albums a ON a.id = t.album_id
+        Ok(sqlx::query_as(concat!(
+            editor_columns!(),
+            " FROM tracks t LEFT JOIN albums a ON a.id = t.album_id
              WHERE t.removed_at IS NULL AND t.id IN (SELECT value FROM json_each(?1))
-             ORDER BY t.path",
-        )
+             ORDER BY t.path"
+        ))
         .bind(list)
         .fetch_all(&self.pool)
         .await?)

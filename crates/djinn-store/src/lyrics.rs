@@ -147,6 +147,34 @@ impl Store {
         .await?)
     }
 
+    /// Timed lyrics found for a song that has only words (or none), asked
+    /// for from the library editor's Make timed. Returns whether they went in
+    /// (not when the song is timed already, or these were blocked).
+    pub async fn save_timed_lyrics(&self, track_id: i64, found: &NewLyrics<'_>) -> Result<bool> {
+        if found.synced.is_none()
+            || self
+                .lyrics_blocked(track_id, found.source, found.synced, found.plain)
+                .await?
+        {
+            return Ok(false);
+        }
+        let now = now_ms();
+        let done = sqlx::query(
+            "UPDATE lyrics SET synced = ?, plain = ?, instrumental = 0, source = ?,
+                    ai = 0, ai_model = NULL, ai_match = NULL, online_checked_at = ?, updated_at = ?
+             WHERE track_id = ? AND synced IS NULL",
+        )
+        .bind(found.synced)
+        .bind(found.plain)
+        .bind(found.source)
+        .bind(now)
+        .bind(now)
+        .bind(track_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(done.rows_affected() > 0)
+    }
+
     /// What reading a song's file found. Nothing found keeps an earlier
     /// LRCLIB check, so it isn't asked again early, and keeps imported
     /// lyrics; anything found beside the song wins over them.
