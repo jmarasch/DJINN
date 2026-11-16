@@ -93,9 +93,6 @@
   /** The songs open in the album layout, if it's open. */
   let layoutSongs = $state<EditorSong[] | null>(null)
   let layoutBox = $state<HTMLElement | null>(null)
-  $effect(() => {
-    if (layoutBox) layoutBox.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  })
 
   const FIELDS: { key: EditorCoreField; label: string; narrow?: boolean }[] = [
     { key: 'disc_no', label: 'Disc', narrow: true },
@@ -896,12 +893,24 @@
     }
   }
 
+  /** The chosen song's album among the songs shown: by DJINN's album when
+   * it has one, else (an import, a song new to DJINN) by the album as the
+   * tags say, else by folder. */
+  function albumMates(song: EditorSong | null): EditorSong[] {
+    if (!song) return []
+    if (song.album_id != null) return songs.filter((s) => s.album_id === song.album_id)
+    const album = original(song, 'album')
+    if (album) return songs.filter((s) => s.album_id == null && original(s, 'album') === album)
+    const folder = folderOf(song)
+    return songs.filter((s) => s.album_id == null && !original(s, 'album') && folderOf(s) === folder)
+  }
+
   /** The songs a cover goes to: those picked, else the chosen song's album here. */
   const coverSongsNow = $derived(
     (pickedSongs.length
       ? pickedSongs
       : chosen
-        ? songs.filter((s) => (chosen?.album_id != null ? s.album_id === chosen.album_id : s.id === chosen?.id))
+        ? albumMates(chosen)
         : []
     ).filter((s) => target === 'database' || s.editable),
   )
@@ -910,7 +919,7 @@
   function openLayout() {
     const list = pickedSongs.length
       ? pickedSongs
-      : songs.filter((s) => (chosen?.album_id != null ? s.album_id === chosen.album_id : s.id === chosen?.id))
+      : albumMates(chosen)
     if (list.length) layoutSongs = list
   }
 
@@ -1716,7 +1725,9 @@
       />
     {/if}
     {#if layoutSongs}
-      <div bind:this={layoutBox}>
+      <!-- Over the editor, so the grid keeps its room. -->
+      <div class="layout-backdrop" role="presentation" onclick={() => (layoutSongs = null)}></div>
+      <div class="layout-window" bind:this={layoutBox}>
         <AlbumLayout songs={layoutSongs} onapply={useLayout} onclose={() => (layoutSongs = null)} />
       </div>
     {/if}
@@ -2193,6 +2204,28 @@
     padding: 6px 8px;
     border: 1px solid var(--target);
     border-radius: 8px;
+  }
+
+  .layout-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    background: rgb(0 0 0 / 0.6);
+  }
+
+  .layout-window {
+    position: fixed;
+    z-index: 41;
+    inset: 24px;
+    overflow: auto;
+    border-radius: 14px;
+    background: var(--page-bg, var(--surface));
+    box-shadow: 0 0 24px var(--glow);
+  }
+
+  /* A short pane scrolls rather than spilling over what's below. */
+  .grid {
+    overflow: auto;
   }
 
   .cover-open {
