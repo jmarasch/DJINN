@@ -6,6 +6,7 @@
 //! list and where its cover is. Only what the admin typed or picked is sent,
 //! and only when they ask.
 
+use std::collections::{BTreeMap, HashSet};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
@@ -55,7 +56,13 @@ pub struct ReleaseTrack {
     pub title: String,
     /// The track's own artist when it differs from the release's.
     pub artist: Option<String>,
+    /// The track's own genre when it differs from the release's.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub genre: Option<String>,
     pub length_ms: Option<i64>,
+    /// Other tags returned for this track (by lofty `ItemKey` name, e.g. `"Isrc"`).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub extra: BTreeMap<String, String>,
 }
 
 /// A release with its track list.
@@ -66,7 +73,42 @@ pub struct Release {
     pub title: String,
     pub artist: String,
     pub year: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub genre: Option<String>,
+    pub has_cover: bool,
+    /// Other tags returned for the release (by lofty `ItemKey` name, e.g. `"Label"`, `"Barcode"`).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub extra: BTreeMap<String, String>,
     pub tracks: Vec<ReleaseTrack>,
+}
+
+fn put_extra(map: &mut BTreeMap<String, String>, key: &str, value: Option<String>) {
+    if let Some(clean) = value
+        .map(|v| v.split_whitespace().collect::<Vec<_>>().join(" "))
+        .filter(|v| !v.is_empty())
+    {
+        map.insert(key.to_owned(), clean);
+    }
+}
+
+fn join_unique(
+    values: impl IntoIterator<Item = String>,
+    sep: &str,
+    limit: usize,
+) -> Option<String> {
+    let mut seen = HashSet::new();
+    let mut out = Vec::new();
+    for raw in values {
+        let clean = raw.split_whitespace().collect::<Vec<_>>().join(" ");
+        if clean.is_empty() || !seen.insert(clean.to_ascii_lowercase()) {
+            continue;
+        }
+        out.push(clean);
+        if out.len() >= limit {
+            break;
+        }
+    }
+    (!out.is_empty()).then(|| out.join(sep))
 }
 
 const MB_INTERVAL: Duration = Duration::from_millis(1100);
@@ -178,6 +220,46 @@ fn credit(credits: &[MbCredit]) -> String {
 }
 
 #[derive(Deserialize)]
+struct MbGenre {
+    name: String,
+    #[serde(default)]
+    count: i64,
+}
+
+#[derive(Deserialize)]
+struct MbReleaseGroup {
+    #[serde(default)]
+    genres: Vec<MbGenre>,
+}
+
+#[derive(Deserialize)]
+struct MbName {
+    name: String,
+}
+
+#[derive(Deserialize)]
+struct MbLabelInfo {
+    #[serde(default, rename = "catalog-number")]
+    catalog_number: Option<String>,
+    #[serde(default)]
+    label: Option<MbName>,
+}
+
+#[derive(Deserialize)]
+struct MbCoverArt {
+    #[serde(default)]
+    front: bool,
+}
+
+#[derive(Deserialize)]
+struct MbRecording {
+    #[serde(default)]
+    isrcs: Vec<String>,
+    #[serde(default)]
+    genres: Vec<MbGenre>,
+}
+
+#[derive(Deserialize)]
 struct MbRelease {
     id: String,
     title: String,
@@ -189,6 +271,16 @@ struct MbRelease {
     status: Option<String>,
     #[serde(default)]
     disambiguation: Option<String>,
+    #[serde(default)]
+    barcode: Option<String>,
+    #[serde(default)]
+    genres: Vec<MbGenre>,
+    #[serde(default, rename = "release-group")]
+    release_group: Option<MbReleaseGroup>,
+    #[serde(default, rename = "label-info")]
+    label_info: Vec<MbLabelInfo>,
+    #[serde(default, rename = "cover-art-archive")]
+    cover_art_archive: Option<MbCoverArt>,
     #[serde(default, rename = "artist-credit")]
     artist_credit: Vec<MbCredit>,
     #[serde(default)]
@@ -199,6 +291,8 @@ struct MbRelease {
 struct MbMedium {
     #[serde(default)]
     position: i64,
+    #[serde(default)]
+    title: Option<String>,
     #[serde(default)]
     format: Option<String>,
     #[serde(default, rename = "track-count")]
@@ -216,6 +310,8 @@ struct MbTrack {
     length: Option<i64>,
     #[serde(default, rename = "artist-credit")]
     artist_credit: Vec<MbCredit>,
+    #[serde(default)]
+    recording: Option<MbRecording>,
 }
 
 impl MbRelease {
@@ -285,30 +381,93 @@ fn year_of(date: Option<&str>) -> Option<i64> {
     date.and_then(|d| d.get(..4)).and_then(|y| y.parse().ok())
 }
 
+fn mb_genres(a: &[MbGenre], b: &[MbGenre]) -> Option<String> {
+    let mut combined: Vec<&MbGenre> = a.iter().chain(b.iter()).collect();
+    combined.sort_by_key(|g| std::cmp::Reverse(g.count));
+    join_unique(combined.into_iter().map(|g| g.name.clone()), ", ", 3)
+}
+
 async fn mb_release(contact: &str, id: &str) -> Result<Option<Release>, LibraryError> {
     let release: MbRelease = mb(
         contact,
         &format!("release/{id}"),
-        &[("inc", "recordings+artist-credits+media")],
+        &[(
+            "inc",
+            "recordings+artist-credits+media+genres+release-groups+labels+isrcs",
+        )],
     )
     .await?;
     let artist = credit(&release.artist_credit);
+    let group_genres = release
+        .release_group
+        .as_ref()
+        .map_or(&[][..], |g| &g.genres);
+    let genre = mb_genres(&release.genres, group_genres);
+    let has_cover = release.cover_art_archive.as_ref().is_none_or(|c| c.front);
+    let mut extra = BTreeMap::new();
+    put_extra(
+        &mut extra,
+        "Label",
+        join_unique(
+            release
+                .label_info
+                .iter()
+                .filter_map(|li| li.label.as_ref().map(|l| l.name.clone())),
+            ", ",
+            5,
+        ),
+    );
+    put_extra(
+        &mut extra,
+        "CatalogNumber",
+        join_unique(
+            release
+                .label_info
+                .iter()
+                .filter_map(|li| li.catalog_number.clone()),
+            ", ",
+            5,
+        ),
+    );
+    put_extra(&mut extra, "Barcode", release.barcode);
+    put_extra(&mut extra, "ReleaseCountry", release.country);
     Ok(Some(Release {
         source: Source::MusicBrainz,
         year: year_of(release.date.as_deref()),
+        genre: genre.clone(),
+        has_cover,
+        extra,
         tracks: release
             .media
             .iter()
             .flat_map(|m| {
                 let artist = artist.clone();
+                let genre = genre.clone();
+                let disc_title = m.title.clone();
                 m.tracks.iter().map(move |t| {
                     let own = credit(&t.artist_credit);
+                    let track_genre = t
+                        .recording
+                        .as_ref()
+                        .and_then(|r| mb_genres(&r.genres, &[]))
+                        .filter(|g| Some(g) != genre.as_ref());
+                    let mut track_extra = BTreeMap::new();
+                    if let Some(rec) = &t.recording {
+                        put_extra(
+                            &mut track_extra,
+                            "Isrc",
+                            join_unique(rec.isrcs.iter().cloned(), "; ", 5),
+                        );
+                    }
+                    put_extra(&mut track_extra, "SetSubtitle", disc_title.clone());
                     ReleaseTrack {
                         disc: m.position.max(1),
                         number: t.position,
                         title: t.title.clone(),
                         artist: (!own.is_empty() && own != artist).then_some(own),
+                        genre: track_genre,
                         length_ms: t.length,
+                        extra: track_extra,
                     }
                 })
             })
@@ -345,6 +504,12 @@ struct DzAlbum {
     release_date: Option<String>,
     #[serde(default)]
     cover_xl: Option<String>,
+    #[serde(default)]
+    genres: Option<DzList<DzName>>,
+    #[serde(default)]
+    label: Option<String>,
+    #[serde(default)]
+    upc: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -358,6 +523,8 @@ struct DzTrack {
     disk_number: Option<i64>,
     #[serde(default)]
     artist: Option<DzName>,
+    #[serde(default)]
+    isrc: Option<String>,
 }
 
 async fn dz_album(id: &str) -> Result<DzAlbum, LibraryError> {
@@ -383,21 +550,37 @@ async fn dz_release(id: &str) -> Result<Option<Release>, LibraryError> {
     )
     .await?;
     let artist = album.artist.name.clone();
+    let genre = album
+        .genres
+        .and_then(|g| join_unique(g.data.into_iter().map(|n| n.name), ", ", 3));
+    let has_cover = album.cover_xl.as_deref().is_some_and(|u| !u.is_empty());
+    let mut extra = BTreeMap::new();
+    put_extra(&mut extra, "Label", album.label);
+    put_extra(&mut extra, "Barcode", album.upc);
     Ok(Some(Release {
         source: Source::Deezer,
         id: id.to_owned(),
         title: album.title,
         year: year_of(album.release_date.as_deref()),
+        genre,
+        has_cover,
+        extra,
         tracks: tracks
             .data
             .into_iter()
             .enumerate()
-            .map(|(i, t)| ReleaseTrack {
-                disc: t.disk_number.unwrap_or(1).max(1),
-                number: t.track_position.unwrap_or(i as i64 + 1),
-                title: t.title,
-                artist: t.artist.map(|a| a.name).filter(|a| *a != artist),
-                length_ms: t.duration.map(|s| s * 1000),
+            .map(|(i, t)| {
+                let mut track_extra = BTreeMap::new();
+                put_extra(&mut track_extra, "Isrc", t.isrc);
+                ReleaseTrack {
+                    disc: t.disk_number.unwrap_or(1).max(1),
+                    number: t.track_position.unwrap_or(i as i64 + 1),
+                    title: t.title,
+                    artist: t.artist.map(|a| a.name).filter(|a| *a != artist),
+                    genre: None,
+                    length_ms: t.duration.map(|s| s * 1000),
+                    extra: track_extra,
+                }
             })
             .collect(),
         artist,
@@ -441,6 +624,10 @@ struct ItItem {
     disc_number: Option<i64>,
     #[serde(default)]
     track_time_millis: Option<i64>,
+    #[serde(default)]
+    primary_genre_name: Option<String>,
+    #[serde(default)]
+    copyright: Option<String>,
 }
 
 async fn it_lookup(id: &str) -> Result<ItList, LibraryError> {
@@ -462,6 +649,19 @@ async fn it_release(id: &str) -> Result<Option<Release>, LibraryError> {
         return Ok(None);
     };
     let artist = album.artist_name.clone().unwrap_or_default();
+    let genre = album
+        .primary_genre_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|g| !g.is_empty())
+        .map(str::to_owned);
+    let has_cover = album
+        .artwork_url100
+        .as_deref()
+        .is_some_and(|u| !u.is_empty());
+    let mut extra = BTreeMap::new();
+    put_extra(&mut extra, "CopyrightMessage", album.copyright.clone());
+    put_extra(&mut extra, "ReleaseCountry", album.country.clone());
     let mut tracks: Vec<ReleaseTrack> = list
         .results
         .iter()
@@ -471,7 +671,15 @@ async fn it_release(id: &str) -> Result<Option<Release>, LibraryError> {
             number: t.track_number.unwrap_or(0),
             title: t.track_name.clone().unwrap_or_default(),
             artist: t.artist_name.clone().filter(|a| *a != artist),
+            genre: t
+                .primary_genre_name
+                .as_deref()
+                .map(str::trim)
+                .filter(|g| !g.is_empty())
+                .map(str::to_owned)
+                .filter(|g| Some(g) != genre.as_ref()),
             length_ms: t.track_time_millis,
+            extra: BTreeMap::new(),
         })
         .collect();
     tracks.sort_by_key(|t| (t.disc, t.number));
@@ -480,6 +688,9 @@ async fn it_release(id: &str) -> Result<Option<Release>, LibraryError> {
         id: id.to_owned(),
         title: album.collection_name.clone().unwrap_or_default(),
         year: year_of(album.release_date.as_deref()),
+        genre,
+        has_cover,
+        extra,
         tracks,
         artist,
     }))
@@ -555,12 +766,36 @@ async fn spotify_get<T: serde::de::DeserializeOwned>(
 
 #[derive(Deserialize)]
 struct SpName {
+    #[serde(default)]
+    id: Option<String>,
     name: String,
 }
 
 #[derive(Deserialize)]
 struct SpImage {
     url: String,
+}
+
+#[derive(Deserialize)]
+struct SpExternalIds {
+    #[serde(default)]
+    upc: Option<String>,
+    #[serde(default)]
+    ean: Option<String>,
+    #[serde(default)]
+    isrc: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct SpCopyright {
+    #[serde(default)]
+    text: String,
+}
+
+#[derive(Deserialize)]
+struct SpArtist {
+    #[serde(default)]
+    genres: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -575,6 +810,14 @@ struct SpAlbum {
     total_tracks: usize,
     #[serde(default)]
     album_type: Option<String>,
+    #[serde(default)]
+    genres: Vec<String>,
+    #[serde(default)]
+    label: Option<String>,
+    #[serde(default)]
+    external_ids: Option<SpExternalIds>,
+    #[serde(default)]
+    copyrights: Vec<SpCopyright>,
     #[serde(default)]
     images: Vec<SpImage>,
     #[serde(default)]
@@ -605,6 +848,8 @@ struct SpTrack {
     duration_ms: Option<i64>,
     #[serde(default)]
     artists: Vec<SpName>,
+    #[serde(default)]
+    external_ids: Option<SpExternalIds>,
 }
 
 fn names(list: &[SpName]) -> String {
@@ -626,6 +871,38 @@ async fn sp_album(keys: &(String, String), id: &str) -> Result<SpAlbum, LibraryE
 async fn sp_release(keys: &(String, String), id: &str) -> Result<Option<Release>, LibraryError> {
     let album = sp_album(keys, id).await?;
     let artist = names(&album.artists);
+    let mut genre = join_unique(album.genres.clone(), ", ", 3);
+    if genre.is_none() {
+        if let Some(artist_id) = album
+            .artists
+            .first()
+            .and_then(|a| a.id.as_deref())
+            .filter(|i| !i.is_empty() && i.chars().all(|c| c.is_ascii_alphanumeric()))
+        {
+            if let Ok(sp_artist) = spotify_get::<SpArtist>(
+                keys,
+                &format!("https://api.spotify.com/v1/artists/{artist_id}"),
+                &[],
+            )
+            .await
+            {
+                genre = join_unique(sp_artist.genres, ", ", 3);
+            }
+        }
+    }
+    let has_cover = !album.images.is_empty();
+    let mut extra = BTreeMap::new();
+    put_extra(&mut extra, "Label", album.label);
+    put_extra(
+        &mut extra,
+        "Barcode",
+        album.external_ids.and_then(|e| e.upc.or(e.ean)),
+    );
+    put_extra(
+        &mut extra,
+        "CopyrightMessage",
+        album.copyrights.into_iter().next().map(|c| c.text),
+    );
     let mut items = Vec::new();
     let mut page = album.tracks;
     // Long albums come in pages of 50; only Spotify's own next links are followed.
@@ -645,16 +922,27 @@ async fn sp_release(keys: &(String, String), id: &str) -> Result<Option<Release>
         id: album.id,
         title: album.name,
         year: year_of(album.release_date.as_deref()),
+        genre,
+        has_cover,
+        extra,
         tracks: items
             .into_iter()
             .map(|t| {
                 let own = names(&t.artists);
+                let mut track_extra = BTreeMap::new();
+                put_extra(
+                    &mut track_extra,
+                    "Isrc",
+                    t.external_ids.and_then(|e| e.isrc),
+                );
                 ReleaseTrack {
                     disc: t.disc_number.max(1),
                     number: t.track_number,
                     title: t.name,
                     artist: (own != artist && !own.is_empty()).then_some(own),
+                    genre: None,
                     length_ms: t.duration_ms,
+                    extra: track_extra,
                 }
             })
             .collect(),
@@ -974,9 +1262,16 @@ mod tests {
     #[test]
     fn musicbrainz_answers_read_as_releases() {
         let json = r#"{"releases":[{"id":"r1","title":"Out of Time","date":"1991-03-12","country":"US",
-            "status":"Official","disambiguation":"","artist-credit":[{"name":"R.E.M.","joinphrase":""}],
+            "status":"Official","disambiguation":"","barcode":"075992649629",
+            "genres":[{"name":"alternative rock","count":10},{"name":"rock","count":5}],
+            "release-group":{"genres":[{"name":"jangle pop","count":7},{"name":"alternative rock","count":2}]},
+            "label-info":[{"catalog-number":"9 26496-2","label":{"name":"Warner Bros."}}],
+            "cover-art-archive":{"front":true},
+            "artist-credit":[{"name":"R.E.M.","joinphrase":""}],
             "media":[{"position":1,"format":"CD","track-count":2,"tracks":[
-              {"position":1,"title":"Radio Song","length":255000,"artist-credit":[{"name":"R.E.M.","joinphrase":" feat. "},{"name":"KRS-One","joinphrase":""}]},
+              {"position":1,"title":"Radio Song","length":255000,
+               "artist-credit":[{"name":"R.E.M.","joinphrase":" feat. "},{"name":"KRS-One","joinphrase":""}],
+               "recording":{"isrcs":["USWB19100001"],"genres":[{"name":"pop rap","count":4}]}},
               {"position":2,"title":"Losing My Religion","length":268000,"artist-credit":[{"name":"R.E.M.","joinphrase":""}]}]}]}]}"#;
         let list: MbList = serde_json::from_str(json).unwrap();
         let hit = list.releases.into_iter().next().unwrap().hit();
@@ -994,18 +1289,47 @@ mod tests {
             credit(&release.media[0].tracks[0].artist_credit),
             "R.E.M. feat. KRS-One"
         );
+        let group_genres = release
+            .release_group
+            .as_ref()
+            .map_or(&[][..], |g| &g.genres);
+        assert_eq!(
+            mb_genres(&release.genres, group_genres).as_deref(),
+            Some("alternative rock, jangle pop, rock")
+        );
+        assert_eq!(release.barcode.as_deref(), Some("075992649629"));
+        assert_eq!(
+            release.label_info[0].catalog_number.as_deref(),
+            Some("9 26496-2")
+        );
+        assert_eq!(
+            release.media[0].tracks[0].recording.as_ref().unwrap().isrcs,
+            ["USWB19100001"]
+        );
     }
 
     #[test]
     fn spotify_answers_read_as_releases() {
         let json = r#"{"id":"a1","name":"Out of Time","release_date":"1991-03-12","total_tracks":2,
-            "album_type":"album","artists":[{"name":"R.E.M."}],"images":[{"url":"https://i.scdn.co/image/x"}],
+            "album_type":"album","genres":["alternative rock"],"label":"Warner Bros.",
+            "external_ids":{"upc":"075992649629"},
+            "artists":[{"id":"art1","name":"R.E.M."}],"images":[{"url":"https://i.scdn.co/image/x"}],
             "tracks":{"items":[{"name":"Radio Song","track_number":1,"disc_number":1,"duration_ms":255000,
+              "external_ids":{"isrc":"USWB19100001"},
               "artists":[{"name":"R.E.M."},{"name":"KRS-One"}]}],"next":null}}"#;
         let album: SpAlbum = serde_json::from_str(json).unwrap();
         assert_eq!(names(&album.artists), "R.E.M.");
+        assert_eq!(album.genres, ["alternative rock"]);
+        assert_eq!(album.label.as_deref(), Some("Warner Bros."));
         let tracks = album.tracks.unwrap();
         assert_eq!(names(&tracks.items[0].artists), "R.E.M., KRS-One");
+        assert_eq!(
+            tracks.items[0]
+                .external_ids
+                .as_ref()
+                .and_then(|e| e.isrc.as_deref()),
+            Some("USWB19100001")
+        );
         assert_eq!(album.images[0].url, "https://i.scdn.co/image/x");
     }
 
@@ -1017,20 +1341,27 @@ mod tests {
             title: "A".into(),
             artist: "B".into(),
             year: None,
+            genre: None,
+            has_cover: false,
+            extra: BTreeMap::new(),
             tracks: vec![
                 ReleaseTrack {
                     disc: 1,
                     number: 1,
                     title: "One".into(),
                     artist: None,
+                    genre: None,
                     length_ms: None,
+                    extra: BTreeMap::new(),
                 },
                 ReleaseTrack {
                     disc: 1,
                     number: 2,
                     title: "Two (Remastered)".into(),
                     artist: None,
+                    genre: None,
                     length_ms: None,
+                    extra: BTreeMap::new(),
                 },
             ],
         };

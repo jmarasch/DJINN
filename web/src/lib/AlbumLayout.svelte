@@ -8,16 +8,19 @@
   // The tags go back to the grid as changes to approve.
   import { onMount } from 'svelte'
   import { api } from './api'
+  import { tagLabel } from './editorTags'
   import { unlocked } from './protected.svelte'
   import { toast } from './state.svelte'
   import type { EditorField, EditorSong, Release, ReleaseHit, ReleaseSource } from './types'
 
   let {
     songs,
+    editingFiles = false,
     onapply,
     onclose,
   }: {
     songs: EditorSong[]
+    editingFiles?: boolean
     /** The tags to change, and the release's cover if it is to be used. */
     onapply: (changes: { song: EditorSong; field: EditorField; value: string }[], cover: Blob | null) => void
     onclose: () => void
@@ -45,7 +48,60 @@
   let laid = $state<(number | null)[]>([])
   /** A song picked up by a tap, to put on a track with another tap. */
   let carrying = $state<number | null>(null)
-  let take = $state({ titles: true, numbers: true, album: true, album_artist: true, artist: false, year: true, cover: false })
+  let take = $state<Record<string, boolean>>({})
+
+  type TakeItem = { key: string; label: string; detail?: string; defaultOn: boolean }
+
+  function itemsFor(r: Release | null, includeExtra: boolean): TakeItem[] {
+    if (!r) return []
+    const items: TakeItem[] = []
+    if (r.tracks.some((t) => t.title)) items.push({ key: 'titles', label: 'Titles', defaultOn: true })
+    if (r.tracks.some((t) => t.number > 0)) {
+      const rDiscs = new Set(r.tracks.map((t) => t.disc)).size
+      items.push({
+        key: 'numbers',
+        label: rDiscs > 1 || songs.some((s) => s.disc_no) ? 'Track and disc numbers' : 'Track numbers',
+        defaultOn: true,
+      })
+    }
+    if (r.title) items.push({ key: 'album', label: 'Album', detail: r.title, defaultOn: true })
+    if (r.artist) items.push({ key: 'album_artist', label: 'Album artist', detail: r.artist, defaultOn: true })
+    if (r.tracks.some((t) => t.artist) || r.artist) {
+      items.push({
+        key: 'artist',
+        label: "Each song's artist",
+        detail: r.tracks.some((t) => t.artist) ? 'per track' : r.artist,
+        defaultOn: r.tracks.some((t) => !!t.artist),
+      })
+    }
+    if (r.year != null) items.push({ key: 'year', label: 'Year', detail: String(r.year), defaultOn: true })
+    if (r.genre || r.tracks.some((t) => t.genre)) {
+      items.push({
+        key: 'genre',
+        label: 'Genre',
+        detail: r.genre ?? 'per track',
+        defaultOn: true,
+      })
+    }
+    if (includeExtra) {
+      const seen = new Set<string>()
+      for (const [name, value] of Object.entries(r.extra ?? {})) {
+        seen.add(name)
+        items.push({ key: `x:${name}`, label: tagLabel(name), detail: value, defaultOn: false })
+      }
+      for (const track of r.tracks) {
+        for (const name of Object.keys(track.extra ?? {})) {
+          if (seen.has(name)) continue
+          seen.add(name)
+          items.push({ key: `x:${name}`, label: tagLabel(name), detail: 'per track', defaultOn: false })
+        }
+      }
+    }
+    if (r.has_cover !== false) items.push({ key: 'cover', label: 'Cover', defaultOn: false })
+    return items
+  }
+
+  const availableItems = $derived(itemsFor(release, editingFiles))
 
   const byId = (id: number | null) => (id === null ? undefined : songs.find((s) => s.id === id))
   const unknown = $derived(songs.filter((s) => !laid.includes(s.id)))
@@ -127,7 +183,9 @@
       for (const m of found.matched) next[m.track] = m.id
       laid = next
       carrying = null
-      take.artist = found.release.tracks.some((t) => t.artist)
+      const nextTake: Record<string, boolean> = {}
+      for (const item of itemsFor(found.release, editingFiles)) nextTake[item.key] = item.defaultOn
+      take = nextTake
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Could not get its tracks', true)
     } finally {
@@ -157,6 +215,7 @@
   async function apply() {
     if (!release) return
     const changes: { song: EditorSong; field: EditorField; value: string }[] = []
+    const extraKeys = availableItems.filter((i) => i.key.startsWith('x:') && take[i.key]).map((i) => i.key.slice(2))
     release.tracks.forEach((track, i) => {
       const song = byId(laid[i])
       if (!song || !release) return
@@ -165,13 +224,17 @@
       }
       if (take.titles) set('title', track.title)
       if (take.numbers) {
-        set('track_no', track.number)
+        if (track.number > 0) set('track_no', track.number)
         if (discs > 1 || song.disc_no) set('disc_no', track.disc)
       }
       if (take.album) set('album', release.title)
       if (take.album_artist) set('album_artist', release.artist)
       if (take.artist) set('artist', track.artist ?? release.artist)
       if (take.year) set('year', release.year)
+      if (take.genre) set('genre', track.genre ?? release.genre)
+      for (const name of extraKeys) {
+        set(`x:${name}` as EditorField, track.extra?.[name] ?? release.extra?.[name])
+      }
     })
     let cover: Blob | null = null
     if (take.cover && chosenHit) {
@@ -320,17 +383,26 @@
     </div>
 
     <div class="use">
-      {#if chosenHit}
+      {#if chosenHit && release?.has_cover !== false}
         <img src={api.editorReleaseCover(chosenHit.source, chosenHit.id)} alt="The release's cover" width="200" height="200" />
       {/if}
-      <div class="small"><b>Take from the release</b></div>
-      <label class="check small"><input type="checkbox" bind:checked={take.titles} /> Titles</label>
-      <label class="check small"><input type="checkbox" bind:checked={take.numbers} /> Track and disc numbers</label>
-      <label class="check small"><input type="checkbox" bind:checked={take.album} /> Album</label>
-      <label class="check small"><input type="checkbox" bind:checked={take.album_artist} /> Album artist</label>
-      <label class="check small"><input type="checkbox" bind:checked={take.artist} /> Each song's artist</label>
-      <label class="check small"><input type="checkbox" bind:checked={take.year} /> Year</label>
-      <label class="check small"><input type="checkbox" bind:checked={take.cover} /> Cover</label>
+      {#if availableItems.length}
+        <div class="small"><b>Take from the release</b></div>
+        {#each availableItems as item (item.key)}
+          <label class="check small">
+            <input
+              type="checkbox"
+              checked={!!take[item.key]}
+              onchange={(e) => (take[item.key] = e.currentTarget.checked)}
+            />
+            <span class="take-label">
+              {item.label}{#if item.detail}<span class="muted item-detail"> · {item.detail}</span>{/if}
+            </span>
+          </label>
+        {/each}
+      {:else}
+        <p class="small muted">Pick a release to see what tags it returned.</p>
+      {/if}
       <button class="primary" disabled={!release || laid.every((x) => x === null)} onclick={apply}>Use this layout</button>
       <p class="small muted">The tags go to the grid as changes to approve. The cover is put on straight away (it can be undone).</p>
     </div>
@@ -521,5 +593,10 @@
     margin: 0;
     padding: 0;
     min-height: 0;
+  }
+
+  .take-label {
+    min-width: 0;
+    overflow-wrap: anywhere;
   }
 </style>

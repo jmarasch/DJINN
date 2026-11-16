@@ -1489,7 +1489,9 @@ export interface ReleaseTrack {
   title: string
   /** The track's own artist when it isn't the release's. */
   artist: string | null
+  genre?: string | null
   length_ms: number | null
+  extra?: Record<string, string>
 }
 
 export interface Release {
@@ -1498,6 +1500,9 @@ export interface Release {
   title: string
   artist: string
   year: number | null
+  genre?: string | null
+  has_cover?: boolean
+  extra?: Record<string, string>
   tracks: ReleaseTrack[]
 }
 

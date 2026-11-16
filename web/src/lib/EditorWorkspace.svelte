@@ -1113,9 +1113,24 @@
   async function useLayout(changes: { song: EditorSong; field: EditorField; value: string }[], cover: Blob | null) {
     const list = layoutSongs ?? []
     let skipped = 0
+    const showHidden = new Set<string>()
+    const addExtra: string[] = []
     for (const c of changes) {
-      if (rowEditable(c.song)) setPending(c.song, c.field, c.value)
-      else skipped++
+      if (rowEditable(c.song)) {
+        setPending(c.song, c.field, c.value)
+        if (c.field.startsWith('x:')) {
+          const name = c.field.slice(2)
+          if (!columns.extra.includes(name) && !addExtra.includes(name)) addExtra.push(name)
+        } else if (columns.hidden.includes(c.field)) {
+          showHidden.add(c.field)
+        }
+      } else skipped++
+    }
+    if (showHidden.size || addExtra.length) {
+      columns = {
+        hidden: columns.hidden.filter((h) => !showHidden.has(h)),
+        extra: [...columns.extra, ...addExtra],
+      }
     }
     layoutSongs = null
     toast(
@@ -1974,7 +1989,7 @@
       <!-- Over the editor, so the grid keeps its room. -->
       <div class="layout-backdrop" role="presentation" onclick={() => (layoutSongs = null)}></div>
       <div class="layout-window" bind:this={layoutBox}>
-        <AlbumLayout songs={layoutSongs} onapply={useLayout} onclose={() => (layoutSongs = null)} />
+        <AlbumLayout songs={layoutSongs} {editingFiles} onapply={useLayout} onclose={() => (layoutSongs = null)} />
       </div>
     {/if}
   </div>
