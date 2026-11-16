@@ -26,7 +26,7 @@
 
   $effect(() => {
     void load()
-    api.libraryProblems().then((p) => (problems = p)).catch(() => {})
+    api.libraryProblems(true).then((p) => (problems = p)).catch(() => {})
     api.scheduledCheck().then((c) => (nightly = c)).catch(() => {})
     api.about().then((a) => (about = a)).catch(() => {})
     api.protectedStatus().then((p) => (lock = p)).catch(() => {})

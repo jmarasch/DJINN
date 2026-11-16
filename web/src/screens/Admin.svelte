@@ -162,7 +162,7 @@
   $effect(() => {
     void tab
     api.changedSettings().then((c) => (changed = c)).catch(() => {})
-    api.libraryProblems().then((p) => (trouble = p.trouble)).catch(() => {})
+    api.libraryProblems(true).then((p) => (trouble = p.trouble)).catch(() => {})
   })
 
   function find(entry: AdminEntry) {

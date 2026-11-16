@@ -869,16 +869,21 @@
     }
   }
 
+  // While the AI works on songs here, follow just their lyrics and AI state
+  // (a small database check, not a reload that opens every file).
   $effect(() => {
     if (!songs.some((s) => s.ai_job)) return
     const timer = setInterval(async () => {
       if (loading || busy || lyricsBusy || (!selected && !searching && importing === null)) return
+      const ids = songs.filter((s) => s.ai_job).map((s) => s.id)
+      if (!ids.length) return
+      const asked = importing
       try {
-        const found =
-          importing !== null
-            ? await api.editorImportSongs(importing)
-            : await api.editorSongs(selected, 0, target === 'library', searching)
-        const byId = new Map(found.songs.map((s) => [s.id, s]))
+        const found = await api.editorAiStatus(ids, asked !== null)
+        // Import file ids and library song ids can match: drop an answer
+        // that came back after switching between them.
+        if (importing !== asked) return
+        const byId = new Map(found.map((s) => [s.id, s]))
         songs = songs.map((s) => {
           const fresh = byId.get(s.id)
           return fresh ? { ...s, lyrics: fresh.lyrics, ai_job: fresh.ai_job } : s

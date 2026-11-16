@@ -11,6 +11,9 @@ use tokio::sync::{broadcast, watch, Notify};
 use crate::events::ServerEvent;
 use crate::jukebox::Jukebox;
 
+/// Cached problem counts: `(kind, count)` pairs.
+pub type ProblemCounts = Vec<(djinn_store::ProblemKind, i64)>;
+
 #[derive(Clone)]
 pub struct AppState {
     pub store: Store,
@@ -71,6 +74,10 @@ pub struct AppState {
     /// Copies of songs, worked out when asked and kept until the library
     /// changes.
     pub duplicates: Arc<tokio::sync::Mutex<Option<Arc<crate::duplicates::Duplicates>>>>,
+    /// The Problems page's counts and when they were counted (Unix ms).
+    /// Held while counting, so requests that come in meanwhile wait and
+    /// share the answer instead of each starting the slow count again.
+    pub problem_counts: Arc<tokio::sync::Mutex<Option<(i64, ProblemCounts)>>>,
     /// The mix, timed, for nodes.
     pub node_audio: Arc<crate::node_audio::Hub>,
     /// Players for the other rooms, and who follows whom.
@@ -145,6 +152,7 @@ impl AppState {
             elevations: Arc::default(),
             converter: Arc::default(),
             duplicates: Arc::default(),
+            problem_counts: Arc::default(),
             node_audio: Arc::default(),
             rooms: Arc::default(),
             open_setup: Arc::new(AtomicBool::new(false)),

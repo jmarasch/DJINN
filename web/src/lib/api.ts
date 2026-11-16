@@ -391,6 +391,12 @@ export const api = {
   },
   editorImportSongs: (batch: number) =>
     get<{ total: number; editable: boolean; songs: EditorSong[] }>(`/editor/imports/${batch}/songs`),
+  /** Where these songs' lyrics and AI work stand (library songs, or an import's files). */
+  editorAiStatus: (ids: number[], imported: boolean) =>
+    post<{ id: number; lyrics: number; ai_job: string | null }[]>(
+      imported ? '/editor/imports/ai-status' : '/editor/ai-status',
+      { ids },
+    ),
   /** The grid's changes, written into the waiting files. */
   editorImportApply: (changes: EditorChange[]) => post<EditorApplied>('/editor/imports/apply', { changes }),
   editorImportCover: async (ids: number[], file: File | null) => {
@@ -729,7 +735,9 @@ export const api = {
   libraryStatus: () => get<LibraryStatus>('/library/status'),
   openArtFolder: () => post<void>('/library/open-art-folder'),
   rescan: () => post<StartResponse>('/library/rescan'),
-  libraryProblems: () => get<ProblemSummary>('/library/problems'),
+  /** `cached`: counts a few minutes old will do (badges), so it rarely counts. */
+  libraryProblems: (cached = false) =>
+    get<ProblemSummary>(cached ? '/library/problems?cached=true' : '/library/problems'),
   libraryProblemList: (kind: ProblemKind, offset = 0) =>
     get<ProblemItem[]>(`/library/problems/${kind}?offset=${offset}&limit=100`),
   setDuplicatesAcrossAlbums: (acrossAlbums: boolean) =>

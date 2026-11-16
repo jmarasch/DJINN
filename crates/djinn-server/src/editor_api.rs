@@ -30,6 +30,7 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/editor/tree", get(tree))
         .route("/editor/songs", get(songs))
+        .route("/editor/ai-status", post(ai_status))
         .route("/editor/apply", post(apply))
         .route("/editor/history", get(history))
         .route("/editor/undo/{batch}", post(undo))
@@ -201,6 +202,48 @@ struct Songs {
     /// Changes can be made here: the folder is allowed.
     editable: bool,
     songs: Vec<Row>,
+}
+
+/// The most songs one AI status check takes.
+pub(crate) const AI_STATUS_MAX: usize = 2000;
+
+#[derive(Deserialize)]
+pub(crate) struct AiStatusQuery {
+    pub(crate) ids: Vec<i64>,
+}
+
+/// Where a song's lyrics and AI work stand, for the grid to follow while the
+/// AI works without loading (and reading the files of) the whole folder again.
+#[derive(Serialize)]
+pub(crate) struct AiStatus {
+    pub(crate) id: i64,
+    /// 0 none, 1 words, 2 timed.
+    pub(crate) lyrics: i64,
+    pub(crate) ai_job: Option<String>,
+}
+
+/// Library songs' lyrics and AI work, from the database only.
+async fn ai_status(
+    _: Elevated,
+    State(state): State<AppState>,
+    Json(body): Json<AiStatusQuery>,
+) -> ApiResult<Json<Vec<AiStatus>>> {
+    if body.ids.len() > AI_STATUS_MAX {
+        return Err(ApiError::bad_request("too many songs"));
+    }
+    Ok(Json(
+        state
+            .store
+            .editor_songs_by_id(&body.ids)
+            .await?
+            .into_iter()
+            .map(|s| AiStatus {
+                id: s.id,
+                lyrics: s.lyrics,
+                ai_job: s.ai_job,
+            })
+            .collect(),
+    ))
 }
 
 async fn songs(

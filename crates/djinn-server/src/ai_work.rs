@@ -557,11 +557,16 @@ async fn claim_imports(
         let mut ready: Vec<djinn_store::AiJob> = Vec::new();
         let mut stale: Vec<i64> = Vec::new();
         for file in candidates {
+            // Each file is opened (and an MP3's length found by reading all
+            // of it), so stop once there's enough; the rest wait for the
+            // next ask.
+            if ready.len() >= max {
+                break;
+            }
             let Some(kind) = file.ai_want.clone() else {
                 continue;
             };
             let path = std::path::PathBuf::from(&file.path);
-            let duration_ms = djinn_library::compare::length_ms(&path);
             let local = djinn_library::lyrics::local(&path);
             let needs = match kind.as_str() {
                 "listen" => local.is_none(),
@@ -574,9 +579,7 @@ async fn claim_imports(
                 stale.push(file.id);
                 continue;
             }
-            if ready.len() >= max {
-                continue;
-            }
+            let duration_ms = djinn_library::compare::length_ms(&path);
             let tags = djinn_library::compare::read(&path, original_years).unwrap_or_default();
             let plain = if kind == "sync" {
                 local.and_then(|l| l.plain)

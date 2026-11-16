@@ -104,11 +104,40 @@ pub async fn hidden(store: &Store) -> anyhow::Result<Vec<ProblemKind>> {
         .collect())
 }
 
-async fn summary(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json<Summary>> {
+#[derive(Deserialize, Default)]
+struct SummaryQuery {
+    /// Counts up to `CACHED_MS` old will do (for badges).
+    #[serde(default)]
+    cached: bool,
+}
+
+/// How old the counts a badge shows may be.
+const CACHED_MS: i64 = 5 * 60 * 1000;
+
+/// The problem counts, counted again when older than `max_age_ms`. Only one
+/// count runs at a time: a request that comes in while one is running waits
+/// and shares its answer, so a few quick page changes don't start several
+/// slow counts at once.
+pub async fn counts(state: &AppState, max_age_ms: i64) -> anyhow::Result<Vec<(ProblemKind, i64)>> {
+    let asked = djinn_store::now_ms();
+    let mut cache = state.problem_counts.lock().await;
+    if let Some((at, counts)) = cache.as_ref() {
+        if *at >= asked || asked - *at <= max_age_ms {
+            return Ok(counts.clone());
+        }
+    }
+    let counts = state.store.problem_counts().await?;
+    *cache = Some((djinn_store::now_ms(), counts.clone()));
+    Ok(counts)
+}
+
+async fn summary(
+    _: AdminUser,
+    State(state): State<AppState>,
+    Query(q): Query<SummaryQuery>,
+) -> ApiResult<Json<Summary>> {
     let hidden = hidden(&state.store).await?;
-    let kinds: Vec<KindCount> = state
-        .store
-        .problem_counts()
+    let kinds: Vec<KindCount> = counts(&state, if q.cached { CACHED_MS } else { 0 })
         .await?
         .into_iter()
         .map(|(kind, count)| KindCount {

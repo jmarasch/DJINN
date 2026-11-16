@@ -44,6 +44,7 @@ pub fn router() -> Router<AppState> {
         .route("/editor/imports/{batch}/add", post(add_to_library))
         .route("/editor/imports/files/{id}", delete(drop_file))
         .route("/editor/imports/apply", post(apply))
+        .route("/editor/imports/ai-status", post(ai_status))
         .route("/editor/imports/cover", post(cover))
 }
 
@@ -245,6 +246,26 @@ async fn drop_file(
 
 // --- The grid ---
 
+/// A waiting file's lyrics: 0 none, 1 words, 2 timed.
+fn lyrics_level(path: &Path) -> i64 {
+    match djinn_library::lyrics::local(path) {
+        Some(f) if f.synced.is_some() => 2,
+        Some(f) if f.plain.is_some() => 1,
+        _ => 0,
+    }
+}
+
+/// The AI work asked for a waiting file, as the grid shows it.
+fn ai_job(file: &ImportFile, working: bool) -> Option<String> {
+    file.ai_want.as_ref().map(|k| {
+        if working {
+            format!("{k} working")
+        } else {
+            format!("{k} asked")
+        }
+    })
+}
+
 /// A waiting file as the editor's grid shows a song, from its tags.
 fn as_song(
     file: &ImportFile,
@@ -253,11 +274,7 @@ fn as_song(
     working: bool,
 ) -> EditorSong {
     let path = Path::new(&file.path);
-    let lyrics = match djinn_library::lyrics::local(path) {
-        Some(f) if f.synced.is_some() => 2,
-        Some(f) if f.plain.is_some() => 1,
-        _ => 0,
-    };
+    let lyrics = lyrics_level(path);
     EditorSong {
         id: file.id,
         path: file.path.clone(),
@@ -273,13 +290,7 @@ fn as_song(
         art_hash,
         duration_ms: compare::length_ms(path),
         lyrics,
-        ai_job: file.ai_want.as_ref().map(|k| {
-            if working {
-                format!("{k} working")
-            } else {
-                format!("{k} asked")
-            }
-        }),
+        ai_job: ai_job(file, working),
     }
 }
 
@@ -357,6 +368,39 @@ async fn songs(
         editable: true,
         songs,
     }))
+}
+
+/// Waiting files' lyrics and AI work, for the grid to follow while the AI
+/// works. Reads only the lyrics (an `.lrc` next to the file, or its tags),
+/// not the tags, cover and length the whole grid needs.
+async fn ai_status(
+    _: Elevated,
+    State(state): State<AppState>,
+    Json(body): Json<crate::editor_api::AiStatusQuery>,
+) -> ApiResult<Json<Vec<crate::editor_api::AiStatus>>> {
+    if body.ids.len() > crate::editor_api::AI_STATUS_MAX {
+        return Err(ApiError::bad_request("too many songs"));
+    }
+    let files = state.store.import_files_by_id(&body.ids).await?;
+    let working: std::collections::HashSet<i64> = files
+        .iter()
+        .filter(|f| crate::ai_work::import_working(&state, f.id))
+        .map(|f| f.id)
+        .collect();
+    Ok(Json(
+        tokio::task::spawn_blocking(move || {
+            files
+                .iter()
+                .map(|file| crate::editor_api::AiStatus {
+                    id: file.id,
+                    lyrics: lyrics_level(Path::new(&file.path)),
+                    ai_job: ai_job(file, working.contains(&file.id)),
+                })
+                .collect()
+        })
+        .await
+        .map_err(anyhow::Error::from)?,
+    ))
 }
 
 /// Waiting files' titles and lengths, for Album layout to match a release.
