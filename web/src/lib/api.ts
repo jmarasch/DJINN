@@ -138,6 +138,8 @@ import type {
   TrackTags,
   User,
   Mp3Check,
+  GenreGroups,
+  GenreGroupChoice,
 } from './types'
 
 export class ApiError extends Error {
@@ -353,6 +355,18 @@ export const api = {
   /** Starts measuring songs with no loudness data (with the sound analysis). */
   measureLoudness: () => post<{ started: boolean }>('/library/problems/measure'),
   mp3Check: () => get<Mp3Check>('/library/mp3-check'),
+  genreFold: () => get<Record<string, string>>('/genre-groups/fold'),
+  genreGroups: () => get<GenreGroups>('/genre-groups'),
+  setGenreGroupsOn: (on: boolean) => put<void>('/genre-groups/enabled', { on }),
+  genreGroupChoices: () => get<{ choices: GenreGroupChoice[] }>('/genre-groups/choices'),
+  autoGenreGroups: (containers: number) =>
+    post<{ containers: number; grouped: number }>('/genre-groups/auto', { containers }),
+  createGenreGroup: (name: string) => post<{ id: number }>('/genre-groups', { name }),
+  renameGenreGroup: (id: number, name: string) => put<void>(`/genre-groups/${id}`, { name }),
+  deleteGenreGroup: (id: number) => del<void>(`/genre-groups/${id}`),
+  placeGenre: (genre: string, group: number | null) => put<void>('/genre-groups/place', { genre, group }),
+  freeGenre: (genre: string) => del<void>(`/genre-groups/free/${encodeURIComponent(genre)}`),
+  clearGenreGroups: () => del<void>('/genre-groups'),
   mp3CheckAgain: () => post<void>('/library/mp3-check'),
   /** Track and disc numbers for an album's songs from MusicBrainz. */
   editorTracklist: (albumId: number) =>

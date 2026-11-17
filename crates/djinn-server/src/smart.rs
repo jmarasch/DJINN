@@ -82,6 +82,11 @@ pub fn router() -> Router<AppState> {
 
 impl Catalog {
     /// Songs whose genres or styles include `genre` (normalized).
+    /// Each song's genres and styles together.
+    pub(crate) fn song_tags(&self) -> &HashMap<i64, Vec<String>> {
+        &self.tags
+    }
+
     fn songs_in(&self, genre: &str) -> Vec<i64> {
         self.tags
             .iter()
@@ -228,13 +233,23 @@ pub fn list_genres(
     state: &AppState,
     ids: impl IntoIterator<Item = i64>,
 ) -> HashMap<i64, Vec<String>> {
-    let Ok(catalog) = state.catalog.read() else {
-        return HashMap::new();
+    let found: Vec<(i64, Vec<String>)> = {
+        let Ok(catalog) = state.catalog.read() else {
+            return HashMap::new();
+        };
+        ids.into_iter()
+            .filter_map(|id| {
+                let tags = catalog.tags.get(&id)?;
+                (!tags.is_empty()).then(|| (id, tags.clone()))
+            })
+            .collect()
     };
-    ids.into_iter()
-        .filter_map(|id| {
-            let tags = catalog.tags.get(&id)?;
-            (!tags.is_empty()).then(|| (id, tags.iter().take(LIST_GENRES).cloned().collect()))
+    // With genre containers on, a song shows its containers.
+    found
+        .into_iter()
+        .map(|(id, tags)| {
+            let shown = crate::genre_groups::fold_names(state, tags);
+            (id, shown.into_iter().take(LIST_GENRES).collect())
         })
         .collect()
 }
@@ -350,7 +365,10 @@ async fn genres(
 ) -> Json<GenreMap> {
     let shape = asked.shape();
     let map = match (state.catalog.read(), state.sound.read()) {
-        (Ok(catalog), Ok(index)) => djinn_library::genres::shaped(&catalog.tags, &index, shape),
+        (Ok(catalog), Ok(index)) => match crate::genre_groups::shown_tags(&state, &catalog.tags) {
+            Some(folded) => djinn_library::genres::shaped(&folded, &index, shape),
+            None => djinn_library::genres::shaped(&catalog.tags, &index, shape),
+        },
         _ => GenreMap::default(),
     };
     Json(map)
@@ -397,10 +415,27 @@ fn pull_genre(state: &AppState, name: &str, popularity: &HashMap<i64, i64>) -> G
         artists: Vec::new(),
         related: Vec::new(),
     };
+    let container = crate::genre_groups::container_named(state, name);
     let (Ok(catalog), Ok(index)) = (state.catalog.read(), state.sound.read()) else {
         return pull;
     };
-    let songs = catalog.songs_in(name);
+    // A genre container holds every song of its genres; its related genres
+    // are other containers and loose genres.
+    let folded = container
+        .as_ref()
+        .and_then(|_| crate::genre_groups::shown_tags(state, &catalog.tags));
+    let (name, tags) = match (&container, &folded) {
+        (Some(container), Some(folded)) => (container.as_str(), folded),
+        _ => (name, &catalog.tags),
+    };
+    let songs = if folded.is_some() {
+        tags.iter()
+            .filter(|(_, t)| t.iter().any(|g| g == name))
+            .map(|(id, _)| *id)
+            .collect()
+    } else {
+        catalog.songs_in(name)
+    };
     let in_genre: HashSet<i64> = songs.iter().copied().collect();
     let plays = |id: &i64| popularity.get(id).copied().unwrap_or(0);
     let weighted: Vec<(i64, i64)> = songs.iter().map(|id| (*id, 1 + plays(id))).collect();
@@ -410,10 +445,15 @@ fn pull_genre(state: &AppState, name: &str, popularity: &HashMap<i64, i64>) -> G
         .artist_songs
         .iter()
         .filter_map(|(artist, ids)| {
-            let tagged = catalog
-                .artist_genres
-                .get(artist)
-                .is_some_and(|g| g.iter().any(|t| vibe::genre_fits(t, name)));
+            let tagged = catalog.artist_genres.get(artist).is_some_and(|g| {
+                if folded.is_some() {
+                    crate::genre_groups::fold_names(state, g.iter().cloned().collect())
+                        .iter()
+                        .any(|t| t == name)
+                } else {
+                    g.iter().any(|t| vibe::genre_fits(t, name))
+                }
+            });
             let mine: Vec<&i64> = ids.iter().filter(|id| in_genre.contains(id)).collect();
             let weight: i64 = mine.iter().map(|id| 1 + plays(id)).sum();
             (tagged || weight > 0).then_some((*artist, weight.max(1)))
@@ -422,7 +462,7 @@ fn pull_genre(state: &AppState, name: &str, popularity: &HashMap<i64, i64>) -> G
     let mut rng = rand::rng();
     pull.songs = weighted_order(&weighted, &mut rng);
     pull.artists = weighted_order(&artists, &mut rng);
-    pull.related = djinn_library::genres::map(&catalog.tags, &index).related(name);
+    pull.related = djinn_library::genres::map(tags, &index).related(name);
     pull
 }
 
@@ -1062,8 +1102,9 @@ pub(crate) fn similar_track_ids(state: &AppState, id: i64, count: usize) -> Vec<
 pub(crate) fn top_genres(state: &AppState, count: usize) -> Vec<(String, usize)> {
     let mut all = match (state.catalog.read(), state.sound.read()) {
         (Ok(catalog), Ok(index)) => {
+            let folded = crate::genre_groups::shown_tags(state, &catalog.tags);
             djinn_library::genres::shaped(
-                &catalog.tags,
+                folded.as_ref().unwrap_or(&catalog.tags),
                 &index,
                 djinn_library::genres::Shape::default(),
             )

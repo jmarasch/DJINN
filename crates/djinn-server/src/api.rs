@@ -55,6 +55,7 @@ pub fn router() -> Router<AppState> {
         .merge(rooms_api::router())
         .merge(problems_api::router())
         .merge(crate::mp3_check::router())
+        .merge(crate::genre_groups::router())
         .merge(protected::router())
         .merge(duplicates::router())
         .merge(scheduled_check::router())

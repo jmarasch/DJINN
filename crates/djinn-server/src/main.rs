@@ -36,6 +36,7 @@ mod editor_lyrics;
 mod error;
 mod events;
 mod folders;
+mod genre_groups;
 mod go;
 mod go_announce;
 mod go_app;
@@ -489,6 +490,7 @@ async fn run() -> anyhow::Result<()> {
     schedule::start(state.clone());
     lyrics::start(&state);
     mp3_check::start(&state);
+    genre_groups::reload(&state).await;
     ai_listener::resume(&state).await;
     update::start(&state);
     if let Err(e) = convert::apply(&state).await {

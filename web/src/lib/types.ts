@@ -866,6 +866,29 @@ export type ProblemKind =
   | 'ai_lyrics'
   | 'no_length_header'
 
+/** A genre and how many songs have it (Admin > Library > Genres). */
+export interface GenreCountRow {
+  genre: string
+  songs: number
+  /** Placed by hand: Auto-group leaves it where it is. */
+  pinned: boolean
+}
+
+/** Genre containers: similar genres shown under one name. */
+export interface GenreGroups {
+  enabled: boolean
+  containers: { id: number; name: string; auto: boolean; genres: GenreCountRow[] }[]
+  /** Genres in no container. */
+  loose: GenreCountRow[]
+}
+
+/** A way Auto-group can sort the genres. */
+export interface GenreGroupChoice {
+  containers: number
+  grouped: number
+  step: number
+}
+
 /** The thorough check of MP3 length headers. */
 export interface Mp3Check {
   running: boolean

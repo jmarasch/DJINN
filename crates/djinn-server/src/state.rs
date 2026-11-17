@@ -57,6 +57,8 @@ pub struct AppState {
     /// Genres worked out, by name, until they're too old.
     pub genre_pulls:
         Arc<std::sync::Mutex<std::collections::HashMap<String, Arc<crate::smart::GenrePull>>>>,
+    /// Genre to container while genre containers are on (empty when off).
+    pub genre_fold: Arc<std::sync::RwLock<std::collections::HashMap<String, String>>>,
     /// Optional AI listening.
     pub ai: Arc<crate::ai::AiState>,
     /// Version checks and self-updates.
@@ -144,6 +146,7 @@ impl AppState {
             sound: Arc::default(),
             catalog: Arc::default(),
             genre_pulls: Arc::default(),
+            genre_fold: Arc::default(),
             ai: Arc::new(crate::ai::AiState::new(&art_dir_for_models)),
             update: Arc::default(),
             go: Arc::default(),

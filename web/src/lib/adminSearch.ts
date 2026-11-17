@@ -168,6 +168,12 @@ export const adminEntries: AdminEntry[] = [
   { label: 'Picture download limits', tab: 'library', keywords: 'image cache size pixels' },
   { label: 'Artist picture sources', tab: 'library', keywords: 'fanart audiodb unsplash commons api key' },
   { label: 'MusicBrainz', tab: 'library', keywords: 'covers genres lookup contact' },
+  {
+    label: 'Show genres in their containers',
+    tab: 'library',
+    keywords: 'genre containers group similar genres auto metal combine',
+    key: 'genre_containers',
+  },
   { label: 'Identify songs by sound', tab: 'library', keywords: 'acoustid fingerprint identify' },
   { label: 'YouTube playlist links', tab: 'library', keywords: 'youtube import api key' },
   { label: 'Image cache', tab: 'library', keywords: 'art covers folder' },

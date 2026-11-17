@@ -20,6 +20,7 @@
   import SystemStatus from '../lib/SystemStatus.svelte'
   import UpdatePanel from '../lib/UpdatePanel.svelte'
   import AiPanel from '../lib/AiPanel.svelte'
+  import GenreGroupsPanel from '../lib/GenreGroupsPanel.svelte'
   import CastPanel from '../lib/CastPanel.svelte'
   import CrossfadePanel from '../lib/CrossfadePanel.svelte'
   import EqualizerPanel from '../lib/EqualizerPanel.svelte'
@@ -327,6 +328,7 @@
     ['folders', 'Folders and checks'],
     ['settings', 'Library settings'],
     ['online', 'Online info'],
+    ['genres', 'Genres'],
   ])}
   <div data-subtab="folders" hidden={sub.library !== 'folders'}>
   <div class="cards-2">
@@ -430,6 +432,10 @@
       </form>
     </section>
   {/if}
+  </div>
+
+  <div data-subtab="genres" hidden={sub.library !== 'genres'}>
+    <div class="cards-2"><GenreGroupsPanel /></div>
   </div>
 
   <div data-subtab="online" hidden={sub.library !== 'online'}>
