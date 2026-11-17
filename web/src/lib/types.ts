@@ -1677,6 +1677,8 @@ export interface AiWorkStatus {
   vocals_for_nodes: boolean
   /** The least an AI's lyrics must score to be kept, in percent. */
   min_match: number
+  /** Genres whose songs get no AI lyrics. */
+  skip_genres: string[]
   counts: {
     waiting_listen: number
     waiting_sync: number

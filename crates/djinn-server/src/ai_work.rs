@@ -41,6 +41,11 @@ const KEYS: &str = "ai_worker_keys";
 /// of the words it heard when writing them.
 pub const MIN_MATCH: &str = "ai_lyrics_min_match";
 pub const MIN_MATCH_DEFAULT: i64 = 85;
+/// Genres whose songs the AI doesn't make or time lyrics for (one per line),
+/// unless an admin asks for a song.
+pub const SKIP_GENRES: &str = "ai_lyrics_skip_genres";
+/// Most genres that can be left out.
+const SKIP_GENRES_MOST: usize = 100;
 const BATCH_MAX: usize = 10;
 /// A song held this long by a worker that never answers goes back to waiting.
 const LEASE_MS: i64 = 30 * 60 * 1000;
@@ -224,6 +229,7 @@ struct Status {
     sync_plain: bool,
     vocals_for_nodes: bool,
     min_match: i64,
+    skip_genres: Vec<String>,
     counts: AiCounts,
     /// Why handing out work is paused (music playing, outside the hours).
     held: Option<crate::background::Held>,
@@ -258,9 +264,14 @@ async fn status(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json<S
         sync_plain: settings::flag(&state.store, WORK_SYNC, false).await?,
         vocals_for_nodes: settings::flag(&state.store, VOCALS_FOR_NODES, true).await?,
         min_match: min_match(&state).await?,
+        skip_genres: skip_genres(&state).await?,
         counts: state
             .store
-            .ai_counts(lookups_off(&state).await?, LEASE_MS)
+            .ai_counts(
+                lookups_off(&state).await?,
+                LEASE_MS,
+                &skipped_songs(&state).await?,
+            )
             .await?,
         held: crate::background::held(&state).await,
         keys: keys(&state).await?.into_iter().map(|k| k.name).collect(),
@@ -277,6 +288,8 @@ struct Settings {
     vocals_for_nodes: bool,
     #[serde(default)]
     min_match: Option<i64>,
+    #[serde(default)]
+    skip_genres: Option<Vec<String>>,
 }
 
 fn yes() -> bool {
@@ -296,6 +309,20 @@ async fn put_settings(
         state
             .store
             .set_setting(MIN_MATCH, &pct.clamp(0, 100).to_string())
+            .await?;
+    }
+    if let Some(genres) = body.skip_genres {
+        let mut kept: Vec<String> = Vec::new();
+        for genre in genres {
+            let genre = djinn_library::vibe::normalize(&genre);
+            if !genre.is_empty() && !kept.contains(&genre) {
+                kept.push(genre);
+            }
+        }
+        kept.truncate(SKIP_GENRES_MOST);
+        state
+            .store
+            .set_setting(SKIP_GENRES, &kept.join("\n"))
             .await?;
     }
     Ok(StatusCode::NO_CONTENT)
@@ -389,6 +416,28 @@ struct Batch {
     /// The least a result may score, in percent (`MIN_MATCH`): the worker
     /// skips a song that scores lower rather than sending it.
     min_match: i64,
+}
+
+async fn skip_genres(state: &AppState) -> anyhow::Result<Vec<String>> {
+    Ok(state
+        .store
+        .get_setting(SKIP_GENRES)
+        .await?
+        .unwrap_or_default()
+        .lines()
+        .map(str::trim)
+        .filter(|g| !g.is_empty())
+        .map(str::to_owned)
+        .collect())
+}
+
+/// The songs in the genres left out of AI lyrics.
+async fn skipped_songs(state: &AppState) -> anyhow::Result<Vec<i64>> {
+    let genres = skip_genres(state).await?;
+    if genres.is_empty() {
+        return Ok(Vec::new());
+    }
+    Ok(crate::smart::songs_in_genres(state, &genres))
 }
 
 async fn min_match(state: &AppState) -> anyhow::Result<i64> {
@@ -698,6 +747,7 @@ async fn hand_out(state: &AppState, name: &str, asker: Asker, body: Next) -> Api
     let sync = background && settings::flag(&state.store, WORK_SYNC, false).await?;
     let lookups_off = lookups_off(state).await?;
     let mut prepare = false;
+    let skip = skipped_songs(state).await?;
     let jobs = if asker == Asker::Node {
         let mut jobs = if background {
             state.store.ai_claim_prepared(name, max).await?
@@ -707,7 +757,7 @@ async fn hand_out(state: &AppState, name: &str, asker: Asker, body: Next) -> Api
         if jobs.is_empty() {
             jobs = state
                 .store
-                .ai_claim(name, listen, sync, lookups_off, max, LEASE_MS)
+                .ai_claim(name, listen, sync, lookups_off, max, LEASE_MS, &skip)
                 .await?;
         }
         jobs
@@ -734,6 +784,7 @@ async fn hand_out(state: &AppState, name: &str, asker: Asker, body: Next) -> Api
                     lookups_off,
                     if prepare { 1 } else { left },
                     LEASE_MS,
+                    &skip,
                 )
                 .await?;
             jobs.extend(more);
@@ -1357,7 +1408,12 @@ mod tests {
         let got = state.store.lyrics(id).await.unwrap().unwrap();
         assert_eq!((got.ai, got.plain.as_deref()), (1, Some("hello there")));
         assert_eq!(
-            state.store.ai_counts(false, LEASE_MS).await.unwrap().done,
+            state
+                .store
+                .ai_counts(false, LEASE_MS, &[])
+                .await
+                .unwrap()
+                .done,
             1
         );
     }

@@ -814,7 +814,7 @@ mod tests {
         assert_eq!((t.lyrics, t.lyrics_ai, t.lyrics_failed), (0, 0, 1));
         // The AI isn't handed it again; the other song without lyrics is.
         let jobs = store
-            .ai_claim("w", true, false, true, 10, 60_000)
+            .ai_claim("w", true, false, true, 10, 60_000, &[])
             .await
             .unwrap();
         assert!(jobs.iter().all(|j| j.track_id != ids[0]));

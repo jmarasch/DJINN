@@ -15,6 +15,10 @@
   // The minimum score, kept apart from `work` so the 3-second refresh doesn't
   // move the slider under a finger.
   let minMatch = $state<number | null>(null)
+  // Genres left out of AI lyrics, and every genre in the library to pick from.
+  let skipGenres = $state<string[] | null>(null)
+  let known = $state<string[]>([])
+  let genreText = $state('')
 
   const n = (x: number) => x.toLocaleString()
   const models = ['tiny', 'base', 'small', 'medium', 'large-v3-turbo']
@@ -23,6 +27,7 @@
     try {
       work = await api.aiWork()
       if (minMatch === null) minMatch = work.min_match
+      if (skipGenres === null) skipGenres = [...work.skip_genres]
       listener = await api.aiListener()
     } catch {
       // Shown next time.
@@ -30,6 +35,10 @@
   }
 
   onMount(() => {
+    api
+      .genres()
+      .then((map) => (known = map.genres.map((g) => g.name).sort()))
+      .catch(() => {})
     void refresh()
     const timer = setInterval(() => void refresh(), 3000)
     return () => clearInterval(timer)
@@ -44,12 +53,27 @@
         sync_plain: work.sync_plain,
         vocals_for_nodes: work.vocals_for_nodes,
         min_match: minMatch ?? work.min_match,
+        skip_genres: skipGenres ?? work.skip_genres,
       })
       if (work.on && listener?.installed && listener.auto_start && !listener.running) await api.startAiListener()
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Could not save', true)
     }
     void refresh()
+  }
+
+  function addGenre() {
+    const genre = genreText.trim().toLowerCase()
+    genreText = ''
+    if (!genre || !skipGenres || skipGenres.includes(genre)) return
+    skipGenres = [...skipGenres, genre]
+    void saveWork()
+  }
+
+  function removeGenre(genre: string) {
+    if (!skipGenres) return
+    skipGenres = skipGenres.filter((g) => g !== genre)
+    void saveWork()
   }
 
   async function saveListener() {
@@ -125,6 +149,35 @@
       model was of the words it heard (half the words at least this sure). Songs that score lower get no AI lyrics and count as failed; lower the minimum,
       then select Try again, to give them another go.
     </p>
+    <h4>Genres to leave out</h4>
+    <p class="small muted sub">
+      Songs in these genres get no AI lyrics (a genre takes in its narrower ones, so "metal" covers "black metal"),
+      unless you ask for a song in the library editor. Handy for instrumental or classical music, or vocals the AI
+      can't follow.
+    </p>
+    {#if skipGenres?.length}
+      <div class="chips">
+        {#each skipGenres as genre (genre)}
+          <span class="chip">
+            {genre}
+            <button class="icon-only" aria-label="Stop leaving out {genre}" onclick={() => removeGenre(genre)}>×</button>
+          </span>
+        {/each}
+      </div>
+    {/if}
+    <form
+      class="add-genre"
+      onsubmit={(e) => {
+        e.preventDefault()
+        addGenre()
+      }}
+    >
+      <input list="ai-skip-genres" bind:value={genreText} placeholder="A genre, like classical" aria-label="Genre to leave out" />
+      <datalist id="ai-skip-genres">
+        {#each known as g (g)}<option value={g}></option>{/each}
+      </datalist>
+      <button class="small-button" type="submit" disabled={!genreText.trim()}>Leave out</button>
+    </form>
     <p class="small">
       Waiting: {n(work.counts.waiting_listen)} without lyrics, {n(work.counts.waiting_sync)} plain.
       Working: {n(work.counts.working)}.{#if work.counts.prepared}
@@ -241,6 +294,39 @@
 </section>
 
 <style>
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 6px 0;
+  }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 2px 4px 2px 10px;
+    border: 1px solid var(--edge);
+    border-radius: 999px;
+    font-size: 0.85rem;
+  }
+
+  .chip button {
+    min-height: 0;
+    padding: 0 6px;
+  }
+
+  .add-genre {
+    display: flex;
+    gap: 8px;
+    margin: 6px 0 10px;
+  }
+
+  .add-genre input {
+    flex: 1;
+    min-width: 0;
+  }
+
   .range {
     display: grid;
     gap: 4px;

@@ -290,6 +290,7 @@ export const api = {
     sync_plain: boolean
     vocals_for_nodes: boolean
     min_match?: number
+    skip_genres?: string[]
   }) =>
     put<void>('/ai-work/settings', s),
   makeAiWorkerKey: (name: string) => post<{ name: string; key: string }>('/ai-work/keys', { name }),

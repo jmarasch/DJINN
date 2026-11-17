@@ -1031,6 +1031,24 @@ pub(crate) async fn genre_song_ids(state: &AppState, name: &str, count: usize) -
     }
 }
 
+/// Every song in any of these genres (a genre takes in its narrower ones, as
+/// on its page: "metal" covers "black metal").
+pub(crate) fn songs_in_genres(state: &AppState, names: &[String]) -> Vec<i64> {
+    let Ok(catalog) = state.catalog.read() else {
+        return Vec::new();
+    };
+    let names: Vec<String> = names.iter().map(|n| vibe::normalize(n)).collect();
+    catalog
+        .tags
+        .iter()
+        .filter(|(_, tags)| {
+            tags.iter()
+                .any(|t| names.iter().any(|n| vibe::genre_fits(t, n)))
+        })
+        .map(|(id, _)| *id)
+        .collect()
+}
+
 /// Songs that sound like this one, closest first.
 pub(crate) fn similar_track_ids(state: &AppState, id: i64, count: usize) -> Vec<i64> {
     state

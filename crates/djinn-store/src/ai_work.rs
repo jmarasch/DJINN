@@ -58,10 +58,21 @@ macro_rules! sync_where {
     };
 }
 
+/// Song ids as a JSON list, for `json_each`.
+fn id_list(ids: &[i64]) -> String {
+    format!(
+        "[{}]",
+        ids.iter().map(i64::to_string).collect::<Vec<_>>().join(",")
+    )
+}
+
 impl Store {
     /// Hands `limit` songs to `worker`: songs with no lyrics (once LRCLIB has
     /// been asked, or when `lookups_off`), then songs with plain lyrics to
-    /// time. A song held longer than `lease_ms` counts as free again.
+    /// time. A song held longer than `lease_ms` counts as free again. Songs
+    /// in `skip` (the genres left out of AI lyrics) are only done when an
+    /// admin asks for them.
+    #[allow(clippy::too_many_arguments)]
     pub async fn ai_claim(
         &self,
         worker: &str,
@@ -70,7 +81,9 @@ impl Store {
         lookups_off: bool,
         limit: i64,
         lease_ms: i64,
+        skip: &[i64],
     ) -> Result<Vec<AiJob>> {
+        let skip = id_list(skip);
         let now = now_ms();
         let lease_cut = now - lease_ms;
         let mut tx = self.write().await?;
@@ -104,11 +117,13 @@ impl Store {
                 listen_where!(),
                 " AND ",
                 free!(),
-                " ORDER BY t.id LIMIT ?3"
+                " AND t.id NOT IN (SELECT value FROM json_each(?4))
+                 ORDER BY t.id LIMIT ?3"
             ))
             .bind(lease_cut)
             .bind(lookups_off)
             .bind(left)
+            .bind(&skip)
             .fetch_all(&mut *tx)
             .await?;
             jobs.extend(found);
@@ -123,10 +138,12 @@ impl Store {
                 sync_where!(),
                 " AND ",
                 free!(),
-                " ORDER BY t.id LIMIT ?2"
+                " AND t.id NOT IN (SELECT value FROM json_each(?3))
+                 ORDER BY t.id LIMIT ?2"
             ))
             .bind(lease_cut)
             .bind(room)
+            .bind(&skip)
             .fetch_all(&mut *tx)
             .await?;
             jobs.extend(found);
@@ -325,7 +342,12 @@ impl Store {
         Ok(done.rows_affected())
     }
 
-    pub async fn ai_counts(&self, lookups_off: bool, lease_ms: i64) -> Result<AiCounts> {
+    pub async fn ai_counts(
+        &self,
+        lookups_off: bool,
+        lease_ms: i64,
+        skip: &[i64],
+    ) -> Result<AiCounts> {
         let cut = now_ms() - lease_ms;
         Ok(sqlx::query_as(concat!(
             "SELECT
@@ -334,13 +356,13 @@ impl Store {
             listen_where!(),
             " AND ",
             free!(),
-            ") AS waiting_listen,
+            " AND t.id NOT IN (SELECT value FROM json_each(?3))) AS waiting_listen,
                (SELECT count(*) FROM lyrics l JOIN tracks t ON t.id = l.track_id
                 WHERE ",
             sync_where!(),
             " AND ",
             free!(),
-            ") AS waiting_sync,
+            " AND t.id NOT IN (SELECT value FROM json_each(?3))) AS waiting_sync,
                (SELECT count(*) FROM ai_jobs WHERE status = 'working') AS working,
                (SELECT count(*) FROM ai_jobs WHERE status = 'prepared') AS prepared,
                (SELECT count(*) FROM ai_jobs WHERE status = 'done') AS done,
@@ -348,6 +370,7 @@ impl Store {
         ))
         .bind(cut)
         .bind(lookups_off)
+        .bind(id_list(skip))
         .fetch_one(&self.pool)
         .await?)
     }
@@ -393,14 +416,14 @@ mod tests {
         let lease = 30 * 60 * 1000;
         // Neither kind is on, and LRCLIB hasn't been asked: nothing.
         assert!(store
-            .ai_claim("pc", false, false, false, 10, lease)
+            .ai_claim("pc", false, false, false, 10, lease, &[])
             .await
             .unwrap()
             .is_empty());
         assert_eq!(store.ai_ask(&[ids[1]], "sync").await.unwrap(), 1);
         assert_eq!(store.ai_ask(&[ids[0]], "listen").await.unwrap(), 1);
         let batch = store
-            .ai_claim("pc", true, true, true, 10, lease)
+            .ai_claim("pc", true, true, true, 10, lease, &[])
             .await
             .unwrap();
         // Asked ones in the order asked, each once.
@@ -463,11 +486,19 @@ mod tests {
         };
         store.save_read_lyrics(ids[2], 1, &timed).await.unwrap();
         let lease = 30 * 60 * 1000;
-        let counts = store.ai_counts(false, lease).await.unwrap();
+        let counts = store.ai_counts(false, lease, &[]).await.unwrap();
         assert_eq!((counts.waiting_listen, counts.waiting_sync), (1, 1));
+        // Songs in a genre left out aren't counted or handed out.
+        let counts = store.ai_counts(false, lease, &ids[..2]).await.unwrap();
+        assert_eq!((counts.waiting_listen, counts.waiting_sync), (0, 0));
+        assert!(store
+            .ai_claim("pc", true, true, false, 10, lease, &ids[..2])
+            .await
+            .unwrap()
+            .is_empty());
         // Only new songs when sync is off.
         let batch = store
-            .ai_claim("pc", true, false, false, 10, lease)
+            .ai_claim("pc", true, false, false, 10, lease, &[])
             .await
             .unwrap();
         assert_eq!(
@@ -479,7 +510,7 @@ mod tests {
         );
         // Held: nobody else gets it. Sync hands over the words to time.
         let more = store
-            .ai_claim("other", true, true, false, 10, lease)
+            .ai_claim("other", true, true, false, 10, lease, &[])
             .await
             .unwrap();
         assert_eq!(more.len(), 1);
@@ -494,7 +525,7 @@ mod tests {
         // The worker dies: after the lease the song is free again.
         assert!(
             store
-                .ai_claim("late", true, true, false, 10, 0)
+                .ai_claim("late", true, true, false, 10, 0, &[])
                 .await
                 .unwrap()
                 .len()
@@ -503,20 +534,20 @@ mod tests {
         // Done and failed songs stay out; failed ones come back on retry.
         store.ai_finish(ids[0], None).await.unwrap();
         store.ai_finish(ids[1], Some("no vocals")).await.unwrap();
-        let counts = store.ai_counts(false, lease).await.unwrap();
+        let counts = store.ai_counts(false, lease, &[]).await.unwrap();
         assert_eq!((counts.done, counts.failed, counts.working), (1, 1, 0));
         assert_eq!(store.ai_retry_failed().await.unwrap(), 1);
         // Main isolates the vocals of a song for a node: only a node's claim
         // of prepared songs takes it, until the lease runs out.
         let batch = store
-            .ai_claim("main", true, true, false, 1, lease)
+            .ai_claim("main", true, true, false, 1, lease, &[])
             .await
             .unwrap();
         let id = batch[0].track_id;
         store.ai_prepared(id).await.unwrap();
         assert_eq!(store.ai_prepared_count().await.unwrap(), 1);
         assert!(store
-            .ai_claim("main", true, true, false, 10, lease)
+            .ai_claim("main", true, true, false, 10, lease, &[])
             .await
             .unwrap()
             .iter()
