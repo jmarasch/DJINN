@@ -38,6 +38,8 @@ pub struct Track {
     pub lyrics: i64,
     /// 0 not AI, 1 the words were made by an AI, 2 a person's words timed by an AI.
     pub lyrics_ai: i64,
+    /// 1 when an admin removed lyrics an AI had made or timed (shown as a red microphone).
+    pub lyrics_failed: i64,
 }
 
 // Column lists are macros so queries stay `&'static str` (built with
@@ -55,7 +57,8 @@ macro_rules! track_columns {
          coalesce(t.art_hash, (SELECT fa.art_hash FROM albums fa WHERE fa.id = t.album_id)) AS art_hash, \
          coalesce((SELECT CASE WHEN tl.synced IS NOT NULL THEN 2 WHEN tl.plain IS NOT NULL THEN 1 ELSE 0 END \
                    FROM lyrics tl WHERE tl.track_id = t.id), 0) AS lyrics, \
-         coalesce((SELECT al.ai FROM lyrics al WHERE al.track_id = t.id), 0) AS lyrics_ai"
+         coalesce((SELECT al.ai FROM lyrics al WHERE al.track_id = t.id), 0) AS lyrics_ai, \
+         coalesce((SELECT fl.ai_removed FROM lyrics fl WHERE fl.track_id = t.id), 0) AS lyrics_failed"
     };
 }
 pub(crate) use track_columns;

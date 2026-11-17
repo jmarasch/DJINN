@@ -7,6 +7,7 @@
   import Icon from './Icon.svelte'
   import Sheet from './Sheet.svelte'
   import TagEditor from './TagEditor.svelte'
+  import { t } from './i18n.svelte'
   import { hasPlaylists, isAdmin, toast } from './state.svelte'
   import type { TagField, Track, TrackEdit, TrackTags } from './types'
 
@@ -70,6 +71,23 @@
     location.hash = `/similar/${track.id}`
   }
 
+  // Takes the song's lyrics away as bad and blocks that source's same text.
+  // When an AI made or timed them, the song keeps a red microphone and the AI
+  // leaves it alone until its lyrics are allowed again.
+  async function removeLyrics() {
+    menu = false
+    if (!confirm(`Remove the lyrics of ${track.title}?`)) return
+    try {
+      await api.blockLyrics(track.id, 'removed from the song menu')
+      if (track.lyrics_ai) track.lyrics_failed = 1
+      track.lyrics = 0
+      track.lyrics_ai = 0
+      toast(t('lyrics.removed'))
+    } catch (e) {
+      toast(e instanceof Error ? e.message : t('lyrics.remove_failed'), true)
+    }
+  }
+
   async function radio() {
     menu = false
     try {
@@ -122,6 +140,9 @@
     {#if isAdmin()}
       <button class="item" onclick={radio}><Icon name="radio" /> Start radio from this song</button>
       <button class="item" onclick={editTags}><Icon name="edit" /> Edit tags</button>
+      {#if track.lyrics}
+        <button class="item" onclick={removeLyrics}><Icon name="lyrics-outline" /> {t('lyrics.remove')}</button>
+      {/if}
     {/if}
     <button
       class="item"

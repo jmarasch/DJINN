@@ -435,6 +435,8 @@ impl Store {
         .await?;
         sqlx::query(
             "UPDATE lyrics SET synced = NULL, plain = NULL, instrumental = 0, source = 'none',
+                    ai_removed = CASE WHEN ai > 0 THEN 1 ELSE ai_removed END,
+                    ai = 0, ai_model = NULL, ai_match = NULL,
                     online_checked_at = ?, updated_at = ?
              WHERE track_id = ?",
         )
@@ -452,7 +454,7 @@ impl Store {
     pub async fn allow_lyrics_again(&self, track_id: Option<i64>) -> Result<u64> {
         let mut tx = self.write().await?;
         sqlx::query(
-            "UPDATE lyrics SET file_mtime = NULL, online_checked_at = NULL
+            "UPDATE lyrics SET file_mtime = NULL, online_checked_at = NULL, ai_removed = 0
              WHERE source = 'none'
                AND track_id IN (SELECT track_id FROM lyrics_blocks WHERE ?1 IS NULL OR track_id = ?1)",
         )
@@ -775,6 +777,51 @@ mod tests {
             .unwrap()
             .synced
             .is_some());
+    }
+
+    #[tokio::test]
+    async fn removed_ai_lyrics_are_marked_and_not_taken_up_again() {
+        let (store, ids) = store_with(&["One", "Two"]).await;
+        sqlx::query("INSERT INTO users (username, password_hash, role, created_at) VALUES ('a', 'x', 'admin', 1)")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        let admin: i64 = sqlx::query_scalar("SELECT id FROM users LIMIT 1")
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+        let made = NewLyrics {
+            synced: Some("[00:01.00]la"),
+            plain: Some("la"),
+            instrumental: false,
+            source: "bulk",
+        };
+        let mark = AiMark {
+            kind: 1,
+            model: "m",
+            match_pct: None,
+        };
+        store
+            .save_bulk_lyrics(ids[0], &made, false, Some(&mark), "z", false)
+            .await
+            .unwrap();
+        store
+            .save_read_lyrics(ids[1], 7, &NewLyrics::NONE)
+            .await
+            .unwrap();
+        store.block_lyrics(ids[0], admin, None).await.unwrap();
+        let t = store.track(ids[0]).await.unwrap().unwrap();
+        assert_eq!((t.lyrics, t.lyrics_ai, t.lyrics_failed), (0, 0, 1));
+        // The AI isn't handed it again; the other song without lyrics is.
+        let jobs = store
+            .ai_claim("w", true, false, true, 10, 60_000)
+            .await
+            .unwrap();
+        assert!(jobs.iter().all(|j| j.track_id != ids[0]));
+        // Allowing its lyrics again clears the mark.
+        store.allow_lyrics_again(Some(ids[0])).await.unwrap();
+        let t = store.track(ids[0]).await.unwrap().unwrap();
+        assert_eq!(t.lyrics_failed, 0);
     }
 
     #[tokio::test]

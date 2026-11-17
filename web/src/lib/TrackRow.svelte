@@ -46,7 +46,7 @@
   <div class="text">
     <div class="title-line">
       <button class="title ellipsis" onclick={() => tapTrack(track)}>{track.title}</button>
-      <LyricsMark lyrics={track.lyrics} ai={track.lyrics_ai} />
+      <LyricsMark lyrics={track.lyrics} ai={track.lyrics_ai} failed={track.lyrics_failed} />
     </div>
     <div class="sub ellipsis">
       <Credits {track} />

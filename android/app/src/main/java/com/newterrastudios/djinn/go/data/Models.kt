@@ -37,6 +37,7 @@ data class Track(
     val lyrics: Int = 0,
     /** 0 not AI, 1 the words were made by an AI, 2 a person's words timed by an AI. */
     @SerialName("lyrics_ai") val lyricsAi: Int = 0,
+    @SerialName("lyrics_failed") val lyricsFailed: Int = 0,
 )
 
 @Serializable

@@ -17,6 +17,8 @@
   /* The microphone beside songs whose lyrics an AI made (pink) or timed (green). */
   --ai-made: #ff4fd8;
   --ai-timed: #7dff4f;
+  /* Red when an AI's lyrics for the song were removed as bad. */
+  --ai-failed: #ff3b4f;
   /* Neon edges: a thin lavender line with a soft glow around it. */
   --edge: rgb(190 150 255 / 0.62);
   --edge-strong: rgb(205 170 255 / 0.95);
@@ -58,6 +60,7 @@
     --accent-2: #0d9488;
     --ai-made: #d4129e;
     --ai-timed: #2f9e0a;
+    --ai-failed: #c8102e;
     --edge: rgb(111 63 214 / 0.26);
     --edge-strong: rgb(111 63 214 / 0.6);
     --glow: 0 0 12px rgb(111 63 214 / 0.08);

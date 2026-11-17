@@ -47,7 +47,7 @@ macro_rules! free {
 }
 macro_rules! listen_where {
     () => {
-        "l.source = 'none' AND t.removed_at IS NULL AND t.duration_ms >= 5000
+        "l.source = 'none' AND l.ai_removed = 0 AND t.removed_at IS NULL AND t.duration_ms >= 5000
          AND (l.online_checked_at IS NOT NULL OR ?2)"
     };
 }
