@@ -284,7 +284,13 @@ export const api = {
   setLyricsSettings: (settings: LyricsSettings) => put<void>('/lyrics/settings', settings),
   recheckLyrics: () => post<void>('/lyrics/recheck'),
   aiWork: () => get<AiWorkStatus>('/ai-work'),
-  setAiWork: (s: { on: boolean; new_songs: boolean; sync_plain: boolean; vocals_for_nodes: boolean }) =>
+  setAiWork: (s: {
+    on: boolean
+    new_songs: boolean
+    sync_plain: boolean
+    vocals_for_nodes: boolean
+    min_match?: number
+  }) =>
     put<void>('/ai-work/settings', s),
   makeAiWorkerKey: (name: string) => post<{ name: string; key: string }>('/ai-work/keys', { name }),
   removeAiWorkerKey: (name: string) => del<void>(`/ai-work/keys/${encodeURIComponent(name)}`),

@@ -123,8 +123,26 @@ def prepare(engine: ListenerEngine, audio: Path, work: Path) -> Path:
     return out
 
 
+def confidence(transcript) -> "float | None":
+    """How sure the model was of the words it heard: the median of its word
+    probabilities (0 to 1), or None when it gives none. The median, not the
+    average: tried on real songs, clear vocals came out at 94 to 99% and
+    mumbled or buried ones at 66 to 84%, where a few unsure words drag an
+    average of good lyrics under 85%."""
+    probs = sorted(w.probability for w in transcript.words if w.word.strip())
+    if not probs:
+        return None
+    return probs[len(probs) // 2]
+
+
+def too_low(score: float, min_similarity: float) -> Skip:
+    # DJINN reads "scored too low" as final: asking again won't change it.
+    return Skip(f"scored too low ({score * 100:.0f}%, under {min_similarity * 100:.0f}%)")
+
+
 def listen(engine: ListenerEngine, job: dict, audio: Path, min_similarity: float) -> str:
-    """The `.lrc` text for one job."""
+    """The `.lrc` text for one job. `min_similarity` (0 to 1) is the least it
+    may score: the match for timing, the model's confidence for words."""
     query = SongQuery(
         artist=job.get("artist") or "",
         title=job.get("title") or "",
@@ -156,7 +174,7 @@ def listen(engine: ListenerEngine, job: dict, audio: Path, min_similarity: float
         )
         is_energy = transcript.model_name == "energy-onset"
         if not is_energy and report.similarity < min_similarity:
-            raise Skip(f"the audio doesn't match the words ({report.similarity * 100:.0f}%)")
+            raise too_low(report.similarity, min_similarity)
         lines = sync_lyrics_to_audio(plain, transcript, duration_ms=query.duration_ms)
         if not lines:
             raise Skip("no lines to time")
@@ -171,7 +189,12 @@ def listen(engine: ListenerEngine, job: dict, audio: Path, min_similarity: float
         body = lines_to_lrc_body(transcript.lines)
         if not body:
             raise Skip("no usable lyrics heard")
-        result = ListenerResult(tag_kind="ai-generated", model_name=transcript.model_name, synced_lrc=body)
+        sure = confidence(transcript)
+        if sure is not None and sure < min_similarity:
+            raise too_low(sure, min_similarity)
+        result = ListenerResult(
+            tag_kind="ai-generated", model_name=transcript.model_name, synced_lrc=body, confidence=sure
+        )
     return format_lrc_file(query, result)
 
 
@@ -204,6 +227,11 @@ def run(args) -> int:
             time.sleep(30)
             continue
         jobs = batch.get("jobs") or []
+        # DJINN says the least a result may score (Admin > AI > Lyrics).
+        if isinstance(batch.get("min_match"), (int, float)):
+            min_similarity = max(0.0, min(1.0, batch["min_match"] / 100))
+        else:
+            min_similarity = args.min_similarity
         if not jobs:
             held = batch.get("held")
             wait = min(int(batch.get("wait_secs") or 120), MAX_WAIT)
@@ -227,7 +255,7 @@ def run(args) -> int:
                         print(f"vocals for a node: {job.get('artist')} - {job.get('title')} ({time.time() - started:.0f}s)", flush=True)
                         continue
                     listened = time.time()
-                    lrc = listen(engine, job, audio, args.min_similarity)
+                    lrc = listen(engine, job, audio, min_similarity)
                     elapsed = int((time.time() - listened) * 1000)
                 djinn.result(job["track_id"], lrc=lrc, elapsed_ms=elapsed)
                 print(f"{job['kind']}: {job.get('artist')} - {job.get('title')} ({time.time() - started:.0f}s)", flush=True)
@@ -291,7 +319,10 @@ def main() -> int:
     p.add_argument("--device", default="auto", help="auto, cuda or cpu")
     p.add_argument("--vocals", choices=["auto", "on", "off"], default="auto", help="isolate vocals with Demucs first")
     p.add_argument("--models-dir", default=str(DEFAULT_MODELS_DIR))
-    p.add_argument("--min-similarity", type=float, default=0.5, help="how well the audio must match words to time them")
+    p.add_argument(
+        "--min-similarity", type=float, default=0.85,
+        help="the least a result may score (0 to 1) when DJINN doesn't say: the match for timing, confidence for words",
+    )
     p.add_argument("--once", action="store_true", help="do one batch (or wait once) and stop")
     p.add_argument("--setup", action="store_true", help="download the models and stop")
     p.add_argument("--bench", action="store_true", help="test this computer's speed with the model and stop")

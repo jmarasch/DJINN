@@ -12,6 +12,9 @@
   let listener = $state<AiListenerStatus | null>(null)
   let newKeyName = $state('')
   let madeKey = $state<{ name: string; key: string } | null>(null)
+  // The minimum score, kept apart from `work` so the 3-second refresh doesn't
+  // move the slider under a finger.
+  let minMatch = $state<number | null>(null)
 
   const n = (x: number) => x.toLocaleString()
   const models = ['tiny', 'base', 'small', 'medium', 'large-v3-turbo']
@@ -19,6 +22,7 @@
   async function refresh() {
     try {
       work = await api.aiWork()
+      if (minMatch === null) minMatch = work.min_match
       listener = await api.aiListener()
     } catch {
       // Shown next time.
@@ -39,6 +43,7 @@
         new_songs: work.new_songs,
         sync_plain: work.sync_plain,
         vocals_for_nodes: work.vocals_for_nodes,
+        min_match: minMatch ?? work.min_match,
       })
       if (work.on && listener?.installed && listener.auto_start && !listener.running) await api.startAiListener()
     } catch (e) {
@@ -111,6 +116,15 @@
       <input type="checkbox" bind:checked={work.sync_plain} onchange={saveWork} />
       Time plain lyrics (a person's words, timed by the AI)
     </label>
+    <label class="range">
+      <span>Keep lyrics that score at least <strong>{minMatch ?? work.min_match}%</strong></span>
+      <input type="range" min="0" max="100" step="1" bind:value={minMatch} onchange={saveWork} />
+    </label>
+    <p class="small muted sub">
+      For timing, the score is how well the words it heard match the lyrics. For lyrics it writes, it is how sure the
+      model was of the words it heard (half the words at least this sure). Songs that score lower get no AI lyrics and count as failed; lower the minimum,
+      then select Try again, to give them another go.
+    </p>
     <p class="small">
       Waiting: {n(work.counts.waiting_listen)} without lyrics, {n(work.counts.waiting_sync)} plain.
       Working: {n(work.counts.working)}.{#if work.counts.prepared}
@@ -227,6 +241,16 @@
 </section>
 
 <style>
+  .range {
+    display: grid;
+    gap: 4px;
+    margin-top: 10px;
+  }
+
+  .range input {
+    width: 100%;
+  }
+
   .sub {
     margin: 2px 0 10px;
   }

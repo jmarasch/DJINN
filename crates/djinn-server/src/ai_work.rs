@@ -36,6 +36,11 @@ pub const WORK_ON: &str = "ai_work_on";
 const WORK_NEW: &str = "ai_work_new";
 const WORK_SYNC: &str = "ai_work_sync";
 const KEYS: &str = "ai_worker_keys";
+/// The least an AI's lyrics must score to be kept, in percent: how well the
+/// heard audio matched the words when timing them, or how sure the model was
+/// of the words it heard when writing them.
+pub const MIN_MATCH: &str = "ai_lyrics_min_match";
+pub const MIN_MATCH_DEFAULT: i64 = 85;
 const BATCH_MAX: usize = 10;
 /// A song held this long by a worker that never answers goes back to waiting.
 const LEASE_MS: i64 = 30 * 60 * 1000;
@@ -218,6 +223,7 @@ struct Status {
     new_songs: bool,
     sync_plain: bool,
     vocals_for_nodes: bool,
+    min_match: i64,
     counts: AiCounts,
     /// Why handing out work is paused (music playing, outside the hours).
     held: Option<crate::background::Held>,
@@ -251,6 +257,7 @@ async fn status(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json<S
         new_songs: settings::flag(&state.store, WORK_NEW, true).await?,
         sync_plain: settings::flag(&state.store, WORK_SYNC, false).await?,
         vocals_for_nodes: settings::flag(&state.store, VOCALS_FOR_NODES, true).await?,
+        min_match: min_match(&state).await?,
         counts: state
             .store
             .ai_counts(lookups_off(&state).await?, LEASE_MS)
@@ -268,6 +275,8 @@ struct Settings {
     sync_plain: bool,
     #[serde(default = "yes")]
     vocals_for_nodes: bool,
+    #[serde(default)]
+    min_match: Option<i64>,
 }
 
 fn yes() -> bool {
@@ -283,6 +292,12 @@ async fn put_settings(
     settings::set_flag(&state.store, WORK_NEW, body.new_songs).await?;
     settings::set_flag(&state.store, WORK_SYNC, body.sync_plain).await?;
     settings::set_flag(&state.store, VOCALS_FOR_NODES, body.vocals_for_nodes).await?;
+    if let Some(pct) = body.min_match {
+        state
+            .store
+            .set_setting(MIN_MATCH, &pct.clamp(0, 100).to_string())
+            .await?;
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -371,7 +386,28 @@ struct Batch {
     wait_secs: Option<u64>,
     /// Why, when it's paused.
     held: Option<crate::background::Held>,
+    /// The least a result may score, in percent (`MIN_MATCH`): the worker
+    /// skips a song that scores lower rather than sending it.
+    min_match: i64,
 }
+
+async fn min_match(state: &AppState) -> anyhow::Result<i64> {
+    Ok(settings::number(&state.store, MIN_MATCH, MIN_MATCH_DEFAULT)
+        .await?
+        .clamp(0, 100))
+}
+
+/// Why an AI's lyrics are refused for scoring under `min`, read from their
+/// `[by:...match=NN%]` header. Lyrics that give no score are kept.
+fn too_unsure(text: &str, min: i64) -> Option<String> {
+    let pct = djinn_library::lyrics_import::header(text)
+        .ai_info()?
+        .match_pct?;
+    (pct < min).then(|| format!("{LOW_SCORE} ({pct}%, under {min}%)"))
+}
+
+/// The start of the reason a result scored too low (also the worker's skip).
+const LOW_SCORE: &str = "scored too low";
 
 fn vocals_dir(state: &AppState) -> std::path::PathBuf {
     crate::ai_listener::dir(state).join("vocals")
@@ -640,10 +676,12 @@ async fn hand_out(state: &AppState, name: &str, asker: Asker, body: Next) -> Api
             s.asked_at = djinn_store::now_ms();
         }
     });
+    let min_match = min_match(state).await?;
     let nothing = |held| Batch {
         jobs: Vec::new(),
         wait_secs: Some(WAIT_SECS),
         held,
+        min_match,
     };
     let work_on = settings::flag(&state.store, WORK_ON, false).await?;
     // A node keeps its own rules (it asks only while it isn't playing or
@@ -726,6 +764,7 @@ async fn hand_out(state: &AppState, name: &str, asker: Asker, body: Next) -> Api
         jobs,
         wait_secs: None,
         held: None,
+        min_match,
     })
 }
 
@@ -838,16 +877,26 @@ async fn finish_track_result(
     body: &Outcome,
 ) -> ApiResult<()> {
     let kind_number = if kind == "sync" { 2 } else { 1 };
+    let min = min_match(state).await?;
     let failure = match (&body.lrc, &body.error) {
         // An instrumental has no lyrics to make: finished, nothing stored.
         (None, Some(error)) if error == "instrumental" => None,
-        (Some(text), _) => store_from_worker(state, id, text, kind_number, name)
-            .await
-            .err(),
+        (Some(text), _) => match too_unsure(text, min) {
+            Some(why) => Some(why),
+            None => store_from_worker(state, id, text, kind_number, name)
+                .await
+                .err(),
+        },
         (None, Some(error)) => Some(error.chars().take(200).collect()),
         (None, None) => Some("sent nothing".to_owned()),
     };
-    state.store.ai_finish(id, failure.as_deref()).await?;
+    // A low score won't change by asking again, so the song isn't retried
+    // (until an admin retries failed songs, say after lowering the minimum).
+    if failure.as_deref().is_some_and(|f| f.starts_with(LOW_SCORE)) {
+        state.store.ai_give_up(id, failure.as_deref()).await?;
+    } else {
+        state.store.ai_finish(id, failure.as_deref()).await?;
+    }
     let _ = tokio::fs::remove_file(vocals_file(state, id)).await;
     let audio_ms = state
         .store
@@ -861,10 +910,17 @@ async fn finish_track_result(
     Ok(())
 }
 
-async fn store_import_result(file: &djinn_store::ImportFile, body: &Outcome) -> Option<String> {
+async fn store_import_result(
+    file: &djinn_store::ImportFile,
+    body: &Outcome,
+    min: i64,
+) -> Option<String> {
     match (&body.lrc, &body.error) {
         (None, Some(error)) if error == "instrumental" => None,
         (Some(text), _) => {
+            if let Some(why) = too_unsure(text, min) {
+                return Some(why);
+            }
             if text.len() as u64 > djinn_library::lyrics_import::MAX_FILE_BYTES {
                 return Some("the lyrics are too big".into());
             }
@@ -919,8 +975,13 @@ async fn take_result(
                 "that song isn't held by a worker any more",
             ));
         };
-        let failure = store_import_result(&file, &body).await;
-        if failure.is_none() || lease.attempts >= djinn_store::MAX_ATTEMPTS {
+        let failure = store_import_result(&file, &body, min_match(state).await?).await;
+        let low = failure.as_deref().is_some_and(|f| f.starts_with(LOW_SCORE))
+            || body
+                .error
+                .as_deref()
+                .is_some_and(|e| e.starts_with(LOW_SCORE));
+        if failure.is_none() || low || lease.attempts >= djinn_store::MAX_ATTEMPTS {
             with_imports(|m| m.remove(&key));
             state.store.clear_import_ai_want(file_id).await?;
         } else {
@@ -1179,6 +1240,21 @@ mod tests {
     use super::*;
     use crate::test_util::session;
     use tower::ServiceExt;
+
+    #[test]
+    fn lyrics_scoring_under_the_minimum_are_refused() {
+        let lrc = |by: &str| format!("[ar:A]\n[ti:T]\n[by:{by}]\n[00:01.00]la la\n");
+        let made = lrc("lyrics-listener (AI-generated; model=small; match=84%)");
+        let why = too_unsure(&made, 85).unwrap_or_default();
+        assert!(why.starts_with(LOW_SCORE), "{why}");
+        assert_eq!(too_unsure(&made, 84), None);
+        let timed = lrc("lyrics-listener (AI-synced; model=small; match=90%)");
+        assert_eq!(too_unsure(&timed, 85), None);
+        assert!(too_unsure(&timed, 91).is_some());
+        // No score given (an older worker, or timing alone): kept.
+        let plain = lrc("lyrics-listener (AI-generated; model=small)");
+        assert_eq!(too_unsure(&plain, 100), None);
+    }
 
     #[tokio::test]
     async fn a_worker_takes_a_song_and_sends_lyrics_back() {

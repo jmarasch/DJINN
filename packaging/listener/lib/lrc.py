@@ -65,6 +65,9 @@ def build_by_header(result: ListenerResult) -> str:
             pct = int(round(max(0.0, min(1.0, result.comparison.similarity)) * 100))
             return f"[by:lyrics-listener (AI-synced; model={model}; match={pct}%)]"
         return f"[by:lyrics-listener (AI-synced; model={model})]"
+    if result.confidence is not None:
+        pct = int(round(max(0.0, min(1.0, result.confidence)) * 100))
+        return f"[by:lyrics-listener (AI-generated; model={model}; match={pct}%)]"
     return f"[by:lyrics-listener (AI-generated; model={model})]"
 
 

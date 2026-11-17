@@ -119,3 +119,6 @@ class ListenerResult:
     plain_text: Optional[str] = None
     instrumental: bool = False
     comparison: Optional[ComparisonReport] = None
+    # For lyrics an AI wrote by listening: how sure the model was of the
+    # words it heard (0 to 1, the median of its word probabilities).
+    confidence: Optional[float] = None

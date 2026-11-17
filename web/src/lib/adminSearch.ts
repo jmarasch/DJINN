@@ -99,6 +99,12 @@ export const adminEntries: AdminEntry[] = [
   { label: 'Admins must use two-step sign-in for GO', tab: 'go', keywords: '2fa totp security', key: 'admin_two_step' },
   { label: 'Trusted proxies', tab: 'go', keywords: 'reverse proxy cloudflare' },
   { label: 'Lyrics listening', tab: 'ai', keywords: 'ai lyrics listener whisper worker timed sync install model local' },
+  {
+    label: 'Keep lyrics that score at least',
+    tab: 'ai',
+    keywords: 'ai lyrics minimum score match confidence threshold slider',
+    key: 'ai_lyrics_min_match',
+  },
   { label: 'Library editor', tab: 'editor', keywords: 'compare database files tags differences corrections write grid' },
   { label: 'Protected areas', tab: 'protected', keywords: 'lock library changes strictness password two-step 2fa unlock max medium off' },
   { label: 'Audit trail', tab: 'protected', keywords: 'audit log records purge turn off who unlocked changed' },

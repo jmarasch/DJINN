@@ -287,6 +287,27 @@ impl Store {
         Ok(())
     }
 
+    /// Records a failure that asking again won't change (a result that
+    /// scored under the minimum): the song isn't handed out again until an
+    /// admin retries failed songs.
+    pub async fn ai_give_up(&self, track_id: i64, error: Option<&str>) -> Result<()> {
+        sqlx::query("DELETE FROM ai_asked WHERE track_id = ?")
+            .bind(track_id)
+            .execute(&self.pool)
+            .await?;
+        sqlx::query(
+            "UPDATE ai_jobs SET status = 'failed', finished_at = ?, error = ?,
+                    attempts = max(attempts, ?) WHERE track_id = ?",
+        )
+        .bind(now_ms())
+        .bind(error)
+        .bind(MAX_ATTEMPTS)
+        .bind(track_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
     /// Gives failed songs another go.
     pub async fn ai_retry_failed(&self) -> Result<u64> {
         let done = sqlx::query("DELETE FROM ai_jobs WHERE status = 'failed'")
