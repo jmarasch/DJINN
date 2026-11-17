@@ -286,6 +286,8 @@ struct Status {
     albums: i64,
     /// The music files' size together.
     library_bytes: i64,
+    /// How long the songs last together, in ms.
+    library_ms: i64,
     library_folders: usize,
     scanning: bool,
     last_scan: Option<ScanProgress>,
@@ -416,6 +418,7 @@ async fn status(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json<S
             .await?
             .total,
         library_bytes: state.store.library_bytes().await?,
+        library_ms: state.store.library_duration_ms().await?,
         library_folders: folders::library_roots(&state).await?.len(),
         scanning: state
             .scan

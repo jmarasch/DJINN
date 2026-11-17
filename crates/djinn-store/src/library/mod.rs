@@ -599,6 +599,16 @@ impl Store {
         Ok(bytes)
     }
 
+    /// How long the playable songs last together, in ms.
+    pub async fn library_duration_ms(&self) -> Result<i64> {
+        let ms = sqlx::query_scalar(
+            "SELECT coalesce(sum(t.duration_ms), 0) FROM tracks t WHERE t.removed_at IS NULL",
+        )
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(ms)
+    }
+
     pub async fn track(&self, id: i64) -> Result<Option<Track>> {
         let track = sqlx::query_as(concat!(
             "SELECT ",

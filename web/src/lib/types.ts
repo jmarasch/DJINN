@@ -1328,6 +1328,8 @@ export interface SystemStatus {
   albums: number
   /** The music files' size together. */
   library_bytes: number
+  /** How long the songs last together, in ms. */
+  library_ms: number
   library_folders: number
   scanning: boolean
   last_scan: { found: number; to_read: number; read: number; removed: number; done: boolean } | null

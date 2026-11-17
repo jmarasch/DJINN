@@ -4,7 +4,15 @@
   import { api } from './api'
   import Icon from './Icon.svelte'
   import { toast } from './state.svelte'
-  import type { About, LyricsImportReport, ProtectedStatus, ProblemSummary, ScheduledCheck, SystemStatus } from './types'
+  import type {
+    About,
+    LyricsImportReport,
+    ProtectedStatus,
+    ProblemSummary,
+    ScheduledCheck,
+    Stats,
+    SystemStatus,
+  } from './types'
 
   type Level = 'ok' | 'warn' | 'bad'
   type Line = { level: Level; label: string; detail: string; href?: string }
@@ -15,6 +23,8 @@
   let about = $state<About | null>(null)
   let lyricsImport = $state<LyricsImportReport | null>(null)
   let lock = $state<ProtectedStatus | null>(null)
+  // Everything ever played and asked for, party and GO (loaded once).
+  let allTime = $state<Stats | null>(null)
 
   async function load() {
     try {
@@ -31,6 +41,10 @@
     api.about().then((a) => (about = a)).catch(() => {})
     api.protectedStatus().then((p) => (lock = p)).catch(() => {})
     api.lyricsImport().then((i) => (lyricsImport = i.report)).catch(() => {})
+    api
+      .stats({ party: true, go: true })
+      .then((s) => (allTime = s))
+      .catch(() => {})
     const timer = setInterval(() => void load(), 10_000)
     return () => clearInterval(timer)
   })
@@ -42,6 +56,36 @@
       : bytes >= 1e9
         ? `${(bytes / 1e9).toFixed(1)} GB`
         : `${Math.round(bytes / 1e6)} MB`
+  /** A long time as days and hours, or hours and minutes. */
+  const span = (ms: number) => {
+    const hours = Math.floor(ms / 3_600_000)
+    if (hours >= 48) return `${n(Math.floor(hours / 24))} days ${hours % 24} h`
+    if (hours >= 1) return `${hours} h ${Math.floor((ms % 3_600_000) / 60_000)} min`
+    return `${Math.round(ms / 60_000)} min`
+  }
+  const days = ['Sundays', 'Mondays', 'Tuesdays', 'Wednesdays', 'Thursdays', 'Fridays', 'Saturdays']
+  const hourName = (h: number) => new Date(2000, 0, 1, h).toLocaleTimeString([], { hour: 'numeric' })
+  const busiest = (rows: [number, number][]) =>
+    rows.reduce<[number, number] | null>((best, row) => (!best || row[1] > best[1] ? row : best), null)
+
+  const listening = $derived.by(() => {
+    if (!allTime || !status) return null
+    const sum = allTime.summary
+    const hour = busiest(allTime.by_hour)
+    const weekday = busiest(allTime.by_weekday)
+    const first = allTime.by_day[0]?.[0] ?? null
+    return {
+      sum,
+      share: status.songs ? Math.round((sum.songs / status.songs) * 100) : 0,
+      song: allTime.top_songs[0] ?? null,
+      artist: allTime.top_artists[0] ?? null,
+      requested: allTime.top_requested[0] ?? null,
+      hour: hour && hour[1] ? hourName(hour[0]) : null,
+      weekday: weekday && weekday[1] ? days[weekday[0]] : null,
+      since: first ? new Date(`${first}T12:00:00`).toLocaleDateString([], { year: 'numeric', month: 'long', day: 'numeric' }) : null,
+    }
+  })
+
   const ago = (ms: number) => {
     const days = Math.floor((Date.now() - ms) / 86_400_000)
     return days < 1 ? 'today' : days === 1 ? 'yesterday' : `${days} days ago`
@@ -236,11 +280,89 @@
       <span class="small muted">Albums</span>
     </div>
     <div class="stat">
+      <Icon name="clock" size={22} />
+      <strong>{n(Math.round(status.library_ms / 3_600_000))} h</strong>
+      <span class="small muted">Of music ({span(status.library_ms)})</span>
+    </div>
+    <div class="stat">
       <Icon name="folder" size={22} />
       <strong>{size(status.library_bytes)}</strong>
       <span class="small muted">Music on disk</span>
     </div>
   </div>
+  {#if listening && listening.sum.plays}
+    {@const l = listening}
+    <section class="card all-time">
+      <h2><Icon name="headphones" size={20} /> All-time listening</h2>
+      <p class="small muted">
+        Party and DJINN GO together{#if l.since}, since {l.since}{/if}. More in
+        <a href="#/admin/stats">Stats</a>.
+      </p>
+      <div class="stats">
+        <div class="stat">
+          <strong>{n(Math.round(l.sum.listened_ms / 3_600_000))} h</strong>
+          <span class="small muted">Listened ({span(l.sum.listened_ms)})</span>
+        </div>
+        <div class="stat">
+          <strong>{n(l.sum.plays)}</strong>
+          <span class="small muted">Plays</span>
+        </div>
+        <div class="stat">
+          <strong>{n(l.sum.songs)}</strong>
+          <span class="small muted">Different songs ({l.share}% of the library)</span>
+        </div>
+        <div class="stat">
+          <strong>{n(l.sum.requests)}</strong>
+          <span class="small muted">Requests, from {n(l.sum.requesters)} {l.sum.requesters === 1 ? 'person' : 'people'}</span>
+        </div>
+        <div class="stat">
+          <strong>{n(l.sum.skips)}</strong>
+          <span class="small muted">Skips</span>
+        </div>
+      </div>
+      <ul>
+        {#if l.song}
+          <li>
+            <div class="grow">
+              <span>Most played song</span>
+              <div class="small muted">
+                {l.song.title}{#if l.song.artist}, {l.song.artist}{/if} ({n(l.song.plays)} plays)
+              </div>
+            </div>
+          </li>
+        {/if}
+        {#if l.artist}
+          <li>
+            <div class="grow">
+              <span>Most played artist</span>
+              <div class="small muted">{l.artist.name} ({n(l.artist.plays)} plays)</div>
+            </div>
+          </li>
+        {/if}
+        {#if l.requested}
+          <li>
+            <div class="grow">
+              <span>Most requested</span>
+              <div class="small muted">
+                {l.requested.title ?? 'A removed song'}{#if l.requested.artist}, {l.requested.artist}{/if}
+                ({n(l.requested.requests)} requests)
+              </div>
+            </div>
+          </li>
+        {/if}
+        {#if l.weekday || l.hour}
+          <li>
+            <div class="grow">
+              <span>Busiest time</span>
+              <div class="small muted">
+                {[l.weekday, l.hour ? `around ${l.hour}` : null].filter(Boolean).join(', ')}
+              </div>
+            </div>
+          </li>
+        {/if}
+      </ul>
+    </section>
+  {/if}
   <div class="cards-2">
     {@render block('Music', music, 'playing')}
     {@render block('Library', library, 'library')}
@@ -267,6 +389,18 @@
     background: var(--card-bg);
     box-shadow: var(--glow);
     color: var(--accent);
+  }
+
+  .all-time {
+    margin-bottom: 16px;
+  }
+
+  .all-time .stats {
+    margin: 10px 0;
+  }
+
+  .all-time .stat {
+    box-shadow: none;
   }
 
   .stat strong {
