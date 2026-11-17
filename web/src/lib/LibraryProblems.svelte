@@ -98,6 +98,10 @@
       label: 'Lyrics an AI made',
       hint: 'An AI worked on these lyrics. "Words made by an AI" are guesses from listening and may have mistakes: any other source replaces them (LRCLIB is still asked about these songs, and an import of ordinary lyrics replaces them). "Timed by an AI" are a person\'s words with timing worked out by an AI; the match says how well they fit, so check the low ones. Each row says which import it came from. Use Report these lyrics, then Remove and block, on one that is wrong.',
     },
+    messy_genres: {
+      label: 'Messy genre tags',
+      hint: 'Genre tags that are not one clean genre: several run together with ";" or "|" ("rock;alternative pop rock"), an old genre number like "(17)", a placeholder like "Unknown" or "Other", or a whole sentence. Each one shows as a genre of its own in genre lists, the genre cloud and genre containers. To fix them: select Fix in the editor, pick the songs, choose Genre in the tools under the grid, type the genres with commas between them ("Rock, Alternative") and select Set, then Approve. Editing the Database keeps the change in DJINN only; editing the Library writes it into the files (the folder must be allowed under the folders DJINN may change).',
+    },
     no_length_header: {
       label: 'MP3s with no length header',
       hint: "These variable bit rate MP3s have no length header, so many players, phones and car stereos show the wrong length and can't skip ahead properly. DJINN counts them right. To fix the files: select Fix in the editor, allow the folder under the folders DJINN may change (Admin > Library > Library editor), unlock the protected area, pick the MP3s, and choose Fix MP3 lengths. It adds the header without touching the audio and can be undone from the editor's history. The thorough check reads the start of every MP3 in the background, and again whenever one changes.",

@@ -865,6 +865,7 @@ export type ProblemKind =
   | 'vanished'
   | 'ai_lyrics'
   | 'no_length_header'
+  | 'messy_genres'
 
 /** A genre and how many songs have it (Admin > Library > Genres). */
 export interface GenreCountRow {

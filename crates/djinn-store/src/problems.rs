@@ -69,10 +69,14 @@ pub enum ProblemKind {
     /// A variable bit rate MP3 with no length header (found by the thorough
     /// check), so players other than DJINN show the wrong length.
     NoLengthHeader,
+    /// A genre tag that isn't a clean genre: several run together
+    /// ("Rock;Pop"), an old genre number ("(17)"), a placeholder
+    /// ("Unknown") or a whole sentence.
+    MessyGenres,
 }
 
 impl ProblemKind {
-    pub const ALL: [Self; 29] = [
+    pub const ALL: [Self; 30] = [
         Self::MissingFolder,
         Self::Unreadable,
         Self::BadName,
@@ -102,6 +106,7 @@ impl ProblemKind {
         Self::Vanished,
         Self::AiLyrics,
         Self::NoLengthHeader,
+        Self::MessyGenres,
     ];
 
     /// Kinds a library check finds while walking the folders. Each check
@@ -144,6 +149,7 @@ impl ProblemKind {
             Self::Vanished => "vanished",
             Self::AiLyrics => "ai_lyrics",
             Self::NoLengthHeader => "no_length_header",
+            Self::MessyGenres => "messy_genres",
         }
     }
 
@@ -360,6 +366,39 @@ macro_rules! junk_where {
           OR t.title <> trim(t.title)
           OR (length(t.title) > 8 AND instr(t.title, ' ') > 0
               AND t.title = upper(t.title) AND t.title <> lower(t.title)))"
+    };
+}
+/// Genre tags that aren't clean genres: several run together with ";",
+/// "|" or a backslash (commas are how DJINN lists genres, so they're fine), an old
+/// ID3 genre number, a placeholder, or one name too long to be a genre.
+macro_rules! messy_genre_where {
+    () => {
+        "(instr(t.genre, ';') > 0 OR instr(t.genre, '|') > 0 OR instr(t.genre, '\\') > 0
+          OR instr(t.genre, ' / ') > 0 OR instr(t.genre, '//') > 0
+          OR trim(t.genre) NOT GLOB '*[^0-9]*' OR t.genre GLOB '*([0-9])*'
+          OR t.genre GLOB '*([0-9][0-9])*' OR t.genre GLOB '*([0-9][0-9][0-9])*'
+          OR lower(trim(t.genre)) IN ('unknown', 'unknown genre', '<unknown>', 'genre', 'none',
+                                      'misc', 'default', 'n/a', '-', '?', 'other', 'other genre')
+          OR (instr(t.genre, ',') = 0 AND length(t.genre) > 40))"
+    };
+}
+macro_rules! messy_genres_from {
+    () => {
+        concat!(
+            "FROM tracks t WHERE t.removed_at IS NULL AND t.genre IS NOT NULL AND trim(t.genre) <> '' AND ",
+            messy_genre_where!()
+        )
+    };
+}
+macro_rules! messy_genres_detail {
+    () => {
+        "CASE WHEN instr(t.genre, ';') > 0 OR instr(t.genre, '|') > 0 OR instr(t.genre, '\\') > 0
+                   OR instr(t.genre, ' / ') > 0 OR instr(t.genre, '//') > 0
+                THEN 'Several genres run together: ' || t.genre
+              WHEN trim(t.genre) NOT GLOB '*[^0-9]*' OR t.genre GLOB '*([0-9]*)*'
+                THEN 'A genre number instead of a name: ' || t.genre
+              WHEN length(t.genre) > 40 THEN 'Too long for a genre: ' || t.genre
+              ELSE 'A placeholder, not a genre: ' || t.genre END"
     };
 }
 macro_rules! title_junk_from {
@@ -716,6 +755,7 @@ impl Store {
                 sqlx::query_scalar(concat!("SELECT COUNT(*) ", no_length_header_from!()))
             }
             K::TitleJunk => sqlx::query_scalar(concat!("SELECT COUNT(*) ", title_junk_from!())),
+            K::MessyGenres => sqlx::query_scalar(concat!("SELECT COUNT(*) ", messy_genres_from!())),
             K::NameMismatch => {
                 sqlx::query_scalar(concat!("SELECT COUNT(*) ", name_mismatch_from!()))
             }
@@ -936,6 +976,11 @@ impl Store {
             K::TitleJunk => sqlx::query_as(concat!(
                 song_columns!(title_junk_detail!(), "NULL"),
                 title_junk_from!(),
+                " ORDER BY t.path LIMIT ? OFFSET ?"
+            )),
+            K::MessyGenres => sqlx::query_as(concat!(
+                song_columns!(messy_genres_detail!(), "NULL"),
+                messy_genres_from!(),
                 " ORDER BY t.path LIMIT ? OFFSET ?"
             )),
             K::NameMismatch => sqlx::query_as(concat!(
@@ -1222,6 +1267,60 @@ mod tests {
             rows[0].detail
         );
         assert!(rows[0].detail.contains("/m/"), "{}", rows[0].detail);
+    }
+
+    #[tokio::test]
+    async fn messy_genres_are_listed_and_clean_ones_left_alone() {
+        let store = Store::open_in_memory().await.unwrap();
+        let with = |n: usize, genre: &str| ScannedTrack {
+            genre: Some(genre.into()),
+            ..song(&format!("/m/g/{n}.flac"), &format!("Song {n}"))
+        };
+        let messy = [
+            "rock;alternative pop rock;pop",
+            "Rock | Pop",
+            "Rock / Pop",
+            "(17)",
+            "(17)Rock",
+            "13",
+            "Unknown",
+            "Other",
+            "an extremely long genre that someone typed as a sentence",
+        ];
+        let clean = [
+            "Rock",
+            "Hip-Hop/Rap",
+            "R&B",
+            "80s Pop",
+            "2 Tone",
+            "Rock, Pop, Alternative",
+            "Drum & Bass",
+        ];
+        let songs: Vec<_> = messy
+            .iter()
+            .chain(clean.iter())
+            .enumerate()
+            .map(|(n, g)| with(n, g))
+            .collect();
+        store.save_scanned(&songs).await.unwrap();
+        let counts = store.problem_counts().await.unwrap();
+        assert_eq!(count(&counts, ProblemKind::MessyGenres), messy.len() as i64);
+        let rows = store
+            .problems(ProblemKind::MessyGenres, 0, 50)
+            .await
+            .unwrap();
+        let detail = |genre: &str| {
+            rows.iter()
+                .find(|r| r.detail.ends_with(&format!(": {genre}")))
+                .map(|r| r.detail.clone())
+                .unwrap_or_default()
+        };
+        assert!(detail("rock;alternative pop rock;pop").starts_with("Several genres"));
+        assert!(detail("(17)").starts_with("A genre number"));
+        assert!(detail("13").starts_with("A genre number"));
+        assert!(detail("Unknown").starts_with("A placeholder"));
+        assert!(detail("Other").starts_with("A placeholder"));
+        assert!(detail(messy[8]).starts_with("Too long"));
     }
 
     #[tokio::test]
