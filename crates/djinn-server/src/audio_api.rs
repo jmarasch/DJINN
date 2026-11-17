@@ -287,6 +287,9 @@ const ANALYSIS_BATCH: i64 = 16;
 /// already runs. Then AI listening starts, if it's on.
 pub async fn start_analysis(state: &AppState) {
     if !analysis_on(state).await {
+        // Analysis would refresh what search and genre pages know when done;
+        // without it, new songs' genres must still show.
+        crate::smart::refresh(state).await;
         crate::ai::start(state);
         return;
     }
