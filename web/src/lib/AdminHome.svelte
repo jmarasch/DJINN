@@ -56,14 +56,15 @@
       : bytes >= 1e9
         ? `${(bytes / 1e9).toFixed(1)} GB`
         : `${Math.round(bytes / 1e6)} MB`
-  /** A long time as days and hours, or hours and minutes. */
-  const span = (ms: number) => {
+  /** A time in whole hours, or minutes when under one. */
+  const hoursOf = (ms: number) =>
+    ms >= 3_600_000 ? `${n(Math.floor(ms / 3_600_000))} h` : `${Math.floor(ms / 60_000)} min`
+  /** The same as days and hours, for two days or more. */
+  const days = (ms: number) => {
     const hours = Math.floor(ms / 3_600_000)
-    if (hours >= 48) return `${n(Math.floor(hours / 24))} days ${hours % 24} h`
-    if (hours >= 1) return `${hours} h ${Math.floor((ms % 3_600_000) / 60_000)} min`
-    return `${Math.round(ms / 60_000)} min`
+    return hours >= 48 ? ` (${n(Math.floor(hours / 24))} days ${hours % 24} h)` : ''
   }
-  const days = ['Sundays', 'Mondays', 'Tuesdays', 'Wednesdays', 'Thursdays', 'Fridays', 'Saturdays']
+  const weekdays = ['Sundays', 'Mondays', 'Tuesdays', 'Wednesdays', 'Thursdays', 'Fridays', 'Saturdays']
   const hourName = (h: number) => new Date(2000, 0, 1, h).toLocaleTimeString([], { hour: 'numeric' })
   const busiest = (rows: [number, number][]) =>
     rows.reduce<[number, number] | null>((best, row) => (!best || row[1] > best[1] ? row : best), null)
@@ -81,7 +82,7 @@
       artist: allTime.top_artists[0] ?? null,
       requested: allTime.top_requested[0] ?? null,
       hour: hour && hour[1] ? hourName(hour[0]) : null,
-      weekday: weekday && weekday[1] ? days[weekday[0]] : null,
+      weekday: weekday && weekday[1] ? weekdays[weekday[0]] : null,
       since: first ? new Date(`${first}T12:00:00`).toLocaleDateString([], { year: 'numeric', month: 'long', day: 'numeric' }) : null,
     }
   })
@@ -281,8 +282,8 @@
     </div>
     <div class="stat">
       <Icon name="clock" size={22} />
-      <strong>{n(Math.round(status.library_ms / 3_600_000))} h</strong>
-      <span class="small muted">Of music ({span(status.library_ms)})</span>
+      <strong>{hoursOf(status.library_ms)}</strong>
+      <span class="small muted">Of music{days(status.library_ms)}</span>
     </div>
     <div class="stat">
       <Icon name="folder" size={22} />
@@ -300,8 +301,8 @@
       </p>
       <div class="stats">
         <div class="stat">
-          <strong>{n(Math.round(l.sum.listened_ms / 3_600_000))} h</strong>
-          <span class="small muted">Listened ({span(l.sum.listened_ms)})</span>
+          <strong>{hoursOf(l.sum.listened_ms)}</strong>
+          <span class="small muted">Listened{days(l.sum.listened_ms)}</span>
         </div>
         <div class="stat">
           <strong>{n(l.sum.plays)}</strong>
