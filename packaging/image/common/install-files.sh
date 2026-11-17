@@ -21,6 +21,11 @@ install -m 755 "$binary" "$root/opt/djinn/djinn"
 install -m 644 "$here/config.toml" "$root/etc/djinn/config.toml"
 install -m 644 "$here/djinn.service" "$root/etc/systemd/system/djinn.service"
 ln -sf /etc/systemd/system/djinn.service "$root/etc/systemd/system/multi-user.target.wants/djinn.service"
+# Restart computer on a node's page (a sound card or driver that hung):
+# DJINN's user may run exactly this one command as root, nothing else.
+install -d -m 750 "$root/etc/sudoers.d"
+printf 'djinn ALL=(root) NOPASSWD: /usr/bin/systemctl reboot\n' > "$root/etc/sudoers.d/djinn-reboot"
+chmod 440 "$root/etc/sudoers.d/djinn-reboot"
 
 # The account, written straight into the files (no useradd inside the image).
 uid=990

@@ -201,6 +201,9 @@ pub struct Node {
     /// for never). Being connected to Main's feed isn't playing: it stays
     /// open while the room is quiet.
     heard_us: Arc<std::sync::atomic::AtomicI64>,
+    /// Main's song is paused: it may carry on any moment, so the box keeps
+    /// itself free for it as if it played.
+    held: Arc<AtomicBool>,
     /// Browsers let in to manage this node (by a link from Main's Admin >
     /// Nodes > Manage), and until when.
     managers: Arc<Mutex<std::collections::HashMap<String, std::time::Instant>>>,
@@ -281,6 +284,7 @@ impl Node {
             )),
             volume: Arc::new(AtomicU32::new(1.0f32.to_bits())),
             heard_us: Arc::new(std::sync::atomic::AtomicI64::new(0)),
+            held: Arc::default(),
             managers: Arc::default(),
             updating: Arc::default(),
             update_failed: Arc::default(),
@@ -300,11 +304,16 @@ impl Node {
         Arc::clone(&self.ai)
     }
 
-    /// Playing music or drawing visuals for a screen: AI work must wait. A
-    /// quiet room isn't busy, though the node stays connected to Main's feed.
+    /// Playing music, holding a paused song or drawing visuals for a screen:
+    /// AI work must wait (a worker that started during a pause took the
+    /// processor the song needed when it carried on). A quiet room isn't
+    /// busy, though the node stays connected to Main's feed.
     pub(crate) fn busy(&self) -> bool {
         let now = djinn_engine::clock::now_micros();
-        self.music_arriving(now) || self.status().offline || self.levels.watched(now)
+        self.music_arriving(now)
+            || self.held.load(Ordering::Acquire)
+            || self.status().offline
+            || self.levels.watched(now)
     }
 
     /// Whether music from Main arrived in the last few seconds.
@@ -931,7 +940,10 @@ impl Node {
                 tokio::time::sleep(Duration::from_millis(200)).await;
                 continue;
             }
-            match self.listen(&main, &pin, &mut player).await {
+            let listened = self.listen(&main, &pin, &mut player).await;
+            // Main says again whether it's paused when the node reconnects.
+            self.held.store(false, Ordering::Release);
+            match listened {
                 Ok(()) => lost_since = None,
                 Err(e) => {
                     tracing::debug!(error = %format!("{e:#}"), "node audio stopped");
@@ -1164,8 +1176,15 @@ impl Node {
                         self.heard_us
                             .store(djinn_engine::clock::now_micros().max(1), Ordering::Release);
                     }
-                    if let djinn_engine::Mark::Volume(v) = piece.mark {
-                        self.volume.store(v.to_bits(), Ordering::Release);
+                    match piece.mark {
+                        djinn_engine::Mark::Volume(v) => {
+                            self.volume.store(v.to_bits(), Ordering::Release);
+                        }
+                        djinn_engine::Mark::Pause => self.held.store(true, Ordering::Release),
+                        djinn_engine::Mark::Resume | djinn_engine::Mark::Flush => {
+                            self.held.store(false, Ordering::Release);
+                        }
+                        djinn_engine::Mark::Audio { .. } => {}
                     }
                     for (_, one) in &p.list {
                         one.piece(piece.clone())?;
@@ -1723,6 +1742,7 @@ pub fn router(node: Node) -> Router {
         .route("/api/node/log", get(log_lines))
         .route("/api/node/log/file", get(log_file))
         .route("/api/node/restart", post(restart))
+        .route("/api/node/reboot", post(reboot))
         .route("/api/node/levels", get(levels))
         // The AI lyrics helper's worker, passed on to Main.
         .route("/api/ai-work/next", post(crate::node_ai::next))
@@ -1886,6 +1906,8 @@ struct Diagnostics {
     cached_bytes: u64,
     /// The log's recording level.
     log_level: &'static str,
+    /// This computer lets DJINN restart it (`djinn_platform::power`).
+    can_reboot: bool,
 }
 
 async fn diagnostics(
@@ -1916,11 +1938,12 @@ async fn diagnostics(
             djinn_platform::system::disk(&cache_dir),
             files,
             listen.map(crate::banner::urls).unwrap_or_default(),
+            djinn_platform::power::can_reboot(),
         )
     })
     .await
     .map_err(anyhow::Error::from)?;
-    let (cpu_busy, memory, disk, files, addresses) = found;
+    let (cpu_busy, memory, disk, files, addresses, can_reboot) = found;
     Ok(Json(Diagnostics {
         version: env!("CARGO_PKG_VERSION"),
         build: build.chars().take(12).collect(),
@@ -1937,6 +1960,7 @@ async fn diagnostics(
         cached_songs: files.len(),
         cached_bytes: files.iter().sum(),
         log_level: crate::logs::record_level(),
+        can_reboot,
     }))
 }
 
@@ -2006,6 +2030,30 @@ async fn restart(
         // Let the answer go out first.
         tokio::time::sleep(Duration::from_millis(300)).await;
         start_again();
+    });
+    Ok(StatusCode::ACCEPTED)
+}
+
+/// Restarts the whole computer, for a sound card or driver that hung where
+/// restarting DJINN doesn't help.
+async fn reboot(State(node): State<Node>, headers: axum::http::HeaderMap) -> ApiResult<StatusCode> {
+    must_manage(&node, &headers)?;
+    let allowed = tokio::task::spawn_blocking(djinn_platform::power::can_reboot)
+        .await
+        .unwrap_or(false);
+    if !allowed {
+        return Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "this computer doesn't let DJINN restart it; restart it by hand (sudo reboot)",
+        ));
+    }
+    tracing::warn!("restarting the computer, as asked on the node's page");
+    tokio::spawn(async move {
+        // Let the answer go out first.
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        if let Ok(Err(e)) = tokio::task::spawn_blocking(djinn_platform::power::reboot).await {
+            tracing::warn!(error = %e, "couldn't restart the computer");
+        }
     });
     Ok(StatusCode::ACCEPTED)
 }
@@ -2697,10 +2745,10 @@ mod tests {
             let res = ask("GET", path, None).await.unwrap();
             assert_eq!(res.status(), StatusCode::FORBIDDEN, "{path}");
         }
-        let res = ask("POST", "/api/node/restart", Some("guess"))
-            .await
-            .unwrap();
-        assert_eq!(res.status(), StatusCode::FORBIDDEN);
+        for path in ["/api/node/restart", "/api/node/reboot"] {
+            let res = ask("POST", path, Some("guess")).await.unwrap();
+            assert_eq!(res.status(), StatusCode::FORBIDDEN, "{path}");
+        }
 
         node.managers
             .lock()

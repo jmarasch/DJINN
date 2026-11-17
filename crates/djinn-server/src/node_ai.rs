@@ -230,7 +230,23 @@ async fn stop(helper: &Helper) {
 
 fn start(node: &Node, helper: &Helper, model: &str) -> std::io::Result<Child> {
     let port = node.port();
-    let mut command = Command::new(ai_listener::venv_python(&helper.dir));
+    // At the lowest priority, so the speaker always comes first. `nice`
+    // becomes Python, so the worker keeps its process id for `pause`.
+    let python = ai_listener::venv_python(&helper.dir);
+    #[cfg(unix)]
+    let mut command = {
+        let mut command = Command::new("nice");
+        command.args(["-n", "19"]).arg(&python);
+        command
+    };
+    #[cfg(not(unix))]
+    let mut command = {
+        /// Windows' IDLE_PRIORITY_CLASS.
+        const IDLE_PRIORITY: u32 = 0x40;
+        let mut command = Command::new(&python);
+        command.creation_flags(IDLE_PRIORITY);
+        command
+    };
     command
         .current_dir(&helper.dir)
         .args(["worker.py", "--server"])

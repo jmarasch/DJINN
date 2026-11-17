@@ -1,6 +1,6 @@
 <script lang="ts">
   // A node's page, while managing it: what the node says about itself, its
-  // log, and a restart. Talks to the node's own DJINN, not Main.
+  // log, a restart, and restarting the whole computer. Talks to the node's own DJINN, not Main.
   import { onMount } from 'svelte'
 
   interface Diagnostics {
@@ -19,6 +19,7 @@
     cached_songs: number
     cached_bytes: number
     log_level: string
+    can_reboot: boolean
   }
 
   let facts = $state<Diagnostics | null>(null)
@@ -29,6 +30,8 @@
   let error = $state('')
   let restarting = $state(false)
   let confirmRestart = $state(false)
+  let rebooting = $state(false)
+  let confirmReboot = $state(false)
   let logBox = $state<HTMLElement>()
 
   const gb = (bytes: number) => `${(bytes / 1024 ** 3).toFixed(1)} GB`
@@ -75,6 +78,22 @@
       restarting = false
       void loadFacts()
     }, 8000)
+  }
+
+  async function reboot() {
+    confirmReboot = false
+    const res = await fetch('/api/node/reboot', { method: 'POST' }).catch(() => null)
+    if (!res?.ok) {
+      error = (await res?.json().catch(() => null))?.error ?? 'Could not restart the computer'
+      return
+    }
+    error = ''
+    rebooting = true
+    // Off for a minute or two; the page's status check shows it coming back.
+    setTimeout(() => {
+      rebooting = false
+      void loadFacts()
+    }, 120000)
   }
 
   onMount(() => {
@@ -140,6 +159,27 @@
       </button>
     {/if}
   </div>
+  {#if facts?.can_reboot}
+    <div class="buttons">
+      {#if confirmReboot}
+        <span class="small">
+          Restart the whole computer? It's off for a minute or two. For when the sound is stuck and
+          restarting the node didn't help.
+        </span>
+        <button class="danger" onclick={reboot}>Restart computer</button>
+        <button onclick={() => (confirmReboot = false)}>Cancel</button>
+      {:else}
+        <button disabled={rebooting} onclick={() => (confirmReboot = true)}>
+          {rebooting ? 'Restarting the computer...' : 'Restart computer'}
+        </button>
+      {/if}
+    </div>
+  {:else if facts}
+    <p class="small muted">
+      This computer doesn't let DJINN restart it. Boxes set up from a DJINN install disc or Pi image
+      do; on others, restart it by hand.
+    </p>
+  {/if}
 </section>
 
 <section class="card">

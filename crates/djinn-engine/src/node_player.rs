@@ -832,6 +832,79 @@ mod tests {
         assert!(worst < 2.0, "worst {worst} ms");
     }
 
+    /// Main plays, pauses for ten minutes holding what it had buffered, then
+    /// carries on: the node picks up on time, with what it was holding first.
+    #[test]
+    fn after_a_long_pause_it_carries_on_in_time() {
+        let rate = 48_000u32;
+        let mut speaker = Simulated::new(rate, 50e-6);
+        let mut schedule = Schedule::new(rate, 0, 1.0);
+        let chunk = 480usize;
+        let step = 1000i64;
+        let (pause_at, resume_at) = (5_000_000i64, 605_000_000i64);
+        let mut now = 0i64;
+        let mut worst: f64 = 0.0;
+        let mut heard_after = 0usize;
+        let mut dues: Vec<(u64, i64)> = Vec::new();
+        let mut frame = 0u64;
+        let mut next_at = 500_000i64;
+        let mark = |mark| Piece {
+            mark,
+            samples: Vec::new(),
+        };
+        while now < resume_at + 30_000_000 {
+            if now == pause_at {
+                schedule.push(mark(Mark::Pause), 0, now, &mut speaker);
+            }
+            if now == resume_at {
+                schedule.push(mark(Mark::Resume), 0, now, &mut speaker);
+                // What Main held while paused is heard that much later.
+                let held = resume_at - pause_at;
+                next_at += held;
+                for due in dues.iter_mut().filter(|d| d.1 > pause_at) {
+                    due.1 += held;
+                }
+            }
+            let playing = !(pause_at..resume_at).contains(&now);
+            while playing && next_at < now + 300_000 {
+                dues.push((frame, next_at));
+                schedule.push(
+                    Piece {
+                        mark: Mark::Audio {
+                            frames: chunk as u32,
+                            play_at_us: next_at,
+                        },
+                        samples: numbered(frame, chunk),
+                    },
+                    0,
+                    now,
+                    &mut speaker,
+                );
+                frame += chunk as u64;
+                next_at += (chunk as i64 * 1_000_000) / i64::from(rate);
+            }
+            let before = speaker.heard.len();
+            schedule.tick(now, &mut speaker);
+            for &(f, heard_in) in &speaker.heard[before..] {
+                if now >= 1_000_000 {
+                    let (start, due) = dues.iter().rev().find(|d| d.0 <= f).copied().unwrap();
+                    let due = due + ((f - start) as i64 * 1_000_000) / i64::from(rate);
+                    worst = worst.max(((now + heard_in - due) as f64 / 1000.0).abs());
+                }
+                if now > resume_at {
+                    heard_after += 1;
+                }
+            }
+            speaker.advance(step as f64 / 1e6);
+            now += step;
+        }
+        assert!(
+            heard_after > 2500,
+            "only {heard_after} chunks after the pause"
+        );
+        assert!(worst < 2.0, "worst {worst} ms");
+    }
+
     #[test]
     fn a_new_delay_moves_what_is_waiting() {
         let mut speaker = Simulated::new(1000, 0.0);
