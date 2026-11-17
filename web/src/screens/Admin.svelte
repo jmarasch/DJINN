@@ -210,7 +210,7 @@
 
   // Tabs inside the longest sections; the others stay in the page, hidden,
   // so Find a setting can still reach them.
-  let sub = $state<Record<string, string>>({ library: 'folders', smart: 'play', audio: 'sound' })
+  let sub = $state<Record<string, string>>({ library: 'folders', smart: 'play', audio: 'sound', ai: 'search' })
 
   function openSub(group: string, id: string) {
     sub[group] = id
@@ -469,7 +469,14 @@
   <div data-subtab="styles" hidden={sub.smart !== 'styles'}><SmartPlayPanel part="styles" /></div>
   <div data-subtab="schedule" hidden={sub.smart !== 'schedule'}><SchedulePanel /></div>
 {:else if t === 'ai'}
-  <div class="cards-2"><AiPanel /><AiWorkPanel /></div>
+  {@render subtabs('ai', [
+    ['search', 'Search'],
+    ['listen', 'Listen'],
+    ['lyrics', 'Lyrics'],
+  ])}
+  <div data-subtab="search" hidden={sub.ai !== 'search'}><div class="cards-2"><AiPanel part="search" /></div></div>
+  <div data-subtab="listen" hidden={sub.ai !== 'listen'}><div class="cards-2"><AiPanel part="listen" /></div></div>
+  <div data-subtab="lyrics" hidden={sub.ai !== 'lyrics'}><div class="cards-2"><AiWorkPanel /></div></div>
 {:else if t === 'users'}
   <div class="cards-2"><UsersPanel /></div>
 {:else if t === 'editor'}

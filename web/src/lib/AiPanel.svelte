@@ -1,4 +1,7 @@
 <script lang="ts">
+  // Admin > AI has three tabs: Listen (this), Search (this) and Lyrics (AiWorkPanel).
+  let { part }: { part: 'listen' | 'search' } = $props()
+
   import { api } from './api'
   import { app, toast } from './state.svelte'
   import type { AiOptions } from './types'
@@ -101,6 +104,7 @@
   </section>
 {/if}
 
+{#if part === 'listen'}
 <section class="card">
   <h2>AI listening (optional)</h2>
   <p class="small muted">
@@ -189,7 +193,9 @@
     {/if}
   {/if}
 </section>
+{/if}
 
+{#if part === 'search'}
 <section class="card">
   <h2>AI reader (optional)</h2>
   <p class="small muted">
@@ -283,6 +289,7 @@
     {/if}
   {/if}
 </section>
+{/if}
 
 {#snippet specs(spec: Spec, download: string, fast: string, slow: string)}
   {@const fit = verdict(spec)}
