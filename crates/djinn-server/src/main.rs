@@ -52,6 +52,7 @@ mod logs;
 mod lyrics;
 mod lyrics_import;
 mod mood_api;
+mod mp3_check;
 mod network;
 mod node_ai;
 mod node_audio;
@@ -487,6 +488,7 @@ async fn run() -> anyhow::Result<()> {
     scheduled_check::start(state.clone());
     schedule::start(state.clone());
     lyrics::start(&state);
+    mp3_check::start(&state);
     ai_listener::resume(&state).await;
     update::start(&state);
     if let Err(e) = convert::apply(&state).await {

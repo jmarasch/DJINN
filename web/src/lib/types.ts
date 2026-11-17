@@ -864,6 +864,16 @@ export type ProblemKind =
   | 'no_loudness'
   | 'vanished'
   | 'ai_lyrics'
+  | 'no_length_header'
+
+/** The thorough check of MP3 length headers. */
+export interface Mp3Check {
+  running: boolean
+  /** MP3s checked as they are now, of `total`. */
+  checked: number
+  total: number
+  missing: number
+}
 
 export interface ProblemCount {
   kind: ProblemKind

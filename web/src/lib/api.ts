@@ -137,6 +137,7 @@ import type {
   TrackEdit,
   TrackTags,
   User,
+  Mp3Check,
 } from './types'
 
 export class ApiError extends Error {
@@ -351,6 +352,8 @@ export const api = {
     post<{ files: EditorRenamed[]; batch: number | null }>('/editor/mp3-length', { ids, preview }),
   /** Starts measuring songs with no loudness data (with the sound analysis). */
   measureLoudness: () => post<{ started: boolean }>('/library/problems/measure'),
+  mp3Check: () => get<Mp3Check>('/library/mp3-check'),
+  mp3CheckAgain: () => post<void>('/library/mp3-check'),
   /** Track and disc numbers for an album's songs from MusicBrainz. */
   editorTracklist: (albumId: number) =>
     get<{

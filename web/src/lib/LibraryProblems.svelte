@@ -7,7 +7,7 @@
   import { api } from './api'
   import { app, toast } from './state.svelte'
   import { parseReports, reportShort } from './reports'
-  import type { ProblemCount, ProblemItem, ProblemKind, ProblemSummary } from './types'
+  import type { Mp3Check, ProblemCount, ProblemItem, ProblemKind, ProblemSummary } from './types'
 
   const about: Record<ProblemKind, { label: string; hint: string }> = {
     missing_folder: {
@@ -97,6 +97,10 @@
     ai_lyrics: {
       label: 'Lyrics an AI made',
       hint: 'An AI worked on these lyrics. "Words made by an AI" are guesses from listening and may have mistakes: any other source replaces them (LRCLIB is still asked about these songs, and an import of ordinary lyrics replaces them). "Timed by an AI" are a person\'s words with timing worked out by an AI; the match says how well they fit, so check the low ones. Each row says which import it came from. Use Report these lyrics, then Remove and block, on one that is wrong.',
+    },
+    no_length_header: {
+      label: 'MP3s with no length header',
+      hint: "These variable bit rate MP3s have no length header, so many players, phones and car stereos show the wrong length and can't skip ahead properly. DJINN counts them right. To fix the files: select Fix in the editor, allow the folder under the folders DJINN may change (Admin > Library > Library editor), unlock the protected area, pick the MP3s, and choose Fix MP3 lengths. It adds the header without touching the audio and can be undone from the editor's history. The thorough check reads the start of every MP3 in the background, and again whenever one changes.",
     },
     vanished: {
       label: 'Songs that went missing lately',
@@ -247,6 +251,34 @@
   }
 
   const n = (x: number) => x.toLocaleString()
+  let mp3 = $state<Mp3Check | null>(null)
+
+  async function loadMp3() {
+    try {
+      mp3 = await api.mp3Check()
+    } catch {
+      // Shown next time.
+    }
+  }
+
+  $effect(() => {
+    void loadMp3()
+    const timer = setInterval(() => {
+      if (mp3?.running) void loadMp3().then(load)
+    }, 5000)
+    return () => clearInterval(timer)
+  })
+
+  async function mp3Again() {
+    try {
+      await api.mp3CheckAgain()
+      toast('Reading every MP3 again in the background')
+      await loadMp3()
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not start it', true)
+    }
+  }
+
   async function measure() {
     try {
       await api.measureLoudness()
@@ -356,6 +388,9 @@
           {#if k.kind === 'no_loudness'}
             <button class="small-button" onclick={measure}>Measure now</button>
           {/if}
+          {#if k.kind === 'no_length_header'}
+            <button class="small-button" onclick={mp3Again}>Read every MP3 again</button>
+          {/if}
           <button class="small-button" onclick={() => setHidden(k.kind, true)}>Hide this kind</button>
         </div>
       </div>
@@ -393,6 +428,12 @@
           {/if}<button class="link" onclick={() => setHidden(k.kind, false)}
             >{about[k.kind].label} ({n(k.count)})</button
           >{/each}. Select one to show it again.
+      </p>
+    {/if}
+    {#if mp3 && mp3.total}
+      <p class="small muted">
+        Thorough check: {n(mp3.checked)} of {n(mp3.total)} MP3s read{#if mp3.running} (working on it){/if}{#if mp3.missing},
+          {n(mp3.missing)} with no length header{/if}.
       </p>
     {/if}
     <div class="actions">

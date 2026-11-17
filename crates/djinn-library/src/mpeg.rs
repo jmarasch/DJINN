@@ -154,14 +154,12 @@ fn audio_start<R: Read + Seek>(r: &mut R) -> Option<u64> {
     Some(0)
 }
 
-/// The exact length in milliseconds of an MP3 that has no length header and
-/// whose bit rate varies. None when the file has a header, holds one bit
-/// rate throughout (the tag reader's figure is right), or can't be read.
-pub fn exact_duration_ms(path: &Path) -> Option<i64> {
-    let mut r = BufReader::with_capacity(64 * 1024, File::open(path).ok()?);
-    let len = r.get_ref().metadata().ok()?.len();
-    let start = audio_start(&mut r)?;
-    let (first_pos, first) = find_frame(&mut r, start, 64 * 1024, None)?;
+/// Where the audio of a variable bit rate MP3 with no length header starts,
+/// and its first frame. None when the file has a header, holds one bit rate
+/// throughout, or can't be read. Reads only a few frames.
+fn headerless_vbr<R: Read + Seek>(r: &mut R, len: u64) -> Option<(u64, Frame)> {
+    let start = audio_start(r)?;
+    let (first_pos, first) = find_frame(r, start, 64 * 1024, None)?;
 
     // A length header in the first frame: the tag reader uses it.
     r.seek(SeekFrom::Start(first_pos)).ok()?;
@@ -179,7 +177,7 @@ pub fn exact_duration_ms(path: &Path) -> Option<i64> {
     let mut varies = false;
     let mut pos = first_pos;
     for _ in 0..PROBE_FRAMES {
-        let Some(frame) = header_at(&mut r, pos) else {
+        let Some(frame) = header_at(r, pos) else {
             break;
         };
         if !first.same_stream(&frame) {
@@ -191,14 +189,21 @@ pub fn exact_duration_ms(path: &Path) -> Option<i64> {
     if !varies {
         for quarter in 1..=3u64 {
             let at = first_pos + (len - first_pos) * quarter / 4;
-            if let Some((_, frame)) = find_frame(&mut r, at, RESYNC_BYTES, Some(&first)) {
+            if let Some((_, frame)) = find_frame(r, at, RESYNC_BYTES, Some(&first)) {
                 varies |= frame.kbps != first.kbps;
             }
         }
     }
-    if !varies {
-        return None;
-    }
+    varies.then_some((first_pos, first))
+}
+
+/// The exact length in milliseconds of an MP3 that has no length header and
+/// whose bit rate varies. None when the file has a header, holds one bit
+/// rate throughout (the tag reader's figure is right), or can't be read.
+pub fn exact_duration_ms(path: &Path) -> Option<i64> {
+    let mut r = BufReader::with_capacity(64 * 1024, File::open(path).ok()?);
+    let len = r.get_ref().metadata().ok()?.len();
+    let (first_pos, first) = headerless_vbr(&mut r, len)?;
 
     // Count every frame.
     let mut samples: u64 = 0;
@@ -276,9 +281,17 @@ fn walk_needing_header(path: &Path) -> Option<Walked> {
 }
 
 /// Whether this MP3 would get a length header: its bit rate varies and it
-/// has none, so players other than DJINN guess its length wrong.
+/// has none, so players other than DJINN guess its length wrong. Quick: it
+/// reads a few frames, not the whole file.
 pub fn needs_length_header(path: &Path) -> bool {
-    exact_duration_ms(path).is_some()
+    let Ok(file) = File::open(path) else {
+        return false;
+    };
+    let mut r = BufReader::with_capacity(64 * 1024, file);
+    let Ok(meta) = r.get_ref().metadata() else {
+        return false;
+    };
+    headerless_vbr(&mut r, meta.len()).is_some()
 }
 
 /// The Xing frame for `walked`: the first frame's kind (no CRC, no

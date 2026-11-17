@@ -1595,6 +1595,9 @@ pub fn start_scan(state: &AppState) -> bool {
                         tracing::warn!(error = %format!("{e:#}"), "checking wishes failed");
                     }
                 }
+                // Changed or retagged files are read again; quick when
+                // nothing changed.
+                crate::mp3_check::start(&state);
                 // Nothing new or gone: no artists to look up, no songs to
                 // measure, and the playlist is the same.
                 if !changed {

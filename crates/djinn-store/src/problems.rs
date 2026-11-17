@@ -66,10 +66,13 @@ pub enum ProblemKind {
     Vanished,
     /// Lyrics an AI made by listening (guesses worth checking).
     AiLyrics,
+    /// A variable bit rate MP3 with no length header (found by the thorough
+    /// check), so players other than DJINN show the wrong length.
+    NoLengthHeader,
 }
 
 impl ProblemKind {
-    pub const ALL: [Self; 28] = [
+    pub const ALL: [Self; 29] = [
         Self::MissingFolder,
         Self::Unreadable,
         Self::BadName,
@@ -98,6 +101,7 @@ impl ProblemKind {
         Self::NoLoudness,
         Self::Vanished,
         Self::AiLyrics,
+        Self::NoLengthHeader,
     ];
 
     /// Kinds a library check finds while walking the folders. Each check
@@ -139,6 +143,7 @@ impl ProblemKind {
             Self::NoLoudness => "no_loudness",
             Self::Vanished => "vanished",
             Self::AiLyrics => "ai_lyrics",
+            Self::NoLengthHeader => "no_length_header",
         }
     }
 
@@ -329,6 +334,14 @@ macro_rules! low_bitrate_from {
            AND t.size * 8 / t.duration_ms < 96"
     };
 }
+/// MP3s the thorough check found with no length header, while the file is
+/// still the one checked.
+macro_rules! no_length_header_from {
+    () => {
+        "FROM mp3_header_checks c JOIN tracks t ON t.id = c.track_id
+         WHERE c.missing = 1 AND t.removed_at IS NULL AND c.size = t.size AND c.mtime = t.mtime"
+    };
+}
 macro_rules! low_bitrate_detail {
     () => {
         "(t.size * 8 / t.duration_ms) || ' kbps'"
@@ -493,6 +506,83 @@ pub const REPORT_REASONS: [&str; 10] = [
     "lyrics_other",
 ];
 
+/// An MP3 the thorough check hasn't looked at since it last changed.
+#[derive(Clone, Debug, PartialEq, Eq, FromRow)]
+pub struct Mp3ToCheck {
+    pub id: i64,
+    pub path: String,
+    pub size: i64,
+    pub mtime: i64,
+}
+
+/// How the thorough check stands: MP3s checked (for their current file) and
+/// MP3s in the library.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, FromRow, serde::Serialize)]
+pub struct Mp3CheckCounts {
+    pub checked: i64,
+    pub total: i64,
+    pub missing: i64,
+}
+
+impl Store {
+    /// MP3s whose header hasn't been checked for the file as it is now.
+    pub async fn mp3s_to_check(&self, limit: i64) -> Result<Vec<Mp3ToCheck>> {
+        Ok(sqlx::query_as(
+            "SELECT t.id, t.path, t.size, t.mtime FROM tracks t
+             WHERE t.removed_at IS NULL AND t.codec = 'mpeg'
+               AND NOT EXISTS (SELECT 1 FROM mp3_header_checks c WHERE c.track_id = t.id
+                               AND c.size = t.size AND c.mtime = t.mtime)
+             ORDER BY t.id LIMIT ?",
+        )
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
+    /// Keeps what the check found for each file: (song, whether its length
+    /// header is missing).
+    pub async fn save_mp3_checks(&self, found: &[(Mp3ToCheck, bool)]) -> Result<()> {
+        let mut tx = self.write().await?;
+        for (song, missing) in found {
+            sqlx::query(
+                "INSERT INTO mp3_header_checks (track_id, size, mtime, missing) VALUES (?, ?, ?, ?)
+                 ON CONFLICT (track_id) DO UPDATE SET size = excluded.size, mtime = excluded.mtime,
+                     missing = excluded.missing",
+            )
+            .bind(song.id)
+            .bind(song.size)
+            .bind(song.mtime)
+            .bind(i64::from(*missing))
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// Forgets every result, so the thorough check reads every MP3 again.
+    pub async fn forget_mp3_checks(&self) -> Result<()> {
+        sqlx::query("DELETE FROM mp3_header_checks")
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn mp3_check_counts(&self) -> Result<Mp3CheckCounts> {
+        Ok(sqlx::query_as(
+            "SELECT
+               (SELECT count(*) FROM mp3_header_checks c JOIN tracks t ON t.id = c.track_id
+                WHERE t.removed_at IS NULL AND c.size = t.size AND c.mtime = t.mtime) AS checked,
+               (SELECT count(*) FROM tracks t WHERE t.removed_at IS NULL AND t.codec = 'mpeg') AS total,
+               (SELECT count(*) FROM mp3_header_checks c JOIN tracks t ON t.id = c.track_id
+                WHERE c.missing = 1 AND t.removed_at IS NULL AND c.size = t.size
+                  AND c.mtime = t.mtime) AS missing",
+        )
+        .fetch_one(&self.pool)
+        .await?)
+    }
+}
+
 impl Store {
     /// Records a listener's report on a song, replacing their last one.
     /// False if the song isn't in the library.
@@ -622,6 +712,9 @@ impl Store {
             K::BogusValues => sqlx::query_scalar(concat!("SELECT COUNT(*) ", bogus_from!())),
             K::OddLength => sqlx::query_scalar(concat!("SELECT COUNT(*) ", odd_length_from!())),
             K::LowBitrate => sqlx::query_scalar(concat!("SELECT COUNT(*) ", low_bitrate_from!())),
+            K::NoLengthHeader => {
+                sqlx::query_scalar(concat!("SELECT COUNT(*) ", no_length_header_from!()))
+            }
             K::TitleJunk => sqlx::query_scalar(concat!("SELECT COUNT(*) ", title_junk_from!())),
             K::NameMismatch => {
                 sqlx::query_scalar(concat!("SELECT COUNT(*) ", name_mismatch_from!()))
@@ -830,6 +923,11 @@ impl Store {
                 odd_length_from!(),
                 " ORDER BY t.duration_ms LIMIT ? OFFSET ?"
             )),
+            K::NoLengthHeader => sqlx::query_as(concat!(
+                song_columns!("'Variable bit rate, no length header'", "NULL"),
+                no_length_header_from!(),
+                " ORDER BY t.path LIMIT ? OFFSET ?"
+            )),
             K::LowBitrate => sqlx::query_as(concat!(
                 song_columns!(low_bitrate_detail!(), "NULL"),
                 low_bitrate_from!(),
@@ -926,6 +1024,62 @@ impl Store {
 mod tests {
     use super::*;
     use crate::ScannedTrack;
+
+    #[tokio::test]
+    async fn mp3s_missing_a_length_header_are_listed_until_the_file_changes() {
+        let store = Store::open_in_memory().await.unwrap();
+        let mp3 = |path: &str, title: &str| ScannedTrack {
+            codec: Some("mpeg".into()),
+            size: 1000,
+            mtime: 5,
+            ..song(path, title)
+        };
+        store
+            .save_scanned(&[
+                mp3("/m/a.mp3", "A"),
+                mp3("/m/b.mp3", "B"),
+                song("/m/c.flac", "C"),
+            ])
+            .await
+            .unwrap();
+        // Only the MP3s are checked.
+        let todo = store.mp3s_to_check(10).await.unwrap();
+        assert_eq!(todo.len(), 2);
+        let found: Vec<_> = todo
+            .into_iter()
+            .map(|s| {
+                let a = s.title_is_a();
+                (s, a)
+            })
+            .collect();
+        store.save_mp3_checks(&found).await.unwrap();
+        assert!(store.mp3s_to_check(10).await.unwrap().is_empty());
+        let listed = store
+            .problems(ProblemKind::NoLengthHeader, 0, 10)
+            .await
+            .unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].path.as_deref(), Some("/m/a.mp3"));
+        let counts = store.mp3_check_counts().await.unwrap();
+        assert_eq!((counts.checked, counts.total, counts.missing), (2, 2, 1));
+        // Once the file changes (fixed in the editor), it's off the list and checked again.
+        sqlx::query("UPDATE tracks SET size = 1200 WHERE path = '/m/a.mp3'")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        assert!(store
+            .problems(ProblemKind::NoLengthHeader, 0, 10)
+            .await
+            .unwrap()
+            .is_empty());
+        assert_eq!(store.mp3s_to_check(10).await.unwrap().len(), 1);
+    }
+
+    impl Mp3ToCheck {
+        fn title_is_a(&self) -> bool {
+            self.path.ends_with("a.mp3")
+        }
+    }
 
     fn song(path: &str, title: &str) -> ScannedTrack {
         ScannedTrack {
@@ -1167,6 +1321,7 @@ mod tests {
         assert_eq!(n(K::IdenticalFiles), 2);
         assert!(n(K::NoLyrics) > 10);
         assert!(n(K::NoLoudness) > 10);
+        assert_eq!(n(K::NoLengthHeader), 0);
         // Each list answers without an SQL error, with the detail where there is one.
         for (kind, _) in &counts {
             store.problems(*kind, 0, 5).await.unwrap();
