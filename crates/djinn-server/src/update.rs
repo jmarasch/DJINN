@@ -718,7 +718,8 @@ pub(crate) fn replace(exe: &Path, new: &Path) -> std::io::Result<()> {
 /// Starts the (new) program again with the same arguments. On Unix this
 /// replaces the process; elsewhere it starts a new one and this one ends.
 pub fn restart(exe: &Path) -> std::io::Result<()> {
-    let mut command = std::process::Command::new(exe);
+    let exe = program_now(exe);
+    let mut command = std::process::Command::new(&exe);
     command
         .args(std::env::args_os().skip(1))
         .env(RESTARTED, "1");
@@ -733,10 +734,40 @@ pub fn restart(exe: &Path) -> std::io::Result<()> {
     }
 }
 
+/// The program's file as it is now. Once it was replaced (an update put a
+/// new file in its place), Linux names the running one "<path> (deleted)",
+/// which can't be started; the new file is at the plain path.
+fn program_now(exe: &Path) -> std::path::PathBuf {
+    if !exe.exists() {
+        if let Some(plain) = exe
+            .to_str()
+            .and_then(|path| path.strip_suffix(" (deleted)"))
+        {
+            return std::path::PathBuf::from(plain);
+        }
+    }
+    exe.to_path_buf()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use ed25519_dalek::{Signer, SigningKey};
+
+    #[test]
+    fn a_replaced_program_starts_from_its_plain_path() {
+        let dir = std::env::temp_dir().join(format!("djinn-exe-test-{}", rand::random::<u64>()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("djinn");
+        std::fs::write(&file, b"new").unwrap();
+        let deleted = dir.join("djinn (deleted)");
+        assert_eq!(program_now(&deleted), file);
+        // A real file keeps its name, odd or not.
+        std::fs::write(&deleted, b"odd").unwrap();
+        assert_eq!(program_now(&deleted), deleted);
+        assert_eq!(program_now(&file), file);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn versions() {
