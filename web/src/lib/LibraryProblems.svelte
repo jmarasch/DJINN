@@ -52,11 +52,11 @@
     },
     bogus_values: {
       label: 'Songs with impossible numbers',
-      hint: 'A track or disc number of 0 or less, or a length of 0, usually means a bad rip or a damaged tag. Fix it with Edit tags or a tag editor.',
+      hint: 'A track or disc number of 0 or less, or a length of 0, usually means a bad rip or a damaged tag. Fix it with Edit tags or a tag editor. For an MP3 with a length of 0, see the note under "Very short or very long songs".',
     },
     odd_length: {
       label: 'Very short or very long songs',
-      hint: 'Under 10 seconds or over 3 hours. Often a cut-off download, a hidden track, a skit, or a whole mix filed as one song.',
+      hint: 'Under 10 seconds or over 3 hours. Often a cut-off download, a hidden track, a skit, or a whole mix filed as one song. A variable bit rate MP3 with no length header can also show a wrong length in other players, even though DJINN counts it right. To fix the file: select Fix in the editor, allow the folder under the folders DJINN may change (Admin > Library > Library editor), unlock the protected area, pick the MP3s, and choose Fix MP3 lengths. It adds the header and can be undone from the editor\'s history.',
     },
     low_bitrate: {
       label: 'Low-quality songs',

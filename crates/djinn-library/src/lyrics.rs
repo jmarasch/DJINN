@@ -392,11 +392,12 @@ impl Lrclib {
         if let Some(album) = query.album.filter(|a| !a.is_empty()) {
             params.push(("album_name", album.to_owned()));
         }
-        // LRCLIB refuses a length of 0 seconds; a shorter one is left out.
+        // LRCLIB answers 400 unless the length is 1 to 3600 seconds, so a
+        // longer one (a DJ mix) is left out, as is a zero.
         if let Some(secs) = query
             .duration_ms
             .map(|ms| (ms + 500) / 1000)
-            .filter(|s| *s > 0)
+            .filter(|s| (1..=3600).contains(s))
         {
             params.push(("duration", secs.to_string()));
         }
@@ -408,7 +409,9 @@ impl Lrclib {
             .await
             .map_err(|e| LookupError(e.to_string()))?;
         let status = response.status();
-        if status == reqwest::StatusCode::NOT_FOUND {
+        // A 400 means LRCLIB won't take this one song's details; it counts as
+        // "doesn't know" so one odd song can't hold up all the others.
+        if status == reqwest::StatusCode::NOT_FOUND || status == reqwest::StatusCode::BAD_REQUEST {
             return Ok(None);
         }
         if !status.is_success() {
