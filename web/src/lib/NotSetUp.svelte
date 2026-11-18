@@ -3,6 +3,7 @@
   // with yet, so it says so and shows the way to the first-start page.
   import { onMount } from 'svelte'
   import { api } from './api'
+  import { t } from './i18n.svelte'
 
   type Status = Awaited<ReturnType<typeof api.bootstrapStatus>>
   let { status }: { status: Status } = $props()
@@ -33,16 +34,16 @@
 </script>
 
 <div class="card notice">
-  <h1>This DJINN hasn't been set up yet</h1>
+  <h1>{t('ns2.title')}</h1>
   {#if live.open}
-    <p class="muted">Scan the code with a phone, or open the link on any computer on this network, to set it up.</p>
-    <img src="/api/auth/bootstrap/qr.svg" alt="QR code for {setupUrl}" />
+    <p class="muted">{t('ns2.scan')}</p>
+    <img src="/api/auth/bootstrap/qr.svg" alt={t('ns2.qr', { url: setupUrl })} />
     <p><a href={onScreen ? '/setup?screen=1' : '/setup'}>{setupUrl}</a></p>
     {#if live.mains?.length}
-      <p class="muted">Found {live.mains[0].name} on this network, so this box may be meant as a node for it.</p>
+      <p class="muted">{t('ns2.found', { name: live.mains[0].name })}</p>
     {/if}
   {:else}
-    <p class="muted">Open the setup link DJINN printed when it started. It's in the server's log too.</p>
+    <p class="muted">{t('ns2.link')}</p>
   {/if}
 </div>
 
