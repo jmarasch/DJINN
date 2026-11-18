@@ -1,5 +1,6 @@
 <script lang="ts">
   // Songs that sound like one song.
+  import { t } from '../lib/i18n.svelte'
   import { api } from '../lib/api'
   import Art from '../lib/Art.svelte'
   import Credits from '../lib/Credits.svelte'
@@ -29,7 +30,7 @@
   })
 </script>
 
-<button class="back" onclick={() => history.back()}><Icon name="back" /> Back</button>
+<button class="back" onclick={() => history.back()}><Icon name="back" /> {t('nav.back')}</button>
 
 {#if error}
   <p class="error">{error}</p>
@@ -37,29 +38,28 @@
   <header>
     <Art hash={seed.art_hash} size={72} round={10} />
     <div class="grow">
-      <div class="muted small">More like</div>
+      <div class="muted small">{t('sim.more_like')}</div>
       <h1 class="ellipsis">{seed.title}</h1>
       <div class="muted ellipsis"><Credits track={seed} /></div>
     </div>
   </header>
   {#if !analyzed && !analysisOn}
     <p class="muted">
-      Finding songs that sound alike needs sound analysis, which is off.
-      {#if isAdmin()}Switch it on under <a href="#/admin/library">Admin > Library</a>.{/if}
+      {t('sim.off')}
+      {#if isAdmin()}{t('sim.switch_on')} <a href="#/admin/library">{t('sim.admin_library')}</a>.{/if}
     </p>
   {:else if !analyzed}
     <p class="muted">
-      DJINN hasn't listened to this song yet. It analyzes new songs in the background, so check back in a little
-      while.
+      {t('sim.not_yet')}
     </p>
   {:else}
-    <p class="small muted">Songs that sound alike: tempo, energy, tone, and mood.</p>
+    <p class="small muted">{t('sim.note')}</p>
     {#each similar as track (track.id)}
       <TrackRow {track} />
     {/each}
   {/if}
 {:else}
-  <p class="muted">Listening...</p>
+  <p class="muted">{t('sim.listening')}</p>
 {/if}
 
 <style>

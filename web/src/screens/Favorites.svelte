@@ -20,7 +20,7 @@
     api
       .liked()
       .then((l) => (liked = l))
-      .catch((e) => toast(e instanceof Error ? e.message : 'Could not load your favorites', true))
+      .catch((e) => toast(e instanceof Error ? e.message : t('fv.load_failed'), true))
   })
 
   const empty = $derived(liked && !liked.artists.length && !liked.albums.length && !liked.tracks.length)
@@ -47,17 +47,17 @@
   </div>
 {/snippet}
 {#if !liked}
-  <p class="muted small">Loading...</p>
+  <p class="muted small">{t('common.loading')}</p>
 {:else if empty}
   <div class="empty">
     <img src="/images/no-favorites.webp" alt="" />
-    <p class="muted">Tap the heart on a song, album or artist to keep it here.</p>
+    <p class="muted">{t('fv.empty')}</p>
   </div>
 {:else}
   {#if liked.artists.length}
     <section class="panel">
       <div class="head">
-        <h2>Artists</h2>
+        <h2>{t('gen.artists')}</h2>
         {#if liked.artists.length > FEW}
           <button class="see-all" aria-expanded={all.artists} onclick={() => (all.artists = !all.artists)}>
             {all.artists ? t('favorites.fewer') : t('favorites.see_all')}
@@ -74,7 +74,7 @@
   {#if liked.albums.length}
     <section class="panel">
       <div class="head">
-        <h2>Albums</h2>
+        <h2>{t('av.albums')}</h2>
         {#if liked.albums.length > FEW}
           <button class="see-all" aria-expanded={all.albums} onclick={() => (all.albums = !all.albums)}>
             {all.albums ? t('favorites.fewer') : t('favorites.see_all')}
@@ -91,7 +91,7 @@
   {#if liked.tracks.length}
     <section class="panel">
       <div class="head">
-        <h2>Songs</h2>
+        <h2>{t('gen.songs')}</h2>
         {#if liked.tracks.length > FEW_SONGS}
           <button class="see-all" aria-expanded={all.tracks} onclick={() => (all.tracks = !all.tracks)}>
             {all.tracks ? t('favorites.fewer') : t('favorites.see_all')}

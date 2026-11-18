@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '../lib/i18n.svelte'
   import { api } from '../lib/api'
   import Art from '../lib/Art.svelte'
   import Icon from '../lib/Icon.svelte'
@@ -40,15 +41,15 @@
 
   let trackSort = $state<'number' | 'name'>('number')
   const tracks = $derived(
-    album ? (trackSort === 'name' ? [...album.tracks].sort(byName<Track>((t) => t.title)) : album.tracks) : [],
+    album ? (trackSort === 'name' ? [...album.tracks].sort(byName<Track>((track) => track.title)) : album.tracks) : [],
   )
-  const trackOrders: { value: 'number' | 'name'; label: string }[] = [
-    { value: 'number', label: 'Track order' },
-    { value: 'name', label: 'A to Z' },
-  ]
+  const trackOrders: { value: 'number' | 'name'; label: string }[] = $derived([
+    { value: 'number', label: t('alv.order') },
+    { value: 'name', label: t('av.az') },
+  ])
 </script>
 
-<button class="back" onclick={() => history.back()}><Icon name="back" /> Back</button>
+<button class="back" onclick={() => history.back()}><Icon name="back" /> {t('nav.back')}</button>
 
 {#if error}
   <p class="error">{error}</p>
@@ -74,14 +75,14 @@
           <QueueAll kind="album" refId={album.id} />
           <AddToPlaylist kind="album" refId={album.id} label={album.title} />
           {#if isAdmin()}
-            <button class="pill" onclick={() => (editing = true)}><Icon name="edit" size={18} /> Edit album</button>
+            <button class="pill" onclick={() => (editing = true)}><Icon name="edit" size={18} /> {t('alv.edit')}</button>
           {/if}
         </div>
       </div>
     </header>
     {#if album.tracks.length > 1}
       <div class="sort">
-        <SortChoice options={trackOrders} bind:value={trackSort} storageKey="djinn-album-track-sort" label="Sort songs" />
+        <SortChoice options={trackOrders} bind:value={trackSort} storageKey="djinn-album-track-sort" label={t('alv.sort')} />
       </div>
     {/if}
     {#each tracks as track (track.id)}
@@ -89,9 +90,9 @@
     {/each}
   </div>
   {#if editing}
-    {@const ids = album.tracks.map((t) => t.id)}
+    {@const ids = album.tracks.map((track) => track.id)}
     <TagEditor
-      title="Edit album"
+      title={t('alv.edit')}
       trackIds={ids}
       fields={['album', 'album_artist', 'year', 'genre']}
       initial={{

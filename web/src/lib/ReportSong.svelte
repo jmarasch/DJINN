@@ -1,6 +1,7 @@
 <script lang="ts">
   // "Report a problem" with a song: a reason and an optional note, for the
   // admin's Problems list. Used by the party app and DJINN GO.
+  import { t } from './i18n.svelte'
   import { api } from './api'
   import { lyricsReasons, reportReasons, type ReportReason } from './reports'
   import Sheet from './Sheet.svelte'
@@ -23,20 +24,20 @@
     sending = true
     try {
       await api.reportSong(song.id, reason, note.trim() || undefined)
-      toast('Thanks, the admin will take a look')
+      toast(t('menu.report_thanks'))
       onclose()
     } catch (err) {
-      toast(err instanceof Error ? err.message : 'Could not send it', true)
+      toast(err instanceof Error ? err.message : t('wish.failed'), true)
     } finally {
       sending = false
     }
   }
 </script>
 
-<Sheet title={about === 'lyrics' ? 'Report the lyrics' : 'Report a problem'} {onclose}>
+<Sheet title={about === 'lyrics' ? t('rs2.report_lyrics') : t('rs2.report')} {onclose}>
   <form onsubmit={send}>
     <p class="small muted">
-      {about === 'lyrics' ? `What's wrong with the lyrics of "${song.title}"?` : `What's wrong with "${song.title}"?`}
+      {about === 'lyrics' ? t('rs2.whats_wrong_lyrics', { title: song.title }) : t('menu.whats_wrong', { title: song.title })}
     </p>
     {#each reasons as r (r.id)}
       <label class="switch choice">
@@ -45,10 +46,10 @@
       </label>
     {/each}
     <label>
-      Anything else the admin should know (optional)
+      {t('rs2.anything')}
       <textarea rows="3" maxlength="300" bind:value={note}></textarea>
     </label>
-    <button class="primary" disabled={!reason || sending}>Send</button>
+    <button class="primary" disabled={!reason || sending}>{t('common.send')}</button>
   </form>
 </Sheet>
 

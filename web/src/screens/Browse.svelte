@@ -194,11 +194,11 @@
         </button>
       {/each}
     </div>
-    <div class="views" role="group" aria-label="Layout">
+    <div class="views" role="group" aria-label={t('br.layout')}>
       {#if tab === 'genres'}
         <button
           class:active={genreView === 'tags'}
-          aria-label="Tags"
+          aria-label={t('br.tags')}
           aria-pressed={genreView === 'tags'}
           onclick={() => (genreView = 'tags')}
         >
@@ -206,17 +206,17 @@
         </button>
         <button
           class:active={genreView === 'cloud'}
-          aria-label="Cloud"
+          aria-label={t('br.cloud')}
           aria-pressed={genreView === 'cloud'}
           onclick={() => (genreView = 'cloud')}
         >
           <Icon name="cloud" size={20} />
         </button>
       {:else}
-        <button class:active={!grid} aria-label="List" aria-pressed={!grid} onclick={() => (view = 'list')}>
+        <button class:active={!grid} aria-label={t('br.list')} aria-pressed={!grid} onclick={() => (view = 'list')}>
           <Icon name="list" size={20} />
         </button>
-        <button class:active={grid} aria-label="Grid" aria-pressed={grid} onclick={() => (view = 'grid')}>
+        <button class:active={grid} aria-label={t('br.grid')} aria-pressed={grid} onclick={() => (view = 'grid')}>
           <Icon name="grid" size={20} />
         </button>
       {/if}
@@ -292,7 +292,7 @@
 {/if}
 
 {#if scroll.up && scroll.far}
-  <button class="to-top" aria-label="Back to top" onclick={toTop}>
+  <button class="to-top" aria-label={t('common.back_to_top')} onclick={toTop}>
     <Icon name="up" size={24} />
   </button>
 {/if}
@@ -307,7 +307,7 @@
       key={(a) => a.id}
       count={(n) => plural(n, 'artists')}
       {grid}
-      empty="No artists yet. Rescan the library from Admin after adding music."
+      empty={t('br.no_artists')}
     >
       {#snippet item(artist)}
         {#if grid}
@@ -376,7 +376,7 @@
       key={(a) => a.id}
       count={(n) => plural(n, 'albums')}
       {grid}
-      empty="No albums. Songs without an album tag are under Artists and Songs."
+      empty={t('br.no_albums')}
     >
       {#snippet item(album)}
         {#if grid}

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '../lib/i18n.svelte'
   import { api } from '../lib/api'
   import Art from '../lib/Art.svelte'
   import Heart from '../lib/Heart.svelte'
@@ -42,26 +43,25 @@
   const title = $derived(name.charAt(0).toUpperCase() + name.slice(1))
 </script>
 
-<button class="back" onclick={() => history.back()}><Icon name="back" /> Back</button>
+<button class="back" onclick={() => history.back()}><Icon name="back" /> {t('nav.back')}</button>
 
 <h1>{title}</h1>
 {#if error}
   <p class="error">{error}</p>
 {:else if page}
   <p class="small muted">
-    {page.total}
-    {page.total === 1 ? 'song' : 'songs'}, by their tags or how they sound, shuffled with the most played nearer the top.
+    {t('gen.intro', { n: page.total })}
   </p>
-  <RadioButton seed={{ kind: 'genre', name: page.name }} label="{title} radio" />
+  <RadioButton seed={{ kind: 'genre', name: page.name }} label={t('gen.radio', { name: title })} />
   {#if page.related.length}
-    <h2>Related genres</h2>
+    <h2>{t('gen.related')}</h2>
     <div class="chips">
       {#each page.related as genre (genre.name)}
         <a
           class="chip related"
           href="#/genre/{encodeURIComponent(genre.name)}"
           style:--strength={genre.strength}
-          title="{genre.songs} {genre.songs === 1 ? 'song' : 'songs'}"
+          title={t('count.songs', { n: genre.songs })}
         >
           {genre.name}
           <span class="count">{genre.songs}</span>
@@ -70,7 +70,7 @@
     </div>
   {/if}
   {#if artists.length}
-    <h2>Artists <span class="muted small">{page.artist_total}</span></h2>
+    <h2>{t('gen.artists')} <span class="muted small">{page.artist_total}</span></h2>
     <ScrollRow nearEnd={moreArtists}>
       {#each artists as artist (artist.id)}
         <div class="artist-tile">
@@ -84,17 +84,17 @@
     </ScrollRow>
   {/if}
   {#if page.tracks.length}
-    <h2>Songs</h2>
-    <InfiniteList cacheKey="genre-{name}" load={(offset) => api.genreSongs(name, offset)} key={(t) => t.id}>
+    <h2>{t('gen.songs')}</h2>
+    <InfiniteList cacheKey="genre-{name}" load={(offset) => api.genreSongs(name, offset)} key={(track) => track.id}>
       {#snippet item(track)}
         <TrackRow {track} />
       {/snippet}
     </InfiniteList>
   {:else}
-    <p class="muted">No songs with this genre yet.</p>
+    <p class="muted">{t('gen.none')}</p>
   {/if}
 {:else}
-  <p class="muted">Loading...</p>
+  <p class="muted">{t('common.loading')}</p>
 {/if}
 
 <style>
