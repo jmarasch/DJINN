@@ -4,17 +4,18 @@
   // "Last party" is the recap: from the first song after a long break.
   import { api } from './api'
   import { toast } from './state.svelte'
+  import { locale, t } from './i18n.svelte'
   import type { GuestSummary, HistoryCounts, Stats, StatsFilter, User } from './types'
 
   type Range = 'party' | 'today' | 'week' | 'month' | 'year' | 'all'
-  const ranges: { id: Range; label: string }[] = [
-    { id: 'party', label: 'Last party' },
-    { id: 'today', label: 'Today' },
-    { id: 'week', label: '7 days' },
-    { id: 'month', label: '30 days' },
-    { id: 'year', label: 'This year' },
-    { id: 'all', label: 'All time' },
-  ]
+  const ranges: { id: Range; label: string }[] = $derived([
+    { id: 'party', label: t('st.party') },
+    { id: 'today', label: t('st.today') },
+    { id: 'week', label: t('st.week') },
+    { id: 'month', label: t('st.month') },
+    { id: 'year', label: t('st.year') },
+    { id: 'all', label: t('st.all') },
+  ])
 
   let range = $state<Range>('party')
   let person = $state<number | null>(null)
@@ -30,7 +31,7 @@
       ([users, guests]) => {
         people = [
           ...users.map((u) => ({ id: u.id, name: u.display_name || u.username })),
-          ...guests.map((g) => ({ id: g.id, name: `${g.name} (guest)` })),
+          ...guests.map((g) => ({ id: g.id, name: t('st.guest', { name: g.name }) })),
         ].sort((a, b) => a.name.localeCompare(b.name))
       },
     )
@@ -77,7 +78,7 @@
         stats = await api.stats({ from, user: person, party: where !== 'go', go: where !== 'party' })
       }
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not load stats', true)
+      toast(e instanceof Error ? e.message : t('st.load_failed'), true)
     } finally {
       loading = false
     }
@@ -94,29 +95,35 @@
     try {
       clearing = await api.historyCounts(filter)
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not count that', true)
+      toast(e instanceof Error ? e.message : t('st.count_failed'), true)
     }
   }
 
   async function clear() {
     try {
       const done = await api.clearHistory(filter)
-      toast(`Cleared ${n(done.party_plays + done.go_plays)} plays and ${n(done.requests)} requests`)
+      toast(t('st.cleared', { plays: n(done.party_plays + done.go_plays), requests: n(done.requests) }))
       clearing = null
       await load()
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not clear it', true)
+      toast(e instanceof Error ? e.message : t('st.clear_failed'), true)
     }
   }
 
-  const n = (x: number) => x.toLocaleString()
-  const count = (x: number, one: string, many: string) => `${n(x)} ${x === 1 ? one : many}`
+  const n = (x: number) => x.toLocaleString(locale.code)
   const hours = (ms: number) => {
     const h = ms / 3_600_000
-    return h >= 10 ? `${n(Math.round(h))} hours` : h >= 1 ? `${h.toFixed(1)} hours` : `${Math.round(ms / 60_000)} min`
+    return h >= 10
+      ? t('st.hours', { n: n(Math.round(h)) })
+      : h >= 1
+        ? t('st.hours', { n: h.toLocaleString(locale.code, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) })
+        : t('st.min', { n: Math.round(ms / 60_000) })
   }
-  const hourLabel = (h: number) => new Date(2000, 0, 1, h).toLocaleTimeString([], { hour: 'numeric' })
-  const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+  const hourLabel = (h: number) => new Date(2000, 0, 1, h).toLocaleTimeString(locale.code, { hour: 'numeric' })
+  // Sunday first; 2 January 2000 was a Sunday.
+  const dayNames = $derived(
+    Array.from({ length: 7 }, (_, d) => new Date(2000, 0, 2 + d).toLocaleDateString(locale.code, { weekday: 'short' })),
+  )
   const csv = $derived(
     `/api/stats/export.csv?${new URLSearchParams({
       ...(filter.from != null ? { from: String(filter.from) } : {}),
@@ -142,7 +149,7 @@
   <figure class="bars" aria-label={title}>
     <div class="plot">
       {#each values as value, i (i)}
-        <div class="slot" title="{label(i)}: {n(value)} plays">
+        <div class="slot" title={t('st.plays_title', { label: label(i), n: n(value) })}>
           <div class="bar" style:height="{(value / max) * 100}%"></div>
         </div>
       {/each}
@@ -170,7 +177,7 @@
           {#if s.album_id}<a href="#/album/{s.album_id}">{s.title}</a>{:else}{s.title}{/if}
           {#if s.artist}<span class="muted">{` · ${s.artist}`}</span>{/if}
           <span class="count small muted">
-            {skips ? `${n(s.skips)} of ${n(s.plays)} skipped` : count(s.plays, 'play', 'plays')}
+            {skips ? t('st.skipped_of', { skips: n(s.skips), plays: n(s.plays) }) : t('admin.home.n_plays', { n: s.plays })}
           </span>
         </li>
       {/each}
@@ -180,117 +187,120 @@
 
 <section class="card">
   <div class="filters">
-    <div class="chips" role="group" aria-label="Time">
+    <div class="chips" role="group" aria-label={t('st.time')}>
       {#each ranges as r (r.id)}
         <button class:active={range === r.id} aria-pressed={range === r.id} onclick={() => (range = r.id)}>{r.label}</button>
       {/each}
     </div>
     <div class="actions">
-      <select bind:value={person} aria-label="Whose">
-        <option value={null}>Everyone</option>
+      <select bind:value={person} aria-label={t('st.whose')}>
+        <option value={null}>{t('st.everyone')}</option>
         {#each people as p (p.id)}<option value={p.id}>{p.name}</option>{/each}
       </select>
-      <select bind:value={where} aria-label="Where">
-        <option value="both">Party and GO</option>
-        <option value="party">Party only</option>
-        <option value="go">GO only</option>
+      <select bind:value={where} aria-label={t('st.where')}>
+        <option value="both">{t('st.both')}</option>
+        <option value="party">{t('st.party_only')}</option>
+        <option value="go">{t('st.go_only')}</option>
       </select>
     </div>
   </div>
 
   {#if noParty}
-    <p class="muted">No party yet: nothing has played.</p>
+    <p class="muted">{t('st.no_party')}</p>
   {:else if stats}
     {#if range === 'party' && stats.from}
       <p class="small muted">
-        Since {new Date(stats.from).toLocaleString([], { weekday: 'long', hour: 'numeric', minute: '2-digit' })}, the first song after a
-        break of six hours or more.
+        {t('st.since', {
+          when: new Date(stats.from).toLocaleString(locale.code, { weekday: 'long', hour: 'numeric', minute: '2-digit' }),
+        })}
       </p>
     {/if}
     <div class="tiles">
-      <div><strong>{n(stats.summary.plays)}</strong><span class="small muted">plays</span></div>
-      <div><strong>{hours(stats.summary.listened_ms)}</strong><span class="small muted">listened</span></div>
-      <div><strong>{n(stats.summary.songs)}</strong><span class="small muted">different songs</span></div>
-      <div><strong>{n(stats.summary.requests)}</strong><span class="small muted">requests</span></div>
-      <div><strong>{n(stats.summary.requesters)}</strong><span class="small muted">people asking</span></div>
-      <div><strong>{n(stats.summary.skips)}</strong><span class="small muted">skipped</span></div>
+      <div><strong>{n(stats.summary.plays)}</strong><span class="small muted">{t('st.plays')}</span></div>
+      <div><strong>{hours(stats.summary.listened_ms)}</strong><span class="small muted">{t('st.listened')}</span></div>
+      <div><strong>{n(stats.summary.songs)}</strong><span class="small muted">{t('st.songs')}</span></div>
+      <div><strong>{n(stats.summary.requests)}</strong><span class="small muted">{t('st.requests')}</span></div>
+      <div><strong>{n(stats.summary.requesters)}</strong><span class="small muted">{t('st.asking')}</span></div>
+      <div><strong>{n(stats.summary.skips)}</strong><span class="small muted">{t('st.skipped')}</span></div>
     </div>
   {:else if loading}
-    <p class="small muted">Loading...</p>
+    <p class="small muted">{t('common.loading')}</p>
   {/if}
 </section>
 
 {#if stats && stats.summary.plays + stats.summary.requests > 0}
   <section class="card">
-    <h2>Top</h2>
-    {@render songList('Songs played most', stats.top_songs)}
+    <h2>{t('st.top')}</h2>
+    {@render songList(t('st.played_most'), stats.top_songs)}
     {#if stats.top_requested.length}
-      <h3>Asked for most</h3>
+      <h3>{t('st.asked_most')}</h3>
       <ol>
         {#each stats.top_requested.slice(0, 10) as r (r.track_id)}
           <li>
-            {r.title ?? '(removed song)'}{#if r.artist}<span class="muted">{` · ${r.artist}`}</span>{/if}
-            <span class="count small muted">{count(r.requests, 'request', 'requests')}</span>
+            {r.title ?? t('admin.removed_song')}{#if r.artist}<span class="muted">{` · ${r.artist}`}</span>{/if}
+            <span class="count small muted">{t('admin.home.n_requests', { n: r.requests })}</span>
           </li>
         {/each}
       </ol>
     {/if}
     {#if stats.top_artists.length}
-      <h3>Artists</h3>
+      <h3>{t('st.artists')}</h3>
       <ol>
         {#each stats.top_artists.slice(0, 10) as a (a.artist_id)}
-          <li><a href="#/artist/{a.artist_id}">{a.name}</a> <span class="count small muted">{count(a.plays, 'play', 'plays')}</span></li>
+          <li><a href="#/artist/{a.artist_id}">{a.name}</a> <span class="count small muted">{t('admin.home.n_plays', { n: a.plays })}</span></li>
         {/each}
       </ol>
     {/if}
     {#if stats.top_requesters.length}
-      <h3>Who asked most</h3>
+      <h3>{t('st.who_asked')}</h3>
       <ol>
         {#each stats.top_requesters.slice(0, 10) as p, i (i)}
-          <li>{p.name ?? 'Someone'} <span class="count small muted">{count(p.requests, 'request', 'requests')}</span></li>
+          <li>
+            {p.name ?? t('st.someone')} <span class="count small muted">{t('admin.home.n_requests', { n: p.requests })}</span>
+          </li>
         {/each}
       </ol>
     {/if}
-    {@render songList('Skipped most', stats.most_skipped, true)}
+    {@render songList(t('st.skipped_most'), stats.most_skipped, true)}
   </section>
 
   {#if stats.summary.plays}
     <section class="card">
-      <h2>When</h2>
+      <h2>{t('st.when')}</h2>
       <p class="small muted">
-        Busiest around {hourLabel(peak(byHour))}{#if range !== 'party' && range !== 'today'}, and on {dayNames[peak(byDay)]}s{/if}. This
-        computer's time.
+        {t('st.busiest', { hour: hourLabel(peak(byHour)) })}{#if range !== 'party' && range !== 'today'}{t(
+            'st.busiest_day',
+            { day: t(`st.wd.${peak(byDay)}`) },
+          )}{/if}{t('st.computer_time')}
       </p>
-      {@render bars(byHour, hourLabel, 'Plays by hour of the day')}
+      {@render bars(byHour, hourLabel, t('st.by_hour'))}
       {#if range !== 'party' && range !== 'today'}
-        {@render bars(byDay, (i) => dayNames[i], 'Plays by day of the week')}
+        {@render bars(byDay, (i) => dayNames[i], t('st.by_day'))}
       {/if}
     </section>
   {/if}
 {/if}
 
 <section class="card">
-  <h2>Clear this history</h2>
+  <h2>{t('st.clear_title')}</h2>
   <p class="small muted">
-    Forgets the plays and requests in the view above (its time, person and where). What Smart Play learned from them goes
-    too, and top songs on artist pages count again from what's left. Save a backup first (Admin > System) if you might want
-    them back.
+    {t('st.clear_note')}
   </p>
   <div class="actions">
-    <a class="button small-button" href={csv} download>Download the lists as a spreadsheet</a>
-    <button class="small-button" onclick={askClear}>Clear this history</button>
+    <a class="button small-button" href={csv} download>{t('st.csv')}</a>
+    <button class="small-button" onclick={askClear}>{t('st.clear_title')}</button>
   </div>
   {#if clearing}
     {@const total = clearing.party_plays + clearing.go_plays + clearing.requests}
     {#if total === 0}
-      <p class="small">Nothing to clear.</p>
+      <p class="small">{t('st.nothing')}</p>
     {:else}
       <p class="small">
-        This removes {n(clearing.party_plays)} party plays, {n(clearing.go_plays)} GO plays and {n(clearing.requests)} requests.
+        {t('st.removes', { party: n(clearing.party_plays), go: n(clearing.go_plays), requests: n(clearing.requests) })}
       </p>
       <div class="actions">
-        <button class="danger small-button" onclick={clear}>Clear them</button>
-        <button class="small-button" onclick={() => (clearing = null)}>Cancel</button>
+        <button class="danger small-button" onclick={clear}>{t('st.clear_them')}</button>
+        <button class="small-button" onclick={() => (clearing = null)}>{t('common.cancel')}</button>
       </div>
     {/if}
   {/if}
