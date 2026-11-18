@@ -70,6 +70,9 @@
     background: none;
     border: none;
     padding: 0;
+    min-height: 0;
+    display: inline;
+    line-height: inherit;
     color: var(--accent);
     text-decoration: underline;
     cursor: pointer;
