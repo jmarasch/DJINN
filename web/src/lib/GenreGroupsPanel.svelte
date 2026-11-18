@@ -9,6 +9,7 @@
   import { api } from './api'
   import { loadGenreFold } from './genreFold.svelte'
   import { toast } from './state.svelte'
+  import { locale, t } from './i18n.svelte'
   import type { GenreGroupChoice, GenreGroups } from './types'
 
   let groups = $state<GenreGroups | null>(null)
@@ -24,13 +25,13 @@
   let over = $state<number | 'loose' | null>(null)
 
   const LOOSE_SHOWN = 150
-  const n = (x: number) => x.toLocaleString()
+  const n = (x: number) => x.toLocaleString(locale.code)
 
   async function load() {
     try {
       groups = await api.genreGroups()
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not load the genres', true)
+      toast(e instanceof Error ? e.message : t('gg.load_failed'), true)
     }
   }
 
@@ -40,7 +41,7 @@
       // Start in the middle: neither a few huge containers nor many tiny ones.
       pick = Math.floor(choices.length / 2)
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not work out the groups', true)
+      toast(e instanceof Error ? e.message : t('gg.choices_failed'), true)
     }
   }
 
@@ -56,7 +57,7 @@
       await run()
       if (done) toast(done)
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'That did not work', true)
+      toast(e instanceof Error ? e.message : t('common.failed'), true)
     } finally {
       busy = false
     }
@@ -72,13 +73,13 @@
     if (
       autoMade &&
       !confirm(
-        `Replace the ${autoMade} containers Auto-group made? Containers you made or changed, and genres you placed, stay.`,
+        t('gg.replace_q', { n: autoMade }),
       )
     )
       return
     await change(async () => {
       const made = await api.autoGenreGroups(chosen.containers)
-      toast(`Made ${made.containers} containers holding ${made.grouped} genres`)
+      toast(t('gg.made', { containers: made.containers, genres: made.grouped }))
     })
     await loadChoices()
   }
@@ -96,7 +97,7 @@
   }
 
   async function remove(id: number, name: string) {
-    if (!confirm(`Remove the container ${name}? Its genres go back to being on their own.`)) return
+    if (!confirm(t('gg.remove_q', { name }))) return
     await change(() => api.deleteGenreGroup(id))
     await loadChoices()
   }
@@ -107,8 +108,8 @@
   }
 
   async function clearAll() {
-    if (!confirm('Remove every container, including ones you made?')) return
-    await change(() => api.clearGenreGroups(), 'Containers removed')
+    if (!confirm(t('gg.clear_q'))) return
+    await change(() => api.clearGenreGroups(), t('gg.removed'))
     await loadChoices()
   }
 
@@ -144,7 +145,7 @@
     draggable="true"
     role="button"
     tabindex="0"
-    title="Drag to another container, or tap and choose Move here"
+    title={t('gg.chip_title')}
     ondragstart={(e) => dragStart(e, genre)}
     onclick={() => (moving = moving === genre ? null : genre)}
     onkeydown={(e) => {
@@ -158,8 +159,8 @@
     {#if pinned && inside === null}
       <button
         class="x"
-        title="Placed by hand. Let Auto-group place it again"
-        aria-label="Let Auto-group place {genre}"
+        title={t('gg.pinned_title')}
+        aria-label={t('gg.free', { genre })}
         onclick={(e) => {
           e.stopPropagation()
           void change(() => api.freeGenre(genre))
@@ -169,8 +170,8 @@
     {#if inside !== null}
       <button
         class="x"
-        title="Take it out of this container"
-        aria-label="Take {genre} out"
+        title={t('gg.take_out_title')}
+        aria-label={t('gg.take_out', { genre })}
         onclick={(e) => {
           e.stopPropagation()
           void moveTo(genre, null)
@@ -181,13 +182,9 @@
 {/snippet}
 
 <section class="card wide">
-  <h2>Genre containers</h2>
+  <h2>{t('gg.title')}</h2>
   <p class="small muted">
-    Group similar genres into containers, so "black metal", "death metal" and "speed metal" all show as "Metal". While
-    this is on, genre lists, the genre cloud and genre pages show the containers instead of the genres in them, and a
-    container's page has every song of its genres. Artist, album and song pages still show the real genres, with the
-    container first in pink. Your music files and the genres DJINN knows aren't changed; turn this off to put
-    everything back.
+    {t('gg.intro')}
   </p>
   {#if groups}
     <label class="switch">
@@ -197,36 +194,33 @@
         disabled={busy}
         onchange={(e) => change(() => api.setGenreGroupsOn(e.currentTarget.checked))}
       />
-      Show genres in their containers
+      {t('gg.on')}
     </label>
 
-    <h3>Auto-group</h3>
+    <h3>{t('gg.auto')}</h3>
     {#if choices === null}
-      <p class="small muted">Working out how the genres relate...</p>
+      <p class="small muted">{t('gg.working')}</p>
     {:else if choices.length === 0}
       <p class="small muted">
-        Not enough related genres to group yet. Genres relate when songs share them or sound alike, so this works
-        better after a library check and sound analysis.
+        {t('gg.not_enough')}
       </p>
     {:else}
       <p class="small muted">
-        Genres are grouped by how related they are: songs they share, and how alike their songs sound. Slide left for
-        fewer, broader containers, right for more, closer ones. Genres you placed by hand and containers you made or
-        changed are left as they are.
+        {t('gg.how')}
       </p>
       <label class="range">
         <span>
-          About <strong>{chosen?.containers ?? 0}</strong> containers, holding {n(chosen?.grouped ?? 0)} genres
+          {t('gg.about', { containers: chosen?.containers ?? 0, genres: n(chosen?.grouped ?? 0) })}
         </span>
-        <input type="range" min="0" max={choices.length - 1} step="1" bind:value={pick} aria-label="How many containers" />
-        <span class="ends small muted"><span>Broader</span><span>Closer</span></span>
+        <input type="range" min="0" max={choices.length - 1} step="1" bind:value={pick} aria-label={t('gg.how_many')} />
+        <span class="ends small muted"><span>{t('gg.broader')}</span><span>{t('gg.closer')}</span></span>
       </label>
       <div class="actions">
-        <button class="small-button" disabled={busy || !chosen} onclick={autoGroup}>Auto-group</button>
+        <button class="small-button" disabled={busy || !chosen} onclick={autoGroup}>{t('gg.auto')}</button>
       </div>
     {/if}
 
-    <h3>Containers</h3>
+    <h3>{t('gg.containers')}</h3>
     <form
       class="new"
       onsubmit={(e) => {
@@ -234,13 +228,13 @@
         void create()
       }}
     >
-      <input bind:value={newName} placeholder="A new container, like Metal" aria-label="New container name" maxlength="60" />
-      <button class="small-button" type="submit" disabled={busy || !newName.trim()}>Make it</button>
+      <input bind:value={newName} placeholder={t('gg.new_hint')} aria-label={t('gg.new_name')} maxlength="60" />
+      <button class="small-button" type="submit" disabled={busy || !newName.trim()}>{t('gg.make')}</button>
     </form>
     {#if moving}
       <p class="small moving-note">
-        Moving <strong>{moving}</strong>: choose Move here on a container.
-        <button class="link" onclick={() => (moving = null)}>Cancel</button>
+        {t('gg.moving', { genre: moving })}
+        <button class="link" onclick={() => (moving = null)}>{t('common.cancel')}</button>
       </p>
     {/if}
     {#if groups.containers.length}
@@ -250,7 +244,7 @@
             class="box"
             class:over={over === c.id}
             role="group"
-            aria-label="Container {c.name}"
+            aria-label={t('gg.container', { name: c.name })}
             ondragover={(e) => allowDrop(e, c.id)}
             ondragleave={() => (over = null)}
             ondrop={(e) => drop(e, c.id)}
@@ -259,59 +253,59 @@
               <input
                 class="name"
                 value={c.name}
-                aria-label="Container name"
+                aria-label={t('gg.container_name')}
                 maxlength="60"
                 onchange={(e) => rename(c.id, e.currentTarget.value, c.name)}
               />
-              {#if c.auto}<span class="tag small muted" title="Made by Auto-group">auto</span>{/if}
-              <button class="x" aria-label="Remove container {c.name}" onclick={() => remove(c.id, c.name)}>×</button>
+              {#if c.auto}<span class="tag small muted" title={t('gg.made_by_auto')}>{t('gg.auto_tag')}</span>{/if}
+              <button class="x" aria-label={t('gg.remove_container', { name: c.name })} onclick={() => remove(c.id, c.name)}>×</button>
             </div>
             <div class="chips">
               {#each c.genres as g (g.genre)}{@render chip(g.genre, g.songs, g.pinned, c.id)}{/each}
-              {#if !c.genres.length}<span class="small muted">Drag genres here</span>{/if}
+              {#if !c.genres.length}<span class="small muted">{t('gg.drag_here')}</span>{/if}
             </div>
             {#if moving && !c.genres.some((g) => g.genre === moving)}
-              <button class="small-button here" onclick={() => moving && moveTo(moving, c.id)}>Move here</button>
+              <button class="small-button here" onclick={() => moving && moveTo(moving, c.id)}>{t('gg.move_here')}</button>
             {/if}
           </div>
         {/each}
       </div>
     {:else}
-      <p class="small muted">No containers yet. Use Auto-group, or make one and drag genres into it.</p>
+      <p class="small muted">{t('gg.none')}</p>
     {/if}
 
     <div
       class="box loose"
       class:over={over === 'loose'}
       role="group"
-      aria-label="Genres on their own"
+      aria-label={t('gg.loose_label')}
       ondragover={(e) => allowDrop(e, 'loose')}
       ondragleave={() => (over = null)}
       ondrop={(e) => drop(e, null)}
     >
       <div class="head">
-        <strong>On their own</strong>
-        <span class="small muted">{n(groups.loose.length)} genres</span>
-        <input class="filter" bind:value={filter} placeholder="Find a genre" aria-label="Find a genre" />
+        <strong>{t('gg.loose')}</strong>
+        <span class="small muted">{t('count.genres', { n: groups.loose.length })}</span>
+        <input class="filter" bind:value={filter} placeholder={t('gg.find_genre')} aria-label={t('gg.find_genre')} />
       </div>
       <div class="chips">
         {#each looseShown as g (g.genre)}{@render chip(g.genre, g.songs, g.pinned, null)}{/each}
       </div>
       {#if looseShown.length < loose.length}
-        <button class="link" onclick={() => (showAll = true)}>Show all {n(loose.length)}</button>
+        <button class="link" onclick={() => (showAll = true)}>{t('gg.show_all', { n: n(loose.length) })}</button>
       {/if}
       {#if moving && !groups.loose.some((g) => g.genre === moving)}
-        <button class="small-button here" onclick={() => moving && moveTo(moving, null)}>Move here</button>
+        <button class="small-button here" onclick={() => moving && moveTo(moving, null)}>{t('gg.move_here')}</button>
       {/if}
     </div>
 
     {#if groups.containers.length}
       <div class="actions">
-        <button class="small-button danger" disabled={busy} onclick={clearAll}>Remove every container</button>
+        <button class="small-button danger" disabled={busy} onclick={clearAll}>{t('gg.remove_all')}</button>
       </div>
     {/if}
   {:else}
-    <p class="small muted">Loading...</p>
+    <p class="small muted">{t('common.loading')}</p>
   {/if}
 </section>
 

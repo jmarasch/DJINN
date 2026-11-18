@@ -4,6 +4,7 @@
   import { onMount } from 'svelte'
   import { api } from './api'
   import { toast } from './state.svelte'
+  import { locale, t } from './i18n.svelte'
   import type { LyricsImportStatus, LyricsSettings, LyricsStatus } from './types'
 
   let settings = $state<LyricsSettings | null>(null)
@@ -14,7 +15,7 @@
   let unasked = $state(false)
   let replaceOther = $state(false)
   let sending = $state(false)
-  const n = (x: number) => x.toLocaleString()
+  const n = (x: number) => x.toLocaleString(locale.code)
 
   async function refresh() {
     try {
@@ -41,20 +42,20 @@
     if (!settings) return
     try {
       await api.setLyricsSettings(settings)
-      toast('Saved')
+      toast(t('common.saved'))
       setTimeout(refresh, 500)
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not save', true)
+      toast(e instanceof Error ? e.message : t('common.save_failed_short'), true)
     }
   }
 
   async function recheck() {
     try {
       await api.recheckLyrics()
-      toast('Looking for lyrics again')
+      toast(t('lyrp.recheck_started'))
       setTimeout(refresh, 500)
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not start', true)
+      toast(e instanceof Error ? e.message : t('common.start_failed'), true)
     }
   }
 
@@ -74,7 +75,7 @@
       }
       files = null
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not import', true)
+      toast(e instanceof Error ? e.message : t('lyrp.import_failed'), true)
     } finally {
       sending = false
       void refresh()
@@ -86,18 +87,18 @@
       await api.dismissLyricsImport()
       importing = null
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not clear it', true)
+      toast(e instanceof Error ? e.message : t('lyrp.clear_failed'), true)
     }
   }
 
   async function allowAgain() {
-    if (!confirm('Let every removed lyric come back? Songs are read and asked about again.')) return
+    if (!confirm(t('lyrp.allow_q'))) return
     try {
       await api.allowAllLyrics()
-      toast('Done')
+      toast(t('common.done'))
       setTimeout(refresh, 500)
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not do that', true)
+      toast(e instanceof Error ? e.message : t('common.do_failed'), true)
     }
   }
 
@@ -107,133 +108,132 @@
 </script>
 
 <section class="card">
-  <h3>Lyrics</h3>
+  <h3>{t('lyrp.title')}</h3>
   <p class="small muted">
-    DJINN reads lyrics from a .lrc file beside each song (same name) and from the songs' own tags, and keeps them in its
-    database. Timed lyrics follow the music on the Playing tab, in GO and on the lyrics page; any lyrics can be searched
-    by typing a line you remember.
+    {t('lyrp.intro')}
   </p>
   {#if status}
     <p class="small">
       {#if status.running}<span class="spinner" aria-hidden="true"></span>
-        {status.phase === 'looking up' ? 'Asking LRCLIB...' : `Reading files: ${n(status.unread)} to go.`}
+        {status.phase === 'looking up' ? t('lyrp.asking') : t('lyrp.reading', { n: n(status.unread) })}
       {/if}
-      {n(withWords)} of {n(status.songs)} songs have lyrics ({n(status.synced)} timed){#if status.instrumental}, {n(
-          status.instrumental,
-        )} instrumental{/if}{#if status.imported}; {n(status.imported)} imported from zips{/if}{#if status.ai} ({n(status.ai)} made by an AI){/if}.
+      {t('lyrp.have', { words: n(withWords), songs: n(status.songs), timed: n(status.synced) })}{#if status.instrumental}{t(
+          'lyrp.instrumental',
+          { n: n(status.instrumental) },
+        )}{/if}{#if status.imported}{t('lyrp.imported', { n: n(status.imported) })}{/if}{#if status.ai}{t('lyrp.by_ai', {
+            n: n(status.ai),
+          })}{/if}.
     </p>
   {/if}
   {#if settings}
     <label class="switch">
       <input type="checkbox" bind:checked={settings.lookup} onchange={save} />
-      Look up missing lyrics on LRCLIB
+      {t('lyrp.lookup')}
     </label>
     <p class="small muted sub">
-      A free, open lyrics site (lrclib.net). Each song's artist, title, album and length are sent, one song at a time.
-      {#if settings.lookup && status && status.not_looked_up > 0}{n(status.not_looked_up)} songs still to ask about.{/if}
+      {t('lyrp.lookup_note')}
+      {#if settings.lookup && status && status.not_looked_up > 0}{t('lyrp.to_ask', { n: n(status.not_looked_up) })}{/if}
     </p>
     <label class="switch">
       <input type="checkbox" bind:checked={settings.ai_note} onchange={save} />
-      Show a note on lyrics an AI worked on
+      {t('lyrp.ai_note')}
     </label>
     <p class="small muted sub">
-      A line under the lyrics saying an AI made the words, or timed them. On by default.
+      {t('lyrp.ai_note_note')}
     </p>
     <label class="switch">
       <input type="checkbox" bind:checked={settings.page} onchange={save} />
-      Lyrics page
+      {t('lyrp.page')}
     </label>
     <p class="small muted sub">
-      Full-screen lyrics for a TV or spare screen, without signing in, at
+      {t('lyrp.page_note')}
       {#if settings.page}<a href="/lyrics" target="_blank" rel="noopener">{pageUrl}</a>{:else}{pageUrl}{/if}.
     </p>
   {/if}
   <div class="actions">
-    <button onclick={recheck}>Recheck lyrics</button>
-    {#if withWords}<a class="button" href="/api/lyrics/export" download>Export .lrc files</a>{/if}
+    <button onclick={recheck}>{t('lyrp.recheck')}</button>
+    {#if withWords}<a class="button" href="/api/lyrics/export" download>{t('lyrp.export')}</a>{/if}
   </div>
   {#if status?.blocked}
     <p class="small">
-      {n(status.blocked)} {status.blocked === 1 ? 'song has' : 'songs have'} lyrics you removed as bad, which won't be
-      taken from the same source again unless its text changes.
-      <button class="link" onclick={allowAgain}>Allow them again</button>
+      {t('lyrp.blocked', { n: status.blocked })}
+      <button class="link" onclick={allowAgain}>{t('lyrp.allow')}</button>
     </p>
   {/if}
   <p class="small muted">
-    Recheck reads every song again (for .lrc files added since) and asks LRCLIB again. Export downloads a zip of .lrc
-    files laid out like your music folders and named like the songs, so unzipping it over a music folder puts each one
-    beside its song.
+    {t('lyrp.recheck_note')}
   </p>
 </section>
 
 <section class="card">
-  <h3>Import lyrics from a zip</h3>
+  <h3>{t('lyrp.import_title')}</h3>
   <p class="small muted">
-    A zip of .lrc or .txt files laid out like your music folders (the same layout as the export above). Each file is
-    matched to a song by the artist and title in its [ar:] and [ti:] lines, or by its place in the zip when those are
-    missing. It only fills songs that have no lyrics: lyrics from song files, tags and LRCLIB always win. Files that
-    look like code or markup are thrown out and listed. Up to 250 MB and 150,000 files per zip; send several zips for a
-    bigger library.
+    {t('lyrp.import_note')}
   </p>
   <label class="switch">
     <input type="checkbox" bind:checked={replace} />
-    Replace lyrics from an earlier import
+    {t('lyrp.replace')}
   </label>
   <label class="switch">
     <input type="checkbox" bind:checked={replaceOther} />
-    Let better imported lyrics replace lyrics from files, tags and LRCLIB
+    {t('lyrp.replace_other')}
   </label>
   <p class="small muted sub">
-    "Better" means timed over plain, or a person's words timed by an AI over plain words. Lyrics an AI made by listening
-    never replace anyone's, and nothing replaces a person's timed lyrics with equal or worse ones.
+    {t('lyrp.better_note')}
   </p>
   <label class="switch">
     <input type="checkbox" bind:checked={unasked} />
-    Import even if LRCLIB has not been asked about the song yet
+    {t('lyrp.unasked')}
   </label>
   <p class="small muted sub">
-    Unless this is ticked, songs LRCLIB hasn't been asked about are skipped (and counted), so it gets the first go.
+    {t('lyrp.unasked_note')}
   </p>
   <div class="actions">
     <input type="file" accept=".zip,application/zip" multiple bind:files disabled={sending || importing?.running} />
-    <button onclick={sendZips} disabled={!files?.length || sending || importing?.running}>Import</button>
+    <button onclick={sendZips} disabled={!files?.length || sending || importing?.running}>{t('lyrp.import')}</button>
   </div>
   {#if report}
     <div class="report">
       <p class="small">
         {#if importing?.running}<span class="spinner" aria-hidden="true"></span>
-          Importing {report.file}: {n(report.done)} of {n(report.total)} files.
+          {t('lyrp.importing', { file: report.file, done: n(report.done), total: n(report.total) })}
         {:else}
-          {report.file || 'The last import'}: {n(report.saved_timed + report.saved_plain)} saved ({n(report.saved_timed)}
-          timed, {n(report.saved_plain)} plain).
+          {t('lyrp.saved', {
+            file: report.file || t('lyrp.last_import'),
+            saved: n(report.saved_timed + report.saved_plain),
+            timed: n(report.saved_timed),
+            plain: n(report.saved_plain),
+          })}
         {/if}
       </p>
-      {#if report.error}<p class="small bad">Stopped: {report.error}</p>{/if}
+      {#if report.error}<p class="small bad">{t('lyrp.stopped', { error: report.error })}</p>{/if}
       {#if report.warning_count}
         <div class="warn">
           <p class="small">
-            <strong>{n(report.warning_count)} {report.warning_count === 1 ? 'file was' : 'files were'} thrown out</strong>
-            because {report.warning_count === 1 ? 'it looked' : 'they looked'} like code or markup, not lyrics:
+            <strong>{t('lyrp.thrown_out', { n: report.warning_count })}</strong>
+            {t('lyrp.because', { n: report.warning_count })}
           </p>
           <ul class="small">
             {#each report.warnings.slice(0, 20) as w (w.entry)}
               <li>{w.entry}: {w.reason}</li>
             {/each}
           </ul>
-          {#if report.warning_count > 20}<p class="small muted">The rest are in the full report.</p>{/if}
+          {#if report.warning_count > 20}<p class="small muted">{t('lyrp.rest')}</p>{/if}
         </div>
       {/if}
       <p class="small muted">
-        Skipped: {n(report.had_lyrics)} already had lyrics, {n(report.kept_import)} kept an earlier import, {n(
-          report.waiting_lrclib,
-        )} waiting for LRCLIB, {n(report.instrumental + report.empty)} empty or instrumental. No song found for {n(
-          report.not_matched,
-        )}{#if report.ambiguous}; {n(report.ambiguous)} fit more than one song{/if}.
+        {t('lyrp.skipped', {
+          had: n(report.had_lyrics),
+          kept: n(report.kept_import),
+          waiting: n(report.waiting_lrclib),
+          empty: n(report.instrumental + report.empty),
+          unmatched: n(report.not_matched),
+        })}{#if report.ambiguous}{t('lyrp.ambiguous', { n: n(report.ambiguous) })}{/if}.
       </p>
       {#if !importing?.running}
         <div class="actions">
-          <a class="button" href="/api/lyrics/import/report" download>Download the full report</a>
-          <button onclick={dismissImport}>Clear</button>
+          <a class="button" href="/api/lyrics/import/report" download>{t('lyrp.download_report')}</a>
+          <button onclick={dismissImport}>{t('common.clear')}</button>
         </div>
       {/if}
     </div>
