@@ -7,6 +7,7 @@
   // the house's). Main's page says when it wants the visual (going
   // see-through over it) and which song plays, and is told whether there's
   // sound to draw.
+  import { t } from './i18n.svelte'
   import { onMount } from 'svelte'
   import { GlVisual } from './nodeGlVisual'
   import { isGlStyle, ShapeVisual, Smoother, type ShapeStyle, type SoundFrame, type VisualStyle } from './nodeVisual'
@@ -169,7 +170,7 @@
 <div class="stage">
   <canvas bind:this={canvas} class:shown={mode === 'visual' && !onChip}></canvas>
   <canvas bind:this={glCanvas} class:shown={mode === 'visual' && onChip}></canvas>
-  <iframe bind:this={frame} src={url} title="DJINN screen" allow="fullscreen" onload={tell}></iframe>
+  <iframe bind:this={frame} src={url} title={t('stage.title')} allow="fullscreen" onload={tell}></iframe>
   {#if unheard}
     <p class="unheard">
       Main's screen page isn't answering here. This box is asking for {url}. Open that address in this

@@ -1,6 +1,7 @@
 <script lang="ts">
   // A panel that slides up over the page. Closes on the backdrop, the
   // close button, or Escape.
+  import { t } from './i18n.svelte'
   import type { Snippet } from 'svelte'
   import Icon from './Icon.svelte'
 
@@ -14,7 +15,7 @@
 <div class="sheet" role="dialog" aria-modal="true" aria-label={title}>
   <header>
     <h2>{title}</h2>
-    <button class="close" aria-label="Close" onclick={onclose}><Icon name="close" /></button>
+    <button class="close" aria-label={t('common.close')} onclick={onclose}><Icon name="close" /></button>
   </header>
   <div class="body">{@render children()}</div>
 </div>

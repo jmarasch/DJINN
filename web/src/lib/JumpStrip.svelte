@@ -3,6 +3,7 @@
   // or the other way round, following the list). Tap a letter or slide a
   // finger along it to jump. Letters and years missing from the list jump
   // to the next one there is, so the strip always looks the same.
+  import { t } from './i18n.svelte'
   import type { Jump } from './types'
 
   let {
@@ -151,7 +152,7 @@
   <nav
     class="strip"
     class:years
-    aria-label="Jump to"
+    aria-label={t('js.jump')}
     bind:this={strip}
     bind:clientHeight={height}
     style:top="{top}px"
@@ -165,7 +166,7 @@
     {#each shown as i, n (i)}
       <button
         style:top={place(i)}
-        aria-label="Jump to {entries[i].label}"
+        aria-label={t('js.jump_to', { label: entries[i].label })}
         onclick={() => onjump(entries[i].offset)}
         onpointerdown={(e) => e.preventDefault()}
       >

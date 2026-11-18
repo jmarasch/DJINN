@@ -9,7 +9,7 @@
     lyrics,
     position,
     big = false,
-    empty = 'No lyrics for this song.',
+    empty = t('lyrics.none'),
     song,
   }: {
     /** Undefined while loading, null when there are none. */
@@ -76,11 +76,11 @@
 {/if}
 <div class="lyrics" class:big bind:this={box}>
   {#if lyrics === undefined}
-    <p class="note">Loading lyrics...</p>
+    <p class="note">{t('lyrics.loading')}</p>
   {:else if lyrics === null}
     <p class="note">{empty}</p>
   {:else if lyrics.instrumental}
-    <p class="note">Instrumental</p>
+    <p class="note">{t('lyrics.instrumental')}</p>
   {:else if lines}
     <div class="pad" aria-hidden="true"></div>
     {#each lines as line, i (i)}

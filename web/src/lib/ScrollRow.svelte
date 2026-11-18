@@ -3,6 +3,7 @@
   // devices with a mouse there are arrows that move it about a page. Each
   // side only shows while there's more that way. Swiping and scrolling work
   // as in any scrolling row.
+  import { t } from './i18n.svelte'
   import type { Snippet } from 'svelte'
   import Icon from './Icon.svelte'
 
@@ -62,12 +63,12 @@
     {@render children()}
   </div>
   {#if more.left}
-    <button type="button" class="arrow left" aria-label="Scroll left" onclick={() => page(-1)}>
+    <button type="button" class="arrow left" aria-label={t('sr.left')} onclick={() => page(-1)}>
       <Icon name="chevron-left" />
     </button>
   {/if}
   {#if more.right}
-    <button type="button" class="arrow right" aria-label="Scroll right" onclick={() => page(1)}>
+    <button type="button" class="arrow right" aria-label={t('sr.right')} onclick={() => page(1)}>
       <Icon name="chevron-right" />
     </button>
   {/if}

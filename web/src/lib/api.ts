@@ -1,3 +1,4 @@
+import { t } from './i18n.svelte'
 import type { Visuals } from './visuals'
 import type {
   MoodState,
@@ -166,7 +167,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   })
   if (!res.ok) {
     if (res.status === 401) unauthorized?.()
-    let message = `Request failed (${res.status})`
+    let message = t('api.failed', { status: res.status })
     try {
       const data = await res.json()
       if (typeof data?.error === 'string') message = data.error
@@ -326,14 +327,14 @@ export const api = {
     const query = `target=${target}&ids=${ids.join(',')}${how === 'remove' ? '&remove=true' : ''}${how === 'reset' ? '&reset=true' : ''}`
     const res = await fetch(`/api/editor/cover?${query}`, { method: 'POST', body: file ?? new Blob([]) })
     const data = await res.json().catch(() => null)
-    if (!res.ok) throw new ApiError(res.status, data?.error ?? `Request failed (${res.status})`)
+    if (!res.ok) throw new ApiError(res.status, data?.error ?? t('api.failed', { status: res.status }))
     return data as EditorApplied
   },
   /** Puts another song file in place of a song's, keeping the song. */
   editorReplace: async (id: number, file: File) => {
     const res = await fetch(`/api/editor/replace/${id}?name=${encodeURIComponent(file.name)}`, { method: 'POST', body: file })
     const data = await res.json().catch(() => null)
-    if (!res.ok) throw new ApiError(res.status, data?.error ?? `Request failed (${res.status})`)
+    if (!res.ok) throw new ApiError(res.status, data?.error ?? t('api.failed', { status: res.status }))
     return data as EditorApplied
   },
   editorRename: (ids: number[], pattern: string, preview: boolean, after: EditorAfterMove = {}) =>
@@ -427,7 +428,7 @@ export const api = {
     const query = `ids=${ids.join(',')}${file ? '' : '&remove=true'}`
     const res = await fetch(`/api/editor/imports/cover?${query}`, { method: 'POST', body: file ?? new Blob([]) })
     const data = await res.json().catch(() => null)
-    if (!res.ok) throw new ApiError(res.status, data?.error ?? `Request failed (${res.status})`)
+    if (!res.ok) throw new ApiError(res.status, data?.error ?? t('api.failed', { status: res.status }))
     return data as EditorApplied
   },
   /** Moves an import's files into a library folder, placed by `pattern`. */

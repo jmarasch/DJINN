@@ -1,6 +1,7 @@
 <script lang="ts">
   // Warns the host when Windows has the network set to Public: its firewall
   // then keeps phones out, and nothing else would say why.
+  import { t } from './i18n.svelte'
   let show = $state(false)
 
   fetch('/api/join')
@@ -11,9 +12,8 @@
 
 {#if show}
   <div class="note" role="alert">
-    <strong>Phones can't reach DJINN right now.</strong>
-    Windows has this network set to Public, which blocks guests. On this computer, open Settings &gt; Network &amp;
-    internet, pick the Wi-Fi or Ethernet connection, and choose Private network.
+    <strong>{t('pn.title')}</strong>
+    {t('pn.note')}
   </div>
 {/if}
 

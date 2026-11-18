@@ -3,6 +3,7 @@
   // the X, Escape or a click outside it. `footer` holds its Save and apply
   // button; without one it gets a Done button (settings that save as you
   // change them).
+  import { t } from './i18n.svelte'
   import type { Snippet } from 'svelte'
   import Icon from './Icon.svelte'
 
@@ -24,14 +25,14 @@
       <h2>{title}</h2>
       {#if subtitle}<p class="small muted">{subtitle}</p>{/if}
     </div>
-    <button class="close" aria-label="Close" onclick={onclose}><Icon name="close" /></button>
+    <button class="close" aria-label={t('common.close')} onclick={onclose}><Icon name="close" /></button>
   </header>
   <div class="body">{@render children()}</div>
   <footer>
     {#if footer}
       {@render footer()}
     {:else}
-      <button class="primary" onclick={onclose}>Done</button>
+      <button class="primary" onclick={onclose}>{t('common.done')}</button>
     {/if}
   </footer>
 </div>

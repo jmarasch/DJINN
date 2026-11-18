@@ -19,7 +19,7 @@
       app.me = await api.joinAsGuest(name)
       connect()
     } catch (err) {
-      error = err instanceof Error ? err.message : 'Could not join'
+      error = err instanceof Error ? err.message : t('gj.failed')
     } finally {
       busy = false
     }

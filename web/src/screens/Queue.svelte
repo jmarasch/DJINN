@@ -23,7 +23,7 @@
       await api.moveRequest(item.id, index)
     } catch (e) {
       app.queue = before
-      toast(e instanceof Error ? e.message : 'Could not move that song', true)
+      toast(e instanceof Error ? e.message : t('q.move_failed'), true)
     }
   }
 </script>
@@ -69,14 +69,14 @@
         {#if isAdmin()}
           <div class="order">
             <button
-              aria-label="Move up"
+              aria-label={t('player.move_up')}
               disabled={!sameSupport(app.queue[i - 1], item)}
               onclick={() => move(item, i - 1)}
             >
               <Icon name="up" size={20} />
             </button>
             <button
-              aria-label="Move down"
+              aria-label={t('player.move_down')}
               disabled={!sameSupport(app.queue[i + 1], item)}
               onclick={() => move(item, i + 1)}
             >

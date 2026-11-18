@@ -70,11 +70,11 @@
 {/snippet}
 
 {#if failed}
-  <p class="muted">Couldn't load this right now.</p>
+  <p class="muted">{t('disc.failed')}</p>
 {:else if !found}
-  <p class="muted small">Loading...</p>
+  <p class="muted small">{t('common.loading')}</p>
 {:else if nothing}
-  <p class="muted">Nothing to suggest yet. Add some music to the library.</p>
+  <p class="muted">{t('disc.empty')}</p>
 {:else}
   {#if found.speed_dial.length}
     <section>

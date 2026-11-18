@@ -3,6 +3,7 @@
 
 import { api } from './api'
 import { app, isAdmin, toast, whenLoggingOut } from './state.svelte'
+import { t } from './i18n.svelte'
 
 export const playHere = $state({
   /** The stream; null when the host turned Play here off. */
@@ -62,7 +63,7 @@ async function connect() {
     await a.play()
   } catch {
     stopPlayHere()
-    toast("Couldn't play here. Check this device's sound and try again.", true)
+    toast(t('ph.failed'), true)
   }
 }
 

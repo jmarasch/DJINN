@@ -139,7 +139,7 @@
 {:else if onJoinPage}
   <Join />
 {:else if !app.ready}
-  <div class="center-screen muted">Loading...</div>
+  <div class="center-screen muted">{t('common.loading')}</div>
 {:else if app.me && app.setupLibrary}
   <main class="narrow"><SetupLibrary /></main>
 {:else if !app.me}
@@ -155,10 +155,10 @@
     {:else}
       <Login />
       {#if app.mode && app.mode.signup !== 'closed'}
-        <button class="back-to-guest" onclick={() => (signingUp = true)}>New here? Create an account</button>
+        <button class="back-to-guest" onclick={() => (signingUp = true)}>{t('app.new_here')}</button>
       {/if}
       {#if app.mode?.guest_mode}
-        <button class="back-to-guest" onclick={() => (app.hostLogin = false)}>Not the host? Join with a name</button>
+        <button class="back-to-guest" onclick={() => (app.hostLogin = false)}>{t('app.not_host')}</button>
       {/if}
     {/if}
   </main>

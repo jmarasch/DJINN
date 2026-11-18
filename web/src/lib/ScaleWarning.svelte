@@ -6,6 +6,7 @@
   // page's inner width in page points), so only Windows' scale counts. It
   // shows for a while and goes, since a screen may have no mouse to close
   // it; it comes back when the page loads again or the scale changes.
+  import { t } from './i18n.svelte'
   import { onMount } from 'svelte'
 
   const SHOW_FOR_MS = 60_000
@@ -53,12 +54,11 @@
 
 {#if shown}
   <div class="scale-warning" role="alert">
-    <strong>Windows display scaling is set to {Math.round(scale * 100)}%</strong>
+    <strong>{t('sw2.title', { pct: Math.round(scale * 100) })}</strong>
     <p>
-      Scaling can make this screen look wrong. Set it to 100% in Windows Settings &gt; System &gt; Display &gt; Scale.
-      If you want things on the display bigger, lower the screen resolution instead.
+      {t('sw2.note')}
     </p>
-    <button onclick={() => (shown = false)}>Got it</button>
+    <button onclick={() => (shown = false)}>{t('sw2.got_it')}</button>
   </div>
 {/if}
 

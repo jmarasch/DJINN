@@ -291,9 +291,9 @@ export async function requestTrack(trackId: number) {
   try {
     const item = await api.addRequest(trackId)
     toast(
-      item.outcome === 'backed' ? 'You asked for it too, so it moved up a place' : 'Added to the queue',
+      item.outcome === 'backed' ? t('rq.backed') : t('rq.added'),
       false,
-      { label: 'Undo', run: () => cancelRequest(item.id) },
+      { label: t('rq.undo'), run: () => cancelRequest(item.id) },
     )
   } catch (e) {
     const next = new Set(app.pending)
@@ -368,13 +368,13 @@ export function tapTrack(track: { id: number; title: string }) {
       requestTrack(track.id)
       break
     case 'playing':
-      toast('Playing now')
+      toast(t('rq.playing'))
       break
     case 'mine':
-      toast('You asked for this one. Tap the check to step back.')
+      toast(t('rq.yours'))
       break
     default:
-      toast('Adding it...')
+      toast(t('rq.adding'))
   }
 }
 
