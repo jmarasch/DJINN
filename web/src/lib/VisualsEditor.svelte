@@ -3,6 +3,7 @@
   // looks: a gallery of thumbnails, and a style's settings with a live
   // preview when one is opened. For the house (Admin > Visualizers) and for
   // a node of its own (its screen settings).
+  import { t } from './i18n.svelte'
   import { onMount } from 'svelte'
   import type { VisualStyle } from './nodeVisual'
   import { DEFAULT_LOOK, lookOf, Preview, STYLES, styleInfo, thumbnail, type Look, type Visuals } from './visuals'
@@ -79,16 +80,16 @@
 <div class="visuals">
   <div class="row">
     <label>
-      Take turns
+      {t('ve.turns')}
       <select value={value.change} onchange={(e) => save({ change: e.currentTarget.value as Visuals['change'] })}>
-        <option value="song">With each song</option>
-        <option value="time">Every few seconds</option>
-        <option value="never">Never (only the first)</option>
+        <option value="song">{t('ve.song')}</option>
+        <option value="time">{t('ve.time')}</option>
+        <option value="never">{t('ve.never')}</option>
       </select>
     </label>
     {#if value.change === 'time'}
       <label>
-        Every {value.every_secs} seconds
+        {t('ve.every', { n: value.every_secs })}
         <input
           type="range"
           min="5"
@@ -101,7 +102,7 @@
     {/if}
   </div>
   <p class="small muted">
-    Ticked ones take turns, in the numbered order. Open one for its settings and a preview with a made-up song.
+    {t('ve.note')}
   </p>
 
   <div class="gallery">
@@ -119,7 +120,7 @@
         </button>
         <label class="check small">
           <input type="checkbox" checked={at >= 0} onchange={(e) => toggle(info.style, e.currentTarget.checked)} />
-          In the rotation
+          {t('ve.rotation')}
         </label>
       </div>
     {/each}
@@ -136,21 +137,21 @@
         <p class="small muted">{info?.about}</p>
         {#if info?.chip}
           <p class="small muted">
-            Drawn on the graphics chip. A box that can't keep up skips it and moves on to the next.
+            {t('ve.chip')}
           </p>
         {/if}
         <label class="check">
           <input type="checkbox" checked={at >= 0} onchange={(e) => toggle(open!, e.currentTarget.checked)} />
-          In the rotation{at >= 0 ? `, number ${at + 1}` : ''}
+          {at >= 0 ? t('ve.rotation_n', { n: at + 1 }) : t('ve.rotation')}
         </label>
         {#if at >= 0 && value.styles.length > 1}
           <div class="moves">
-            <button class="pill" disabled={at === 0} onclick={() => move(open!, -1)}>Earlier</button>
-            <button class="pill" disabled={at === value.styles.length - 1} onclick={() => move(open!, 1)}>Later</button>
+            <button class="pill" disabled={at === 0} onclick={() => move(open!, -1)}>{t('ve.earlier')}</button>
+            <button class="pill" disabled={at === value.styles.length - 1} onclick={() => move(open!, 1)}>{t('ve.later')}</button>
           </div>
         {/if}
         <label>
-          How strongly it reacts: {Math.round(openLook.intensity * 100)}%
+          {t('ve.strength', { pct: Math.round(openLook.intensity * 100) })}
           <input
             type="range"
             min="0.25"
@@ -162,14 +163,14 @@
         </label>
         {#if open !== 'spectrogram' && open !== 'vu'}
           <label>
-            Colors
+            {t('ve.colors')}
             <select value={openLook.colors} onchange={(e) => setLook(open!, { colors: e.currentTarget.value as Look['colors'] })}>
-              <option value="default">Its own</option>
-              <option value="rainbow">Rainbow, turning slowly</option>
+              <option value="default">{t('ve.own')}</option>
+              <option value="rainbow">{t('ve.rainbow')}</option>
             </select>
           </label>
         {/if}
-        <button onclick={() => (open = null)}>Close</button>
+        <button onclick={() => (open = null)}>{t('common.close')}</button>
       </div>
     </section>
   {/if}

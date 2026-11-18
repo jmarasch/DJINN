@@ -2,6 +2,7 @@
   // Admin > Visualizers: what node screens draw, for the whole house. Kept
   // on this server and sent to each node; a node can have its own instead
   // (Admin > Nodes > Screen, or the node's own page).
+  import { t } from './i18n.svelte'
   import { onMount } from 'svelte'
   import { api } from './api'
   import { toast } from './state.svelte'
@@ -26,19 +27,18 @@
       visuals = await api.setVisuals(next)
     } catch (e) {
       visuals = before
-      toast(e instanceof Error ? e.message : 'Could not save', true)
+      toast(e instanceof Error ? e.message : t('common.save_failed_short'), true)
     }
   }
 </script>
 
 <section class="card">
-  <h2>Visualizers</h2>
+  <h2>{t('vp.title')}</h2>
   <p class="small muted">
-    What a node's screen draws while it shows the visualizer (Admin &gt; Nodes &gt; Screen). Each node measures its own
-    speaker and draws it in step. These are for every node, unless a node has its own.
+    {t('vp.intro')}
   </p>
   {#if failed}
-    <p class="error">Could not load the visualizers.</p>
+    <p class="error">{t('vp.failed')}</p>
   {:else if visuals}
     <VisualsEditor value={visuals} onchange={save} />
   {/if}

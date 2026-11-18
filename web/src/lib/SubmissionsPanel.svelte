@@ -6,6 +6,7 @@
   import { duration } from './format'
   import { unlocked } from './protected.svelte'
   import { toast } from './state.svelte'
+  import { locale, t } from './i18n.svelte'
   import type { Submission, UploadSettings } from './types'
 
   let waiting = $state<Submission[]>([])
@@ -25,22 +26,22 @@
     try {
       await unlocked(() => api.approveSubmission(s.id))
       waiting = waiting.filter((w) => w.id !== s.id)
-      toast(`Added "${s.title ?? s.file_name}" to the library`)
+      toast(t('sub.added', { title: s.title ?? s.file_name }))
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not add it', true)
+      toast(e instanceof Error ? e.message : t('common.add_failed'), true)
     } finally {
       busy = false
     }
   }
 
   async function decline(s: Submission) {
-    const note = prompt(`Turn down "${s.title ?? s.file_name}"? The file is deleted. A note for ${s.uploader ?? 'them'} (optional):`, '')
+    const note = prompt(t('sub.decline_q', { title: s.title ?? s.file_name, who: s.uploader ?? t('sub.them') }), '')
     if (note === null) return
     try {
       await api.declineSubmission(s.id, note)
       waiting = waiting.filter((w) => w.id !== s.id)
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not turn it down', true)
+      toast(e instanceof Error ? e.message : t('sub.decline_failed'), true)
     }
   }
 
@@ -49,19 +50,20 @@
     if (!settings) return
     try {
       settings = await api.saveUploadSettings(settings)
-      toast('Saved')
+      toast(t('common.saved'))
     } catch (err) {
-      toast(err instanceof Error ? err.message : 'Could not save', true)
+      toast(err instanceof Error ? err.message : t('common.save_failed_short'), true)
     }
   }
 
-  const mb = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)} MB`
+  const mb = (bytes: number) =>
+    `${(bytes / 1024 / 1024).toLocaleString(locale.code, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} MB`
 </script>
 
 <section class="card">
-  <h2>Submitted music</h2>
+  <h2>{t('sub.title')}</h2>
   <p class="small muted">
-    Songs people sent from DJINN GO, for roles that can submit music. Listen, then add them to the library or turn them down.
+    {t('sub.intro')}
   </p>
   {#each waiting as s (s.id)}
     <div class="item">
@@ -70,34 +72,34 @@
         <span class="muted">{[s.artist, s.album].filter(Boolean).join(' · ')}</span>
       </div>
       <div class="muted small">
-        From {s.uploader ?? 'someone'} · {s.file_name} · {mb(s.size)}{#if s.duration_ms} · {duration(s.duration_ms)}{/if}
+        {t('sub.from', { who: s.uploader ?? t('sub.someone') })} · {s.file_name} · {mb(s.size)}{#if s.duration_ms} · {duration(s.duration_ms)}{/if}
       </div>
-      {#if s.duplicate_title}<div class="warn small">Looks like {s.duplicate_title}, already in the library.</div>{/if}
-      {#if !s.title || !s.artist}<div class="warn small">Missing {!s.title ? 'a title' : 'an artist'} in its tags.</div>{/if}
+      {#if s.duplicate_title}<div class="warn small">{t('sub.dup', { title: s.duplicate_title })}</div>{/if}
+      {#if !s.title || !s.artist}<div class="warn small">{!s.title ? t('sub.no_title') : t('sub.no_artist')}</div>{/if}
       <audio controls preload="none" src="/api/submissions/{s.id}/file"></audio>
       <div class="buttons">
-        <button class="primary small-button" onclick={() => approve(s)} disabled={busy}>Add to library</button>
-        <button class="small-button" onclick={() => decline(s)} disabled={busy}>Turn down</button>
+        <button class="primary small-button" onclick={() => approve(s)} disabled={busy}>{t('sub.add')}</button>
+        <button class="small-button" onclick={() => decline(s)} disabled={busy}>{t('sub.decline')}</button>
       </div>
     </div>
   {:else}
-    <p class="muted">Nothing waiting.</p>
+    <p class="muted">{t('sub.nothing')}</p>
   {/each}
 
   {#if settings}
     <form class="settings" onsubmit={saveSettings}>
       <label>
-        Approved songs go to
+        {t('sub.folder')}
         <input bind:value={settings.folder} spellcheck="false" />
       </label>
       <p class="small muted">
-        A folder just for uploads, sorted into Artist/Album folders. It becomes a library folder the first time a song goes in. DJINN never writes to your other music folders.
+        {t('sub.folder_note')}
       </p>
       <label>
-        Largest file (MB)
+        {t('sub.max')}
         <input type="number" min="1" max="4096" bind:value={settings.max_mb} />
       </label>
-      <button class="small-button">Save</button>
+      <button class="small-button">{t('common.save')}</button>
     </form>
   {/if}
 </section>
