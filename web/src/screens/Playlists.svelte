@@ -41,12 +41,12 @@
 
   async function playWild() {
     if (wild) {
-      toast('Wild play is already on')
+      toast(t('pls.wild_on'))
       return
     }
     try {
       await api.playWild()
-      toast('Wild play: random songs from the whole library')
+      toast(t('pls.wild_started'))
     } catch (e) {
       toast(e instanceof Error ? e.message : t('pls.wild_failed'), true)
     }

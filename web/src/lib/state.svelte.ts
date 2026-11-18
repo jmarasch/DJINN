@@ -299,7 +299,7 @@ export async function requestTrack(trackId: number) {
     const next = new Set(app.pending)
     next.delete(trackId)
     app.pending = next
-    toast(e instanceof Error ? e.message : 'Could not add that song', true)
+    toast(e instanceof Error ? e.message : t('rq.add_failed'), true)
   }
 }
 
@@ -341,7 +341,7 @@ export async function cancelRequest(queueId: number) {
     toast(message)
   } catch (e) {
     app.queue = before
-    toast(e instanceof Error ? e.message : 'Could not remove that song', true)
+    toast(e instanceof Error ? e.message : t('rq.remove_failed'), true)
   }
 }
 

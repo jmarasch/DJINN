@@ -76,7 +76,7 @@
   })
 
   function clear(clearing: () => () => void) {
-    toast('Queue cleared', false, { label: 'Undo', run: clearing() })
+    toast(t('player.queue_cleared'), false, { label: t('rq.undo'), run: clearing() })
   }
   const upNext = $derived(player.queue.slice(player.index + 1))
 

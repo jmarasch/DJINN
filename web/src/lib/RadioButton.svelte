@@ -13,7 +13,7 @@
     busy = true
     try {
       await api.playRadio(seed)
-      toast('Radio on: songs like this play when the requests run out')
+      toast(t('radio.on'))
       onstart?.()
     } catch (e) {
       toast(e instanceof Error ? e.message : t('radio.failed'), true)

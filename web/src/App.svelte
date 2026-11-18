@@ -194,11 +194,11 @@
   </header>
   {#if app.me.must_change_password}
     <div class="must-change" role="alert">
-      Your password is a temporary one. <a href="#/account">Change it now</a>.
+      {t('app.temp_password')} <a href="#/account">{t('app.change_now')}</a>.
     </div>
   {/if}
 
-  <nav class="side" class:rail={tab === 'admin'} aria-label="Main navigation">
+  <nav class="side" class:rail={tab === 'admin'} aria-label={t('goa.main_nav')}>
     <a class="brand side-brand" href="#/" aria-label="DJINN">
       <Logo size={48} />
       <span class="brand-text">

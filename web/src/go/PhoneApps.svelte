@@ -50,9 +50,9 @@
   async function copy(text: string) {
     try {
       await navigator.clipboard.writeText(text)
-      toast('Copied')
+      toast(t('pa2.copied'))
     } catch {
-      toast('Select it and copy it', true)
+      toast(t('pa2.copy_by_hand'), true)
     }
   }
 </script>

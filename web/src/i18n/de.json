@@ -3496,5 +3496,15 @@
   "gar.play_failed": "Konnten nicht abgespielt werden",
   "gar.like_artist": "Diesen Künstler mögen",
   "gar.like_album": "Dieses Album mögen",
-  "pb.open": "Läuft gerade öffnen"
+  "pb.open": "Läuft gerade öffnen",
+  "app.temp_password": "Dein Passwort ist ein vorläufiges.",
+  "app.change_now": "Jetzt ändern",
+  "pls.wild_on": "Freie Wiedergabe ist schon an",
+  "pls.wild_started": "Freie Wiedergabe: zufällige Songs aus der ganzen Bibliothek",
+  "rq.add_failed": "Dieser Song konnte nicht hinzugefügt werden",
+  "rq.remove_failed": "Dieser Song konnte nicht entfernt werden",
+  "radio.on": "Radio an: ähnliche Songs laufen, wenn die Wünsche ausgehen",
+  "pa2.copied": "Kopiert",
+  "pa2.copy_by_hand": "Markiere es und kopiere es",
+  "gpl.name_q": "Name der Playlist"
 }

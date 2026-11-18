@@ -3496,5 +3496,15 @@
   "gar.play_failed": "No se pudieron reproducir",
   "gar.like_artist": "Me gusta este artista",
   "gar.like_album": "Me gusta este álbum",
-  "pb.open": "Abrir lo que suena"
+  "pb.open": "Abrir lo que suena",
+  "app.temp_password": "Tu contraseña es temporal.",
+  "app.change_now": "Cámbiala ahora",
+  "pls.wild_on": "El modo libre ya está activado",
+  "pls.wild_started": "Modo libre: canciones al azar de toda la biblioteca",
+  "rq.add_failed": "No se pudo añadir esa canción",
+  "rq.remove_failed": "No se pudo quitar esa canción",
+  "radio.on": "Radio activada: sonarán canciones como esta cuando se acaben las peticiones",
+  "pa2.copied": "Copiado",
+  "pa2.copy_by_hand": "Selecciónalo y cópialo",
+  "gpl.name_q": "Nombre de la lista"
 }

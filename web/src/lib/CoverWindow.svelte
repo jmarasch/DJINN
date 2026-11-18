@@ -112,7 +112,7 @@
       const kind = blob.type === 'image/png' ? 'png' : 'jpg'
       await onset(new File([blob], `cover.${kind}`, { type: blob.type || 'image/jpeg' }))
     } catch (e) {
-      toast(e instanceof Error ? e.message : "Couldn't get that cover", true)
+      toast(e instanceof Error ? e.message : t('cw.cover_failed'), true)
     }
   }
 </script>

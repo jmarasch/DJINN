@@ -48,7 +48,7 @@
 
   async function rename() {
     if (!list) return
-    const name = prompt('Playlist name', list.name)
+    const name = prompt(t('gpl.name_q'), list.name)
     if (!name) return
     try {
       await api.goUpdatePlaylist(list.id, { name })

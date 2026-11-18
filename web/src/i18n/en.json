@@ -3496,5 +3496,15 @@
   "gar.play_failed": "Could not play them",
   "gar.like_artist": "Like this artist",
   "gar.like_album": "Like this album",
-  "pb.open": "Open Now Playing"
+  "pb.open": "Open Now Playing",
+  "app.temp_password": "Your password is a temporary one.",
+  "app.change_now": "Change it now",
+  "pls.wild_on": "Wild play is already on",
+  "pls.wild_started": "Wild play: random songs from the whole library",
+  "rq.add_failed": "Could not add that song",
+  "rq.remove_failed": "Could not remove that song",
+  "radio.on": "Radio on: songs like this play when the requests run out",
+  "pa2.copied": "Copied",
+  "pa2.copy_by_hand": "Select it and copy it",
+  "gpl.name_q": "Playlist name"
 }
