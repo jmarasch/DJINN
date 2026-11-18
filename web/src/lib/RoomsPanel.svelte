@@ -5,6 +5,7 @@
   // timing), each in a floating window, and the room's endpoints (this
   // computer's speakers and nodes), which are dragged from room to room or
   // clicked to open their settings.
+  import { t } from './i18n.svelte'
   import { onMount } from 'svelte'
   import { api } from './api'
   import FloatingWindow from './FloatingWindow.svelte'
@@ -56,7 +57,7 @@
       const answers = await Promise.all(others.map((r) => api.roomQuiet(r.id)))
       quiet = Object.fromEntries(others.map((r, i) => [r.id, answers[i]]))
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not load rooms', true)
+      toast(e instanceof Error ? e.message : t('rm.load_failed'), true)
     }
   }
 
@@ -80,7 +81,7 @@
       toast(done)
       await load()
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'That did not work', true)
+      toast(e instanceof Error ? e.message : t('common.failed'), true)
     }
   }
 
@@ -88,14 +89,15 @@
     e.preventDefault()
     const name = newName.trim()
     if (!name) return
-    void run(() => api.createRoom(name), `Made ${name}`).then(() => (newName = ''))
+    void run(() => api.createRoom(name), t('rm.made', { name })).then(() => (newName = ''))
   }
 
-  const nameOf = (id: number) => rooms.find((r) => r.id === id)?.name ?? 'Main'
+  const nameOf = (id: number) => rooms.find((r) => r.id === id)?.name ?? t('rm.main')
   const leaders = (room: Room) => rooms.filter((r) => r.id !== room.id && r.linked_to === null)
   const followers = (room: Room) => rooms.filter((r) => r.linked_to === room.id)
   const roomOf = (id: number) => rooms.find((r) => r.id === id)
-  const playsText = (room: Room) => (room.linked_to ? `Along with ${nameOf(room.linked_to)}` : 'Its own music')
+  const playsText = (room: Room) =>
+    room.linked_to ? t('rm.along_with', { name: nameOf(room.linked_to) }) : t('rm.own_music')
 
   /** Opens a window, loading what it shows first. */
   async function open(next: Window) {
@@ -115,7 +117,7 @@
       }
       win = next
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not open it', true)
+      toast(e instanceof Error ? e.message : t('ed.open_failed'), true)
     }
   }
 
@@ -123,7 +125,7 @@
     try {
       timing = await api.nudgeTiming(room, speaker.kind, speaker.id, speaker.output, ms)
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not change it', true)
+      toast(e instanceof Error ? e.message : t('lf.change_failed'), true)
     }
   }
 
@@ -135,7 +137,7 @@
     try {
       await api.setRoomScreen(room, screen)
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not save', true)
+      toast(e instanceof Error ? e.message : t('common.save_failed_short'), true)
     }
   }
 
@@ -143,7 +145,7 @@
     try {
       await api.setNodeAudio(node.id, { ...node.audio, screen, visual })
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not save', true)
+      toast(e instanceof Error ? e.message : t('common.save_failed_short'), true)
     }
     await load()
   }
@@ -158,7 +160,7 @@
     try {
       casts = (await api.discoverCasts()).devices
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not search', true)
+      toast(e instanceof Error ? e.message : t('rm.search_failed'), true)
     }
     searching = false
   }
@@ -167,9 +169,9 @@
   async function placeCast(device: CastDevice, room: number) {
     try {
       casts = (await api.setCastRoom(device.id, room)).devices
-      toast(`${device.name} is in ${nameOf(room)}`)
+      toast(t('rm.cast_in', { device: device.name, room: nameOf(room) }))
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not move it', true)
+      toast(e instanceof Error ? e.message : t('rm.move_failed'), true)
       await load()
     }
   }
@@ -178,16 +180,24 @@
   async function removeCast(device: CastDevice) {
     try {
       casts = (await api.clearCastRoom(device.id)).devices
-      toast(`${device.name} is no longer in a room`)
+      toast(t('rm.cast_out', { device: device.name }))
       win = null
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not remove it', true)
+      toast(e instanceof Error ? e.message : t('common.remove_failed'), true)
       await load()
     }
   }
 
   const castState = (c: CastDevice) =>
-    c.error ? c.error : c.active ? (c.buffering ? 'connecting' : c.playing ? 'playing' : 'casting') : 'not casting'
+    c.error
+      ? c.error
+      : c.active
+        ? c.buffering
+          ? t('rm.c_connecting')
+          : c.playing
+            ? t('rm.c_playing')
+            : t('rm.c_casting')
+        : t('rm.c_not')
 
   /** Puts a dragged endpoint in `room`. */
   function dropOn(room: Room) {
@@ -202,11 +212,11 @@
     }
     if (item.kind === 'node') {
       const node = nodes.find((n) => n.id === item.id)
-      if (node && node.room_id !== room.id) void run(() => api.setNodeRoom(node.id, room.id), `${node.name} moved to ${room.name}`)
+      if (node && node.room_id !== room.id) void run(() => api.setNodeRoom(node.id, room.id), t('rm.moved_to', { name: node.name, room: room.name }))
     } else {
       const output = outputs.find((o) => o.id === item.id)
       if (output && output.room_id !== room.id)
-        void run(() => api.placeOutput(output.id, room.id), `${output.label} moved to ${room.name}`)
+        void run(() => api.placeOutput(output.id, room.id), t('rm.moved_to', { name: output.label, room: room.name }))
     }
   }
 
@@ -226,16 +236,13 @@
 </script>
 
 <section class="card wide">
-  <h2>Rooms</h2>
+  <h2>{t('rm.title')}</h2>
   <p class="small muted">
-    Each room is its own party: its own queue, playlist, volume and skip votes, played on the speakers and nodes you put
-    in it. A room uses Main's queue rules (Admin &gt; Rules) until you give it its own. Drag an endpoint from one room to
-    another to move it; click one to open its settings. People pick their room in the app, or scan a room's join code
-    to walk straight in. Your song likes and what the party learns are shared across the house.
+    {t('rm.intro')}
   </p>
   <form class="add" onsubmit={add}>
-    <input bind:value={newName} placeholder="New room, like Patio" maxlength="40" aria-label="New room's name" />
-    <button class="primary" disabled={!newName.trim()}>Add room</button>
+    <input bind:value={newName} placeholder={t('rm.new_hint')} maxlength="40" aria-label={t('rm.new_name')} />
+    <button class="primary" disabled={!newName.trim()}>{t('rm.add')}</button>
   </form>
 </section>
 
@@ -244,19 +251,19 @@
     <section class="card room">
       <div class="head">
         <h3>{room.name}</h3>
-        <button class="small-button" onclick={() => open({ kind: 'room', room: room.id })}>Room options</button>
+        <button class="small-button" onclick={() => open({ kind: 'room', room: room.id })}>{t('rm.options')}</button>
       </div>
 
       <div class="tools">
-        <button onclick={() => open({ kind: 'display', room: room.id })}>Display settings</button>
-        <button title="What this room plays" onclick={() => open({ kind: 'plays', room: room.id })}>
-          Plays<span class="muted small"> · {playsText(room)}</span>
+        <button onclick={() => open({ kind: 'display', room: room.id })}>{t('rm.display')}</button>
+        <button title={t('rm.what_plays')} onclick={() => open({ kind: 'plays', room: room.id })}>
+          {t('rm.plays')}<span class="muted small"> · {playsText(room)}</span>
         </button>
-        <button onclick={() => open({ kind: 'rules', room: room.id })}>Queue rules</button>
+        <button onclick={() => open({ kind: 'rules', room: room.id })}>{t('rm.rules')}</button>
         {#if room.linked_to === null}
-          <button onclick={() => open({ kind: 'timing', room: room.id })}>Timing</button>
+          <button onclick={() => open({ kind: 'timing', room: room.id })}>{t('rm.timing')}</button>
         {:else}
-          <button disabled title="Timing is set in the room this one plays along with">Timing</button>
+          <button disabled title={t('rm.timing_linked')}>{t('rm.timing')}</button>
         {/if}
       </div>
 
@@ -264,7 +271,7 @@
         class="endpoints"
         class:over={over === room.id}
         role="group"
-        aria-label="Endpoints in {room.name}"
+        aria-label={t('rm.endpoints_in', { room: room.name })}
         ondragover={(e) => {
           if (!dragging) return
           e.preventDefault()
@@ -276,8 +283,8 @@
           dropOn(room)
         }}
       >
-        <h4>Endpoints</h4>
-        <p class="small muted">Speakers, nodes and cast devices. Drag one to another room, or click it for its settings.</p>
+        <h4>{t('rm.endpoints')}</h4>
+        <p class="small muted">{t('rm.endpoints_note')}</p>
         <div class="chips">
           {#each outputs.filter((o) => o.room_id === room.id) as output (output.id)}
             <button
@@ -290,7 +297,7 @@
               ondragend={() => ((dragging = null), (over = null))}
               onclick={() => open({ kind: 'output', id: output.id })}
             >
-              {output.label}<span class="muted small"> · this computer</span>
+              {output.label}<span class="muted small">{t('rm.this_computer')}</span>
             </button>
           {/each}
           {#each nodes.filter((n) => n.room_id === room.id) as node (node.id)}
@@ -305,7 +312,11 @@
               onclick={() => open({ kind: 'node', id: node.id })}
             >
               <span class="dot" class:on={online(node)}></span>
-              {node.name}<span class="muted small"> · node{(node.audio.outputs ?? []).length ? `, ${(node.audio.outputs ?? []).length + 1} speakers` : ''}</span>
+              {node.name}<span class="muted small"
+                >{t('rm.node')}{(node.audio.outputs ?? []).length
+                  ? t('rm.n_speakers', { n: (node.audio.outputs ?? []).length + 1 })
+                  : ''}</span
+              >
             </button>
           {/each}
           {#each placedCasts(room) as device (device.id)}
@@ -320,11 +331,11 @@
               onclick={() => open({ kind: 'cast', id: device.id })}
             >
               <span class="dot" class:on={device.active && !device.error}></span>
-              {device.name}<span class="muted small"> · cast</span>
+              {device.name}<span class="muted small">{t('rm.cast')}</span>
             </button>
           {/each}
           {#if !outputs.some((o) => o.room_id === room.id) && !nodes.some((n) => n.room_id === room.id) && !placedCasts(room).length}
-            <span class="small muted">None yet. Drag one here.</span>
+            <span class="small muted">{t('rm.none')}</span>
           {/if}
         </div>
       </div>
@@ -335,7 +346,7 @@
 <section
   class="card wide nearby"
   class:over={over === -1}
-  aria-label="Cast devices not in a room"
+  aria-label={t('rm.casts_out')}
   ondragover={(e) => {
     if (dragging?.kind !== 'cast') return
     e.preventDefault()
@@ -351,10 +362,9 @@
     if (device?.placed || device?.active) void removeCast(device)
   }}
 >
-  <h3>Cast devices</h3>
+  <h3>{t('rm.casts')}</h3>
   <p class="small muted">
-    TVs and speakers DJINN can cast to. Drag one into a room to put it there; it then plays that room's music. Drag
-    one back here to take it out of its room.
+    {t('rm.casts_note')}
   </p>
   <div class="chips">
     {#each nearby as device (device.id)}
@@ -371,27 +381,27 @@
         {device.name}<span class="muted small"> · {device.model ?? device.kind}</span>
       </button>
     {:else}
-      <span class="small muted">None waiting. Search to look again.</span>
+      <span class="small muted">{t('rm.none_waiting')}</span>
     {/each}
-    <button class="small-button" disabled={searching} onclick={search}>{searching ? 'Searching...' : 'Search again'}</button>
+    <button class="small-button" disabled={searching} onclick={search}>{searching ? t('cw.searching') : t('rm.search_again')}</button>
   </div>
 </section>
 
 {#if win && (win.kind === 'plays') && winRoom}
   {@const room = winRoom}
-  <FloatingWindow title="{room.name}: what it plays" onclose={() => (win = null)}>
+  <FloatingWindow title={t('rm.plays_title', { room: room.name })} onclose={() => (win = null)}>
     <label class="field">
-      Plays
+      {t('rm.plays')}
       <select
         value={room.linked_to ?? 0}
         onchange={(e) => {
           const to = Number(e.currentTarget.value) || null
-          void run(() => api.linkRoom(room.id, to), to ? `${room.name} plays along with ${nameOf(to)}` : `${room.name} plays its own music`)
+          void run(() => api.linkRoom(room.id, to), to ? t('rm.now_along', { room: room.name, other: nameOf(to) }) : t('rm.now_own', { room: room.name }))
         }}
       >
-        <option value={0}>Its own music</option>
+        <option value={0}>{t('rm.own_music')}</option>
         {#each leaders(room) as other (other.id)}
-          <option value={other.id}>Along with {other.name}, in step</option>
+          <option value={other.id}>{t('rm.in_step', { name: other.name })}</option>
         {/each}
       </select>
     </label>
@@ -402,97 +412,97 @@
           checked={quiet[room.id].follow_main}
           onchange={(e) => {
             const next = { ...quiet[room.id], follow_main: e.currentTarget.checked }
-            void run(() => api.setRoomQuiet(room.id, next), next.follow_main ? `${room.name} plays Main's music when quiet` : 'Saved')
+            void run(() => api.setRoomQuiet(room.id, next), next.follow_main ? t('rm.follows', { room: room.name }) : t('common.saved'))
           }}
         />
-        When nothing's queued here, play along with Main
+        {t('rm.follow_main')}
       </label>
       {#if quiet[room.id].follow_main}
         <label class="field">
-          A request here takes over
+          {t('rm.takeover')}
           <select
             value={quiet[room.id].takeover}
             onchange={(e) => {
               const next = { ...quiet[room.id], takeover: e.currentTarget.value as 'now' | 'after_song' }
-              void run(() => api.setRoomQuiet(room.id, next), 'Saved')
+              void run(() => api.setRoomQuiet(room.id, next), t('common.saved'))
             }}
           >
-            <option value="now">Right away</option>
-            <option value="after_song">When Main's song ends</option>
+            <option value="now">{t('rm.right_away')}</option>
+            <option value="after_song">{t('rm.after_song')}</option>
           </select>
         </label>
       {/if}
     {/if}
     {#if followers(room).length}
-      <p class="small muted">Playing along here: {followers(room).map((r) => r.name).join(', ')}.</p>
+      <p class="small muted">{t('rm.playing_along', { names: followers(room).map((r) => r.name).join(', ') })}</p>
     {/if}
-    <p class="small muted">These save as you change them.</p>
+    <p class="small muted">{t('rm.save_as_change')}</p>
   </FloatingWindow>
 {:else if win && win.kind === 'rules' && winRoom}
   {@const room = winRoom}
-  <FloatingWindow title="{room.name}: queue rules" subtitle="A room uses Main's rules until it has its own." onclose={() => (win = null)}>
+  <FloatingWindow title={t('rm.rules_title', { room: room.name })} subtitle={t('rm.rules_sub')} onclose={() => (win = null)}>
     <form
       id="rules-form"
       class="stack"
       onsubmit={(e) => {
         e.preventDefault()
-        void run(() => api.setRoomRules(room.id, rules), `${room.name}'s rules saved`).then(() => (win = null))
+        void run(() => api.setRoomRules(room.id, rules), t('rm.rules_saved', { room: room.name })).then(() => (win = null))
       }}
     >
-      <label class="field">Most songs in the queue (0 for no limit) <input type="number" min="0" max="1000" bind:value={rules.max_queue} /></label>
-      <label class="field">Songs each person can have queued <input type="number" min="0" max="100" bind:value={rules.per_user_limit} /></label>
-      <label class="field">Votes needed to skip a song (0 turns voting off) <input type="number" min="0" max="100" bind:value={rules.skip_votes} /></label>
+      <label class="field">{t('rm.max_queue')} <input type="number" min="0" max="1000" bind:value={rules.max_queue} /></label>
+      <label class="field">{t('admin.per_user')} <input type="number" min="0" max="100" bind:value={rules.per_user_limit} /></label>
+      <label class="field">{t('rm.skip_votes')} <input type="number" min="0" max="100" bind:value={rules.skip_votes} /></label>
     </form>
     {#snippet footer()}
-      <button onclick={() => (win = null)}>Cancel</button>
-      <button class="primary" form="rules-form">Save and apply</button>
+      <button onclick={() => (win = null)}>{t('common.cancel')}</button>
+      <button class="primary" form="rules-form">{t('rm.save_apply')}</button>
     {/snippet}
   </FloatingWindow>
 {:else if win && win.kind === 'timing' && winRoom}
   {@const room = winRoom}
-  <FloatingWindow title="{room.name}: timing" onclose={() => (win = null)}>
+  <FloatingWindow title={t('rm.timing_title', { room: room.name })} onclose={() => (win = null)}>
     <p class="small muted">
-      Play the timing sound, then move each speaker earlier or later until the tocks land together. Nothing can play
-      before the music reaches it, so moving one earlier holds the others back instead. Nodes change within a few
-      seconds; this computer's speakers at once.
+      {t('rm.timing_note')}
     </p>
     <div>
-      <button onclick={() => run(() => api.playSyncTone(room.id), `Timing sound playing in ${room.name} for 30 seconds`)}>
-        Play the timing sound (30 s)
+      <button onclick={() => run(() => api.playSyncTone(room.id), t('rm.tone_playing', { room: room.name }))}>
+        {t('rm.play_tone')}
       </button>
     </div>
     {#if !timing}
-      <p class="small muted">Loading...</p>
+      <p class="small muted">{t('common.loading')}</p>
     {:else if !timing.speakers.length}
-      <p class="small muted">No speakers or nodes in this room yet.</p>
+      <p class="small muted">{t('rm.no_speakers')}</p>
     {:else}
       <ul class="timing">
         {#each timing.speakers as speaker (`${speaker.kind}-${speaker.id}-${speaker.output}`)}
           <li>
             <span class="who">
               {speaker.name}
-              <span class="small muted">{speaker.kind === 'node' ? 'node' : 'this computer'}, held back {speaker.delay_ms} ms</span>
+              <span class="small muted"
+                >{t(speaker.kind === 'node' ? 'rm.held_node' : 'rm.held_computer', { ms: speaker.delay_ms })}</span
+              >
             </span>
             <span class="nudges">
-              <button class="small-button" aria-label="{speaker.name} 10 ms earlier" onclick={() => nudge(room.id, speaker, -10)}>-10</button>
-              <button class="small-button" aria-label="{speaker.name} 1 ms earlier" onclick={() => nudge(room.id, speaker, -1)}>-1</button>
-              <button class="small-button" aria-label="{speaker.name} 1 ms later" onclick={() => nudge(room.id, speaker, 1)}>+1</button>
-              <button class="small-button" aria-label="{speaker.name} 10 ms later" onclick={() => nudge(room.id, speaker, 10)}>+10</button>
+              <button class="small-button" aria-label={t('rm.earlier', { name: speaker.name, n: 10 })} onclick={() => nudge(room.id, speaker, -10)}>-10</button>
+              <button class="small-button" aria-label={t('rm.earlier', { name: speaker.name, n: 1 })} onclick={() => nudge(room.id, speaker, -1)}>-1</button>
+              <button class="small-button" aria-label={t('rm.later', { name: speaker.name, n: 1 })} onclick={() => nudge(room.id, speaker, 1)}>+1</button>
+              <button class="small-button" aria-label={t('rm.later', { name: speaker.name, n: 10 })} onclick={() => nudge(room.id, speaker, 10)}>+10</button>
             </span>
           </li>
         {/each}
       </ul>
-      <p class="small muted">- is earlier, + is later, in milliseconds. Changes apply as you press them.</p>
+      <p class="small muted">{t('rm.nudge_note')}</p>
     {/if}
   </FloatingWindow>
 {:else if win && win.kind === 'display' && winRoom}
   {@const room = winRoom}
-  <FloatingWindow title="{room.name}: display" subtitle="What the room's screens show." onclose={() => (win = null)}>
+  <FloatingWindow title={t('rm.display_title', { room: room.name })} subtitle={t('rm.display_sub')} onclose={() => (win = null)}>
     <section class="stack">
-      <h3>Every screen in this room</h3>
+      <h3>{t('rm.every_screen')}</h3>
       <NodeScreenSettings noVisual screen={roomScreen} visual={null} onchange={(screen) => setRoomScreen(room.id, screen)} />
       <p class="small muted">
-        A node can choose its own instead, below, on its own page or from its tray icon's Screen shows menu.
+        {t('rm.own_choice')}
       </p>
     </section>
     {#each nodes.filter((n) => n.room_id === room.id) as node (node.id)}
@@ -500,7 +510,9 @@
         <h3>
           {node.name}
           <span class="small muted"
-            >shows: {node.audio.screen ? screenName(node.audio.screen) : `${screenName(roomScreen)} (the room's)`}</span
+            >{t('rm.shows', {
+              what: node.audio.screen ? screenName(node.audio.screen) : t('rm.the_rooms', { what: screenName(roomScreen) }),
+            })}</span
           >
         </h3>
         <NodeScreenSettings
@@ -512,114 +524,115 @@
         />
       </section>
     {:else}
-      <p class="small muted">No node with a screen in this room yet.</p>
+      <p class="small muted">{t('rm.no_screens')}</p>
     {/each}
     <section class="stack">
-      <h3>Open this room's pages</h3>
+      <h3>{t('rm.open_pages')}</h3>
       <div class="links">
-        <a href="/tv?room={room.id}" target="_blank" rel="noopener">TV page</a>
-        <a href="/lyrics?room={room.id}" target="_blank" rel="noopener">Lyrics page</a>
-        <a href="/api/join/qr.svg?room={room.id}" target="_blank" rel="noopener">Join code</a>
+        <a href="/tv?room={room.id}" target="_blank" rel="noopener">{t('rm.tv_page')}</a>
+        <a href="/lyrics?room={room.id}" target="_blank" rel="noopener">{t('rm.lyrics_page')}</a>
+        <a href="/api/join/qr.svg?room={room.id}" target="_blank" rel="noopener">{t('rm.join_code')}</a>
       </div>
     </section>
-    <p class="small muted">These save as you change them.</p>
+    <p class="small muted">{t('rm.save_as_change')}</p>
   </FloatingWindow>
 {:else if win && win.kind === 'room' && winRoom}
   {@const room = winRoom}
-  <FloatingWindow title="{room.name}: options" onclose={() => (win = null)}>
+  <FloatingWindow title={t('rm.options_title', { room: room.name })} onclose={() => (win = null)}>
     <form
       class="add"
       onsubmit={(e) => {
         e.preventDefault()
-        void run(() => api.renameRoom(room.id, renameTo), 'Renamed')
+        void run(() => api.renameRoom(room.id, renameTo), t('rm.renamed'))
       }}
     >
-      <input bind:value={renameTo} maxlength="40" aria-label="Room name" />
-      <button class="primary" disabled={!renameTo.trim() || renameTo.trim() === room.name}>Rename</button>
+      <input bind:value={renameTo} maxlength="40" aria-label={t('rm.room_name')} />
+      <button class="primary" disabled={!renameTo.trim() || renameTo.trim() === room.name}>{t('common.rename')}</button>
     </form>
     {#if room.id !== 1}
       <section class="stack">
         {#if deleting}
-          <p class="small muted">Its speakers, nodes, people and queued songs move to Main.</p>
+          <p class="small muted">{t('rm.delete_note')}</p>
           <div class="add">
-            <button class="danger" onclick={() => run(() => api.deleteRoom(room.id), `Deleted ${room.name}`).then(() => (win = null))}>Delete {room.name}</button>
-            <button onclick={() => (deleting = false)}>Cancel</button>
+            <button class="danger" onclick={() => run(() => api.deleteRoom(room.id), t('rm.deleted', { room: room.name })).then(() => (win = null))}
+              >{t('rm.delete_named', { room: room.name })}</button
+            >
+            <button onclick={() => (deleting = false)}>{t('common.cancel')}</button>
           </div>
         {:else}
-          <div><button onclick={() => (deleting = true)}>Delete this room</button></div>
+          <div><button onclick={() => (deleting = true)}>{t('rm.delete')}</button></div>
         {/if}
       </section>
     {/if}
   </FloatingWindow>
 {:else if win && win.kind === 'node' && winNode}
-  <FloatingWindow title={winNode.name} subtitle="Node in {nameOf(winNode.room_id)}" onclose={() => (win = null)}>
+  <FloatingWindow title={winNode.name} subtitle={t('rm.node_in', { room: nameOf(winNode.room_id) })} onclose={() => (win = null)}>
     <NodeSettings node={winNode} {rooms} onchange={load} onclose={() => (win = null)} />
   </FloatingWindow>
 {:else if win && win.kind === 'cast' && winCast}
   {@const device = winCast}
-  <FloatingWindow title={device.name} subtitle="Cast device · {castState(device)}" onclose={() => (win = null)}>
+  <FloatingWindow title={device.name} subtitle={t('rm.cast_sub', { state: castState(device) })} onclose={() => (win = null)}>
     <label class="field">
-      Room
+      {t('rm.room')}
       <select value={device.room_id} onchange={(e) => placeCast(device, Number(e.currentTarget.value))}>
         {#each rooms as room (room.id)}<option value={room.id}>{room.name}</option>{/each}
       </select>
     </label>
-    <p class="small muted">It plays {nameOf(device.room_id)}'s music while it's casting.</p>
+    <p class="small muted">{t('rm.plays_music', { room: nameOf(device.room_id) })}</p>
     <div class="actions">
       {#if device.active}
-        <button class="danger" onclick={() => run(() => api.stopCast(device.id), `Stopped casting to ${device.name}`)}>
-          Stop casting
+        <button class="danger" onclick={() => run(() => api.stopCast(device.id), t('rm.stopped_cast', { name: device.name }))}>
+          {t('rm.stop_cast')}
         </button>
       {:else}
-        <button class="primary" onclick={() => run(() => api.startCast(device.id, 'audio'), `Casting to ${device.name}`)}>
-          Cast the music
+        <button class="primary" onclick={() => run(() => api.startCast(device.id, 'audio'), t('rm.casting_to', { name: device.name }))}>
+          {t('rm.cast_music')}
         </button>
         {#if device.screen}
-          <button onclick={() => run(() => api.startCast(device.id, 'page'), `Casting the TV page to ${device.name}`)}>
-            Cast the TV page
+          <button onclick={() => run(() => api.startCast(device.id, 'page'), t('rm.casting_page', { name: device.name }))}>
+            {t('rm.cast_page')}
           </button>
         {/if}
       {/if}
     </div>
     {#if device.active && !device.volume_fixed && device.volume !== null}
       <label class="field">
-        Volume
+        {t('rm.volume')}
         <input
           type="range"
           min="0"
           max="1"
           step="0.01"
           value={device.volume}
-          onchange={(e) => api.setCastVolume(device.id, Number(e.currentTarget.value)).catch(() => toast('Could not set the volume', true))}
+          onchange={(e) => api.setCastVolume(device.id, Number(e.currentTarget.value)).catch(() => toast(t('rm.volume_failed'), true))}
         />
       </label>
     {/if}
     {#if device.error}<p class="small bad">{device.error}</p>{/if}
     {#if device.placed || device.active}
       <section class="stack">
-        <h3>Remove</h3>
+        <h3>{t('rm.remove')}</h3>
         <p class="small muted">
-          Takes {device.name} out of {nameOf(device.room_id)} and stops casting to it. It goes back to the list of
-          devices found, and can be put in a room again.
+          {t('rm.remove_note', { name: device.name, room: nameOf(device.room_id) })}
         </p>
-        <div><button class="danger" onclick={() => removeCast(device)}>Remove from {nameOf(device.room_id)}</button></div>
+        <div><button class="danger" onclick={() => removeCast(device)}>{t('rm.remove_from', { room: nameOf(device.room_id) })}</button></div>
       </section>
     {/if}
   </FloatingWindow>
 {:else if win && win.kind === 'output' && winOutput}
   {@const output = winOutput}
-  <FloatingWindow title={output.label} subtitle="This computer's speaker" onclose={() => (win = null)}>
+  <FloatingWindow title={output.label} subtitle={t('rm.speaker_sub')} onclose={() => (win = null)}>
     <label class="field">
-      Room
+      {t('rm.room')}
       <select
         value={output.room_id}
-        onchange={(e) => run(() => api.placeOutput(output.id, Number(e.currentTarget.value)), `${output.label} moved`)}
+        onchange={(e) => run(() => api.placeOutput(output.id, Number(e.currentTarget.value)), t('rm.moved', { name: output.label }))}
       >
         {#each rooms as room (room.id)}<option value={room.id}>{room.name}</option>{/each}
       </select>
     </label>
     <p class="small muted">
-      Volume, which devices play and the rest of this computer's audio are in <a href="#/admin/audio">Audio</a>.
+      {t('rm.audio_note')} <a href="#/admin/audio">{t('admin.menu.audio')}</a>.
     </p>
   </FloatingWindow>
 {/if}

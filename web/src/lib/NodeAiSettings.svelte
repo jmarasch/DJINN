@@ -1,8 +1,9 @@
 <script lang="ts">
   // A node's AI lyrics help: on or off, the model, and how it's going. In
   // Admin > Nodes and in a node's settings window on the Rooms page.
+  import { t } from './i18n.svelte'
   import { api } from './api'
-  import { AI_PHASES } from './nodeInfo'
+  import { aiPhase } from './nodeInfo'
   import { toast } from './state.svelte'
   import type { HouseNode } from './types'
 
@@ -48,7 +49,7 @@
   </p>
   {#if node.ai_help}
     <p class="small" class:bad={node.ai.phase === 'failed'}>
-      {AI_PHASES[node.ai.phase] ?? 'Waiting for the node'}{node.ai.detail ? `: ${node.ai.detail}` : ''}
+      {aiPhase(node.ai.phase) ?? t('ni.waiting_node')}{node.ai.detail ? `: ${node.ai.detail}` : ''}
     </p>
   {/if}
 </div>
