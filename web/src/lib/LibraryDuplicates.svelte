@@ -4,15 +4,11 @@
   // DJINN never deletes anything; the admin tidies the folders.
   import { api } from './api'
   import { app, toast } from './state.svelte'
+  import { locale, t } from './i18n.svelte'
   import type { DuplicateGroup, DuplicateListing, DuplicateReason } from './types'
 
-  const why: Record<DuplicateReason, string> = {
-    name: 'same title and artist',
-    recording: 'identified as the same recording',
-    sound: 'sound the same',
-  }
   const reasons = (group: DuplicateGroup) => {
-    const text = group.reasons.map((r) => why[r]).join(', ')
+    const text = group.reasons.map((r: DuplicateReason) => t(`dup.${r}`)).join(', ')
     return text.charAt(0).toUpperCase() + text.slice(1)
   }
   const formats: Record<string, string> = { mpeg: 'MP3', mp4: 'M4A', vorbis: 'Ogg Vorbis', wav: 'WAV', flac: 'FLAC', aac: 'AAC' }
@@ -28,7 +24,7 @@
       listing = await api.duplicates(0)
       groups = listing.groups
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not look for duplicates', true)
+      toast(e instanceof Error ? e.message : t('dup.look_failed'), true)
     } finally {
       loading = false
     }
@@ -53,7 +49,7 @@
       listing = next
       groups = [...groups, ...next.groups]
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not load more', true)
+      toast(e instanceof Error ? e.message : t('common.load_more_failed'), true)
     } finally {
       loading = false
     }
@@ -64,7 +60,7 @@
       await api.setDuplicatesAcrossAlbums(on)
       await load()
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not save that', true)
+      toast(e instanceof Error ? e.message : t('sc.save_failed'), true)
     }
   }
 
@@ -74,11 +70,11 @@
       groups = groups.filter((g) => g !== group)
       if (listing) listing = { ...listing, total: listing.total - 1 }
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not save that', true)
+      toast(e instanceof Error ? e.message : t('sc.save_failed'), true)
     }
   }
 
-  const n = (x: number) => x.toLocaleString()
+  const n = (x: number) => x.toLocaleString(locale.code)
   const length = (ms: number | null) => {
     if (ms === null) return ''
     const s = Math.round(ms / 1000)
@@ -88,7 +84,7 @@
     [
       c.format ? (formats[c.format] ?? c.format.toUpperCase()) : null,
       c.kbps ? `${n(c.kbps)} kbps` : null,
-      c.sample_rate ? `${(c.sample_rate / 1000).toLocaleString()} kHz` : null,
+      c.sample_rate ? `${(c.sample_rate / 1000).toLocaleString(locale.code)} kHz` : null,
       length(c.duration_ms),
     ]
       .filter(Boolean)
@@ -96,31 +92,30 @@
 </script>
 
 <section class="card">
-  <h2>Possible duplicates</h2>
+  <h2>{t('dup.title')}</h2>
   {#if !listing}
-    <p class="small muted">{loading ? 'Looking...' : ''}</p>
+    <p class="small muted">{loading ? t('dup.looking') : ''}</p>
   {:else}
     <p class="small muted">
       {#if listing.total}
-        {n(listing.total)} {listing.total === 1 ? 'song has' : 'songs have'} more than one copy ({n(listing.songs)} files).
+        {t('dup.have', { n: listing.total, files: n(listing.songs) })}
       {:else}
-        No copies found.
+        {t('dup.none')}
       {/if}
-      DJINN never deletes files: remove the copies you don't want from your music folders, then check for changes.
+      {t('dup.never')}
       {#if !listing.sound_analysis}
-        Turn on sound analysis in Library extras to also find copies that are named differently.
+        {t('dup.sound_off')}
       {/if}
     </p>
     <label class="switch">
       <input type="checkbox" checked={listing.across_albums} onchange={(e) => setAcross(e.currentTarget.checked)} />
-      Also list copies in different albums
+      {t('dup.across')}
     </label>
     <p class="small muted">
-      A song on both its album and a greatest hits is fine, so by default only copies in the same album (or with no
-      album) are listed. The same album filed twice is under Problems.
+      {t('dup.across_note')}
     </p>
     {#if listing.total}
-      <button class="small-button" onclick={() => (open = !open)}>{open ? 'Hide the list' : 'Show the list'}</button>
+      <button class="small-button" onclick={() => (open = !open)}>{open ? t('dup.hide') : t('dup.show')}</button>
     {/if}
     {#if open}
       {#each groups as group (group.songs.map((s) => s.id).join('-'))}
@@ -130,7 +125,7 @@
             {#each group.songs as copy (copy.id)}
               <li>
                 <div>
-                  {#if copy.keep}<span class="keep">Keep</span>{/if}
+                  {#if copy.keep}<span class="keep">{t('dup.keep')}</span>{/if}
                   {#if copy.album_id !== null}
                     <a href="#/album/{copy.album_id}">{copy.title}</a>
                   {:else}
@@ -144,11 +139,11 @@
               </li>
             {/each}
           </ul>
-          <button class="small-button" onclick={() => notCopies(group)}>Not duplicates</button>
+          <button class="small-button" onclick={() => notCopies(group)}>{t('dup.not')}</button>
         </div>
       {/each}
       {#if groups.length < listing.total}
-        <button class="small-button" disabled={loading} onclick={more}>Show more</button>
+        <button class="small-button" disabled={loading} onclick={more}>{t('common.show_more')}</button>
       {/if}
     {/if}
   {/if}
