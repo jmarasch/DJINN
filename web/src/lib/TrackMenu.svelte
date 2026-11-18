@@ -127,21 +127,21 @@
         {/if}
       </div>
     {/if}
-    <button class="item" onclick={similar}><Icon name="similar" /> More like this</button>
+    <button class="item" onclick={similar}><Icon name="similar" /> {t('menu.more_like_this')}</button>
     {#if hasPlaylists()}
       <button
         class="item"
         onclick={() => {
           menu = false
           playlist = true
-        }}><Icon name="playlist" /> Add to playlist</button
+        }}><Icon name="playlist" /> {t('menu.add_to_playlist')}</button
       >
     {/if}
     {#if isAdmin()}
-      <button class="item" onclick={radio}><Icon name="radio" /> Start radio from this song</button>
-      <button class="item" onclick={editTags}><Icon name="edit" /> Edit tags</button>
+      <button class="item" onclick={radio}><Icon name="radio" /> {t('menu.start_radio_song')}</button>
+      <button class="item" onclick={editTags}><Icon name="edit" /> {t('menu.edit_tags')}</button>
       {#if track.lyrics}
-        <button class="item" onclick={removeLyrics}><Icon name="lyrics-outline" /> {t('lyrics.remove')}</button>
+        <button class="item" onclick={removeLyrics}><Icon name="lyrics-outline" /> {t('menu.remove_lyrics')}</button>
       {/if}
     {/if}
     <button
@@ -149,7 +149,7 @@
       onclick={() => {
         menu = false
         reporting = true
-      }}><Icon name="warning" /> Report a problem</button
+      }}><Icon name="warning" /> {t('menu.report')}</button
     >
   </Sheet>
 {/if}

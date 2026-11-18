@@ -1,6 +1,6 @@
 // The library editor lives in a window of its own (`#/editor`). A folder to
 // open there, or words to look for, travel in the window's address, which
-// is how "Fix in the editor" on another page (Library problems) asks for
+// is how "Fix in the editor" on another page (Library Problems) asks for
 // them. An editor window already open is pointed at the new place without
 // being closed, so it stays unlocked.
 

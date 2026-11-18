@@ -39,7 +39,7 @@ export const adminEntries: AdminEntry[] = [
     keywords: 'duplicates copies songs albums greatest hits',
     key: 'duplicates_across_albums',
   },
-  // Smart play
+  // Smart Play
   { label: 'Learn from the party for wild play and radio', tab: 'smart', keywords: 'smart play learning', key: 'smart_play' },
   { label: 'Also use it for shuffled playlists', tab: 'smart', keywords: 'smart playlists', key: 'smart_playlists' },
   { label: 'How much it counts', tab: 'smart', keywords: 'strength smart', key: 'smart_strength' },
@@ -66,8 +66,8 @@ export const adminEntries: AdminEntry[] = [
     keywords: 'wishlist guests',
     key: 'wishlist_everyone',
   },
-  // Request log
-  { label: 'Request log', tab: 'log', keywords: 'requests history who asked' },
+  // Request Log
+  { label: 'Request Log', tab: 'log', keywords: 'requests history who asked' },
   // Users
   { label: 'Accounts', tab: 'users', keywords: 'users people add password' },
   { label: 'Roles', tab: 'users', keywords: 'permissions listener downloads' },
@@ -106,10 +106,10 @@ export const adminEntries: AdminEntry[] = [
     key: 'ai_lyrics_min_match',
   },
   { label: 'Genres to leave out', tab: 'ai', keywords: 'ai lyrics genres exclude skip instrumental classical' },
-  { label: 'Library editor', tab: 'editor', keywords: 'compare database files tags differences corrections write grid' },
-  { label: 'Protected areas', tab: 'protected', keywords: 'lock library changes strictness password two-step 2fa unlock max medium off' },
+  { label: 'Library Editor', tab: 'editor', keywords: 'compare database files tags differences corrections write grid' },
+  { label: 'Protected Areas', tab: 'protected', keywords: 'lock library changes strictness password two-step 2fa unlock max medium off' },
   { label: 'Audit trail', tab: 'protected', keywords: 'audit log records purge turn off who unlocked changed' },
-  { label: 'Sign-in log', tab: 'signins', keywords: 'logins security attempts clear old' },
+  { label: 'Sign-In Log', tab: 'signins', keywords: 'logins security attempts clear old' },
   { label: 'Converting', tab: 'go', keywords: 'convert mp3 transcode quality', key: 'convert_enabled' },
   { label: 'Submitted music', tab: 'go', keywords: 'uploads submissions approve', key: 'upload_max_mb' },
   // Library

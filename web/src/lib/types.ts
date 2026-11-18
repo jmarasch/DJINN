@@ -499,7 +499,7 @@ export interface PlayerState {
 
 /** The mood dial: everyone nudges the auto mix from chill (-1) to hype (1). */
 export interface MoodState {
-  /** In use (Admin > Smart play). */
+  /** In use (Admin > Smart Play). */
   on: boolean
   /** Where it is now. */
   value: number
@@ -1277,7 +1277,7 @@ export interface IdentificationRow {
   current_year: number | null
 }
 
-/** Smart play's switches (Admin > Smart play). */
+/** Smart Play's switches (Admin > Smart Play). */
 export interface SmartPlaySettings {
   smart_play: boolean
   smart_playlists: boolean

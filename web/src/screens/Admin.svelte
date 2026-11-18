@@ -30,7 +30,7 @@
   import SmartPlayPanel from '../lib/SmartPlayPanel.svelte'
   import SchedulePanel from '../lib/SchedulePanel.svelte'
   import PageTitle from '../lib/PageTitle.svelte'
-  import { adminGroups, adminTabLabel, type AdminTab } from '../lib/adminTabs'
+  import { adminGroups, adminSubtabs, adminTabLabel, type AdminTab } from '../lib/adminTabs'
   import { adminEntries, searchAdmin, type AdminEntry } from '../lib/adminSearch'
   import AdminHome from '../lib/AdminHome.svelte'
   import StatsPanel from '../lib/StatsPanel.svelte'
@@ -286,7 +286,7 @@
 
   async function clearLog() {
     if (!confirm('Clear the request log? Top songs on artist pages keep counting.')) return
-    if (await attempt(() => api.clearRequestLog(), 'Request log cleared')) log = []
+    if (await attempt(() => api.clearRequestLog(), 'Request Log cleared')) log = []
   }
 
   async function saveSettings(e: SubmitEvent) {
@@ -324,12 +324,7 @@
   <LibraryProblems />
   <LibraryDuplicates />
 {:else if t === 'library'}
-  {@render subtabs('library', [
-    ['folders', 'Folders and checks'],
-    ['settings', 'Library settings'],
-    ['online', 'Online info'],
-    ['genres', 'Genres'],
-  ])}
+  {@render subtabs('library', adminSubtabs('library'))}
   <div data-subtab="folders" hidden={sub.library !== 'folders'}>
   <div class="cards-2">
   <section class="card">
@@ -451,11 +446,7 @@
     </Sheet>
   {/if}
 {:else if t === 'audio'}
-  {@render subtabs('audio', [
-    ['sound', 'Sound'],
-    ['outputs', 'Outputs'],
-    ['casting', 'Casting'],
-  ])}
+  {@render subtabs('audio', adminSubtabs('audio'))}
   <div data-subtab="sound" hidden={sub.audio !== 'sound'}>
     <div class="cards-2">
       <div class="wide"><EqualizerPanel /></div>
@@ -466,20 +457,12 @@
   <div data-subtab="outputs" hidden={sub.audio !== 'outputs'}><OutputsPanel /></div>
   <div data-subtab="casting" hidden={sub.audio !== 'casting'}><CastPanel /></div>
 {:else if t === 'smart'}
-  {@render subtabs('smart', [
-    ['play', 'Smart play'],
-    ['styles', 'Party styles'],
-    ['schedule', 'Party schedule'],
-  ])}
+  {@render subtabs('smart', adminSubtabs('smart'))}
   <div data-subtab="play" hidden={sub.smart !== 'play'}><div class="cards-2"><SmartPlayPanel part="play" /></div></div>
   <div data-subtab="styles" hidden={sub.smart !== 'styles'}><SmartPlayPanel part="styles" /></div>
   <div data-subtab="schedule" hidden={sub.smart !== 'schedule'}><SchedulePanel /></div>
 {:else if t === 'ai'}
-  {@render subtabs('ai', [
-    ['search', 'Search'],
-    ['listen', 'Listen'],
-    ['lyrics', 'Lyrics'],
-  ])}
+  {@render subtabs('ai', adminSubtabs('ai'))}
   <div data-subtab="search" hidden={sub.ai !== 'search'}><div class="cards-2"><AiPanel part="search" /></div></div>
   <div data-subtab="listen" hidden={sub.ai !== 'listen'}><div class="cards-2"><AiPanel part="listen" /></div></div>
   <div data-subtab="lyrics" hidden={sub.ai !== 'lyrics'}><div class="cards-2"><AiWorkPanel /></div></div>
@@ -500,7 +483,7 @@
 {:else if t === 'log'}
   <section class="card">
     <div class="log-head">
-      <h2>Request log</h2>
+      <h2>Request Log</h2>
       <button class="small-button" disabled={!log.length} onclick={clearLog}>Clear</button>
     </div>
     {#each log as entry, i (i)}

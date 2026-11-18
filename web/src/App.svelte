@@ -102,7 +102,9 @@
     query.addEventListener('change', update)
     return () => query.removeEventListener('change', update)
   })
-  const themeLabel = $derived({ auto: 'Auto', light: 'Light', dark: 'Dark' }[theme.mode])
+  const themeLabel = $derived(
+    { auto: t('nav.theme_auto'), light: t('nav.theme_light'), dark: t('nav.theme_dark') }[theme.mode],
+  )
   const tab = $derived(
     route.path.startsWith('/search') || albumId || artistId || artistSongsId || similarId || genreName
       ? 'search'
@@ -221,12 +223,12 @@
         <a href="#/playlists" class:active={tab === 'playlists'}><Icon name="playlist" /><span>{t('nav.playlists')}</span></a>
       {/if}
       {#if app.me.role !== 'guest'}
-        <a href="#/account" class:active={route.path === '/account'}><Icon name="person" /><span>{t('playing.your_account')}</span></a>
+        <a href="#/account" class:active={route.path === '/account'}><Icon name="person" /><span>{t('nav.your_account')}</span></a>
       {/if}
       {#if isAdmin()}
-        <a href="#/admin" class:active={tab === 'admin'}><Icon name="settings" /><span>Admin</span></a>
+        <a href="#/admin" class:active={tab === 'admin'}><Icon name="settings" /><span>{t('nav.admin')}</span></a>
       {/if}
-      <button class="theme-toggle" onclick={cycleTheme} aria-label="Theme: {themeLabel}" title="Theme: {themeLabel}">
+      <button class="theme-toggle" onclick={cycleTheme} aria-label={t('nav.theme', { name: themeLabel })} title={t('nav.theme', { name: themeLabel })}>
         <Icon name="theme" /><span>{themeLabel}</span>
       </button>
       {#if tab !== 'admin'}<div class="side-room"><RoomPicker up /></div>{/if}
@@ -289,12 +291,12 @@
           <a href="#/playlists"><Icon name="playlist" /><span>{t('nav.playlists')}</span></a>
         {/if}
         {#if app.me.role !== 'guest'}
-          <a href="#/account"><Icon name="person" /><span>{t('playing.your_account')}</span></a>
+          <a href="#/account"><Icon name="person" /><span>{t('nav.your_account')}</span></a>
         {/if}
         {#if isAdmin()}
-          <a href="#/admin"><Icon name="settings" /><span>Admin</span></a>
+          <a href="#/admin"><Icon name="settings" /><span>{t('nav.admin')}</span></a>
         {/if}
-        <button class="theme-toggle sheet-theme" onclick={cycleTheme}><Icon name="theme" /><span>Theme: {themeLabel}</span></button>
+        <button class="theme-toggle sheet-theme" onclick={cycleTheme}><Icon name="theme" /><span>{t('nav.theme', { name: themeLabel })}</span></button>
       </div>
     </Sheet>
   {/if}

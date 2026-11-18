@@ -1,11 +1,11 @@
 <script lang="ts">
-  // Admin > Library editor: the editor opens in a window of its own, where
+  // Admin > Library Editor: the editor opens in a window of its own, where
   // the admin unlocks it every time it's opened.
   import { openEditorWindow } from './editorJump.svelte'
 </script>
 
 <section class="card wide">
-  <h2>Library editor</h2>
+  <h2>Library Editor</h2>
   <p class="small muted">
     Change tags, covers, file names and where files are kept, compare an album with MusicBrainz, Deezer, Apple or
     Spotify, and look after the folders DJINN may change. It opens in a window of its own, full width, and asks for your

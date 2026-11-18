@@ -1,5 +1,5 @@
 <script lang="ts">
-  // Admin > Access > Protected areas: how strict the lock on library changes
+  // Admin > Access > Protected Areas: how strict the lock on library changes
   // is, whether this session has it open, and the audit trail.
   import { onMount } from 'svelte'
   import { api } from './api'
@@ -132,7 +132,7 @@
 </script>
 
 <section class="card">
-  <h3>Protected areas</h3>
+  <h3>Protected Areas</h3>
   <p class="small muted">
     Anything that changes your music library (the folders and the files in them) sits behind this lock: writing tags,
     renaming, moving, adding songs. Opening such an area asks for your password, and at Max a code from your

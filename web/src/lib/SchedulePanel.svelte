@@ -1,5 +1,5 @@
 <script lang="ts">
-  // Admin > Smart play > Party schedule: time rules like "a quiet playlist
+  // Admin > Smart Play > Party schedule: time rules like "a quiet playlist
   // until 9, then wild play, turned up". Each rule is applied once as it
   // starts, so changes made by hand during it stay.
   import { api } from './api'

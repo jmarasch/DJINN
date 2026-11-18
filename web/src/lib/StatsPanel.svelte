@@ -272,7 +272,7 @@
 <section class="card">
   <h2>Clear this history</h2>
   <p class="small muted">
-    Forgets the plays and requests in the view above (its time, person and where). What Smart play learned from them goes
+    Forgets the plays and requests in the view above (its time, person and where). What Smart Play learned from them goes
     too, and top songs on artist pages count again from what's left. Save a backup first (Admin > System) if you might want
     them back.
   </p>

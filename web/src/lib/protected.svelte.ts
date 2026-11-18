@@ -1,4 +1,4 @@
-// Protected areas: actions that change the library need the admin to unlock
+// Protected Areas: actions that change the library need the admin to unlock
 // them first (password, and a two-step code at the strictest level). A
 // request the server refuses with 423 opens the unlock sheet, and carries on
 // once it's open.

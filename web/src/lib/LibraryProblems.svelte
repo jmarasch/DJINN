@@ -56,7 +56,7 @@
     },
     odd_length: {
       label: 'Very short or very long songs',
-      hint: 'Under 10 seconds or over 3 hours. Often a cut-off download, a hidden track, a skit, or a whole mix filed as one song. A variable bit rate MP3 with no length header can also show a wrong length in other players, even though DJINN counts it right. To fix the file: select Fix in the editor, allow the folder under the folders DJINN may change (Admin > Library > Library editor), unlock the protected area, pick the MP3s, and choose Fix MP3 lengths. It adds the header and can be undone from the editor\'s history.',
+      hint: 'Under 10 seconds or over 3 hours. Often a cut-off download, a hidden track, a skit, or a whole mix filed as one song. A variable bit rate MP3 with no length header can also show a wrong length in other players, even though DJINN counts it right. To fix the file: select Fix in the editor, allow the folder under the folders DJINN may change (Admin > Library > Library Editor), unlock the protected area, pick the MP3s, and choose Fix MP3 lengths. It adds the header and can be undone from the editor\'s history.',
     },
     low_bitrate: {
       label: 'Low-quality songs',
@@ -104,7 +104,7 @@
     },
     no_length_header: {
       label: 'MP3s with no length header',
-      hint: "These variable bit rate MP3s have no length header, so many players, phones and car stereos show the wrong length and can't skip ahead properly. DJINN counts them right. To fix the files: select Fix in the editor, allow the folder under the folders DJINN may change (Admin > Library > Library editor), unlock the protected area, pick the MP3s, and choose Fix MP3 lengths. It adds the header without touching the audio and can be undone from the editor's history. The thorough check reads the start of every MP3 in the background, and again whenever one changes.",
+      hint: "These variable bit rate MP3s have no length header, so many players, phones and car stereos show the wrong length and can't skip ahead properly. DJINN counts them right. To fix the files: select Fix in the editor, allow the folder under the folders DJINN may change (Admin > Library > Library Editor), unlock the protected area, pick the MP3s, and choose Fix MP3 lengths. It adds the header without touching the audio and can be undone from the editor's history. The thorough check reads the start of every MP3 in the background, and again whenever one changes.",
     },
     vanished: {
       label: 'Songs that went missing lately',

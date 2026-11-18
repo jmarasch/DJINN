@@ -1,6 +1,7 @@
 <script lang="ts">
   // Everything you can do with one song in DJINN GO.
   import { api } from '../lib/api'
+  import { t } from '../lib/i18n.svelte'
   import ReportSong from '../lib/ReportSong.svelte'
   import Sheet from '../lib/Sheet.svelte'
   import { app, toast } from '../lib/state.svelte'
@@ -49,18 +50,18 @@
   {@const song = track}
   <Sheet title={song.title} onclose={close}>
     <div class="actions">
-      <button onclick={() => act(() => playNext([song]))}>Play next</button>
-      <button onclick={() => act(() => addToEnd([song]))}>Add to end of queue</button>
-      <button onclick={() => act(() => startRadio(song))}>Start radio from this song</button>
+      <button onclick={() => act(() => playNext([song]))}>{t('menu.play_next')}</button>
+      <button onclick={() => act(() => addToEnd([song]))}>{t('menu.add_to_end')}</button>
+      <button onclick={() => act(() => startRadio(song))}>{t('menu.start_radio_song')}</button>
       <button onclick={() => act(() => toggleLike('track', song.id))}>
         {likes.track.has(song.id) ? 'Unlike' : 'Like'}
       </button>
-      <button onclick={() => act(() => (ui.adding = [song]))}>Add to a playlist</button>
-      {#if song.album_id}<a class="button" href="#/album/{song.album_id}" onclick={close}>Go to album</a>{/if}
-      {#if song.artist_id}<a class="button" href="#/artist/{song.artist_id}" onclick={close}>Go to artist</a>{/if}
-      <button onclick={sendToParty}>Send to the party</button>
-      {#if app.me?.permissions?.downloads}<button onclick={download}>Download</button>{/if}
-      <button onclick={() => act(() => (reporting = { id: song.id, title: song.title }))}>Report a problem</button>
+      <button onclick={() => act(() => (ui.adding = [song]))}>{t('menu.add_to_playlist')}</button>
+      {#if song.album_id}<a class="button" href="#/album/{song.album_id}" onclick={close}>{t('menu.go_to_album')}</a>{/if}
+      {#if song.artist_id}<a class="button" href="#/artist/{song.artist_id}" onclick={close}>{t('menu.go_to_artist')}</a>{/if}
+      <button onclick={sendToParty}>{t('menu.send_to_party')}</button>
+      {#if app.me?.permissions?.downloads}<button onclick={download}>{t('menu.download')}</button>{/if}
+      <button onclick={() => act(() => (reporting = { id: song.id, title: song.title }))}>{t('menu.report')}</button>
     </div>
   </Sheet>
 {/if}

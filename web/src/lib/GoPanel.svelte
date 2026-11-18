@@ -219,7 +219,7 @@
     <button class="small-button" onclick={save} disabled={busy}>Save proxies</button>
   </section>
 
-  <p class="small muted">Sign-ins to DJINN and GO are in <a href="#/admin/signins">Metrics and logs &gt; Sign-in log</a>.</p>
+  <p class="small muted">Sign-ins to DJINN and GO are in <a href="#/admin/signins">Activity and Logs &gt; Sign-In Log</a>.</p>
 {/if}
 
 <style>

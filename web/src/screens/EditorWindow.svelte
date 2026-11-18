@@ -44,7 +44,7 @@
 
 <div class="window">
   <header>
-    <h1>Library editor</h1>
+    <h1>Library Editor</h1>
     {#if stage === 'open'}
       <Tabs
         items={[

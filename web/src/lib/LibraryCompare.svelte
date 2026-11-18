@@ -1,5 +1,5 @@
 <script lang="ts">
-  // Admin > Library editor > Compare: DJINN's database against the files.
+  // Admin > Library Editor > Compare: DJINN's database against the files.
   // Compares what the database holds with what each file's own tags say,
   // field by field, and why they differ.
   // It only reads: nothing in the music folders or the database changes.

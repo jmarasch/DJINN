@@ -1,5 +1,5 @@
 <script lang="ts">
-  // Admin > Metrics and logs > Sign-in log: every sign-in to DJINN and DJINN
+  // Admin > Activity and Logs > Sign-In Log: every sign-in to DJINN and DJINN
   // GO, a page at a time, with clearing old ones.
   import { onMount } from 'svelte'
   import { api } from './api'
@@ -67,7 +67,7 @@
 </script>
 
 <section class="card">
-  <h2>Sign-in log</h2>
+  <h2>Sign-In Log</h2>
   <p class="small muted">
     Every sign-in to DJINN and DJINN GO, kept for 90 days at most. Five wrong passwords lock an account for 15 minutes.
   </p>

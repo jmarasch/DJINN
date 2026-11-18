@@ -190,7 +190,7 @@
     if (lock && lock.level === 'off') {
       lines.push({
         level: 'warn',
-        label: 'Protected areas',
+        label: 'Protected Areas',
         detail: 'The lock on library changes is off',
         href: '#/admin/protected',
       })

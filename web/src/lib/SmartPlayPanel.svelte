@@ -121,9 +121,9 @@
 {#if settings}
   {#if part === 'play'}
   <section class="card">
-    <h2>Smart play</h2>
+    <h2>Smart Play</h2>
     <p class="small muted">
-      When nobody has requested anything, DJINN picks songs itself. Smart play has it learn from the party: songs
+      When nobody has requested anything, DJINN picks songs itself. Smart Play has it learn from the party: songs
       people request come up more, and so do others by the same artists and in the same genres. Songs people skip
       come up less.
     </p>

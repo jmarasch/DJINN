@@ -1,5 +1,5 @@
 <script lang="ts">
-  // Admin > Library editor > Library folders: what DJINN may do in each
+  // Admin > Library Editor > Library folders: what DJINN may do in each
   // library folder, and the editor's trash. Read only folders can always be
   // looked at (the compare and the Problems page read every folder) but
   // nothing in them changes. Read and write lets the editor change tags,
