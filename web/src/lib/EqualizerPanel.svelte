@@ -2,7 +2,7 @@
   import { onMount } from 'svelte'
   import { api } from './api'
   import { toast } from './state.svelte'
-  import { t } from './i18n.svelte'
+  import { locale, t } from './i18n.svelte'
   import type { EqualizerSettings } from './types'
 
   let {
@@ -11,7 +11,7 @@
       await api.saveEqualizer(settings)
     },
     title = t('eq.title'),
-    note = 'Shape the party mix on every output, including casting and Tune In. Normal levels stay intact; peaks near clipping are softened.',
+    note = t('eq.party_note'),
   }: {
     /** Where the settings come from and go (the party mix by default). */
     load?: () => Promise<EqualizerSettings>
@@ -84,7 +84,8 @@
     save()
   }
 
-  const formatted = (gain: number) => `${gain > 0 ? '+' : ''}${gain.toFixed(1)} dB`
+  const formatted = (gain: number) =>
+    `${gain > 0 ? '+' : ''}${gain.toLocaleString(locale.code, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} dB`
 </script>
 
 <section class="card">

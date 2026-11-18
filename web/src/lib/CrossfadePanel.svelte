@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from './i18n.svelte'
   import { api } from './api'
   import { app, toast } from './state.svelte'
 
@@ -15,22 +16,22 @@
       try {
         await api.setCrossfade(crossfade)
       } catch (e) {
-        toast(e instanceof Error ? e.message : 'Could not save', true)
+        toast(e instanceof Error ? e.message : t('common.save_failed_short'), true)
       }
     }, 200)
   }
 </script>
 
 <section class="card">
-  <h2>Crossfade</h2>
+  <h2>{t('xf.title')}</h2>
   <label class="slider">
     <span class="row-label">
-      Blend songs into each other <span class="muted">{crossfade ? `${crossfade} s` : 'Off (gapless)'}</span>
+      {t('xf.blend')} <span class="muted">{crossfade ? t('xf.secs', { n: crossfade }) : t('xf.off')}</span>
     </span>
     <input type="range" min="0" max="12" step="1" bind:value={crossfade} oninput={save} />
   </label>
   <p class="small muted">
-    Songs from the same album always join without a gap, so live albums and DJ mixes flow as recorded.
+    {t('xf.note')}
   </p>
 </section>
 

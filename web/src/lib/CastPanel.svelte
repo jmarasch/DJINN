@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from './i18n.svelte'
   import { api } from './api'
   import { app, toast } from './state.svelte'
   import type { CastDevice } from './types'
@@ -21,7 +22,7 @@
     try {
       app.casts = (await api.discoverCasts()).devices
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not look for devices', true)
+      toast(e instanceof Error ? e.message : t('cast.look_failed'), true)
     } finally {
       searching = false
     }
@@ -31,7 +32,7 @@
     try {
       app.casts = (await api.startCast(device.id, mode)).devices
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'That did not work', true)
+      toast(e instanceof Error ? e.message : t('common.failed'), true)
     }
   }
 
@@ -39,7 +40,7 @@
     try {
       app.casts = (await api.stopCast(device.id)).devices
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'That did not work', true)
+      toast(e instanceof Error ? e.message : t('common.failed'), true)
     }
   }
 
@@ -47,17 +48,17 @@
     try {
       await api.stopAllCasts()
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'That did not work', true)
+      toast(e instanceof Error ? e.message : t('common.failed'), true)
     }
   }
 
   async function newLink() {
-    if (!confirm('Give the live stream a new address? Anyone listening with the old one stops, and casts restart.')) return
+    if (!confirm(t('cast.new_link_q'))) return
     try {
       app.casts = (await api.newStreamLink()).devices
-      toast('The stream has a new address')
+      toast(t('cast.new_link_done'))
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'That did not work', true)
+      toast(e instanceof Error ? e.message : t('common.failed'), true)
     }
   }
 
@@ -72,25 +73,22 @@
   }
 
   const kindLabel = (d: CastDevice) =>
-    d.group ? 'Speaker group' : d.kind === 'cast' ? 'Google Cast' : d.kind === 'sonos' ? 'Sonos' : 'DLNA'
+    d.group ? t('cast.group') : d.kind === 'cast' ? 'Google Cast' : d.kind === 'sonos' ? 'Sonos' : 'DLNA'
 
   function status(d: CastDevice): string {
     if (!d.active) return d.model && !d.group ? `${kindLabel(d)} · ${d.model}` : kindLabel(d)
-    if (d.error) return `${d.error}. Trying again...`
-    if (d.playing) return d.page ? 'Showing the TV page with sound' : 'Playing the party'
-    return 'Connecting...'
+    if (d.error) return t('cast.retrying', { error: d.error })
+    if (d.playing) return d.page ? t('cast.showing') : t('cast.playing')
+    return t('out.connecting')
   }
 
   const anyActive = $derived(app.casts?.some((d) => d.active) ?? false)
 </script>
 
 <section class="card">
-  <h2>Cast to TVs and speakers</h2>
+  <h2>{t('cast.title')}</h2>
   <p class="small muted">
-    Play the party on Chromecasts, Google TVs, Nest speakers, smart TVs (DLNA), and Sonos, several at once. "Show on
-    TV" puts the TV page on the screen, with what's playing, what's next, and the join code, and plays the music too.
-    Network devices run a few seconds behind this computer's speakers and can't be synced to them, so use either casts
-    or local speakers in a room, not both. Speaker groups from the Google Home app stay in sync with each other.
+    {t('cast.intro')}
   </p>
 
   {#if app.casts?.length}
@@ -107,7 +105,7 @@
           <div class="small muted" class:error={device.active && !!device.error}>{status(device)}</div>
           {#if device.active && device.volume !== null && !device.volume_fixed}
             <label class="volume">
-              <span class="small muted">Volume {Math.round(device.volume * 100)}</span>
+              <span class="small muted">{t('cast.volume', { n: Math.round(device.volume * 100) })}</span>
               <input
                 type="range"
                 min="0"
@@ -118,38 +116,38 @@
               />
             </label>
           {:else if device.active && device.volume_fixed}
-            <div class="small muted">Volume is set on the TV.</div>
+            <div class="small muted">{t('cast.volume_tv')}</div>
           {/if}
         </div>
         <div class="actions">
           {#if device.active}
             {#if device.screen}
               <button class="small-button" onclick={() => cast(device, device.page ? 'audio' : 'page')}>
-                {device.page ? 'Audio only' : 'Show TV page'}
+                {device.page ? t('cast.audio_only') : t('cast.show_page')}
               </button>
             {/if}
-            <button onclick={() => stop(device)}>Stop</button>
+            <button onclick={() => stop(device)}>{t('common.stop')}</button>
           {:else if device.screen}
-            <button class="primary" onclick={() => cast(device, 'page')}>Show on TV</button>
-            <button class="small-button" onclick={() => cast(device, 'audio')}>Audio only</button>
+            <button class="primary" onclick={() => cast(device, 'page')}>{t('cast.show_on_tv')}</button>
+            <button class="small-button" onclick={() => cast(device, 'audio')}>{t('cast.audio_only')}</button>
           {:else}
-            <button class="primary" onclick={() => cast(device, 'audio')}>Cast</button>
+            <button class="primary" onclick={() => cast(device, 'audio')}>{t('cast.cast')}</button>
           {/if}
         </div>
       </div>
     {/each}
   {:else if !searching}
     <p class="muted">
-      No devices found. They need to be on the same Wi-Fi as this computer, and switched on.
+      {t('cast.none')}
     </p>
   {/if}
 
   <div class="row-buttons">
     <button disabled={searching} onclick={find}>
-      {#if searching}<span class="spinner" aria-hidden="true"></span> Looking...{:else}Look for devices{/if}
+      {#if searching}<span class="spinner" aria-hidden="true"></span> {t('cast.looking')}{:else}{t('cast.look')}{/if}
     </button>
-    {#if anyActive}<button onclick={stopAll}>Stop all casts</button>{/if}
-    <button onclick={newLink}>New stream address</button>
+    {#if anyActive}<button onclick={stopAll}>{t('cast.stop_all')}</button>{/if}
+    <button onclick={newLink}>{t('cast.new_link')}</button>
   </div>
 </section>
 
