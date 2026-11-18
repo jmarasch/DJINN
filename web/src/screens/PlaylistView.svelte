@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '../lib/i18n.svelte'
   import { api } from '../lib/api'
   import Art from '../lib/Art.svelte'
   import { byline, duration } from '../lib/format'
@@ -25,7 +26,7 @@
   const playing = $derived(app.player.playlist?.id === id)
   const mine = $derived(playlist?.owner_id === app.me?.id)
   const totalMs = $derived(playlist?.tracks.reduce((sum, t) => sum + (t.duration_ms ?? 0), 0) ?? 0)
-  const kindLabel = { track: 'Song', album: 'Album', artist: 'Artist', wanted: 'Song' }
+  const kindLabel = $derived({ track: t('pl.song'), album: t('pl.album'), artist: t('pl.artist'), wanted: t('pl.song') })
   const notInLibrary = $derived(playlist?.entries.filter((e) => e.kind === 'wanted').length ?? 0)
   const problems = $derived(notInLibrary + (playlist?.unplayable.length ?? 0))
 
@@ -39,7 +40,7 @@
       timer = setTimeout(() => followCheck().catch(() => {}), 1000)
     } else if (check) {
       await load()
-      toast(check.problems ? `${check.problems} of ${check.total} files won't play` : `All ${check.total} files play`)
+      toast(check.problems ? t('pl.check_some', { bad: check.problems, total: check.total }) : t('pl.check_all', { n: check.total }))
     }
   }
 
@@ -48,26 +49,26 @@
       await api.checkPlaylist(id)
       await followCheck()
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not check the files', true)
+      toast(e instanceof Error ? e.message : t('pl.check_failed'), true)
     }
   }
 
   $effect(() => () => clearTimeout(timer))
 
   function reason(song: UnplayableSong) {
-    return song.removed ? 'File is missing' : `File won't play: ${song.error ?? 'unknown error'}`
+    return song.removed ? t('pl.missing_file') : t('pl.wont_play', { error: song.error ?? t('pl.unknown_error') })
   }
 
   /** What's wrong with an entry, in words, if anything. */
   function flagOf(entry: PlaylistEntry) {
-    if (entry.kind === 'wanted') return 'Not in your library'
-    if (entry.name === null) return 'No longer in your library'
+    if (entry.kind === 'wanted') return t('pl.not_in_library')
+    if (entry.name === null) return t('pl.gone')
     if (!entry.problem_songs) return null
     if (entry.kind === 'track') {
       const song = playlist?.unplayable.find((s) => s.track_id === entry.ref_id)
-      return song ? reason(song) : "Can't play"
+      return song ? reason(song) : t('pl.cant_play')
     }
-    return `${entry.problem_songs} ${entry.problem_songs === 1 ? "song can't" : "songs can't"} play`
+    return t('pl.songs_cant', { n: entry.problem_songs })
   }
 
   async function attempt(action: () => Promise<unknown>, done?: string) {
@@ -76,7 +77,7 @@
       if (done) toast(done)
       await load()
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'That did not work', true)
+      toast(e instanceof Error ? e.message : t('common.failed'), true)
     }
   }
 
@@ -89,9 +90,9 @@
   async function request(trackId: number, title: string) {
     try {
       await api.addRequest(trackId)
-      toast(`Requested ${title}`)
+      toast(t('pl.requested', { title }))
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not request it', true)
+      toast(e instanceof Error ? e.message : t('pl.request_failed'), true)
     }
   }
 
@@ -100,80 +101,80 @@
   }
 
   async function remove() {
-    if (!playlist || !confirm(`Delete the playlist "${playlist.name}"?`)) return
+    if (!playlist || !confirm(t('pl.delete_q', { name: playlist.name }))) return
     try {
       await api.deletePlaylist(id)
       location.hash = '/playlists'
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not delete it', true)
+      toast(e instanceof Error ? e.message : t('pl.delete_failed'), true)
     }
   }
 
   const hours = (ms: number) => {
     const minutes = Math.round(ms / 60000)
-    return minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)} h ${minutes % 60} min`
+    return minutes < 60 ? t('pl.min', { n: minutes }) : t('pl.h_min', { h: Math.floor(minutes / 60), m: minutes % 60 })
   }
 </script>
 
-<button class="back" onclick={() => history.back()}><Icon name="back" /> Back</button>
+<button class="back" onclick={() => history.back()}><Icon name="back" /> {t('nav.back')}</button>
 
 {#if playlist}
   {#if renaming}
     <form class="rename" onsubmit={rename}>
       <!-- svelte-ignore a11y_autofocus -->
       <input bind:value={name} maxlength="60" autofocus />
-      <button class="primary">Save</button>
+      <button class="primary">{t('common.save')}</button>
     </form>
   {:else}
     <h1>
       {#if mine}
-        <button class="name" onclick={() => (renaming = true)} title="Rename">{playlist.name}</button>
+        <button class="name" onclick={() => (renaming = true)} title={t('pl.rename')}>{playlist.name}</button>
       {:else}
         {playlist.name}
       {/if}
     </h1>
   {/if}
   <p class="muted small">
-    {playlist.tracks.length} {playlist.tracks.length === 1 ? 'song' : 'songs'} · {hours(totalMs)}
-    {#if !mine}· from {playlist.owner}{/if}
-    {#if playing}· <b class="accent">playing now</b>{/if}
-    {#if problems}· <span class="bad"><Icon name="warning" size={13} /> {problems} can't play and will be skipped</span>{/if}
+    {t('count.songs', { n: playlist.tracks.length })} · {hours(totalMs)}
+    {#if !mine}{t('pl.from', { owner: playlist.owner })}{/if}
+    {#if playing}· <b class="accent">{t('pl.playing_now')}</b>{/if}
+    {#if problems}· <span class="bad"><Icon name="warning" size={13} /> {t('pl.problems', { n: problems })}</span>{/if}
   </p>
 
   {#if canStartAutoMix() || mine}
     <div class="actions">
       {#if canStartAutoMix()}
-        <button class="primary" onclick={() => attempt(() => api.playPlaylist(id), `Playing ${playlist?.name}`)}>
-          <Icon name="play" size={20} /> Play
+        <button class="primary" onclick={() => attempt(() => api.playPlaylist(id), t('pl.playing', { name: playlist?.name ?? '' }))}>
+          <Icon name="play" size={20} /> {t('pl.play')}
         </button>
       {/if}
       {#if mine}
-        <div class="mode" role="group" aria-label="Play order">
+        <div class="mode" role="group" aria-label={t('pl.order')}>
           <button
             class:active={playlist.shuffle}
             aria-pressed={playlist.shuffle}
             onclick={() => attempt(() => api.updatePlaylist(id, { shuffle: true }))}
           >
-            <Icon name="shuffle" size={18} /> Shuffle
+            <Icon name="shuffle" size={18} /> {t('pl.shuffle')}
           </button>
           <button
             class:active={!playlist.shuffle}
             aria-pressed={!playlist.shuffle}
             onclick={() => attempt(() => api.updatePlaylist(id, { shuffle: false }))}
           >
-            <Icon name="ordered" size={18} /> In order
+            <Icon name="ordered" size={18} /> {t('pl.in_order')}
           </button>
         </div>
       {/if}
     </div>
   {/if}
   {#if playing && canStartAutoMix()}
-    <button class="stop" onclick={() => attempt(() => api.stopPlaylist(), 'Stopped')}>Stop playing this playlist</button>
+    <button class="stop" onclick={() => attempt(() => api.stopPlaylist(), t('pl.stopped'))}>{t('pl.stop')}</button>
   {/if}
 
   {#if isAdmin()}
     <button class="stop" disabled={checking} onclick={startCheck}>
-      {checking ? `Checking files: ${check?.done ?? 0} of ${check?.total ?? 0}` : 'Check files'}
+      {checking ? t('pl.checking', { done: check?.done ?? 0, total: check?.total ?? 0 }) : t('pl.check')}
     </button>
   {/if}
 
@@ -185,7 +186,7 @@
     />
   {/if}
 
-  <h2>What's in it</h2>
+  <h2>{t('pl.whats_in')}</h2>
   {#each playlist.entries as entry, i (entry.id)}
     {@const flag = flagOf(entry)}
     <div class="entry" class:flagged={flag && (entry.kind === 'track' || entry.kind === 'wanted')}>
@@ -193,11 +194,11 @@
       <div class="text">
         <div class="ellipsis">
           {#if entry.kind === 'album'}
-            <a href="#/album/{entry.ref_id}">{entry.name ?? '(missing)'}</a>
+            <a href="#/album/{entry.ref_id}">{entry.name ?? t('pl.missing')}</a>
           {:else if entry.kind === 'artist'}
-            <a href="#/artist/{entry.ref_id}">{entry.name ?? '(missing)'}</a>
+            <a href="#/artist/{entry.ref_id}">{entry.name ?? t('pl.missing')}</a>
           {:else}
-            {entry.name ?? '(missing)'}
+            {entry.name ?? t('pl.missing')}
           {/if}
         </div>
         <div class="muted small ellipsis">{kindLabel[entry.kind]}{entry.subtitle ? ` · ${entry.subtitle}` : ''}</div>
@@ -207,24 +208,24 @@
       </div>
       {#if mine}
       <div class="order">
-        <button aria-label="Move up" disabled={i === 0} onclick={() => move(entry, i - 1)}><Icon name="up" size={18} /></button>
-        <button aria-label="Move down" disabled={i === playlist.entries.length - 1} onclick={() => move(entry, i + 1)}
+        <button aria-label={t('player.move_up')} disabled={i === 0} onclick={() => move(entry, i - 1)}><Icon name="up" size={18} /></button>
+        <button aria-label={t('player.move_down')} disabled={i === playlist.entries.length - 1} onclick={() => move(entry, i + 1)}
           ><Icon name="down" size={18} /></button
         >
       </div>
-      <button class="icon" aria-label="Remove {entry.name}" onclick={() => attempt(() => api.removeFromPlaylist(id, entry.id))}>
+      <button class="icon" aria-label={t('pl.remove', { name: entry.name ?? '' })} onclick={() => attempt(() => api.removeFromPlaylist(id, entry.id))}>
         <Icon name="close" />
       </button>
       {/if}
     </div>
   {:else}
-    <p class="muted">Empty. Open an album, artist, or song in the Library and tap the playlist button to add it here.</p>
+    <p class="muted">{t('pl.empty')}</p>
   {/each}
 
   {#if playlist.tracks.length}
-    <h2>Songs</h2>
+    <h2>{t('pl.songs')}</h2>
     <p class="muted small">
-      {canStartAutoMix() ? 'Tap a song to play the playlist from there.' : 'Tap a song to request it.'}
+      {canStartAutoMix() ? t('pl.tap_play') : t('pl.tap_request')}
     </p>
     {#each playlist.tracks as track (track.id)}
       <div class="song-row">
@@ -232,7 +233,7 @@
           class="song"
           onclick={() =>
             canStartAutoMix()
-              ? attempt(() => api.playPlaylist(id, track.id), `Playing from ${track.title}`)
+              ? attempt(() => api.playPlaylist(id, track.id), t('pl.playing_from', { title: track.title }))
               : request(track.id, track.title)}
         >
           <Art hash={track.art_hash} size={40} />
@@ -243,7 +244,7 @@
           <span class="muted small">{duration(track.duration_ms)}</span>
         </button>
         {#if canStartAutoMix()}
-          <button class="icon" aria-label="Request {track.title}" title="Request" onclick={() => request(track.id, track.title)}>
+          <button class="icon" aria-label={t('pl.request', { title: track.title })} title={t('pl.request_title')} onclick={() => request(track.id, track.title)}>
             <Icon name="queue" />
           </button>
         {/if}
@@ -252,8 +253,8 @@
   {/if}
 
   {#if playlist.unplayable.length}
-    <h2>Can't play</h2>
-    <p class="muted small">These are skipped. A library check tries them again.</p>
+    <h2>{t('pl.cant_play_title')}</h2>
+    <p class="muted small">{t('pl.skipped')}</p>
     {#each playlist.unplayable as song (song.track_id)}
       <div class="entry flagged">
         <div class="text">
@@ -266,7 +267,7 @@
   {/if}
 
   {#if mine}
-    <button class="delete" onclick={remove}>Delete playlist</button>
+    <button class="delete" onclick={remove}>{t('pl.delete')}</button>
   {/if}
 {/if}
 

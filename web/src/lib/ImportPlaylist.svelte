@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from './i18n.svelte'
   import { api } from './api'
   import Icon from './Icon.svelte'
   import { toast } from './state.svelte'
@@ -46,7 +47,7 @@
       pasted = ''
       onimported()
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not import that', true)
+      toast(e instanceof Error ? e.message : t('ip.failed'), true)
     } finally {
       busy = false
       if (input) input.value = ''
@@ -63,15 +64,14 @@
 {#if open}
   <div class="card panel">
     <div class="head">
-      <h2>Import a playlist</h2>
-      <button class="icon" aria-label="Close" onclick={() => (open = false)}><Icon name="close" /></button>
+      <h2>{t('ip.title')}</h2>
+      <button class="icon" aria-label={t('common.close')} onclick={() => (open = false)}><Icon name="close" /></button>
     </div>
     <p class="muted small">
-      This brings in the list, not the music. Songs you don't have stay in the list, flagged, and are skipped. They
-      start playing by themselves once they're in your library.
+      {t('ip.intro')}
     </p>
 
-    <input placeholder="Name (optional)" bind:value={name} maxlength="60" />
+    <input placeholder={t('ip.name')} bind:value={name} maxlength="60" />
 
     <input
       class="hidden"
@@ -82,51 +82,52 @@
       onchange={pick}
     />
     <button class="primary" disabled={busy} onclick={() => input?.click()}>
-      <Icon name="upload" size={20} /> {busy ? 'Importing...' : 'Choose files'}
+      <Icon name="upload" size={20} /> {busy ? t('ip.importing') : t('ip.choose')}
     </button>
 
-    <textarea rows="4" placeholder={'Or paste songs, one per line:\nRihanna - S&M\nFlo Rida - I Cry\n\nOr a YouTube playlist link'} bind:value={pasted}
+    <textarea rows="4" placeholder={t('ip.paste_hint')} bind:value={pasted}
     ></textarea>
-    <button disabled={busy || !pasted.trim()} onclick={() => run([{ text: pasted }])}>Import what's pasted</button>
+    <button disabled={busy || !pasted.trim()} onclick={() => run([{ text: pasted }])}>{t('ip.import_pasted')}</button>
 
     <details>
-      <summary>How to get a file from a streaming service</summary>
+      <summary>{t('ip.how')}</summary>
       <ul class="small">
         <li>
-          <b>YouTube and YouTube Music:</b> paste a public or unlisted playlist's link above, if an admin has added a
-          YouTube key. DJINN tells YouTube only the key and which playlist.
+          <b>{t('ip.yt_title')}</b> {t('ip.yt')}
         </li>
         <li>
-          <b>Spotify, YouTube Music, Pandora, Tidal, Deezer, Amazon and others:</b>
-          <a href="https://www.tunemymusic.com/" target="_blank" rel="noreferrer">Tune My Music</a> can read a playlist
-          and export it to a file. Choose your service as the source and <b>Export to file</b> as the destination, then
-          choose the file here. Soundiiz works too. These are outside services, and they'll see your playlists.
+          <b>{t('ip.others_title')}</b>
+          <a href="https://www.tunemymusic.com/" target="_blank" rel="noreferrer">Tune My Music</a> {t('ip.others_1')}
+          <b>{t('ip.export_to_file')}</b> {t('ip.others_2')}
         </li>
-        <li><b>Spotify only:</b> <a href="https://exportify.net/" target="_blank" rel="noreferrer">Exportify</a>, or the <code>Playlist1.json</code> in your account data.</li>
-        <li><b>Apple Music:</b> File &gt; Library &gt; Export Playlist.</li>
-        <li><b>Other music players:</b> M3U, PLS and XSPF files work.</li>
+        <li>
+          <b>{t('ip.spotify_title')}</b> <a href="https://exportify.net/" target="_blank" rel="noreferrer">Exportify</a>,
+          {t('ip.spotify', { file: 'Playlist1.json' })}
+        </li>
+        <li><b>{t('ip.apple_title')}</b> {t('ip.apple')}</li>
+        <li><b>{t('ip.players_title')}</b> {t('ip.players')}</li>
       </ul>
     </details>
 
     <p class="small muted">
-      YouTube links are {hasKey ? 'on' : 'off'} on this server.{#if !hasKey}
-        An admin can turn them on under Admin &gt; Library.{/if}
+      {hasKey ? t('ip.yt_on') : t('ip.yt_off')}{#if !hasKey}
+        {t('ip.yt_admin')}{/if}
     </p>
 
     {#each results as result (result.id)}
       <a class="result" href="#/playlist/{result.id}">
         <span class="ellipsis">{result.name}</span>
         <span class="small muted">
-          {result.found} found{#if result.missing}, <b class="bad">{result.missing} not in your library</b>{/if}
+          {t('ip.found', { n: result.found })}{#if result.missing}<b class="bad">{t('ip.not_in_lib', { n: result.missing })}</b>{/if}
         </span>
       </a>
     {/each}
     {#if skipped}
-      <p class="muted small">{skipped} {skipped === 1 ? 'line' : 'lines'} didn't name a song and were left out.</p>
+      <p class="muted small">{t('ip.skipped', { n: skipped })}</p>
     {/if}
   </div>
 {:else}
-  <button class="opener" onclick={() => (open = true)}><Icon name="upload" size={18} /> Import a playlist</button>
+  <button class="opener" onclick={() => (open = true)}><Icon name="upload" size={18} /> {t('ip.title')}</button>
 {/if}
 
 <style>
