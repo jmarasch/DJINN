@@ -6,6 +6,7 @@
   // didn't land, or landed wrong, onto the right track from Unknown, then
   // take the release's titles, numbers, album, artists, year and cover.
   // The tags go back to the grid as changes to approve.
+  import { t } from './i18n.svelte'
   import { onMount } from 'svelte'
   import { api } from './api'
   import { tagLabel } from './editorTags'
@@ -30,7 +31,7 @@
     { key: 'musicbrainz', label: 'MusicBrainz' },
     { key: 'deezer', label: 'Deezer' },
     { key: 'itunes', label: 'Apple Music (iTunes)' },
-    { key: 'spotify', label: 'Spotify (needs its account in Admin > Library)' },
+    { key: 'spotify', get label() { return t('al.spotify_src') } },
   ]
 
   // svelte-ignore state_referenced_locally
@@ -55,31 +56,31 @@
   function itemsFor(r: Release | null, includeExtra: boolean): TakeItem[] {
     if (!r) return []
     const items: TakeItem[] = []
-    if (r.tracks.some((t) => t.title)) items.push({ key: 'titles', label: 'Titles', defaultOn: true })
-    if (r.tracks.some((t) => t.number > 0)) {
-      const rDiscs = new Set(r.tracks.map((t) => t.disc)).size
+    if (r.tracks.some((track) => track.title)) items.push({ key: 'titles', label: t('al.titles'), defaultOn: true })
+    if (r.tracks.some((track) => track.number > 0)) {
+      const rDiscs = new Set(r.tracks.map((track) => track.disc)).size
       items.push({
         key: 'numbers',
-        label: rDiscs > 1 || songs.some((s) => s.disc_no) ? 'Track and disc numbers' : 'Track numbers',
+        label: rDiscs > 1 || songs.some((s) => s.disc_no) ? t('al.numbers_discs') : t('al.numbers'),
         defaultOn: true,
       })
     }
-    if (r.title) items.push({ key: 'album', label: 'Album', detail: r.title, defaultOn: true })
-    if (r.artist) items.push({ key: 'album_artist', label: 'Album artist', detail: r.artist, defaultOn: true })
-    if (r.tracks.some((t) => t.artist) || r.artist) {
+    if (r.title) items.push({ key: 'album', label: t('ed.album'), detail: r.title, defaultOn: true })
+    if (r.artist) items.push({ key: 'album_artist', label: t('ed.album_artist'), detail: r.artist, defaultOn: true })
+    if (r.tracks.some((track) => track.artist) || r.artist) {
       items.push({
         key: 'artist',
-        label: "Each song's artist",
-        detail: r.tracks.some((t) => t.artist) ? 'per track' : r.artist,
-        defaultOn: r.tracks.some((t) => !!t.artist),
+        label: t('al.each_artist'),
+        detail: r.tracks.some((track) => track.artist) ? t('al.per_track') : r.artist,
+        defaultOn: r.tracks.some((track) => !!track.artist),
       })
     }
-    if (r.year != null) items.push({ key: 'year', label: 'Year', detail: String(r.year), defaultOn: true })
-    if (r.genre || r.tracks.some((t) => t.genre)) {
+    if (r.year != null) items.push({ key: 'year', label: t('ed.year'), detail: String(r.year), defaultOn: true })
+    if (r.genre || r.tracks.some((track) => track.genre)) {
       items.push({
         key: 'genre',
-        label: 'Genre',
-        detail: r.genre ?? 'per track',
+        label: t('ed.genre'),
+        detail: r.genre ?? t('al.per_track'),
         defaultOn: true,
       })
     }
@@ -93,11 +94,11 @@
         for (const name of Object.keys(track.extra ?? {})) {
           if (seen.has(name)) continue
           seen.add(name)
-          items.push({ key: `x:${name}`, label: tagLabel(name), detail: 'per track', defaultOn: false })
+          items.push({ key: `x:${name}`, label: tagLabel(name), detail: t('al.per_track'), defaultOn: false })
         }
       }
     }
-    if (r.has_cover !== false) items.push({ key: 'cover', label: 'Cover', defaultOn: false })
+    if (r.has_cover !== false) items.push({ key: 'cover', label: t('al.cover'), defaultOn: false })
     return items
   }
 
@@ -105,7 +106,7 @@
 
   const byId = (id: number | null) => (id === null ? undefined : songs.find((s) => s.id === id))
   const unknown = $derived(songs.filter((s) => !laid.includes(s.id)))
-  const discs = $derived(new Set(release?.tracks.map((t) => t.disc) ?? []).size)
+  const discs = $derived(new Set(release?.tracks.map((track) => track.disc) ?? []).size)
 
   function length(ms: number | null | undefined): string {
     if (!ms) return ''
@@ -139,17 +140,17 @@
       const found = await unlocked(() => api.editorAlbumReleases(albumId))
       if (found.known) {
         hits = found.releases
-        hitsAbout = 'Releases of this album on MusicBrainz'
+        hitsAbout = t('al.releases')
         // Like Picard: start from the release closest in track count.
         const best = [...hits].sort(
           (a, b) => Math.abs(a.tracks - songs.length) - Math.abs(b.tracks - songs.length),
         )[0]
         if (best) await choose(best)
       } else {
-        hitsAbout = "MusicBrainz doesn't know this album yet: search for it below."
+        hitsAbout = t('al.unknown_mb')
       }
     } catch (e) {
-      hitsAbout = e instanceof Error ? e.message : 'Could not ask MusicBrainz'
+      hitsAbout = e instanceof Error ? e.message : t('ed.mb_failed')
     } finally {
       searching = false
     }
@@ -164,10 +165,10 @@
     searching = true
     try {
       hits = await unlocked(() => api.editorReleaseSearch(source, artist, album))
-      hitsAbout = `${hits.length} found on ${SOURCES.find((s) => s.key === source)?.label}`
+      hitsAbout = t('al.found_on', { n: hits.length, source: SOURCES.find((s) => s.key === source)?.label ?? source })
     } catch (err) {
       hits = []
-      hitsAbout = err instanceof Error ? err.message : 'The search failed'
+      hitsAbout = err instanceof Error ? err.message : t('al.search_failed')
     } finally {
       searching = false
     }
@@ -187,7 +188,7 @@
       for (const item of itemsFor(found.release, editingFiles)) nextTake[item.key] = item.defaultOn
       take = nextTake
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not get its tracks', true)
+      toast(e instanceof Error ? e.message : t('al.tracks_failed'), true)
     } finally {
       loadingRelease = false
     }
@@ -240,10 +241,10 @@
     if (take.cover && chosenHit) {
       const res = await fetch(api.editorReleaseCover(chosenHit.source, chosenHit.id))
       if (res.ok) cover = await res.blob()
-      else if (res.status === 404) toast('This release has no cover to take; the tags are still taken', true)
+      else if (res.status === 404) toast(t('al.no_cover'), true)
       else
         toast(
-          `Couldn't get the cover (${(await res.json().catch(() => null))?.error ?? 'the site refused'}); the tags are still taken. Find a cover can try the other sources.`,
+          t('al.cover_refused', { error: (await res.json().catch(() => null))?.error ?? t('al.site_refused') }),
           true,
         )
     }
@@ -253,22 +254,22 @@
 
 <section class="layout">
   <header>
-    <strong>Album layout</strong>
-    <span class="small muted">{songs.length} songs{first?.album ? ` from ${first.album}` : ''}</span>
-    <button class="small-button close" onclick={onclose}>Close</button>
+    <strong>{t('al.title')}</strong>
+    <span class="small muted">{t('count.songs', { n: songs.length })}{first?.album ? t('al.from', { album: first.album }) : ''}</span>
+    <button class="small-button close" onclick={onclose}>{t('common.close')}</button>
   </header>
 
   <div class="cols">
     <div class="find">
       <form onsubmit={search}>
-        <select bind:value={source} aria-label="Where to look">
+        <select bind:value={source} aria-label={t('al.where')}>
           {#each SOURCES as s (s.key)}<option value={s.key}>{s.label}</option>{/each}
         </select>
-        <input bind:value={artist} placeholder="Artist" aria-label="Artist" />
-        <input bind:value={album} placeholder="Album" aria-label="Album" />
-        <button class="small-button" type="submit" disabled={searching}>Search</button>
+        <input bind:value={artist} placeholder={t('ed.artist')} aria-label={t('ed.artist')} />
+        <input bind:value={album} placeholder={t('ed.album')} aria-label={t('ed.album')} />
+        <button class="small-button" type="submit" disabled={searching}>{t('cw.search')}</button>
       </form>
-      <p class="small muted">{searching ? 'Looking...' : hitsAbout}</p>
+      <p class="small muted">{searching ? t('al.looking') : hitsAbout}</p>
       <ul class="hits">
         {#each hits as hit (hit.source + hit.id)}
           <li>
@@ -276,7 +277,7 @@
               <b>{hit.title}</b>
               <span class="small">{hit.artist}</span>
               <span class="small muted">
-                {[hit.date, hit.country, hit.format, `${hit.tracks} tracks`, hit.note].filter(Boolean).join(' · ')}
+                {[hit.date, hit.country, hit.format, t('al.n_tracks', { n: hit.tracks }), hit.note].filter(Boolean).join(' · ')}
               </span>
             </button>
           </li>
@@ -286,18 +287,21 @@
 
     <div class="tracks">
       {#if loadingRelease}
-        <p class="small muted">Getting the track list...</p>
+        <p class="small muted">{t('al.getting')}</p>
       {:else if release}
         <p class="small">
-          <b>{release.title}</b> by {release.artist}{release.year ? ` (${release.year})` : ''} · {release.tracks.length} tracks ·
-          {laid.filter((x) => x !== null).length} of {songs.length} songs placed
+          <b>{release.title}</b> {t('al.by', { artist: release.artist ?? '' })}{release.year ? ` (${release.year})` : ''} · {t(
+            'al.n_tracks',
+            { n: release.tracks.length },
+          )} ·
+          {t('al.placed', { placed: laid.filter((x) => x !== null).length, total: songs.length })}
         </p>
-        <p class="small muted">Drag a song onto its track (or tap it, then tap the track). Dropping it on Unknown takes it off.</p>
+        <p class="small muted">{t('al.drag')}</p>
         <table>
           <tbody>
             {#each release.tracks as track, i (i)}
               {#if discs > 1 && (i === 0 || release.tracks[i - 1].disc !== track.disc)}
-                <tr class="disc"><td colspan="3">Disc {track.disc}</td></tr>
+                <tr class="disc"><td colspan="3">{t('ed.disc_n', { n: track.disc })}</td></tr>
               {/if}
               <tr>
                 <td class="num">{track.number}</td>
@@ -333,11 +337,11 @@
                       title={song.rel_path}
                     >
                       <span class="mono">{fileName(song.path)}</span>
-                      <span class="small muted">{length(song.duration_ms)}{song.title !== track.title ? ` · now "${song.title}"` : ''}</span>
+                      <span class="small muted">{length(song.duration_ms)}{song.title !== track.title ? t('al.now', { title: song.title }) : ''}</span>
                       <span class="small muted mono path">{folderOf(song)}</span>
                     </div>
                   {:else}
-                    <span class="small muted">{carrying !== null ? 'Put it here' : 'Drop a song here'}</span>
+                    <span class="small muted">{carrying !== null ? t('al.put_here') : t('al.drop_here')}</span>
                   {/if}
                 </td>
               </tr>
@@ -345,7 +349,7 @@
           </tbody>
         </table>
       {:else}
-        <p class="small muted">Pick a release on the left to lay the songs on it.</p>
+        <p class="small muted">{t('al.pick_release')}</p>
       {/if}
 
       <div
@@ -358,7 +362,7 @@
         role="button"
         tabindex="-1"
       >
-        <div class="small"><b>Unknown</b> <span class="muted">({unknown.length}): songs not on a track</span></div>
+        <div class="small"><b>{t('al.unknown')}</b> <span class="muted">{t('al.not_on_track', { n: unknown.length })}</span></div>
         {#each unknown as song (song.id)}
           <div
             class="song"
@@ -384,10 +388,10 @@
 
     <div class="use">
       {#if chosenHit && release?.has_cover !== false}
-        <img src={api.editorReleaseCover(chosenHit.source, chosenHit.id)} alt="The release's cover" width="200" height="200" />
+        <img src={api.editorReleaseCover(chosenHit.source, chosenHit.id)} alt={t('al.cover_alt')} width="200" height="200" />
       {/if}
       {#if availableItems.length}
-        <div class="small"><b>Take from the release</b></div>
+        <div class="small"><b>{t('al.take')}</b></div>
         {#each availableItems as item (item.key)}
           <label class="check small">
             <input
@@ -401,10 +405,10 @@
           </label>
         {/each}
       {:else}
-        <p class="small muted">Pick a release to see what tags it returned.</p>
+        <p class="small muted">{t('al.pick_to_see')}</p>
       {/if}
-      <button class="primary" disabled={!release || laid.every((x) => x === null)} onclick={apply}>Use this layout</button>
-      <p class="small muted">The tags go to the grid as changes to approve. The cover is put on straight away (it can be undone).</p>
+      <button class="primary" disabled={!release || laid.every((x) => x === null)} onclick={apply}>{t('al.use')}</button>
+      <p class="small muted">{t('al.use_note')}</p>
     </div>
   </div>
 </section>

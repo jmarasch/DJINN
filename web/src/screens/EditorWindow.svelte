@@ -4,6 +4,7 @@
   // enters their password (and a two-step code at the strictest level) to
   // go in. It locks again when the window closes, after ten minutes without
   // use (then asking again over the work), or from the button here.
+  import { t } from '../lib/i18n.svelte'
   import { onMount } from 'svelte'
   import { api } from '../lib/api'
   import EditorWorkspace from '../lib/EditorWorkspace.svelte'
@@ -44,13 +45,13 @@
 
 <div class="window">
   <header>
-    <h1>Library Editor</h1>
+    <h1>{t('admin.menu.editor')}</h1>
     {#if stage === 'open'}
       <Tabs
         items={[
-          ['editor', 'Editor'],
-          ['folders', 'Library folders'],
-          ['compare', 'Compare'],
+          ['editor', t('ew.editor')],
+          ['folders', t('ew.folders')],
+          ['compare', t('ew.compare')],
         ]}
         active={view}
         onselect={(id) => (view = id as 'editor' | 'folders' | 'compare')}
@@ -58,7 +59,7 @@
     {/if}
     <span class="spacer"></span>
     {#if stage === 'open'}
-      <button onclick={lockAndClose}>Lock and close</button>
+      <button onclick={lockAndClose}>{t('ew.lock_close')}</button>
     {/if}
   </header>
 
@@ -76,11 +77,11 @@
       {/if}
     {:else if stage === 'locked'}
       <div class="gate card">
-        <h2>Unlock the library editor</h2>
+        <h2>{t('ew.unlock')}</h2>
         <UnlockForm
           skipIfOpen={false}
           onopened={() => (stage = 'open')}
-          note="This changes your music library, so it asks every time this window opens. It locks again when you close the window, or after ten minutes without use."
+          note={t('ew.note')}
         />
       </div>
     {/if}

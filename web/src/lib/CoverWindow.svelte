@@ -3,6 +3,7 @@
   // change it (a file, remove, back to the files' own or folder.jpg), and
   // a search of the online sources that shows every cover found side by
   // side. DJINN fetches the pictures, so the page talks to no other site.
+  import { t } from './i18n.svelte'
   import { onMount } from 'svelte'
   import { api } from './api'
   import Art from './Art.svelte'
@@ -90,7 +91,7 @@
     const problems: string[] = []
     found.forEach((r, i) => {
       if (r.status === 'fulfilled') next.push(...r.value.slice(0, 12))
-      else problems.push(`${sourceName(sources[i])}: ${r.reason instanceof Error ? r.reason.message : 'failed'}`)
+      else problems.push(`${sourceName(sources[i])}: ${r.reason instanceof Error ? r.reason.message : t('cw.failed_src')}`)
     })
     // Like for like: each source's best first, taking turns.
     hits = next
@@ -106,7 +107,7 @@
     if (!picked) return
     try {
       const res = await fetch(api.editorReleaseCover(picked.source, picked.id))
-      if (!res.ok) throw new Error("Couldn't get that cover")
+      if (!res.ok) throw new Error(t('cw.cover_failed'))
       const blob = await res.blob()
       const kind = blob.type === 'image/png' ? 'png' : 'jpg'
       await onset(new File([blob], `cover.${kind}`, { type: blob.type || 'image/jpeg' }))
@@ -117,10 +118,10 @@
 </script>
 
 <FloatingWindow
-  title="Album cover"
-  subtitle="{song.album ?? 'No album'}{count ? ` · changes go to ${count} songs` : ''}{target === 'library'
-    ? ', in the files'
-    : ", in DJINN's copy"}"
+  title={t('cw.title')}
+  subtitle="{song.album ?? t('ed.no_album')}{count ? t('cw.goes_to', { n: count }) : ''}{target === 'library'
+    ? t('cw.in_files')
+    : t('cw.in_db')}"
   {onclose}
 >
   <div class="now">
@@ -138,45 +139,45 @@
         }}
       />
       <button class="small-button" disabled={!canEdit || busy || !count} onclick={() => input?.click()}>
-        Replace from a file...
+        {t('cw.from_file')}
       </button>
-      <button class="small-button" disabled={!canEdit || busy || !count} onclick={onremove}>Remove cover</button>
+      <button class="small-button" disabled={!canEdit || busy || !count} onclick={onremove}>{t('ed.remove_cover')}</button>
       {#if staged}
         <!-- Nothing else to go back to, and no folder for folder.jpg yet. -->
       {:else if target === 'database'}
-        <button class="small-button" disabled={busy || !count} onclick={onreset}>Use the files' cover</button>
+        <button class="small-button" disabled={busy || !count} onclick={onreset}>{t('ed.files_cover')}</button>
       {:else}
         <button
           class="small-button"
           disabled={busy || !count}
-          title="Saves the album's cover as folder.jpg in the songs' folders (replacing one that's there; undo from the history)"
+          title={t('ed.folder_jpg_title')}
           onclick={onfolderart}
         >
-          Make folder.jpg
+          {t('ed.folder_jpg')}
         </button>
       {/if}
     </div>
   </div>
 
-  <h3>Search online</h3>
+  <h3>{t('cw.search_online')}</h3>
   <form class="search" onsubmit={search}>
-    <input bind:value={artist} placeholder="Artist" aria-label="Artist" />
-    <input bind:value={album} placeholder="Album" aria-label="Album" />
-    <button class="small-button" type="submit" disabled={searching}>{searching ? 'Searching...' : 'Search'}</button>
+    <input bind:value={artist} placeholder={t('ed.artist')} aria-label={t('ed.artist')} />
+    <input bind:value={album} placeholder={t('ed.album')} aria-label={t('ed.album')} />
+    <button class="small-button" type="submit" disabled={searching}>{searching ? t('cw.searching') : t('cw.search')}</button>
   </form>
   <div class="sources">
     {#each SOURCES as s (s.key)}
-      <label class="check small" title={s.key === 'spotify' && !spotifyReady ? 'Set up its account in Admin > Library first' : undefined}>
+      <label class="check small" title={s.key === 'spotify' && !spotifyReady ? t('cw.spotify_setup') : undefined}>
         <input type="checkbox" bind:checked={use[s.key]} disabled={s.key === 'spotify' && !spotifyReady} />
         {s.label}
       </label>
     {/each}
   </div>
-  <p class="small muted">YouTube Music has no way for other programs to search it, so it isn't one of the sources.</p>
+  <p class="small muted">{t('cw.no_youtube')}</p>
   {#each notes as note (note)}<p class="small bad">{note}</p>{/each}
 
   {#if searched && !searching && !shownHits.length}
-    <p class="small muted">No covers found. Try fewer words, or only the album.</p>
+    <p class="small muted">{t('cw.none')}</p>
   {/if}
   {#if shownHits.length}
     <div class="hits">
@@ -184,7 +185,7 @@
         <button class="hit" class:on={picked && key(picked) === key(h)} onclick={() => (picked = h)} title="{h.title} · {h.artist}">
           <img
             src={api.editorReleaseCover(h.source, h.id)}
-            alt="{h.title} cover"
+            alt={t('cw.alt', { title: h.title })}
             loading="lazy"
             onerror={() => (missing = { ...missing, [key(h)]: true })}
           />
@@ -197,8 +198,8 @@
   {/if}
 
   {#snippet footer()}
-    <button onclick={onclose}>Close</button>
-    <button class="primary" disabled={!picked || !canEdit || busy || !count} onclick={useCover}>Use this cover</button>
+    <button onclick={onclose}>{t('common.close')}</button>
+    <button class="primary" disabled={!picked || !canEdit || busy || !count} onclick={useCover}>{t('cw.use')}</button>
   {/snippet}
 </FloatingWindow>
 
