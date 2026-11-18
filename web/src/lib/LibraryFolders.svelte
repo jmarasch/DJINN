@@ -9,6 +9,7 @@
   import { ApiError, api } from './api'
   import { askToUnlock, unlocked } from './protected.svelte'
   import { toast } from './state.svelte'
+  import { locale, t } from './i18n.svelte'
   import type { EditableFolder } from './types'
 
   let folders = $state<EditableFolder[]>([])
@@ -23,7 +24,7 @@
       locked = false
     } catch (e) {
       if (e instanceof ApiError && e.status === 423) locked = true
-      else toast(e instanceof Error ? e.message : 'Could not load', true)
+      else toast(e instanceof Error ? e.message : t('ed.load_failed'), true)
     }
   }
 
@@ -33,66 +34,63 @@
     try {
       await unlocked(() => api.setFolderEditable(f.path, on))
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not change it', true)
+      toast(e instanceof Error ? e.message : t('lf.change_failed'), true)
     }
     await load()
   }
 
   async function emptyTrash() {
     if (!trash?.files) return
-    if (!confirm(`Delete the ${trash.files} files in the trash for good? Those deletes can't be undone after this.`)) return
+    if (!confirm(t('lf.empty_q', { n: trash.files }))) return
     busy = true
     try {
       const gone = await unlocked(() => api.editorEmptyTrash())
-      toast(`${gone.files.toLocaleString()} files deleted for good`)
+      toast(t('lf.deleted', { n: gone.files.toLocaleString(locale.code) }))
       await load()
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not empty it', true)
+      toast(e instanceof Error ? e.message : t('lf.empty_failed'), true)
     } finally {
       busy = false
     }
   }
 
-  const mb = (bytes: number) => `${(bytes / 1_000_000).toLocaleString(undefined, { maximumFractionDigits: 1 })} MB`
+  const mb = (bytes: number) => `${(bytes / 1_000_000).toLocaleString(locale.code, { maximumFractionDigits: 1 })} MB`
 </script>
 
 <section class="card">
-  <h3>Library folders</h3>
+  <h3>{t('lf.title')}</h3>
   {#if locked}
-    <p class="small">The editor is locked. <button class="link" onclick={async () => (await askToUnlock()) && load()}>Unlock</button></p>
+    <p class="small">
+      {t('ed.locked')} <button class="link" onclick={async () => (await askToUnlock()) && load()}>{t('ed.unlock')}</button>
+    </p>
   {:else}
     <p class="small muted">
-      Each library folder is <b>read only</b> until you make it <b>read and write</b>. In a read only folder you can see
-      everything (the editor, the compare and the Problems page read every folder), but nothing changes, so use it for a
-      folder someone else looks after. In a read and write folder the editor changes the files themselves, in place:
-      tags, covers, names and places, copying in and deleting. Every change is in the editor's history and can be undone.
-      Making a folder read and write checks that DJINN can write there.
+      {t('lf.intro_1')} <b>{t('ed.ro')}</b> {t('lf.intro_2')} <b>{t('ed.rw')}</b>{t('lf.intro_3')}
     </p>
     <ul class="folders">
       {#each folders as f (f.path)}
         <li>
           <div>
             <strong>{f.name}</strong>
-            <span class="badge" class:on={f.editable}>{f.editable ? 'Read and write' : 'Read only'}</span>
+            <span class="badge" class:on={f.editable}>{f.editable ? t('lf.rw') : t('lf.ro')}</span>
             <div class="small mono muted path">{f.path}</div>
           </div>
           <button class="small-button" onclick={() => setWrite(f, !f.editable)}>
-            {f.editable ? 'Make read only' : 'Make read and write'}
+            {f.editable ? t('lf.make_ro') : t('lf.make_rw')}
           </button>
         </li>
       {/each}
     </ul>
 
-    <h4>Trash</h4>
+    <h4>{t('lf.trash')}</h4>
     <p class="small muted">
-      Deleted songs wait in a hidden <code>.djinn-trash</code> folder inside their library folder, keeping their place, so a
-      delete can be undone from the editor's history. Library checks skip it. Emptying it deletes them for good.
+      {t('lf.trash_1')} <code>.djinn-trash</code> {t('lf.trash_2')}
     </p>
     {#if trash}
       <p class="small">
-        {trash.files ? `${trash.files.toLocaleString()} files, ${mb(trash.bytes)}` : 'Empty.'}
+        {trash.files ? t('lf.files_size', { n: trash.files.toLocaleString(locale.code), size: mb(trash.bytes) }) : t('lf.empty')}
         {#if trash.files}
-          <button class="small-button danger" disabled={busy} onclick={emptyTrash}>Empty the trash</button>
+          <button class="small-button danger" disabled={busy} onclick={emptyTrash}>{t('lf.empty_trash')}</button>
         {/if}
       </p>
     {/if}

@@ -8,28 +8,29 @@
   import { ApiError, api } from './api'
   import { askToUnlock } from './protected.svelte'
   import { toast } from './state.svelte'
+  import { locale, t } from './i18n.svelte'
   import type { CompareShown, CompareWhy, EditableFolder } from './types'
 
-  const whyLabel: Record<CompareWhy, string> = {
-    correction: 'Corrected in DJINN',
-    identified: 'Filled in by identification',
-    other: 'Other',
-  }
-  const whyHelp: Record<CompareWhy, string> = {
-    correction: 'You changed it with Edit tags or Edit album. The file still says the old value.',
-    identified: "The file has nothing there and an applied identification filled it in.",
-    other: 'The file changed since DJINN read it, or the two readings differ. A library check re-reads changed files.',
-  }
-  const fieldLabel: Record<string, string> = {
-    title: 'Title',
-    artist: 'Artist',
-    album: 'Album',
-    album_artist: 'Album artist',
-    track_no: 'Track number',
-    disc_no: 'Disc number',
-    year: 'Year',
-    genre: 'Genre',
-  }
+  const whyLabel: Record<CompareWhy, string> = $derived({
+    correction: t('cmp.why_correction'),
+    identified: t('cmp.why_identified'),
+    other: t('cmp.why_other'),
+  })
+  const whyHelp: Record<CompareWhy, string> = $derived({
+    correction: t('cmp.help_correction'),
+    identified: t('cmp.help_identified'),
+    other: t('cmp.help_other'),
+  })
+  const fieldLabel: Record<string, string> = $derived({
+    title: t('ed.title'),
+    artist: t('ed.artist'),
+    album: t('ed.album'),
+    album_artist: t('ed.album_artist'),
+    track_no: t('cmp.track_number'),
+    disc_no: t('cmp.disc_number'),
+    year: t('ed.year'),
+    genre: t('ed.genre'),
+  })
 
   let shown = $state<CompareShown | null>(null)
   let folders = $state<EditableFolder[]>([])
@@ -40,8 +41,8 @@
   let busy = $state(false)
 
   const run = $derived(shown?.run ?? null)
-  const n = (x: number) => x.toLocaleString()
-  const when = (ms: number) => new Date(ms).toLocaleString()
+  const n = (x: number) => x.toLocaleString(locale.code)
+  const when = (ms: number) => new Date(ms).toLocaleString(locale.code)
 
   async function load(offset = 0) {
     try {
@@ -51,7 +52,7 @@
       locked = false
     } catch (e) {
       if (e instanceof ApiError && e.status === 423) locked = true
-      else toast(e instanceof Error ? e.message : 'Could not load', true)
+      else toast(e instanceof Error ? e.message : t('ed.load_failed'), true)
     }
   }
 
@@ -67,7 +68,7 @@
     } catch (e) {
       if (e instanceof ApiError && e.status === 423) {
         locked = true
-      } else toast(e instanceof Error ? e.message : 'Could not start', true)
+      } else toast(e instanceof Error ? e.message : t('common.start_failed'), true)
     } finally {
       busy = false
     }
@@ -95,43 +96,42 @@
 </script>
 
 <section class="card">
-  <h3>Compare</h3>
+  <h3>{t('cmp.title')}</h3>
   <p class="small muted">
-    Compare sets DJINN's database against what each file's tags say. Nothing is changed.
+    {t('cmp.intro')}
   </p>
   {#if locked}
-    <p class="small">The editor is locked. <button class="link" onclick={unlock}>Unlock</button></p>
+    <p class="small">{t('ed.locked')} <button class="link" onclick={unlock}>{t('ed.unlock')}</button></p>
   {:else}
-    <h4>Compare the database with the files</h4>
+    <h4>{t('cmp.heading')}</h4>
     <div class="actions">
       <button class="primary" onclick={start} disabled={busy || shown?.running}>
-        {run ? 'Compare again' : 'Compare now'}
+        {run ? t('cmp.again') : t('cmp.now')}
       </button>
       {#if shown?.running && run}
-        <span class="small"><span class="spinner" aria-hidden="true"></span> {n(run.done)} of {n(run.total)} songs</span>
+        <span class="small"><span class="spinner" aria-hidden="true"></span> {t('cmp.progress', { done: n(run.done), total: n(run.total) })}</span>
       {/if}
     </div>
     <p class="small muted">
-      Reads every song's tags from its file (about half a minute for 40,000 songs on a local disk, longer on a network
-      share) and waits its turn like the other background jobs.
+      {t('cmp.note')}
     </p>
     {#if run && !shown?.running}
       <p class="small">
-        {#if run.error}<span class="bad">Stopped: {run.error}</span>{:else}
-          {n(run.total)} songs compared on {when(run.finished_at ?? run.started_at)}:
+        {#if run.error}<span class="bad">{t('cmp.stopped', { error: run.error })}</span>{:else}
+          {t('cmp.compared', { n: n(run.total), when: when(run.finished_at ?? run.started_at) })}
           {#if run.differing === 0}
-            <strong>the database matches every file.</strong>
+            <strong>{t('cmp.matches')}</strong>
           {:else}
-            <strong>{n(run.differing)} {run.differing === 1 ? 'song differs' : 'songs differ'}</strong> from their files.
+            <strong>{t('cmp.differ', { n: run.differing })}</strong> {t('cmp.from_files')}
           {/if}
-          {#if run.unreadable}{n(run.unreadable)} files couldn't be read.{/if}
+          {#if run.unreadable}{t('cmp.unreadable', { n: n(run.unreadable) })}{/if}
         {/if}
       </p>
     {/if}
     {#if run && total > 0}
       <table class="counts">
         <thead>
-          <tr><th>Field</th>{#each Object.keys(whyLabel) as w (w)}<th title={whyHelp[w as CompareWhy]}>{whyLabel[w as CompareWhy]}</th>{/each}</tr>
+          <tr><th>{t('cmp.field')}</th>{#each Object.keys(whyLabel) as w (w)}<th title={whyHelp[w as CompareWhy]}>{whyLabel[w as CompareWhy]}</th>{/each}</tr>
         </thead>
         <tbody>
           {#each [...new Set(run.counts.map((c) => c.field))] as f (f)}
@@ -150,19 +150,25 @@
       {#if run.folders.length > 1}
         <div class="actions">
           <label class="small">
-            Folder
+            {t('cmp.folder')}
             <select bind:value={folder} onchange={() => load()}>
-              <option value="">All folders</option>
+              <option value="">{t('cmp.all_folders')}</option>
               {#each run.folders as f (f.path)}
-                <option value={f.path}>{folderName(f.path)} ({n(folderStats(f.path)?.differing ?? 0)} of {n(f.songs)} songs differ)</option>
+                <option value={f.path}
+                  >{t('cmp.folder_option', { name: folderName(f.path), differ: n(folderStats(f.path)?.differing ?? 0), songs: n(f.songs) })}</option
+                >
               {/each}
             </select>
           </label>
         </div>
       {/if}
       <div class="actions">
-        {#if field || why}<button class="small-button" onclick={() => pick('', '')}>Show all differences</button>{/if}
-        <span class="small muted">{n(shown?.matching ?? 0)} songs shown{field ? ` for ${fieldLabel[field] ?? field}` : ''}{why ? `, ${whyLabel[why].toLowerCase()}` : ''}</span>
+        {#if field || why}<button class="small-button" onclick={() => pick('', '')}>{t('cmp.show_all')}</button>{/if}
+        <span class="small muted"
+          >{t('cmp.shown', { n: n(shown?.matching ?? 0) })}{field ? t('cmp.for_field', { field: fieldLabel[field] ?? field }) : ''}{why
+            ? `, ${whyLabel[why].toLowerCase()}`
+            : ''}</span
+        >
       </div>
       <ul class="songs">
         {#each shown?.songs ?? [] as song (song.track_id)}
@@ -172,8 +178,8 @@
             {#each song.diffs as d (d.field)}
               <div class="diff small">
                 <span class="field">{fieldLabel[d.field] ?? d.field}</span>
-                <span>DJINN: <b>{d.database ?? '(empty)'}</b></span>
-                <span>File: <b>{d.file ?? '(empty)'}</b></span>
+                <span>{t('cmp.djinn')} <b>{d.database ?? t('ed.empty')}</b></span>
+                <span>{t('cmp.file')} <b>{d.file ?? t('ed.empty')}</b></span>
                 <span class="why">{whyLabel[d.why]}</span>
               </div>
             {/each}
@@ -181,7 +187,7 @@
         {/each}
       </ul>
       {#if shown && shown.songs.length < shown.matching}
-        <button class="small-button" onclick={() => load(shown?.songs.length ?? 0)}>Show more</button>
+        <button class="small-button" onclick={() => load(shown?.songs.length ?? 0)}>{t('common.show_more')}</button>
       {/if}
     {/if}
   {/if}
