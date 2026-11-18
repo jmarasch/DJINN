@@ -7,6 +7,7 @@
   import Icon from './Icon.svelte'
   import Sheet from './Sheet.svelte'
   import { app, toast } from './state.svelte'
+  import { locale, t } from './i18n.svelte'
   import type {
     AccountRole,
     Device,
@@ -41,7 +42,7 @@
   let locked = $state<number[]>([])
 
   async function unlock(user: User) {
-    if (await attempt(() => api.unlockAccount(user.id), `${user.username} can sign in again`)) {
+    if (await attempt(() => api.unlockAccount(user.id), t('up.can_sign_in_again', { name: user.username }))) {
       locked = locked.filter((id) => id !== user.id)
     }
   }
@@ -67,7 +68,7 @@
       if (done) toast(done)
       return true
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'That did not work', true)
+      toast(e instanceof Error ? e.message : t('common.failed'), true)
       return false
     }
   }
@@ -93,11 +94,11 @@
   }
 
   async function approve(user: User) {
-    await setStatus(user, 'active', `${user.username} can sign in now`)
+    await setStatus(user, 'active', t('up.can_sign_in_now', { name: user.username }))
   }
 
   async function deny(user: User) {
-    if (!confirm(`Turn down ${user.username}? Their account is deleted.`)) return
+    if (!confirm(t('up.deny_q', { name: user.username }))) return
     if (await attempt(() => api.deleteUser(user.id))) users = users.filter((u) => u.id !== user.id)
   }
 
@@ -108,8 +109,8 @@
   }
 
   async function resetPassword(user: User) {
-    const password = prompt(`New password for ${user.username} (at least 8 characters):`)
-    if (password) await attempt(() => api.updateUser(user.id, { password }), `Password changed for ${user.username}`)
+    const password = prompt(t('up.new_password_q', { name: user.username }))
+    if (password) await attempt(() => api.updateUser(user.id, { password }), t('up.password_changed', { name: user.username }))
   }
 
   function editUsername(user: User) {
@@ -126,35 +127,35 @@
       editingUsername = null
       return
     }
-    if (await attempt(() => api.updateUser(user.id, { username }), `Username changed to ${username}`)) {
+    if (await attempt(() => api.updateUser(user.id, { username }), t('up.username_changed', { name: username }))) {
       users = users.map((u) => (u.id === user.id ? { ...u, username } : u))
       editingUsername = null
     }
   }
 
   async function resetTwoStep(user: User) {
-    if (!confirm(`Turn off two-step sign-in for ${user.username}? Do this when they've lost their phone and their recovery codes.`)) return
-    if (await attempt(() => api.turnOffUserTwoStep(user.id), `${user.username} signs in with just a password now`)) {
+    if (!confirm(t('up.two_step_off_q', { name: user.username }))) return
+    if (await attempt(() => api.turnOffUserTwoStep(user.id), t('up.two_step_off', { name: user.username }))) {
       users = users.map((u) => (u.id === user.id ? { ...u, two_step: false } : u))
     }
   }
 
   async function removeUser(user: User) {
-    if (!confirm(`Delete ${user.username}? Their queued songs are removed too.`)) return
+    if (!confirm(t('up.delete_q', { name: user.username }))) return
     if (await attempt(() => api.deleteUser(user.id))) users = users.filter((u) => u.id !== user.id)
   }
 
   async function addUser(e: SubmitEvent) {
     e.preventDefault()
     if (newUser.password !== newUser.confirm) {
-      toast('Passwords do not match', true)
+      toast(t('up.no_match'), true)
       return
     }
     const admin = newUser.access === 'admin'
     const roleId = admin ? 1 : Number(newUser.access.slice(5))
     const ok = await attempt(
       () => api.createUser(newUser.username, newUser.password, admin ? 'admin' : 'user', roleId),
-      `Created ${newUser.username}`,
+      t('up.created', { name: newUser.username }),
     )
     if (ok) {
       newUser = { username: '', password: '', confirm: '', access: newUser.access }
@@ -179,13 +180,13 @@
   async function signOutEverywhere() {
     if (!devicesFor) return
     const user = devicesFor
-    if (await attempt(() => api.signOutUserEverywhere(user.id), `Signed ${user.username} out everywhere`)) {
+    if (await attempt(() => api.signOutUserEverywhere(user.id), t('up.signed_out_all', { name: user.username }))) {
       devices = []
     }
   }
 
   async function saveSignup() {
-    if (signup) await attempt(() => api.saveSignupSettings(signup!), 'Saved')
+    if (signup) await attempt(() => api.saveSignupSettings(signup!), t('common.saved'))
   }
 
   async function makeInvite(e: SubmitEvent) {
@@ -207,14 +208,14 @@
     if (!inviteLink) return
     try {
       await navigator.clipboard.writeText(inviteLink)
-      toast('Invite link copied')
+      toast(t('up.link_copied'))
     } catch {
-      toast('Select the link and copy it', true)
+      toast(t('up.copy_by_hand'), true)
     }
   }
 
   async function removeInvite(invite: Invite) {
-    if (!confirm('Cancel this invite? The link stops working.')) return
+    if (!confirm(t('up.cancel_invite_q'))) return
     if (await attempt(() => api.deleteInvite(invite.id))) invites = invites.filter((i) => i.id !== invite.id)
   }
 
@@ -244,7 +245,7 @@
     const { id, ...role } = editing
     const ok = await attempt(
       () => (id ? api.updateRole(id, role) : api.createRole(role)),
-      id ? 'Role saved' : `Added ${role.name}`,
+      id ? t('up.role_saved') : t('up.added', { name: role.name }),
     )
     if (ok) {
       editing = null
@@ -253,9 +254,9 @@
   }
 
   async function removeRole(role: AccountRole) {
-    const moved = role.accounts ? ` Its ${role.accounts} ${role.accounts === 1 ? 'account moves' : 'accounts move'} to Listener.` : ''
-    if (!confirm(`Delete the ${role.name} role?${moved}`)) return
-    if (await attempt(() => api.deleteRole(role.id), `Deleted ${role.name}`)) await load()
+    const moved = role.accounts ? t('up.role_moves', { n: role.accounts }) : ''
+    if (!confirm(t('up.delete_role_q', { name: role.name, moved }))) return
+    if (await attempt(() => api.deleteRole(role.id), t('up.deleted', { name: role.name }))) await load()
   }
 
   async function setGuestUnlimited(guest: GuestSummary, unlimited: boolean) {
@@ -265,27 +266,27 @@
   }
 
   async function removeGuest(guest: GuestSummary) {
-    if (!confirm(`Remove ${guest.name}? Their queued songs are removed too.`)) return
+    if (!confirm(t('up.remove_guest_q', { name: guest.name }))) return
     if (await attempt(() => api.deleteUser(guest.id))) guests = guests.filter((g) => g.id !== guest.id)
   }
 
-  const roleName = (id: number) => roles.find((r) => r.id === id)?.name ?? 'Listener'
+  const roleName = (id: number) => roles.find((r) => r.id === id)?.name ?? t('up.listener')
   const when = (ms: number) =>
-    new Date(ms).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
-  const day = (ms: number) => new Date(ms).toLocaleDateString([], { month: 'short', day: 'numeric' })
+    new Date(ms).toLocaleString(locale.code, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+  const day = (ms: number) => new Date(ms).toLocaleDateString(locale.code, { month: 'short', day: 'numeric' })
 
-  const permissionLabels: [keyof Permissions, string, string][] = [
-    ['go', 'Use DJINN GO', 'Personal listening, apart from the party.'],
-    ['go_remote', 'Use GO away from home', 'Otherwise GO only works on your home network.'],
-    ['require_two_step', 'Must use two-step sign-in for GO', 'A code from an authenticator app after the password.'],
-    ['downloads', 'Download songs', 'Save song files to their device.'],
-    ['convert', 'Have songs converted', 'MP3 copies when their device needs them, if converting is on (Admin > GO).'],
-    ['share_playlists', 'Share playlists', 'Let other people see and play their playlists.'],
-    ['submit_music', 'Submit music', 'Upload songs for the library from DJINN GO.'],
-    ['submit_without_review', 'Submitted music goes straight in', 'Otherwise you review each upload.'],
-    ['unlimited_requests', 'No party request limit', 'Skip the per-person limit and the queue cap.'],
-    ['auto_mix', 'Choose what the party plays', 'Start a playlist that plays when nobody has requested anything.'],
-  ]
+  const permissionLabels: [keyof Permissions, string, string][] = $derived([
+    ['go', t('up.p_go'), t('up.p_go_h')],
+    ['go_remote', t('up.p_remote'), t('up.p_remote_h')],
+    ['require_two_step', t('up.p_two_step'), t('up.p_two_step_h')],
+    ['downloads', t('up.p_downloads'), t('up.p_downloads_h')],
+    ['convert', t('up.p_convert'), t('up.p_convert_h')],
+    ['share_playlists', t('up.p_share'), t('up.p_share_h')],
+    ['submit_music', t('up.p_submit'), t('up.p_submit_h')],
+    ['submit_without_review', t('up.p_no_review'), t('up.p_no_review_h')],
+    ['unlimited_requests', t('up.p_unlimited'), t('up.p_unlimited_h')],
+    ['auto_mix', t('up.p_auto_mix'), t('up.p_auto_mix_h')],
+  ])
   const dependsOn: Partial<Record<keyof Permissions, keyof Permissions>> = {
     go_remote: 'go',
     require_two_step: 'go',
@@ -293,32 +294,30 @@
   }
 
   function summary(role: AccountRole): string {
-    const can = permissionLabels
-      .filter(([key]) => role[key])
-      .map(([, label]) => label[0].toLowerCase() + label.slice(1))
-    return can.length ? `Can ${can.join(', ')}` : 'Party requests only'
+    const can = permissionLabels.filter(([key]) => role[key]).map(([, label]) => label)
+    return can.length ? t('up.can', { list: can.join(', ') }) : t('up.requests_only')
   }
 </script>
 
 {#if pending.length}
   <section class="card">
-    <h2>Waiting for approval</h2>
+    <h2>{t('up.waiting')}</h2>
     {#each pending as user (user.id)}
       <div class="user">
         <div class="grow">
           <div>{user.username}</div>
-          <div class="muted small">Signed up {when(user.created_at)}</div>
+          <div class="muted small">{t('up.signed_up', { when: when(user.created_at) })}</div>
           <div class="user-controls">
             <select
               value={accessOf(user)}
-              aria-label="Role for {user.username}"
+              aria-label={t('up.role_for', { name: user.username })}
               onchange={(e) => setAccess(user, e.currentTarget.value)}
             >
               {#each roles as role (role.id)}<option value="role:{role.id}">{role.name}</option>{/each}
             </select>
-            <button class="small-button" onclick={() => editUsername(user)}>Change username</button>
-            <button class="primary small-button" onclick={() => approve(user)}>Approve</button>
-            <button class="small-button" onclick={() => deny(user)}>Turn down</button>
+            <button class="small-button" onclick={() => editUsername(user)}>{t('up.change_username')}</button>
+            <button class="primary small-button" onclick={() => approve(user)}>{t('up.approve')}</button>
+            <button class="small-button" onclick={() => deny(user)}>{t('up.deny')}</button>
           </div>
         </div>
       </div>
@@ -327,155 +326,159 @@
 {/if}
 
 <section class="card wide">
-  <h2>Accounts</h2>
+  <h2>{t('up.accounts')}</h2>
   {#each accounts as user (user.id)}
     <div class="user" class:off={user.status === 'disabled'}>
       <div class="grow">
         <div>
           {user.username}
-          {#if user.id === app.me?.id}<span class="muted small">(you)</span>{/if}
-          {#if user.status === 'disabled'}<span class="badge">Turned off</span>{/if}
-          {#if user.two_step}<span class="badge">Two-step</span>{/if}
-          {#if locked.includes(user.id)}<span class="badge">Locked</span>{/if}
+          {#if user.id === app.me?.id}<span class="muted small">{t('up.you')}</span>{/if}
+          {#if user.status === 'disabled'}<span class="badge">{t('up.turned_off')}</span>{/if}
+          {#if user.two_step}<span class="badge">{t('up.two_step')}</span>{/if}
+          {#if locked.includes(user.id)}<span class="badge">{t('up.locked')}</span>{/if}
         </div>
         <div class="user-controls">
           <select
             value={accessOf(user)}
             disabled={user.id === app.me?.id}
-            aria-label="Role for {user.username}"
+            aria-label={t('up.role_for', { name: user.username })}
             onchange={(e) => setAccess(user, e.currentTarget.value)}
           >
-            <option value="admin">Admin</option>
+            <option value="admin">{t('up.admin')}</option>
             {#each roles as role (role.id)}<option value="role:{role.id}">{role.name}</option>{/each}
           </select>
           {#if user.role !== 'admin'}
             <label class="switch">
               <input type="checkbox" checked={user.unlimited} onchange={(e) => setUnlimited(user, e.currentTarget.checked)} />
-              No limit
+              {t('up.no_limit')}
             </label>
           {/if}
-          <button class="small-button" onclick={() => showDevices(user)}>Devices</button>
+          <button class="small-button" onclick={() => showDevices(user)}>{t('up.devices')}</button>
           {#if user.id !== app.me?.id}
-            <button class="small-button" onclick={() => editUsername(user)}>Change username</button>
+            <button class="small-button" onclick={() => editUsername(user)}>{t('up.change_username')}</button>
           {/if}
-          <button class="small-button" onclick={() => resetPassword(user)}>Reset password</button>
+          <button class="small-button" onclick={() => resetPassword(user)}>{t('up.reset_password')}</button>
           {#if user.two_step && user.id !== app.me?.id}
-            <button class="small-button" onclick={() => resetTwoStep(user)}>Turn off two-step</button>
+            <button class="small-button" onclick={() => resetTwoStep(user)}>{t('up.turn_off_two_step')}</button>
           {/if}
           {#if locked.includes(user.id)}
-            <button class="small-button" onclick={() => unlock(user)}>Unlock</button>
+            <button class="small-button" onclick={() => unlock(user)}>{t('up.unlock')}</button>
           {/if}
           {#if user.id !== app.me?.id}
             {#if user.status === 'disabled'}
-              <button class="small-button" onclick={() => setStatus(user, 'active', `${user.username} can sign in again`)}>Turn on</button>
+              <button class="small-button" onclick={() => setStatus(user, 'active', t('up.can_sign_in_again', { name: user.username }))}
+                >{t('up.turn_on')}</button
+              >
             {:else}
-              <button class="small-button" onclick={() => setStatus(user, 'disabled', `${user.username} is signed out and can't sign in`)}>Turn off</button>
+              <button class="small-button" onclick={() => setStatus(user, 'disabled', t('up.cant_sign_in', { name: user.username }))}
+                >{t('up.turn_off')}</button
+              >
             {/if}
           {/if}
         </div>
       </div>
       {#if user.id !== app.me?.id}
-        <button class="icon" aria-label="Delete {user.username}" onclick={() => removeUser(user)}><Icon name="close" /></button>
+        <button class="icon" aria-label={t('up.delete_user', { name: user.username })} onclick={() => removeUser(user)}><Icon name="close" /></button>
       {/if}
     </div>
   {/each}
   <form class="new-user" onsubmit={addUser}>
-    <input placeholder="Username" bind:value={newUser.username} maxlength="32" autocapitalize="none" required />
-    <input placeholder="Password" type="password" bind:value={newUser.password} autocomplete="new-password" minlength="8" required />
-    <input placeholder="Password again" type="password" bind:value={newUser.confirm} autocomplete="new-password" required />
-    <select bind:value={newUser.access} aria-label="Role for the new account">
+    <input placeholder={t('up.username')} bind:value={newUser.username} maxlength="32" autocapitalize="none" required />
+    <input placeholder={t('up.password')} type="password" bind:value={newUser.password} autocomplete="new-password" minlength="8" required />
+    <input placeholder={t('up.password_again')} type="password" bind:value={newUser.confirm} autocomplete="new-password" required />
+    <select bind:value={newUser.access} aria-label={t('up.role_new')}>
       {#each roles as role (role.id)}<option value="role:{role.id}">{role.name}</option>{/each}
-      <option value="admin">Admin</option>
+      <option value="admin">{t('up.admin')}</option>
     </select>
-    <button class="primary">Add account</button>
+    <button class="primary">{t('up.add_account')}</button>
   </form>
 </section>
 
 <section class="card wide">
-  <h2>Roles</h2>
-  <p class="small muted">What each kind of account can do. Admins can do everything.</p>
+  <h2>{t('up.roles')}</h2>
+  <p class="small muted">{t('up.roles_note')}</p>
   {#each roles as role (role.id)}
     <div class="user">
       <div class="grow">
         <div>
           {role.name}
-          <span class="muted small">{role.accounts} {role.accounts === 1 ? 'account' : 'accounts'}</span>
+          <span class="muted small">{t('up.n_accounts', { n: role.accounts })}</span>
         </div>
         <div class="muted small">{summary(role)}</div>
       </div>
-      <button class="small-button" onclick={() => editRole(role)}>Edit</button>
+      <button class="small-button" onclick={() => editRole(role)}>{t('up.edit')}</button>
       {#if !role.builtin}
-        <button class="icon" aria-label="Delete {role.name}" onclick={() => removeRole(role)}><Icon name="close" /></button>
+        <button class="icon" aria-label={t('up.delete_user', { name: role.name })} onclick={() => removeRole(role)}><Icon name="close" /></button>
       {/if}
     </div>
   {/each}
-  <button class="small-button add" onclick={() => editRole()}>New role</button>
+  <button class="small-button add" onclick={() => editRole()}>{t('up.new_role')}</button>
 </section>
 
 {#if signup}
   <section class="card">
-    <h2>Sign-ups</h2>
+    <h2>{t('up.signups')}</h2>
     <label>
-      Who can create an account
+      {t('up.who_creates')}
       <select bind:value={signup.mode} onchange={saveSignup}>
-        <option value="closed">Only people you invite or add</option>
-        <option value="review">Anyone, after you approve them</option>
-        <option value="open">Anyone, straight away</option>
+        <option value="closed">{t('up.closed')}</option>
+        <option value="review">{t('up.review')}</option>
+        <option value="open">{t('up.open')}</option>
       </select>
     </label>
     {#if signup.mode !== 'closed'}
       <label>
-        New accounts get the role
+        {t('up.new_get')}
         <select bind:value={signup.role_id} onchange={saveSignup}>
           {#each roles as role (role.id)}<option value={role.id}>{role.name}</option>{/each}
         </select>
       </label>
       {#if signup.mode === 'open'}
-        <p class="small muted">Anyone who can open DJINN can make an account. Pick a role that can't do much, or approve sign-ups instead.</p>
+        <p class="small muted">{t('up.open_note')}</p>
       {/if}
     {/if}
   </section>
 {/if}
 
 <section class="card">
-  <h2>Invite links</h2>
-  <p class="small muted">Send someone a link to make their own account, in the role you choose. Works even when sign-ups are closed.</p>
+  <h2>{t('up.invites')}</h2>
+  <p class="small muted">{t('up.invites_note')}</p>
   <form class="invite-form" onsubmit={makeInvite}>
     <label>
-      Role
+      {t('up.role')}
       <select bind:value={newInvite.role_id}>
         {#each roles as role (role.id)}<option value={role.id}>{role.name}</option>{/each}
       </select>
     </label>
     <label>
-      Can be used
+      {t('up.can_be_used')}
       <select bind:value={newInvite.uses}>
-        <option value="1">Once</option>
-        <option value="5">5 times</option>
-        <option value="25">25 times</option>
-        <option value="any">Any number of times</option>
+        <option value="1">{t('up.once')}</option>
+        <option value="5">{t('up.times', { n: 5 })}</option>
+        <option value="25">{t('up.times', { n: 25 })}</option>
+        <option value="any">{t('up.any_times')}</option>
       </select>
     </label>
     <label>
-      Works for
+      {t('up.works_for')}
       <select bind:value={newInvite.days}>
-        <option value="1">1 day</option>
-        <option value="7">7 days</option>
-        <option value="30">30 days</option>
-        <option value="never">Until you cancel it</option>
+        <option value="1">{t('up.days', { n: 1 })}</option>
+        <option value="7">{t('up.days', { n: 7 })}</option>
+        <option value="30">{t('up.days', { n: 30 })}</option>
+        <option value="never">{t('up.until_cancel')}</option>
       </select>
     </label>
     <label>
-      Note (for you)
-      <input bind:value={newInvite.note} maxlength="100" placeholder="Who it's for" />
+      {t('up.note')}
+      <input bind:value={newInvite.note} maxlength="100" placeholder={t('up.who_for')} />
     </label>
-    <button class="primary">Make invite link</button>
+    <button class="primary">{t('up.make_invite')}</button>
   </form>
   {#if inviteLink}
     <div class="new-link">
-      <p class="small">Copy this link now; it isn't shown again.</p>
-      <input readonly value={inviteLink} onfocus={(e) => e.currentTarget.select()} aria-label="Invite link" />
-      <button class="small-button" onclick={copyLink}>Copy link</button>
+      <p class="small">{t('up.copy_now')}</p>
+      <input readonly value={inviteLink} onfocus={(e) => e.currentTarget.select()} aria-label={t('up.invite_link')} />
+      <button class="small-button" onclick={copyLink}>{t('up.copy_link')}</button>
     </div>
   {/if}
   {#each invites as invite (invite.id)}
@@ -483,43 +486,43 @@
       <div class="grow">
         <div>{invite.note || roleName(invite.role_id)} <span class="muted small">{invite.role_name}</span></div>
         <div class="muted small">
-          {invite.uses_left === null ? 'Any number of uses' : `${invite.uses_left} ${invite.uses_left === 1 ? 'use' : 'uses'} left`},
-          {invite.expires_at === null ? 'no end date' : `until ${day(invite.expires_at)}`}
-          {#if invite.used}, used {invite.used} {invite.used === 1 ? 'time' : 'times'}{/if}
+          {invite.uses_left === null ? t('up.any_uses') : t('up.uses_left', { n: invite.uses_left })},
+          {invite.expires_at === null ? t('up.no_end') : t('up.until', { date: day(invite.expires_at) })}
+          {#if invite.used}{t('up.used', { n: invite.used })}{/if}
         </div>
       </div>
-      <button class="icon" aria-label="Cancel invite" onclick={() => removeInvite(invite)}><Icon name="close" /></button>
+      <button class="icon" aria-label={t('up.cancel_invite')} onclick={() => removeInvite(invite)}><Icon name="close" /></button>
     </div>
   {/each}
 </section>
 
 <section class="card">
-  <h2>Guests</h2>
-  <p class="small muted">People who joined with just a name, by device. A device is recognized by its MAC address on your network.</p>
+  <h2>{t('up.guests')}</h2>
+  <p class="small muted">{t('up.guests_note')}</p>
   {#each guests as guest (guest.id)}
     <div class="user">
       <div class="grow">
-        <div>{guest.name} <span class="muted small">{guest.requests} {guest.requests === 1 ? 'request' : 'requests'}</span></div>
-        <div class="muted small mono">{guest.mac ?? `no MAC (${guest.last_ip ?? 'unknown'})`}</div>
-        {#if guest.names !== guest.name}<div class="muted small">Also went by: {guest.names}</div>{/if}
-        <div class="muted small">Last seen {when(guest.last_seen)}</div>
+        <div>{guest.name} <span class="muted small">{t('up.n_requests', { n: guest.requests })}</span></div>
+        <div class="muted small mono">{guest.mac ?? t('up.no_mac', { ip: guest.last_ip ?? t('up.unknown') })}</div>
+        {#if guest.names !== guest.name}<div class="muted small">{t('up.aka', { names: guest.names })}</div>{/if}
+        <div class="muted small">{t('up.last_seen', { when: when(guest.last_seen) })}</div>
       </div>
       <label class="switch">
         <input type="checkbox" checked={guest.unlimited} onchange={(e) => setGuestUnlimited(guest, e.currentTarget.checked)} />
-        No limit
+        {t('up.no_limit')}
       </label>
-      <button class="icon" aria-label="Remove {guest.name}" onclick={() => removeGuest(guest)}><Icon name="close" /></button>
+      <button class="icon" aria-label={t('up.remove_guest', { name: guest.name })} onclick={() => removeGuest(guest)}><Icon name="close" /></button>
     </div>
   {:else}
-    <p class="muted">No guests yet. Turn on guest mode under <a href="#/admin/rules">Rules</a>.</p>
+    <p class="muted">{t('up.no_guests')} <a href="#/admin/rules">{t('admin.rules')}</a>.</p>
   {/each}
 </section>
 
 {#if editing}
-  <Sheet title={editing.id ? `Edit ${editing.name}` : 'New role'} onclose={() => (editing = null)}>
+  <Sheet title={editing.id ? t('up.edit_role', { name: editing.name }) : t('up.new_role')} onclose={() => (editing = null)}>
     <form class="role-form" onsubmit={saveRole}>
       <label>
-        Name
+        {t('up.name')}
         <input bind:value={editing.name} maxlength="32" required />
       </label>
       {#each permissionLabels as [key, label, hint] (key)}
@@ -533,49 +536,53 @@
         </label>
       {/each}
       <label>
-        GO streams at once
+        {t('up.streams')}
         <select bind:value={editing.max_streams} disabled={!editing.go}>
           <option value={1}>1</option>
           <option value={2}>2</option>
           <option value={3}>3</option>
           <option value={5}>5</option>
-          <option value={0}>No limit</option>
+          <option value={0}>{t('up.no_limit')}</option>
         </select>
       </label>
-      <button class="primary">{editing.id ? 'Save' : 'Add role'}</button>
+      <button class="primary">{editing.id ? t('common.save') : t('up.add_role')}</button>
     </form>
   </Sheet>
 {/if}
 
 {#if editingUsername}
-  <Sheet title="Change username" onclose={() => (editingUsername = null)}>
+  <Sheet title={t('up.change_username')} onclose={() => (editingUsername = null)}>
     <form class="username-form" onsubmit={saveUsername}>
       <label>
-        New username for {editingUsername.username}
+        {t('up.new_username', { name: editingUsername.username })}
         <input bind:value={usernameDraft} maxlength="32" autocomplete="off" autocapitalize="none" required />
       </label>
-      <button class="primary">Save username</button>
+      <button class="primary">{t('up.save_username')}</button>
     </form>
   </Sheet>
 {/if}
 
 {#if devicesFor}
-  <Sheet title="{devicesFor.username}'s devices" onclose={() => (devicesFor = null)}>
+  <Sheet title={t('up.their_devices', { name: devicesFor.username })} onclose={() => (devicesFor = null)}>
     {#each devices as device (device.id)}
       <div class="user">
         <div class="grow">
           <div>{deviceName(device.user_agent)}</div>
           <div class="muted small">
-            {device.ip ?? 'Unknown address'}, last used {when(device.last_seen_at)}, signed in {day(device.created_at)}
+            {t('up.device_line', {
+              ip: device.ip ?? t('up.unknown_address'),
+              used: when(device.last_seen_at),
+              signed: day(device.created_at),
+            })}
           </div>
         </div>
-        <button class="small-button" onclick={() => signOutDevice(device)}>Sign out</button>
+        <button class="small-button" onclick={() => signOutDevice(device)}>{t('up.sign_out')}</button>
       </div>
     {:else}
-      <p class="muted">Not signed in anywhere.</p>
+      <p class="muted">{t('up.nowhere')}</p>
     {/each}
     {#if devices.length > 1}
-      <button class="signout-all" onclick={signOutEverywhere}>Sign out everywhere</button>
+      <button class="signout-all" onclick={signOutEverywhere}>{t('up.sign_out_all')}</button>
     {/if}
   </Sheet>
 {/if}
