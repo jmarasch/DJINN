@@ -17,6 +17,7 @@
   import Art from './Art.svelte'
   import CoverWindow from './CoverWindow.svelte'
   import { COMMON_TAGS, MORE_TAGS, NUMBER_TAGS, tagLabel } from './editorTags'
+  import { autoMatch } from './autoMatch'
   import { FOLDER_LAYOUTS, folderInfo, fromFileName, type FolderInfo, type FolderLayout } from './importLayout'
   import { clearListCache } from './listCache'
   import { askToUnlock, unlocked } from './protected.svelte'
@@ -489,9 +490,15 @@
     if (imports.length) await openImport(imports[0].batch)
   }
 
+  /** Each import's changes still waiting, kept while another is open. */
+  const waitingFor: Record<number, typeof pending> = {}
+
   async function openImport(batch: number) {
-    if (importing === batch || !leaveChanges()) return
-    pending = {}
+    if (importing === batch) return
+    if (importing !== null) waitingFor[importing] = pending
+    else if (!leaveChanges()) return
+    pending = waitingFor[batch] ?? {}
+    delete waitingFor[batch]
     selected = ''
     searching = ''
     importMode = true
@@ -501,8 +508,10 @@
     picked = {}
     renames = null
     addPlan = null
+    autoNote = null
     if (!addFolder) addFolder = roots.find((r) => r.editable)?.path ?? ''
     await loadSongs(0)
+    if (importing === batch) void autoLookUp(batch)
   }
 
   const AUDIO = /\.(mp3|flac|m4a|mp4|aac|ogg|oga|wav)$/i
@@ -647,25 +656,58 @@
     await loadSongs(0)
   }
 
-  /** Where Add to the library would put the import's songs (or, with
-   * `preview` false, puts them there and opens that folder). */
-  async function addToLibrary(preview: boolean) {
-    if (importing === null || !addFolder) return
-    if (changeCount) {
-      toast(t('ed.approve_first'), true)
+  // --- Adding an import to the library. Where each song would go is worked
+  // out as things change (folder, pattern, picked songs, waiting changes),
+  // and Approve Import writes the waiting changes and moves the songs in,
+  // in one step. The editor stays on Import, on the next album waiting.
+  let previewTimer: ReturnType<typeof setTimeout> | undefined
+  let previewing = $state(false)
+  $effect(() => {
+    const batch = importing
+    const folder = addFolder
+    const pattern = addPattern
+    const ids = pickedSongs.map((s) => s.id)
+    const changes = changeList()
+    clearTimeout(previewTimer)
+    if (batch === null || !folder || !pattern.includes('{')) {
+      addPlan = null
       return
     }
-    const ids = pickedSongs.map((s) => s.id)
-    try {
-      if (preview) {
-        addPlan = (await unlocked(() => api.editorImportAdd(importing as number, addFolder, addPattern, true, ids))).files
-        return
+    previewing = true
+    previewTimer = setTimeout(async () => {
+      try {
+        const plan = (await unlocked(() => api.editorImportAdd(batch, folder, pattern, true, ids, changes))).files
+        if (importing === batch) addPlan = plan
+      } catch {
+        if (importing === batch) addPlan = null
+      } finally {
+        previewing = false
       }
-      const going = addPlan?.filter((p) => !p.problem).length ?? 0
-      if (!going || !confirm(t('ed.add_q', { n: going })))
-        return
-      busy = true
-      const done = await unlocked(() => api.editorImportAdd(importing as number, addFolder, addPattern, false, ids))
+    }, 350)
+    return () => clearTimeout(previewTimer)
+  })
+
+  /** A planned path inside the chosen library folder, starting with its name. */
+  function inLibrary(path: string): string {
+    const root = roots.find((r) => r.path === addFolder)
+    if (!root || !path.startsWith(addFolder)) return path
+    return `${root.name}${path.slice(addFolder.length)}`
+  }
+
+  const going = $derived(addPlan?.filter((p) => !p.problem).length ?? 0)
+
+  async function approveImport() {
+    if (importing === null || !addFolder || busy) return
+    const batch = importing
+    busy = true
+    try {
+      const changes = changeList()
+      if (changes.length) {
+        await unlocked(() => api.editorImportApply(changes))
+        pending = {}
+      }
+      const ids = pickedSongs.map((s) => s.id)
+      const done = await unlocked(() => api.editorImportAdd(batch, addFolder, addPattern, false, ids))
       const added = done.files.filter((f) => !f.problem)
       const failed = done.files.filter((f) => f.problem)
       toast(
@@ -673,32 +715,65 @@
           (failed.length ? t('ed.werent', { n: failed.length, problem: failed[0].problem ?? '' }) : ''),
         failed.length > 0,
       )
-      addPlan = failed.length ? failed : null
+      picked = {}
       await loadImports()
-      await loadHistory()
-      const first = added[0]?.to
-      const dest = first ? first.slice(0, Math.max(first.lastIndexOf('/'), first.lastIndexOf('\\'))) : ''
+      void loadHistory()
       if (added.length > 0) {
         clearListCache()
-        await refreshTree(dest)
+        void refreshTree()
       }
-      if (dest && !imports.some((i) => i.batch === importing)) {
-        // Show them where they went, in the Library view.
-        importing = null
-        importMode = false
-        target = 'library'
-        selected = dest
-        moveTo = dest
-        chosen = null
-        picked = {}
+      if (imports.some((i) => i.batch === batch)) {
+        // Some are still waiting (not picked, or they couldn't go in).
         await loadSongs(0)
       } else {
-        await loadSongs(0)
+        importing = null
+        songs = []
+        total = 0
+        chosen = null
+        addPlan = null
+        if (imports.length) await openImport(imports[0].batch)
       }
     } catch (e) {
       toast(e instanceof Error ? e.message : t('ed.add_failed'), true)
     } finally {
       busy = false
+    }
+  }
+
+  // --- The automatic look-up: an import opened for the first time is looked
+  // up on Deezer, and only a complete match (see autoMatch) fills its tags,
+  // as changes highlighted in the grid.
+  const autoTried = new Set<number>()
+  let autoNote = $state<{ text: string; found: boolean } | null>(null)
+
+  async function autoLookUp(batch: number) {
+    if (autoTried.has(batch)) return
+    autoTried.add(batch)
+    autoNote = { text: t('ed.auto_looking'), found: false }
+    try {
+      const match = await autoMatch(songs)
+      if (importing !== batch) return
+      if (!match) {
+        autoNote = { text: t('ed.auto_none'), found: false }
+        return
+      }
+      for (const c of match.changes) setPending(c.song, c.field, c.value)
+      const names = { album: match.release.title, artist: match.release.artist }
+      autoNote = {
+        text: changeCount ? t('ed.auto_found', names) : t('ed.auto_same', names),
+        found: true,
+      }
+      // A cover only when the files have none.
+      if (match.release.has_cover !== false && songs.every((s) => !s.art_hash)) {
+        const res = await fetch(api.editorReleaseCover(match.hit.source, match.hit.id))
+        if (res.ok && importing === batch) {
+          const blob = await res.blob()
+          const kind = blob.type === 'image/png' ? 'png' : 'jpg'
+          await setCover('set', new File([blob], `cover.${kind}`, { type: blob.type }), songs)
+        }
+      }
+    } catch {
+      if (importing === batch) autoNote = { text: t('ed.auto_none'), found: false }
     }
   }
 
@@ -1481,6 +1556,12 @@
                 where: searching ? t('ed.these_folders') : t('ed.this_folder'),
               })}{:else if target === 'library' && searching}{t('ed.dimmed')}{:else}{t('ed.click_cell')}{/if}
           </p>
+          {#if importMode && autoNote}
+            <p class="auto-note small pad" class:found={autoNote.found}>
+              <span class="grow">{autoNote.text}</span>
+              <button class="link" aria-label={t('ed.dismiss')} title={t('ed.dismiss')} onclick={() => (autoNote = null)}>×</button>
+            </p>
+          {/if}
           {#if canEdit && songs.length}
             <div class="online pad">
               <div class="tool">
@@ -1856,7 +1937,7 @@
             <div><strong>{t('ed.add_to_library')}</strong></div>
             <label class="small"
               >{t('ed.into')}
-              <select bind:value={addFolder} onchange={() => (addPlan = null)}>
+              <select bind:value={addFolder}>
                 {#each roots.filter((r) => r.editable) as root (root.path)}<option value={root.path}>{root.name}</option>{/each}
               </select>
             </label>
@@ -1865,25 +1946,22 @@
             {/if}
             <label class="small"
               >{t('ed.placed_as')}
-              <input bind:value={addPattern} class="pattern" oninput={() => (addPlan = null)} aria-label={t('ed.where_goes')} />
+              <input bind:value={addPattern} class="pattern" aria-label={t('ed.where_goes')} />
             </label>
             <span class="small muted">{'{disc} {track} {title} {artist} {album} {album_artist} {year}'}{t('ed.makes_folders')}</span>
             <p class="small muted">
               {pickedSongs.length ? t('ed.picked_go', { n: pickedSongs.length }) : t('ed.all_go', { n: songs.length })}
             </p>
-            <button class="small-button" disabled={busy || !addFolder} onclick={() => addToLibrary(true)}>{t('ed.preview')}</button>
             {#if addPlan}
-              <ul class="changes">
+              <ul class="changes" class:stale={previewing}>
                 {#each addPlan as p (p.id)}
-                  {@const [, to] = afterShared(p.from, p.to)}
                   <li class="small" class:bad={!!p.problem}>
-                    <span class="mono">{to}</span>{#if p.problem}<em> ({p.problem})</em>{/if}
+                    <span class="mono">{inLibrary(p.to)}</span>{#if p.problem}<em> ({p.problem})</em>{/if}
                   </li>
                 {/each}
               </ul>
-              <button class="primary" disabled={busy || !addPlan.some((p) => !p.problem)} onclick={() => addToLibrary(false)}>
-                {t('ed.add_n', { n: addPlan.filter((p) => !p.problem).length })}
-              </button>
+            {:else if previewing}
+              <p class="small muted">{t('ed.preview_wait')}</p>
             {/if}
             <div class="row-buttons">
               <button class="small-button" disabled={busy || !pickedSongs.length} onclick={dropPicked}>{t('ed.take_picked')}</button>
@@ -1917,6 +1995,7 @@
             </button>
           </div>
         {/if}
+        {#if !importMode}
         <div class="box review">
           <div><strong>{t('ed.preview_approve')}</strong></div>
           {#if review.length}
@@ -1948,6 +2027,7 @@
             <button class="primary" disabled>{t('ed.approve')}</button>
           {/if}
         </div>
+        {/if}
         {#if target === 'library' && importing === null}
           <div class="box">
             <div class="small muted">{t('ed.history')}</div>
@@ -1975,6 +2055,14 @@
         {/if}
       </aside>
     </div>
+    {#if importMode && importing !== null}
+      <!-- Always in reach: writes the waiting changes and moves the songs in. -->
+      <div class="approve-bar">
+        <button class="primary" disabled={busy || previewing || !addFolder || going === 0} onclick={approveImport}>
+          {t('ed.approve_import', { n: going })}
+        </button>
+      </div>
+    {/if}
     {#if coverOpen && chosen}
       <CoverWindow
         song={chosen}
@@ -2001,6 +2089,42 @@
 {/if}
 
 <style>
+  .auto-note {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0 0 8px;
+    padding: 6px 10px;
+    border-radius: 8px;
+    background: var(--surface);
+  }
+
+  .auto-note.found {
+    border: 1px solid var(--accent-2, var(--accent));
+  }
+
+  /* Room under the panes, so Approve Import never covers the last line. */
+  .editor.import {
+    padding-bottom: 84px;
+  }
+
+  .approve-bar {
+    position: fixed;
+    right: 24px;
+    bottom: 24px;
+    z-index: 4;
+  }
+
+  .approve-bar button {
+    min-height: 48px;
+    padding: 0 22px;
+    box-shadow: 0 6px 24px rgb(0 0 0 / 0.35);
+  }
+
+  .changes.stale {
+    opacity: 0.6;
+  }
+
   .editor {
     container-type: inline-size;
     --target: var(--accent);

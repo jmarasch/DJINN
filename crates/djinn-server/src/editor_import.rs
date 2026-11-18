@@ -532,6 +532,32 @@ struct Add {
     /// Only say where they'd go.
     #[serde(default)]
     preview: bool,
+    /// Changes not written into the files yet, so a preview names the files
+    /// as they will be once they are.
+    #[serde(default)]
+    changes: Vec<Change>,
+}
+
+/// A song with changes still waiting laid over its tags (the fields a file
+/// name can use).
+fn with_changes(song: &EditorSong, changes: &[Change]) -> EditorSong {
+    let mut song = song.clone();
+    let number = |v: &Option<String>| v.as_deref().and_then(|v| v.trim().parse::<i64>().ok());
+    for change in changes.iter().filter(|c| c.id == song.id) {
+        let text = change.value.clone().filter(|v| !v.trim().is_empty());
+        match change.field.as_str() {
+            "title" => song.title = text.unwrap_or_default(),
+            "artist" => song.artist = text,
+            "album" => song.album = text,
+            "album_artist" => song.album_artist = text,
+            "genre" => song.genre = text,
+            "track_no" => song.track_no = number(&change.value),
+            "disc_no" => song.disc_no = number(&change.value),
+            "year" => song.year = number(&change.value),
+            _ => {}
+        }
+    }
+    song
 }
 
 /// Moves waiting files into the library, named from their tags, and has
@@ -570,7 +596,7 @@ async fn add_to_library(
                 .extension()
                 .map(|e| format!(".{}", e.to_string_lossy()))
                 .unwrap_or_default();
-            let mut parts = name_from(&body.pattern, &row.song);
+            let mut parts = name_from(&body.pattern, &with_changes(&row.song, &body.changes));
             let stem = parts.pop().unwrap_or_default();
             let to = parts
                 .iter()
@@ -748,6 +774,47 @@ async fn add_to_library(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn waiting_changes_name_the_file() {
+        use super::{name_from, with_changes, Change, EditorSong};
+        let song = EditorSong {
+            id: 7,
+            path: "/imports/1/01.flac".into(),
+            title: "01".into(),
+            artist: None,
+            album: None,
+            album_artist: None,
+            track_no: None,
+            disc_no: None,
+            year: None,
+            genre: None,
+            album_id: None,
+            art_hash: None,
+            duration_ms: None,
+            lyrics: 0,
+            ai_job: None,
+        };
+        let change = |id, field: &str, value: &str| Change {
+            id,
+            field: field.into(),
+            value: Some(value.into()),
+        };
+        let changes = vec![
+            change(7, "title", "Kitchen Song"),
+            change(7, "artist", "The Band"),
+            change(7, "album", "First"),
+            change(7, "track_no", "3"),
+            change(8, "title", "Someone else's"),
+        ];
+        let named = with_changes(&song, &changes);
+        assert_eq!(
+            name_from("{album_artist}/{album}/{track} {title}", &named),
+            vec!["The Band", "First", "03 Kitchen Song"]
+        );
+        // Changes for other files leave it alone.
+        assert_eq!(with_changes(&song, &changes[4..]), song);
+    }
+
     use axum::http::StatusCode;
     use djinn_store::Role;
 

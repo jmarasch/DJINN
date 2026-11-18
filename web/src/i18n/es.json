@@ -1365,11 +1365,6 @@
     "other": "¿Sacar {n} canciones de esta importación? Sus archivos se borran."
   },
   "ed.drop_failed": "No se pudo sacar",
-  "ed.approve_first": "Primero aprueba o descarta los cambios, para que las canciones entren como las ves",
-  "ed.add_q": {
-    "one": "¿Añadir {n} canción a la biblioteca? Se puede deshacer desde el historial (lado Biblioteca).",
-    "other": "¿Añadir {n} canciones a la biblioteca? Se puede deshacer desde el historial (lado Biblioteca)."
-  },
   "ed.added": "{n} canciones añadidas a la biblioteca",
   "ed.werent": "; {n} no: {problem}",
   "ed.add_failed": "No se pudieron añadir",
@@ -1486,7 +1481,7 @@
   "ed.t_library": "Biblioteca",
   "ed.t_database": "Base de datos",
   "ed.t_import": "Importar",
-  "ed.import_note": "Trae álbumes nuevos y trabaja en ellos antes de que entren en la biblioteca. Esperan en la carpeta propia de DJINN; al aprobar se escriben las etiquetas en ellos, y Añadir a la biblioteca (a la derecha) los mueve a una carpeta de música.",
+  "ed.import_note": "Trae álbumes nuevos y trabaja en ellos antes de que entren en la biblioteca. Esperan en la carpeta propia de DJINN hasta que los apruebes o descartes. Un álbum que Deezer conoce exactamente recibe sus etiquetas (resaltadas); para lo demás, usa Buscar datos del álbum. Aprobar importación escribe los cambios y mueve las canciones a la carpeta de música indicada a la derecha.",
   "ed.library_note": "Editando las etiquetas de los propios archivos de música. Solo se pueden cambiar las carpetas que permitiste, y cada aprobación se puede deshacer desde el historial.",
   "ed.database_note": "Editando la copia propia de DJINN de las etiquetas. Los archivos no se tocan. Vaciar una celda vuelve al valor del archivo.",
   "ed.bring_in": "Traer",
@@ -1619,8 +1614,6 @@
   "ed.makes_folders": "; una / crea carpetas",
   "ed.picked_go": "Las {n} canciones elegidas entran, con nombres según sus etiquetas.",
   "ed.all_go": "Las {n} canciones entran, con nombres según sus etiquetas.",
-  "ed.preview": "Vista previa...",
-  "ed.add_n": "Añadir {n} canciones a la biblioteca",
   "ed.take_picked": "Sacar las elegidas",
   "ed.this_file": "El archivo de esta canción",
   "ed.replace_file_title": "Para una canción que no se reproduce o una copia mala: pone un archivo mejor en su lugar",
@@ -3506,5 +3499,15 @@
   "radio.on": "Radio activada: sonarán canciones como esta cuando se acaben las peticiones",
   "pa2.copied": "Copiado",
   "pa2.copy_by_hand": "Selecciónalo y cópialo",
-  "gpl.name_q": "Nombre de la lista"
+  "gpl.name_q": "Nombre de la lista",
+  "ed.approve_import": "Aprobar importación ({n})",
+  "ed.approve_import_done": "Todo listo",
+  "ed.imports_done": "Todas las importaciones están en la biblioteca.",
+  "ed.auto_looking": "Buscando este álbum en Deezer...",
+  "ed.auto_found": "Coincide con \"{album}\" de {artist} en Deezer, cada canción en su pista. Las etiquetas que cambia están resaltadas abajo.",
+  "ed.auto_same": "Coincide con \"{album}\" de {artist} en Deezer; las etiquetas ya coinciden.",
+  "ed.auto_none": "No hay coincidencia exacta en Deezer. Usa Buscar datos del álbum... para elegir el álbum tú mismo.",
+  "ed.dismiss": "Descartar",
+  "ed.preview_wait": "Calculando adónde van...",
+  "toast.dismiss": "Haz clic para cerrar"
 }

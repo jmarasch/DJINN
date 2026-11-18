@@ -1,14 +1,18 @@
 <script lang="ts">
   import { dismissToast, toasts } from './state.svelte'
+  import { t as tr } from './i18n.svelte'
 </script>
 
 <div class="toasts" aria-live="polite">
   {#each toasts.items as t (t.id)}
-    <div class="toast" class:error={t.error}>
+    <!-- A click closes it; the keyboard has its action button, and it goes by itself. -->
+    <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+    <div class="toast" class:error={t.error} onclick={() => dismissToast(t.id)} title={tr('toast.dismiss')}>
       {t.text}
       {#if t.action}
         <button
-          onclick={() => {
+          onclick={(e) => {
+            e.stopPropagation()
             t.action?.run()
             dismissToast(t.id)
           }}>{t.action.label}</button
@@ -33,6 +37,7 @@
   }
 
   .toast {
+    cursor: pointer;
     display: flex;
     align-items: center;
     gap: 14px;

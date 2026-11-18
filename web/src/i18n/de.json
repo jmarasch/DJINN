@@ -1365,11 +1365,6 @@
     "other": "{n} Songs aus diesem Import nehmen? Ihre Dateien werden gelöscht."
   },
   "ed.drop_failed": "Konnte nicht herausgenommen werden",
-  "ed.approve_first": "Gib die Änderungen erst frei oder verwirf sie, damit die Songs so hineinkommen, wie du sie siehst",
-  "ed.add_q": {
-    "one": "{n} Song zur Bibliothek hinzufügen? Das lässt sich im Verlauf rückgängig machen (Seite Bibliothek).",
-    "other": "{n} Songs zur Bibliothek hinzufügen? Das lässt sich im Verlauf rückgängig machen (Seite Bibliothek)."
-  },
   "ed.added": "{n} Songs zur Bibliothek hinzugefügt",
   "ed.werent": "; {n} nicht: {problem}",
   "ed.add_failed": "Konnten nicht hinzugefügt werden",
@@ -1486,7 +1481,7 @@
   "ed.t_library": "Bibliothek",
   "ed.t_database": "Datenbank",
   "ed.t_import": "Import",
-  "ed.import_note": "Hol neue Alben herein und bearbeite sie, bevor sie in die Bibliothek kommen. Sie warten in DJINNs eigenem Ordner; die Freigabe schreibt die Tags hinein, und Zur Bibliothek hinzufügen (rechts) verschiebt sie in einen Musikordner.",
+  "ed.import_note": "Hol neue Alben herein und bearbeite sie, bevor sie in die Bibliothek kommen. Sie warten in DJINNs eigenem Ordner, bis du sie freigibst oder verwirfst. Ein Album, das Deezer genau kennt, bekommt seine Tags ausgefüllt (markiert); sonst nutze Albuminfos suchen. Import freigeben schreibt die Änderungen und verschiebt die Songs in den rechts gezeigten Musikordner.",
   "ed.library_note": "Bearbeitet die Tags in den Musikdateien selbst. Nur erlaubte Ordner können geändert werden, und jede Freigabe lässt sich im Verlauf rückgängig machen.",
   "ed.database_note": "Bearbeitet DJINNs eigene Kopie der Tags. Die Dateien bleiben unberührt. Eine Zelle zu leeren, kehrt zum Wert der Datei zurück.",
   "ed.bring_in": "Hereinholen",
@@ -1619,8 +1614,6 @@
   "ed.makes_folders": "; ein / legt Ordner an",
   "ed.picked_go": "Die {n} ausgewählten Songs kommen hinein, benannt nach ihren Tags.",
   "ed.all_go": "Alle {n} Songs kommen hinein, benannt nach ihren Tags.",
-  "ed.preview": "Vorschau...",
-  "ed.add_n": "{n} Songs zur Bibliothek hinzufügen",
   "ed.take_picked": "Ausgewählte herausnehmen",
   "ed.this_file": "Die Datei dieses Songs",
   "ed.replace_file_title": "Für einen Song, der nicht spielt, oder eine schlechte Kopie: setzt eine bessere Datei an ihre Stelle",
@@ -3506,5 +3499,15 @@
   "radio.on": "Radio an: ähnliche Songs laufen, wenn die Wünsche ausgehen",
   "pa2.copied": "Kopiert",
   "pa2.copy_by_hand": "Markiere es und kopiere es",
-  "gpl.name_q": "Name der Playlist"
+  "gpl.name_q": "Name der Playlist",
+  "ed.approve_import": "Import freigeben ({n})",
+  "ed.approve_import_done": "Alles erledigt",
+  "ed.imports_done": "Alle Importe sind in der Bibliothek.",
+  "ed.auto_looking": "Dieses Album wird bei Deezer gesucht...",
+  "ed.auto_found": "\"{album}\" von {artist} bei Deezer gefunden, jeder Song auf seinem Titel. Die geänderten Tags sind unten markiert.",
+  "ed.auto_same": "\"{album}\" von {artist} bei Deezer gefunden; die Tags stimmen schon.",
+  "ed.auto_none": "Kein genauer Treffer bei Deezer. Nutze Albuminfos suchen..., um das Album selbst zu wählen.",
+  "ed.dismiss": "Ausblenden",
+  "ed.preview_wait": "Es wird berechnet, wohin sie kommen...",
+  "toast.dismiss": "Zum Schließen klicken"
 }

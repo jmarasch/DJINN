@@ -10,6 +10,7 @@
   import { onMount } from 'svelte'
   import { api } from './api'
   import { tagLabel } from './editorTags'
+  import { releaseChanges } from './autoMatch'
   import { unlocked } from './protected.svelte'
   import { toast } from './state.svelte'
   import type { EditorField, EditorSong, Release, ReleaseHit, ReleaseSource } from './types'
@@ -215,28 +216,8 @@
 
   async function apply() {
     if (!release) return
-    const changes: { song: EditorSong; field: EditorField; value: string }[] = []
     const extraKeys = availableItems.filter((i) => i.key.startsWith('x:') && take[i.key]).map((i) => i.key.slice(2))
-    release.tracks.forEach((track, i) => {
-      const song = byId(laid[i])
-      if (!song || !release) return
-      const set = (field: EditorField, value: string | number | null | undefined) => {
-        if (value !== null && value !== undefined && value !== '') changes.push({ song, field, value: String(value) })
-      }
-      if (take.titles) set('title', track.title)
-      if (take.numbers) {
-        if (track.number > 0) set('track_no', track.number)
-        if (discs > 1 || song.disc_no) set('disc_no', track.disc)
-      }
-      if (take.album) set('album', release.title)
-      if (take.album_artist) set('album_artist', release.artist)
-      if (take.artist) set('artist', track.artist ?? release.artist)
-      if (take.year) set('year', release.year)
-      if (take.genre) set('genre', track.genre ?? release.genre)
-      for (const name of extraKeys) {
-        set(`x:${name}` as EditorField, track.extra?.[name] ?? release.extra?.[name])
-      }
-    })
+    const changes = releaseChanges(release, (i) => byId(laid[i]), take, extraKeys)
     let cover: Blob | null = null
     if (take.cover && chosenHit) {
       const res = await fetch(api.editorReleaseCover(chosenHit.source, chosenHit.id))

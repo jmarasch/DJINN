@@ -1365,11 +1365,6 @@
     "other": "Take {n} songs out of this import? Their files are deleted."
   },
   "ed.drop_failed": "Could not take it out",
-  "ed.approve_first": "Approve or throw away the changes first, so the songs go in as you see them",
-  "ed.add_q": {
-    "one": "Add {n} song to the library? This can be undone from the history (Library side).",
-    "other": "Add {n} songs to the library? This can be undone from the history (Library side)."
-  },
   "ed.added": "{n} songs added to the library",
   "ed.werent": "; {n} weren't: {problem}",
   "ed.add_failed": "Could not add them",
@@ -1486,7 +1481,7 @@
   "ed.t_library": "Library",
   "ed.t_database": "Database",
   "ed.t_import": "Import",
-  "ed.import_note": "Bring in new albums and work on them before they go into the library. They wait in DJINN's own folder; approving writes the tags into them, and Add to the library (on the right) moves them into a music folder.",
+  "ed.import_note": "Bring in new albums and work on them before they go into the library. They wait in DJINN's own folder until you approve or throw them away. An album Deezer knows exactly gets its tags filled in (highlighted); anything else, use Find Album Info. Approve Import writes the changes and moves the songs into the music folder shown on the right.",
   "ed.library_note": "Editing the tags in the music files themselves. Only folders you allowed can be changed, and every approval can be undone from the history.",
   "ed.database_note": "Editing DJINN's own copy of the tags. The files are left alone. Clearing a cell goes back to the file's value.",
   "ed.bring_in": "Bring In",
@@ -1619,8 +1614,6 @@
   "ed.makes_folders": "; a / makes folders",
   "ed.picked_go": "The {n} picked songs go in, named from their tags.",
   "ed.all_go": "All {n} songs go in, named from their tags.",
-  "ed.preview": "Preview...",
-  "ed.add_n": "Add {n} Songs to the Library",
   "ed.take_picked": "Take Picked Out",
   "ed.this_file": "This song's file",
   "ed.replace_file_title": "For a song that won't play or a poor copy: puts a better file in its place",
@@ -3506,5 +3499,15 @@
   "radio.on": "Radio on: songs like this play when the requests run out",
   "pa2.copied": "Copied",
   "pa2.copy_by_hand": "Select it and copy it",
-  "gpl.name_q": "Playlist name"
+  "gpl.name_q": "Playlist name",
+  "ed.approve_import": "Approve Import ({n})",
+  "ed.approve_import_done": "All done",
+  "ed.imports_done": "Every import is in the library.",
+  "ed.auto_looking": "Looking for this album on Deezer...",
+  "ed.auto_found": "Matched \"{album}\" by {artist} on Deezer, every song on its track. The tags it changes are highlighted below.",
+  "ed.auto_same": "Matched \"{album}\" by {artist} on Deezer; the tags already agree.",
+  "ed.auto_none": "No exact match on Deezer. Use Find album info... to pick the album yourself.",
+  "ed.dismiss": "Dismiss",
+  "ed.preview_wait": "Working out where they go...",
+  "toast.dismiss": "Click to close"
 }

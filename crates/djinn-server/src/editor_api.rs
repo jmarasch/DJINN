@@ -320,11 +320,11 @@ enum Target {
 
 #[derive(Deserialize)]
 pub(crate) struct Change {
-    id: i64,
-    field: String,
+    pub(crate) id: i64,
+    pub(crate) field: String,
     /// The new value; null to go back to the file's (database) or remove
     /// it from the file (library).
-    value: Option<String>,
+    pub(crate) value: Option<String>,
 }
 
 #[derive(Deserialize)]

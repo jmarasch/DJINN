@@ -432,12 +432,20 @@ export const api = {
     return data as EditorApplied
   },
   /** Moves an import's files into a library folder, placed by `pattern`. */
-  editorImportAdd: (batch: number, folder: string, pattern: string, preview: boolean, ids: number[] = []) =>
+  editorImportAdd: (
+    batch: number,
+    folder: string,
+    pattern: string,
+    preview: boolean,
+    ids: number[] = [],
+    changes: EditorChange[] = [],
+  ) =>
     post<{ files: EditorRenamed[]; batch: number | null }>(`/editor/imports/${batch}/add`, {
       folder,
       pattern,
       preview,
       ids,
+      changes,
     }),
   editorImportThrowAway: (batch: number) => del<EditorApplied>(`/editor/imports/${batch}`),
   editorImportDropFile: (id: number) => del<EditorApplied>(`/editor/imports/files/${id}`),
