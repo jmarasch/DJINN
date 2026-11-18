@@ -4,7 +4,7 @@
   // page.
   import { onMount } from 'svelte'
   import { api } from './api'
-  import { house, languages, loadHouseLanguage, ownPick, setLanguage } from './i18n.svelte'
+  import { house, languages, loadHouseLanguage, ownPick, setLanguage, t } from './i18n.svelte'
   import { toast } from './state.svelte'
 
   let value = $state(house.code)
@@ -23,7 +23,7 @@
       value = (await api.language()).default
       loaded = true
     } catch {
-      toast('Could not load the language setting', true)
+      toast(t('hl.load_failed'), true)
     }
   })
 
@@ -31,32 +31,31 @@
     try {
       await api.setLanguage(value)
       await loadHouseLanguage()
-      toast(value ? `DJINN now shows ${nameOf(value)}` : 'Each device shows its own language')
+      toast(value ? t('hl.now_shows', { name: nameOf(value) }) : t('hl.each_own'))
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not save', true)
+      toast(e instanceof Error ? e.message : t('common.save_failed_short'), true)
     }
   }
 </script>
 
 <section class="card">
-  <h2>Language</h2>
+  <h2>{t('hl.title')}</h2>
   <label class="field">
-    Default language
+    {t('hl.default')}
     <select bind:value onchange={save} disabled={!loaded}>
-      <option value="">Each device's own language</option>
+      <option value="">{t('hl.device_own')}</option>
       {#each languages as language (language.code)}
         <option value={language.code}>{language.name}</option>
       {/each}
     </select>
   </label>
   <p class="small muted">
-    What the party app, DJINN GO and the Android app show. Anyone can still pick their own language on their account
-    page. The admin pages stay in English, apart from their menus.
+    {t('hl.note')}
   </p>
   {#if own}
     <p class="own small">
-      This browser uses its own pick, {nameOf(own)}, from Your Account, so it won't change with this setting.
-      <button class="link" onclick={followHouse}>Follow the default here</button>
+      {t('hl.own', { name: nameOf(own) })}
+      <button class="link" onclick={followHouse}>{t('hl.follow')}</button>
     </p>
   {/if}
 </section>

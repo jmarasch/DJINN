@@ -2,6 +2,7 @@
   // Admin > System: checking for, and installing, new versions.
   import { api } from './api'
   import { toast } from './state.svelte'
+  import { locale, t } from './i18n.svelte'
   import type { About } from './types'
 
   let about = $state<About | null>(null)
@@ -38,7 +39,7 @@
     try {
       about = await api.checkForUpdate()
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not check for updates', true)
+      toast(e instanceof Error ? e.message : t('upd.check_failed'), true)
     } finally {
       checking = false
     }
@@ -46,12 +47,12 @@
 
   async function install() {
     if (!about?.latest) return
-    if (!confirm(`Install DJINN ${about.latest.version}? The music stops for a few seconds while DJINN restarts.`)) return
+    if (!confirm(t('upd.install_q', { version: about.latest.version }))) return
     try {
       await api.installUpdate()
       about = await api.about()
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not install the update', true)
+      toast(e instanceof Error ? e.message : t('upd.install_failed'), true)
     }
   }
 
@@ -68,80 +69,80 @@
       // Changing the channel checks again, so fetch what it found.
       about = 'nightly' in change ? await api.about() : { ...about, ...next }
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'That did not work', true)
+      toast(e instanceof Error ? e.message : t('common.failed'), true)
     }
   }
 
-  const mb = (bytes: number) => `${(bytes / 1_000_000).toFixed(1)} MB`
+  const mb = (bytes: number) =>
+    `${(bytes / 1_000_000).toLocaleString(locale.code, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} MB`
   function ago(ms: number): string {
     const minutes = Math.round((Date.now() - ms) / 60_000)
-    if (minutes < 1) return 'just now'
-    if (minutes < 60) return `${minutes} min ago`
+    if (minutes < 1) return t('ni.just_now')
+    if (minutes < 60) return t('ni.min_ago', { n: minutes })
     const hours = Math.round(minutes / 60)
-    if (hours < 24) return `${hours} h ago`
-    return new Date(ms).toLocaleDateString()
+    if (hours < 24) return t('ni.h_ago', { n: hours })
+    return new Date(ms).toLocaleDateString(locale.code)
   }
 </script>
 
 {#if about}
   <section class="card">
-    <h2>Updates</h2>
+    <h2>{t('upd.title')}</h2>
     {#if restarting}
-      <p class="small"><span class="spinner" aria-hidden="true"></span> Restarting with the new version...</p>
+      <p class="small"><span class="spinner" aria-hidden="true"></span> {t('upd.restarting')}</p>
     {:else if about.installing}
-      <p class="small"><span class="spinner" aria-hidden="true"></span> Installing DJINN {about.latest?.version}...</p>
+      <p class="small"><span class="spinner" aria-hidden="true"></span> {t('upd.installing', { version: about.latest?.version ?? '' })}</p>
       {#if about.progress}
-        <p class="small muted">{mb(about.progress[0])} of {mb(about.progress[1])}</p>
+        <p class="small muted">{t('upd.progress', { done: mb(about.progress[0]), total: mb(about.progress[1]) })}</p>
         <progress max={about.progress[1]} value={about.progress[0]}></progress>
       {/if}
     {:else if about.update_available && about.latest}
-      <p class="small"><strong>DJINN {about.latest.version} is available.</strong></p>
+      <p class="small"><strong>{t('upd.available', { version: about.latest.version })}</strong></p>
       {#if about.latest.notes}
         <details>
-          <summary class="small">What's new</summary>
+          <summary class="small">{t('upd.whats_new')}</summary>
           <p class="small notes">{about.latest.notes}</p>
         </details>
       {/if}
       {#if about.cannot_install}
         <p class="small muted">{about.cannot_install}</p>
-        <a class="small" href={about.latest.url} target="_blank" rel="noopener noreferrer">Download it from GitHub</a>
+        <a class="small" href={about.latest.url} target="_blank" rel="noopener noreferrer">{t('upd.download')}</a>
       {:else}
-        <button class="primary" onclick={install}>Install and restart</button>
+        <button class="primary" onclick={install}>{t('upd.install')}</button>
       {/if}
     {:else if about.checked_at}
       <p class="small muted">
-        {about.latest ? "You're up to date." : 'No releases published yet.'} Checked {ago(about.checked_at)}.
+        {about.latest ? t('upd.up_to_date') : t('upd.no_releases')} {t('upd.checked', { when: ago(about.checked_at) })}
       </p>
     {:else}
-      <p class="small muted">Not checked yet.</p>
+      <p class="small muted">{t('upd.not_checked')}</p>
     {/if}
     {#if about.error}<p class="small error">{about.error}</p>{/if}
     {#if !about.installing && !restarting}
       <button class="small-button" disabled={checking} onclick={check}>
-        {checking ? 'Checking...' : 'Check now'}
+        {checking ? t('common.checking') : t('upd.check_now')}
       </button>
     {/if}
 
     <div class="options">
       <label class="channel">
-        <span class="small">Update channel</span>
+        <span class="small">{t('upd.channel')}</span>
         <select
           value={about.nightly ? 'nightly' : 'stable'}
           onchange={(e) => setUpdates({ nightly: e.currentTarget.value === 'nightly' })}
         >
-          <option value="stable">Stable</option>
-          <option value="nightly">Nightly</option>
+          <option value="stable">{t('upd.stable')}</option>
+          <option value="nightly">{t('upd.nightly')}</option>
         </select>
       </label>
       <p class="small muted">
         {#if about.nightly}
-          Nightly builds have the newest changes, built each night there are some. They're tested less, so something
-          may break.
+          {t('upd.nightly_note')}
         {:else}
-          Stable releases come out less often and have had more testing.
+          {t('upd.stable_note')}
         {/if}
         {#if about.nightly_build && !about.nightly}
-          This copy is a nightly build, so it stays as it is until a newer stable release comes out.
+          {t('upd.stays')}
         {/if}
       </p>
       <label class="switch">
@@ -150,7 +151,7 @@
           checked={about.check_updates}
           onchange={(e) => setUpdates({ check_updates: e.currentTarget.checked })}
         />
-        Check for updates once a day
+        {t('upd.daily')}
       </label>
       <label class="switch">
         <input
@@ -159,11 +160,10 @@
           disabled={!about.check_updates}
           onchange={(e) => setUpdates({ auto_update: e.currentTarget.checked })}
         />
-        Install updates by themselves, only while nothing is playing
+        {t('upd.auto')}
       </label>
       <p class="small muted">
-        Checking asks GitHub for the latest release and sends nothing but DJINN's version number. Updates are only
-        installed if they're signed with DJINN's release key.
+        {t('upd.privacy')}
       </p>
     </div>
   </section>
