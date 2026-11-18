@@ -2,6 +2,7 @@
   // Full-screen now playing for a TV or spare tablet: no sign-in, read only.
   import ScaleWarning from '../lib/ScaleWarning.svelte'
   import { onMount } from 'svelte'
+  import { houseLanguageIs } from '../lib/i18n.svelte'
   import { followNodeScreen } from '../lib/screenFollow'
   import { announce, choose, onNodeScreen, order, pageUrl, toggleFullscreen } from '../lib/screenOrder.svelte'
   import ArtistSlideshow from '../lib/ArtistSlideshow.svelte'
@@ -111,6 +112,7 @@
     on<{ position_ms: number }>('position', (data) => setPosition(data.position_ms))
     on<QueueItem[]>('queue_changed', (data) => (queue = data))
     on<{ url: string }>('address', (data) => (joinUrl = inRoom(data.url)))
+    on<{ default: string }>('language', (data) => houseLanguageIs(data.default))
     on<PlayerState>('player_state', (data) => {
       setPosition(position)
       player = data

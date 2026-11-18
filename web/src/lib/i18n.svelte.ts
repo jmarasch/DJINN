@@ -70,20 +70,40 @@ export function setLanguage(code: string) {
 
 if (typeof document !== 'undefined') document.documentElement.lang = locale.code
 
+/** The language this device picked for itself on Your Account ('' when it
+ * follows the house). */
+export function ownPick(): string {
+  const chosen = stored()
+  return chosen && catalogs[chosen] ? chosen : ''
+}
+
+/** The house's default changed (the live `language` event, or a fresh ask):
+ * switches to it unless this device picked its own. */
+export function houseLanguageIs(code: string) {
+  house.code = code ?? ''
+  if (!stored()) setLanguage('')
+}
+
 /** Asks the server for the house's default and switches to it unless this
  * device picked its own. */
 export async function loadHouseLanguage() {
   try {
     const res = await fetch('/api/language')
     if (!res.ok) return
-    house.code = ((await res.json()) as { default: string }).default ?? ''
-    if (!stored()) setLanguage('')
+    houseLanguageIs(((await res.json()) as { default: string }).default ?? '')
   } catch {
     // Offline: the phone's own language stays.
   }
 }
 
-if (typeof fetch !== 'undefined' && typeof location !== 'undefined') void loadHouseLanguage()
+if (typeof fetch !== 'undefined' && typeof location !== 'undefined') {
+  void loadHouseLanguage()
+  // A phone that kept the app open in the background (web GO, the TV and
+  // lyrics pages have no live feed of it) asks again when it comes back.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') void loadHouseLanguage()
+  })
+}
 
 function lookup(code: string, key: string): string | Record<string, string> | undefined {
   return catalogs[code]?.[key]

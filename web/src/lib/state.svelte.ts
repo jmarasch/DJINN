@@ -1,7 +1,7 @@
 // App-wide state, kept current by Server-Sent Events.
 
 import { api, ApiError } from './api'
-import { locale, t } from './i18n.svelte'
+import { houseLanguageIs, locale, t } from './i18n.svelte'
 import { clearListCache } from './listCache'
 import type {
   AiStatus,
@@ -173,6 +173,7 @@ export function connect() {
   })
   on<IdentifyStatus>('identify_status', (data) => (app.identify = data))
   on<{ url: string }>('address', (data) => (app.address = data.url))
+  on<{ default: string }>('language', (data) => houseLanguageIs(data.default))
   on<LyricsProgress>('lyrics', (data) => (app.lyrics = data))
 
   void loadLibraryWork()

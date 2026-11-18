@@ -42,6 +42,11 @@ pub enum ServerEvent {
     Address {
         url: String,
     },
+    /// The house's default language changed (Admin > System); empty is
+    /// each device's own.
+    Language {
+        default: String,
+    },
 }
 
 impl ServerEvent {
@@ -63,6 +68,7 @@ impl ServerEvent {
             Self::IdentifyStatus(_) => "identify_status",
             Self::Lyrics(_) => "lyrics",
             Self::Address { .. } => "address",
+            Self::Language { .. } => "language",
         }
     }
 }

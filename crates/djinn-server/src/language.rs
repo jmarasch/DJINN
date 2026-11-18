@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::auth::AdminUser;
 use crate::error::{ApiError, ApiResult};
+use crate::events::ServerEvent;
 use crate::state::AppState;
 
 /// Setting key: a language code ("es", "fr"), or empty.
@@ -60,6 +61,10 @@ async fn put_language(
         .store
         .set_setting(DEFAULT_LANGUAGE, &language.default)
         .await?;
+    // Open apps switch now, not at their next reload.
+    let _ = state.events.send(ServerEvent::Language {
+        default: language.default.clone(),
+    });
     Ok(Json(language))
 }
 

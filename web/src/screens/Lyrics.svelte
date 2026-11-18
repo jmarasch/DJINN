@@ -7,6 +7,7 @@
   // here fades back so the visual stands out. The admin can turn it off.
   import ScaleWarning from '../lib/ScaleWarning.svelte'
   import { onMount } from 'svelte'
+  import { houseLanguageIs } from '../lib/i18n.svelte'
   import { followNodeScreen } from '../lib/screenFollow'
   import {
     announce,
@@ -172,6 +173,7 @@
     on<{ position_ms: number }>('position', (data) => setPosition(data.position_ms))
     on<QueueItem[]>('queue_changed', (data) => (queue = data))
     on<{ url: string }>('address', (data) => (joinUrl = inRoom(data.url)))
+    on<{ default: string }>('language', (data) => houseLanguageIs(data.default))
     on<PlayerState>('player_state', (data) => {
       setPosition(position() + shift)
       player = data

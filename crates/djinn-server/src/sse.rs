@@ -35,6 +35,7 @@ impl Audience {
                 event,
                 ServerEvent::Hello { .. }
                     | ServerEvent::Address { .. }
+                    | ServerEvent::Language { .. }
                     | ServerEvent::NowPlaying(_)
                     | ServerEvent::Position { .. }
                     | ServerEvent::QueueChanged(_)
