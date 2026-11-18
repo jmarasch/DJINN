@@ -18,9 +18,9 @@
     close()
     try {
       const { outcome } = await api.goSendToParty(song.id)
-      toast(outcome === 'backed' ? `Someone asked for "${song.title}" already; you backed it` : `Sent "${song.title}" to the party`)
+      toast(outcome === 'backed' ? t('gm.backed', { title: song.title }) : t('gm.sent', { title: song.title }))
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not send it to the party', true)
+      toast(e instanceof Error ? e.message : t('gm.send_failed'), true)
     }
   }
 
@@ -30,13 +30,13 @@
     close()
     try {
       const links = await api.playLinks(song.id)
-      if (!links.download_url) return toast("Your account can't download songs", true)
+      if (!links.download_url) return toast(t('gm.no_download'), true)
       const a = document.createElement('a')
       a.href = links.download_url
       a.download = ''
       a.click()
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not download it', true)
+      toast(e instanceof Error ? e.message : t('gm.download_failed'), true)
     }
   }
 
@@ -54,7 +54,7 @@
       <button onclick={() => act(() => addToEnd([song]))}>{t('menu.add_to_end')}</button>
       <button onclick={() => act(() => startRadio(song))}>{t('menu.start_radio_song')}</button>
       <button onclick={() => act(() => toggleLike('track', song.id))}>
-        {likes.track.has(song.id) ? 'Unlike' : 'Like'}
+        {likes.track.has(song.id) ? t('player.unlike') : t('player.like')}
       </button>
       <button onclick={() => act(() => (ui.adding = [song]))}>{t('menu.add_to_playlist')}</button>
       {#if song.album_id}<a class="button" href="#/album/{song.album_id}" onclick={close}>{t('menu.go_to_album')}</a>{/if}

@@ -1,6 +1,7 @@
 <script lang="ts">
   // Your year on DJINN GO: how much you listened, your top songs and
   // artists, your busiest month and the first song you played.
+  import { locale, t } from '../../lib/i18n.svelte'
   import { api } from '../../lib/api'
   import Art from '../../lib/Art.svelte'
   import { toast } from '../../lib/state.svelte'
@@ -13,38 +14,38 @@
     api
       .goYear(year)
       .then((r) => (review = r))
-      .catch((e) => toast(e instanceof Error ? e.message : 'Could not load your year', true))
+      .catch((e) => toast(e instanceof Error ? e.message : t('gy.load_failed'), true))
   })
 
-  const n = (x: number) => x.toLocaleString()
+  const n = (x: number) => x.toLocaleString(locale.code)
   const month = (m: number, style: 'long' | 'short' = 'long') =>
-    new Date(2000, m - 1, 1).toLocaleDateString([], { month: style })
+    new Date(2000, m - 1, 1).toLocaleDateString(locale.code, { month: style })
   const listened = (minutes: number) =>
-    minutes >= 120 ? `${n(Math.round(minutes / 60))} hours` : `${n(minutes)} minutes`
+    minutes >= 120 ? t('gy.hours', { n: n(Math.round(minutes / 60)) }) : t('gy.minutes', { n: n(minutes) })
 </script>
 
 {#if review}
   {@const r = review}
   <div class="head">
-    <h2>Your {r.year}</h2>
+    <h2>{t('gy.your', { year: r.year })}</h2>
     {#if r.years.length > 1}
-      <select aria-label="Year" value={r.year} onchange={(e) => (year = Number(e.currentTarget.value))}>
+      <select aria-label={t('gy.year')} value={r.year} onchange={(e) => (year = Number(e.currentTarget.value))}>
         {#each r.years as y (y)}<option value={y}>{y}</option>{/each}
       </select>
     {/if}
   </div>
   {#if !r.plays}
-    <p class="muted">Nothing played on DJINN GO in {r.year} yet.</p>
+    <p class="muted">{t('gy.nothing', { year: r.year })}</p>
   {:else}
     <div class="tiles">
-      <div><strong>{listened(r.minutes)}</strong><span class="small muted">listened</span></div>
-      <div><strong>{n(r.plays)}</strong><span class="small muted">plays</span></div>
-      <div><strong>{n(r.songs)}</strong><span class="small muted">different songs</span></div>
-      {#if r.requests}<div><strong>{n(r.requests)}</strong><span class="small muted">asked for at the party</span></div>{/if}
+      <div><strong>{listened(r.minutes)}</strong><span class="small muted">{t('st.listened')}</span></div>
+      <div><strong>{n(r.plays)}</strong><span class="small muted">{t('st.plays')}</span></div>
+      <div><strong>{n(r.songs)}</strong><span class="small muted">{t('st.songs')}</span></div>
+      {#if r.requests}<div><strong>{n(r.requests)}</strong><span class="small muted">{t('gy.asked')}</span></div>{/if}
     </div>
 
     {#if r.top_songs.length}
-      <h3>Your top songs</h3>
+      <h3>{t('gy.top_songs')}</h3>
       <ol>
         {#each r.top_songs as s (s.track_id)}
           <li>
@@ -57,7 +58,7 @@
       </ol>
     {/if}
     {#if r.top_artists.length}
-      <h3>Your top artists</h3>
+      <h3>{t('gy.top_artists')}</h3>
       <ol>
         {#each r.top_artists as a (a.artist_id)}
           <li><a href="#/artist/{a.artist_id}">{a.name}</a> <span class="small muted">{n(a.plays)}×</span></li>
@@ -67,10 +68,10 @@
 
     {#if r.busiest_month}
       {@const max = Math.max(1, ...r.months)}
-      <h3>Busiest in {month(r.busiest_month)}</h3>
-      <figure class="months" aria-label="Plays each month">
+      <h3>{t('gy.busiest', { month: month(r.busiest_month) })}</h3>
+      <figure class="months" aria-label={t('gy.months')}>
         {#each r.months as plays, i (i)}
-          <div class="slot" title="{month(i + 1)}: {n(plays)} plays">
+          <div class="slot" title={t('gy.month_plays', { month: month(i + 1), n: n(plays) })}>
             <div class="bar" style:height="{(plays / max) * 100}%"></div>
             <span class="tick small muted">{month(i + 1, 'short').charAt(0)}</span>
           </div>
@@ -79,7 +80,7 @@
     {/if}
 
     {#if r.first}
-      <h3>Your first song of {r.year}</h3>
+      <h3>{t('gy.first', { year: r.year })}</h3>
       <a class="first" href={r.first.album_id ? `#/album/${r.first.album_id}` : undefined}>
         <Art hash={r.first.art_hash} size={56} />
         <span>
@@ -90,7 +91,7 @@
     {/if}
   {/if}
 {:else}
-  <p class="small muted">Loading...</p>
+  <p class="small muted">{t('common.loading')}</p>
 {/if}
 
 <style>

@@ -1,5 +1,6 @@
 <script lang="ts">
   // Offers the Android app, from this server, on Android.
+  import { t } from '../lib/i18n.svelte'
   import { onMount } from 'svelte'
   import { api } from '../lib/api'
   import type { GoAppRelease } from '../lib/types'
@@ -19,15 +20,14 @@
 
 {#if release}
   <section class="card">
-    <h2>Get the Android app</h2>
+    <h2>{t('ga.title')}</h2>
     <p class="small muted">
-      Downloads, offline listening, lock screen controls and more. It comes straight from this server, so Android will
-      ask you to allow installing it, and may warn about where it's from.
+      {t('ga.note')}
     </p>
     <a class="button" href="/go/app/djinn-go.apk" download="djinn-go.apk">
-      Download ({(release.size / 1_000_000).toFixed(0)} MB)
+      {t('ga.download', { n: Math.round(release.size / 1_000_000) })}
     </a>
-    <p class="small muted sum">Version {release.version}. SHA-256: {release.sha256}</p>
+    <p class="small muted sum">{t('gp.app_version', { version: release.version, sum: release.sha256 })}</p>
   </section>
 {/if}
 

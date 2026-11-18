@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { locale, t } from '../../lib/i18n.svelte'
   import PageTitle from '../../lib/PageTitle.svelte'
   // Sending songs for the library, and what happened to them.
   import { onMount } from 'svelte'
@@ -19,7 +20,7 @@
     try {
       mine = await api.mySubmissions()
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not load', true)
+      toast(e instanceof Error ? e.message : t('ed.load_failed'), true)
     }
   }
 
@@ -36,15 +37,15 @@
           item.done = true
         } else {
           try {
-            item.error = JSON.parse(xhr.responseText).error ?? `Failed (${xhr.status})`
+            item.error = JSON.parse(xhr.responseText).error ?? t('gs.failed_status', { status: xhr.status })
           } catch {
-            item.error = `Failed (${xhr.status})`
+            item.error = t('gs.failed_status', { status: xhr.status })
           }
         }
         resolve()
       }
       xhr.onerror = () => {
-        item.error = 'The connection dropped'
+        item.error = t('gs.dropped')
         resolve()
       }
       xhr.send(file)
@@ -67,31 +68,29 @@
       await api.withdrawSubmission(s.id)
       mine = mine.filter((m) => m.id !== s.id)
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not take it back', true)
+      toast(e instanceof Error ? e.message : t('gs.take_back_failed'), true)
     }
   }
 
-  const status = {
-    waiting: 'Waiting for review',
-    approved: 'In the library',
-    declined: 'Turned down',
-  }
-  const when = (ms: number) => new Date(ms).toLocaleDateString([], { month: 'short', day: 'numeric' })
+  const status = $derived({
+    waiting: t('si.waiting'),
+    approved: t('pa.k_approved_submission'),
+    declined: t('sub.decline'),
+  })
+  const when = (ms: number) => new Date(ms).toLocaleDateString(locale.code, { month: 'short', day: 'numeric' })
 </script>
 
-<PageTitle title="Submit music" />
+<PageTitle title={t('gs.title')} />
 {#if !app.me?.permissions?.submit_music}
-  <p class="muted">Your account can't submit music. Ask the host if you'd like to.</p>
+  <p class="muted">{t('gs.cant')}</p>
 {:else}
   <p class="muted">
-    Send song files for the library: MP3, FLAC, M4A (AAC), Ogg Vorbis or WAV.
-    {app.me.permissions.submit_without_review
-      ? 'They go straight in, unless they look like a song the library has already.'
-      : 'The host reviews each one first.'}
-    Good tags (title, artist, album) help them land in the right place.
+    {t('gs.intro')}
+    {app.me.permissions.submit_without_review ? t('gs.straight') : t('gs.review')}
+    {t('gs.tags')}
   </p>
   <label class="button primary pick">
-    Choose songs
+    {t('gs.choose')}
     <input bind:this={input} type="file" accept=".mp3,.flac,.m4a,.mp4,.aac,.ogg,.oga,.wav" multiple onchange={chosen} hidden />
   </label>
 
@@ -101,14 +100,14 @@
       {#if item.error}
         <span class="error small">{item.error}</span>
       {:else if item.done}
-        <span class="muted small">Sent</span>
+        <span class="muted small">{t('gs.sent')}</span>
       {:else}
         <progress max="1" value={item.progress}></progress>
       {/if}
     </div>
   {/each}
 
-  <h2>Sent so far</h2>
+  <h2>{t('gs.so_far')}</h2>
   {#each mine as s (s.id)}
     <div class="item">
       <div class="grow">
@@ -117,13 +116,13 @@
           {status[s.status]}{#if s.note}: {s.note}{/if} · {when(s.created_at)}{#if s.duration_ms} · {duration(s.duration_ms)}{/if}
         </div>
         {#if s.status === 'waiting' && s.duplicate_title}
-          <div class="muted small">Looks like {s.duplicate_title}, already in the library.</div>
+          <div class="muted small">{t('sub.dup', { title: s.duplicate_title })}</div>
         {/if}
       </div>
-      {#if s.status === 'waiting'}<button class="small-button" onclick={() => withdraw(s)}>Take back</button>{/if}
+      {#if s.status === 'waiting'}<button class="small-button" onclick={() => withdraw(s)}>{t('gs.take_back')}</button>{/if}
     </div>
   {:else}
-    <p class="muted">Nothing yet.</p>
+    <p class="muted">{t('gs.nothing')}</p>
   {/each}
 {/if}
 

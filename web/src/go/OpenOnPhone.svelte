@@ -1,5 +1,6 @@
 <script lang="ts">
   // A QR code for opening DJINN GO on a phone.
+  import { t } from '../lib/i18n.svelte'
   import { onMount } from 'svelte'
   import { api } from '../lib/api'
 
@@ -16,8 +17,8 @@
 
 {#if address}
   <section class="card">
-    <h2>Open on your phone</h2>
-    <p class="small muted">Scan this with your phone's camera. Then add it to your home screen to use GO like an app.</p>
+    <h2>{t('oop.title')}</h2>
+    <p class="small muted">{t('oop.note')}</p>
     <!-- The QR code is an SVG DJINN made itself. -->
     <div class="qr">{@html address.qr_svg}</div>
     <p class="url mono">{address.url}</p>
