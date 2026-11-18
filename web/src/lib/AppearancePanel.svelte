@@ -1,6 +1,7 @@
 <script lang="ts">
   // Admin > System > Background: the picture behind every page of the party
   // app. One of the built-in ones, or the admin's own.
+  import { t } from './i18n.svelte'
   import { api } from './api'
   import { appearance, backgrounds } from './appearance.svelte'
   import BackgroundArt from './BackgroundArt.svelte'
@@ -25,7 +26,7 @@
     try {
       apply(await api.saveAppearance({ background, strength: level }))
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not save', true)
+      toast(e instanceof Error ? e.message : t('common.save_failed_short'), true)
     }
   }
 
@@ -35,9 +36,9 @@
     busy = true
     try {
       apply(await api.uploadBackground(picked))
-      toast('Your picture is now the background')
+      toast(t('bgp.yours'))
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not use that picture', true)
+      toast(e instanceof Error ? e.message : t('bgp.use_failed'), true)
     } finally {
       busy = false
       if (file) file.value = ''
@@ -48,15 +49,15 @@
     try {
       apply(await api.removeBackground())
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not remove it', true)
+      toast(e instanceof Error ? e.message : t('common.remove_failed'), true)
     }
   }
 </script>
 
 <section class="card">
-  <h2>Background</h2>
-  <p class="small muted">The picture behind every page of the party app, signed in or not. The TV and lyrics pages keep their own.</p>
-  <div class="choices" role="radiogroup" aria-label="Background">
+  <h2>{t('bgp.title')}</h2>
+  <p class="small muted">{t('bgp.note')}</p>
+  <div class="choices" role="radiogroup" aria-label={t('bgp.title')}>
     {#each backgrounds as choice (choice.id)}
       <button
         class="choice"
@@ -72,12 +73,12 @@
     {#if custom}
       <button class="choice on" role="radio" aria-checked="true">
         <span class="preview"><BackgroundArt name={appearance.background} strength={90} /></span>
-        <span>Your picture</span>
+        <span>{t('bgp.your_picture')}</span>
       </button>
     {/if}
   </div>
   <label class="strength">
-    <span class="row">How strongly it shows <span class="muted">{strength}%</span></span>
+    <span class="row">{t('bgp.strength')} <span class="muted">{strength}%</span></span>
     <input
       type="range"
       min="0"
@@ -91,11 +92,11 @@
   <div class="actions">
     <input bind:this={file} type="file" accept="image/*" hidden onchange={chosen} />
     <button disabled={busy} onclick={() => file?.click()}>
-      {busy ? 'Uploading...' : custom ? 'Use another picture' : 'Use my own picture'}
+      {busy ? t('bgp.uploading') : custom ? t('bgp.another') : t('bgp.own')}
     </button>
-    {#if custom}<button onclick={removeCustom}>Remove my picture</button>{/if}
+    {#if custom}<button onclick={removeCustom}>{t('bgp.remove')}</button>{/if}
   </div>
-  <p class="small muted">Pictures at least 800 by 450 pixels, up to 12 MB. Dark pictures read best.</p>
+  <p class="small muted">{t('bgp.size')}</p>
 </section>
 
 <style>
