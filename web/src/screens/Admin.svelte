@@ -31,7 +31,7 @@
   import SchedulePanel from '../lib/SchedulePanel.svelte'
   import PageTitle from '../lib/PageTitle.svelte'
   import { adminGroups, adminSubtabs, adminTabLabel, type AdminTab } from '../lib/adminTabs'
-  import { adminEntries, searchAdmin, type AdminEntry } from '../lib/adminSearch'
+  import { adminEntries, entryLabel, searchAdmin, type AdminEntry } from '../lib/adminSearch'
   import AdminHome from '../lib/AdminHome.svelte'
   import StatsPanel from '../lib/StatsPanel.svelte'
   import SearchesWishes from '../lib/SearchesWishes.svelte'
@@ -185,7 +185,7 @@
   async function highlight(entry: AdminEntry) {
     finding = null
     await tick()
-    const want = entry.label.toLowerCase().slice(0, 40)
+    const want = entryLabel(entry).toLowerCase().slice(0, 40)
     for (let i = 0; i < 30; i++) {
       const found = [...document.querySelectorAll<HTMLElement>('.admin-content :is(h2, h3, label, p, button, dt, a)')]
         .filter((el) => (el.textContent ?? '').toLowerCase().includes(want))
@@ -605,7 +605,7 @@
       {#each results.slice(0, 12) as entry (entry.tab + entry.label)}
         <li>
           <button onclick={() => find(entry)}>
-            <span>{entry.label}</span>
+            <span>{entryLabel(entry)}</span>
             <span class="small muted">{adminTabLabel(entry.tab)}{entry.key && changed.includes(entry.key) ? t('admin.changed_mark') : ''}</span>
           </button>
         </li>
@@ -655,7 +655,7 @@
           {#each changedEntries as entry (entry.key)}
             <li>
               <button onclick={() => find(entry)}>
-                <span>{entry.label}</span>
+                <span>{entryLabel(entry)}</span>
                 <span class="small muted">{adminTabLabel(entry.tab)}</span>
               </button>
             </li>
