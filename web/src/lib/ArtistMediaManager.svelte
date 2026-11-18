@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from './i18n.svelte'
   import { onMount } from 'svelte'
   import { api } from './api'
   import Sheet from './Sheet.svelte'
@@ -33,26 +34,26 @@
       pictures = list
       remoteAllowed = settings.picture_settings.allow_remote
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not load pictures', true)
+      toast(e instanceof Error ? e.message : t('amm.load_failed'), true)
     } finally {
       loading = false
     }
   })
 
-  const sources = [
+  const sources = $derived([
     { name: 'Wikimedia Commons', url: 'https://commons.wikimedia.org/wiki/Special:MediaSearch?type=image' },
     { name: 'fanart.tv', url: 'https://fanart.tv/music-fanart/' },
     { name: 'TheAudioDB', url: 'https://www.theaudiodb.com/' },
     { name: 'Getty Images', url: 'https://www.gettyimages.com/photos/famous-musicians' },
     { name: 'iStock', url: 'https://www.istockphoto.com/photos/music-artist' },
     { name: 'Unsplash', url: 'https://unsplash.com/s/photos/music-artist' },
-    { name: "Reelin' in the Years Archive", url: 'https://photos.reelinintheyears.com/' },
+    { name: t('amm.reelin'), url: 'https://photos.reelinintheyears.com/' },
     { name: 'Photos.com', url: 'https://photos.com/collections/music+lovers' },
-    { name: 'Rolling Stone photo collections', url: 'https://www.rollingstone.com/product-recommendations/lifestyle/best-music-photography-prints-art-1052198/' },
-    { name: 'Pinterest ideas', url: 'https://www.pinterest.com/ideas/iconic-music-photos/929451450092/' },
+    { name: t('libx.rs_collections'), url: 'https://www.rollingstone.com/product-recommendations/lifestyle/best-music-photography-prints-art-1052198/' },
+    { name: t('libx.pinterest'), url: 'https://www.pinterest.com/ideas/iconic-music-photos/929451450092/' },
     { name: 'Flickr Creative Commons', url: 'https://www.flickr.com/creativecommons/' },
     { name: 'Internet Archive', url: 'https://archive.org/details/image?query=musician' },
-  ]
+  ])
 
   function changed(list: ArtistPicture[]) {
     pictures = list
@@ -62,7 +63,7 @@
   async function upload() {
     const chosen = file?.files?.[0]
     if (!chosen || !credit.trim()) {
-      toast('Choose an image and add its photo credit', true)
+      toast(t('amm.need_file'), true)
       return
     }
     busy = true
@@ -71,22 +72,22 @@
       credit = ''
       creditUrl = ''
       if (file) file.value = ''
-      toast('Artist picture added')
+      toast(t('amm.added'))
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not add picture', true)
+      toast(e instanceof Error ? e.message : t('amm.add_failed'), true)
     } finally {
       busy = false
     }
   }
 
   async function remove(picture: ArtistPicture) {
-    if (!confirm(`Remove this picture from ${name}? A host-uploaded file cannot be recovered here.`)) return
+    if (!confirm(t('amm.remove_q', { name }))) return
     busy = true
     try {
       changed(await api.removeArtistPicture(id, picture.art_hash))
-      toast('Picture removed')
+      toast(t('amm.removed'))
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not remove picture', true)
+      toast(e instanceof Error ? e.message : t('amm.remove_failed'), true)
     } finally {
       busy = false
     }
@@ -100,7 +101,7 @@
     try {
       changed(await api.orderArtistPictures(id, order))
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not change picture order', true)
+      toast(e instanceof Error ? e.message : t('amm.order_failed'), true)
     } finally {
       busy = false
     }
@@ -110,9 +111,9 @@
     busy = true
     try {
       changed(await api.recheckArtistPictures(id))
-      toast('Picture sources checked')
+      toast(t('amm.checked'))
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not check Commons', true)
+      toast(e instanceof Error ? e.message : t('amm.check_failed'), true)
     } finally {
       busy = false
     }
@@ -123,7 +124,7 @@
     try {
       unsplash = await api.searchUnsplash(id)
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not search Unsplash', true)
+      toast(e instanceof Error ? e.message : t('amm.search_failed'), true)
     } finally {
       searching = false
     }
@@ -133,62 +134,62 @@
     busy = true
     try {
       changed(await api.addUnsplashPicture(id, photoId))
-      toast('Remote picture added')
+      toast(t('amm.remote_added'))
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not add picture', true)
+      toast(e instanceof Error ? e.message : t('amm.add_failed'), true)
     } finally {
       busy = false
     }
   }
 </script>
 
-<Sheet title="Manage artist pictures" {onclose}>
-  <p class="small muted">Extra pictures for {name}. Move them to choose the slideshow order. Removing an unused picture also frees its space in DJINN's art cache.</p>
+<Sheet title={t('amm.title')} {onclose}>
+  <p class="small muted">{t('amm.intro', { name })}</p>
   {#if loading}
-    <p class="muted">Loading...</p>
+    <p class="muted">{t('common.loading')}</p>
   {:else}
-    <p class="small muted">{pictures.length} {pictures.length === 1 ? 'picture' : 'pictures'}</p>
+    <p class="small muted">{t('amm.count', { n: pictures.length })}</p>
     {#each pictures as picture, i (picture.art_hash)}
       <div class="picture">
         {#if picture.remote_url && !remoteAllowed}
-          <span class="remote-off">Remote display off</span>
+          <span class="remote-off">{t('amm.remote_off')}</span>
         {:else}
           <img src={picture.remote_url ?? api.artUrl(picture.art_hash, 128)} alt="" />
         {/if}
         <div class="details">
-          <b>{{ manual: 'Added by host', commons: 'Wikimedia Commons', fanart: 'fanart.tv', audiodb: 'TheAudioDB', unsplash: 'Unsplash' }[picture.source]}</b>
+          <b>{{ manual: t('amm.by_host'), commons: 'Wikimedia Commons', fanart: 'fanart.tv', audiodb: 'TheAudioDB', unsplash: 'Unsplash' }[picture.source]}</b>
           <span class="small muted">{picture.credit}</span>
-          {#if picture.credit_url}<a class="small" href={picture.credit_url} target="_blank" rel="noopener noreferrer">Source</a>{/if}
+          {#if picture.credit_url}<a class="small" href={picture.credit_url} target="_blank" rel="noopener noreferrer">{t('amm.source')}</a>{/if}
         </div>
         <div class="picture-actions">
-          <button disabled={busy || i === 0} aria-label="Move picture up" onclick={() => move(i, -1)}>↑</button>
-          <button disabled={busy || i === pictures.length - 1} aria-label="Move picture down" onclick={() => move(i, 1)}>↓</button>
-          <button disabled={busy} aria-label="Remove picture" onclick={() => remove(picture)}>×</button>
+          <button disabled={busy || i === 0} aria-label={t('amm.up')} onclick={() => move(i, -1)}>↑</button>
+          <button disabled={busy || i === pictures.length - 1} aria-label={t('amm.down')} onclick={() => move(i, 1)}>↓</button>
+          <button disabled={busy} aria-label={t('amm.remove')} onclick={() => remove(picture)}>×</button>
         </div>
       </div>
     {/each}
-    <button disabled={busy} onclick={recheck}>Find automatic pictures again</button>
+    <button disabled={busy} onclick={recheck}>{t('amm.recheck')}</button>
   {/if}
 
-  <h3>Add a picture</h3>
-  <p class="small muted">Browse these sources, then upload only a picture you have the rights to use. Stock and archive sites may require a license. Unsplash API images need hotlinking, so they are not downloaded automatically.</p>
+  <h3>{t('amm.add_title')}</h3>
+  <p class="small muted">{t('amm.add_note')}</p>
   <div class="source-links">
     {#each sources as source}<a href={source.url} target="_blank" rel="noopener noreferrer">{source.name}</a>{/each}
   </div>
-  <label class="field">Image file<input bind:this={file} type="file" accept="image/jpeg,image/png,image/webp" /></label>
-  <label class="field">Photo credit<input bind:value={credit} maxlength="200" placeholder="Photographer / license" /></label>
-  <label class="field">Source or license link (optional)<input bind:value={creditUrl} type="url" maxlength="500" placeholder="https://..." /></label>
-  <button class="primary" disabled={busy} onclick={upload}>Add picture</button>
-  <h3>Unsplash photos</h3>
-  <p class="small muted">Search for {name} and choose a matching photo. These images load directly from Unsplash and show the photographer's credit. Enable remote images and add an Unsplash access key in Library settings first.</p>
-  <button disabled={busy || searching} onclick={findUnsplash}>{searching ? 'Searching...' : 'Search Unsplash'}</button>
+  <label class="field">{t('amm.file')}<input bind:this={file} type="file" accept="image/jpeg,image/png,image/webp" /></label>
+  <label class="field">{t('amm.credit')}<input bind:value={credit} maxlength="200" placeholder={t('amm.credit_hint')} /></label>
+  <label class="field">{t('amm.link')}<input bind:value={creditUrl} type="url" maxlength="500" placeholder="https://..." /></label>
+  <button class="primary" disabled={busy} onclick={upload}>{t('amm.add')}</button>
+  <h3>{t('amm.unsplash')}</h3>
+  <p class="small muted">{t('amm.unsplash_note', { name })}</p>
+  <button disabled={busy || searching} onclick={findUnsplash}>{searching ? t('cw.searching') : t('amm.search')}</button>
   {#if unsplash.length}
     <div class="unsplash-grid">
       {#each unsplash as photo (photo.id)}
         <div class="unsplash-choice">
           <img src={photo.thumbnail} alt="" loading="lazy" />
           <a href={photo.credit_url} target="_blank" rel="noopener noreferrer">{photo.credit}</a>
-          <button disabled={busy} onclick={() => selectUnsplash(photo.id)}>Use photo</button>
+          <button disabled={busy} onclick={() => selectUnsplash(photo.id)}>{t('amm.use')}</button>
         </div>
       {/each}
     </div>
