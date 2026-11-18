@@ -45,6 +45,7 @@
   import AppearancePanel from '../lib/AppearancePanel.svelte'
   import RoomsPanel from '../lib/RoomsPanel.svelte'
   import { app, toast } from '../lib/state.svelte'
+  import { locale, t } from '../lib/i18n.svelte'
   import type { LibraryRoot, RequestLogEntry, Settings } from '../lib/types'
 
   let { tab = 'home' }: { tab?: AdminTab } = $props()
@@ -55,7 +56,7 @@
   const OFFER_ONE_PAGE = false
   type Layout = 'sections' | 'page'
   let layout = $state<Layout>(OFFER_ONE_PAGE ? storedLayout() : 'sections')
-  const allTabs: AdminTab[] = adminGroups.flatMap((g) => g.tabs.map((t) => t.id))
+  const allTabs: AdminTab[] = adminGroups.flatMap((g) => g.tabs.map((x) => x.id))
 
   function storedLayout(): Layout {
     try {
@@ -260,47 +261,47 @@
       if (done) toast(done)
       return true
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'That did not work', true)
+      toast(e instanceof Error ? e.message : t('common.failed'), true)
       return false
     }
   }
 
   async function addRoot(path: string) {
     picking = false
-    await attempt(async () => (roots = await api.addLibraryRoot(path)), 'Folder added. Scanning it now.')
+    await attempt(async () => (roots = await api.addLibraryRoot(path)), t('admin.folder_added'))
   }
 
   async function removeRoot(root: LibraryRoot) {
-    if (!confirm(`Remove ${root.path} from the library? Its songs disappear from DJINN (the files stay).`)) return
-    await attempt(async () => (roots = await api.removeLibraryRoot(root.path)), 'Folder removed')
+    if (!confirm(t('admin.remove_folder_q', { path: root.path }))) return
+    await attempt(async () => (roots = await api.removeLibraryRoot(root.path)), t('admin.folder_removed'))
   }
 
   async function checkForChanges() {
     try {
       const { status } = await api.rescan()
-      toast(status === 'started' ? 'Checking for changes' : 'Already checking for changes')
+      toast(status === 'started' ? t('admin.checking') : t('admin.already_checking'))
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not start the check', true)
+      toast(e instanceof Error ? e.message : t('admin.check_failed'), true)
     }
   }
 
   async function clearLog() {
-    if (!confirm('Clear the request log? Top songs on artist pages keep counting.')) return
-    if (await attempt(() => api.clearRequestLog(), 'Request Log cleared')) log = []
+    if (!confirm(t('admin.clear_log_q'))) return
+    if (await attempt(() => api.clearRequestLog(), t('admin.log_cleared'))) log = []
   }
 
   async function saveSettings(e: SubmitEvent) {
     e.preventDefault()
-    if (settings && await attempt(() => api.saveSettings(settings!), 'Saved')) {
+    if (settings && await attempt(() => api.saveSettings(settings!), t('common.saved'))) {
       clearListCache()
       api.changedSettings().then((c) => (changed = c)).catch(() => {})
     }
   }
 
   const scanning = $derived(app.scan !== null && !app.scan.done)
-  const time = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+  const time = (ms: number) => new Date(ms).toLocaleTimeString(locale.code, { hour: 'numeric', minute: '2-digit' })
   const when = (ms: number) =>
-    new Date(ms).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+    new Date(ms).toLocaleString(locale.code, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 </script>
 
 {#snippet subtabs(group: string, items: [string, string][])}
@@ -313,117 +314,116 @@
   </div>
 {/snippet}
 
-{#snippet sectionContent(t: AdminTab)}
-{#if t === 'home'}
+{#snippet sectionContent(id: AdminTab)}
+{#if id === 'home'}
   <AdminHome />
-{:else if t === 'stats'}
+{:else if id === 'stats'}
   <StatsPanel />
   <SearchesWishes />
-{:else if t === 'problems'}
+{:else if id === 'problems'}
   <ScheduledCheck />
   <LibraryProblems />
   <LibraryDuplicates />
-{:else if t === 'library'}
+{:else if id === 'library'}
   {@render subtabs('library', adminSubtabs('library'))}
   <div data-subtab="folders" hidden={sub.library !== 'folders'}>
   <div class="cards-2">
   <section class="card">
-    <h2>Music folders</h2>
+    <h2>{t('admin.music_folders')}</h2>
     {#each roots as root (root.path)}
       <div class="item">
         <Icon name="folder" size={20} />
         <div class="grow">
           <div class="path">{root.path}</div>
-          {#if !root.available}<div class="small error">Not found right now (unplugged or offline?)</div>{/if}
-          {#if root.from_config}<div class="small muted">From config.toml</div>{/if}
+          {#if !root.available}<div class="small error">{t('admin.not_found_now')}</div>{/if}
+          {#if root.from_config}<div class="small muted">{t('admin.from_config')}</div>{/if}
         </div>
         {#if !root.from_config}
-          <button class="icon" aria-label="Remove {root.path}" onclick={() => removeRoot(root)}><Icon name="close" /></button>
+          <button class="icon" aria-label={t('admin.remove_path', { path: root.path })} onclick={() => removeRoot(root)}><Icon name="close" /></button>
         {/if}
       </div>
     {:else}
-      <p class="muted">No music folders yet. Add the folder where your music lives.</p>
+      <p class="muted">{t('admin.no_folders')}</p>
     {/each}
-    <button class="primary" onclick={() => (picking = true)}>Add a folder</button>
+    <button class="primary" onclick={() => (picking = true)}>{t('admin.add_folder')}</button>
   </section>
 
   <section class="card">
-    <h2>Library</h2>
-    <p class="muted">{trackCount} songs</p>
+    <h2>{t('admin.library')}</h2>
+    <p class="muted">{t('count.songs', { n: trackCount })}</p>
     <LibraryProgress />
     {#if app.scan && !scanning}
-      <p class="small muted">Last check found {app.scan.found} files, read {app.scan.read}, removed {app.scan.removed}.</p>
+      <p class="small muted">{t('admin.last_check', { found: app.scan.found, read: app.scan.read, removed: app.scan.removed })}</p>
     {/if}
-    <button disabled={scanning} onclick={checkForChanges}>Check for changes</button>
+    <button disabled={scanning} onclick={checkForChanges}>{t('admin.check_changes')}</button>
   </section>
 
   <section class="card">
-    <h2>Image cache</h2>
+    <h2>{t('admin.image_cache')}</h2>
     <p class="small muted">
-      Covers and artist photos DJINN finds are kept here, on this computer. Your music folders are never changed.
+      {t('admin.image_cache_note')}
     </p>
     <p class="path small mono">{artDir}</p>
-    <button onclick={() => attempt(api.openArtFolder)}>Open image folder</button>
+    <button onclick={() => attempt(api.openArtFolder)}>{t('admin.open_image_folder')}</button>
   </section>
   </div>
-  <p class="small muted">Files that didn't make it in, copies of songs and the nightly check are under <a href="#/admin/problems">Problems</a>.</p>
+  <p class="small muted">{t('admin.problems_note')} <a href="#/admin/problems">{t('admin.problems_link')}</a>.</p>
   </div>
 
   <div data-subtab="settings" hidden={sub.library !== 'settings'}>
   {#if settings}
     <section class="card wide">
-      <h2>Artist library</h2>
+      <h2>{t('admin.artist_library')}</h2>
       <form class="settings" onsubmit={saveSettings}>
         <label class="switch big">
           <input type="checkbox" bind:checked={settings.show_collaboration_artists} />
-          Show all credited artists in the Artists library
+          {t('admin.show_credited')}
         </label>
-        <p class="small muted">When off, secondary "&amp;" and "feat." artists stay searchable and linked from songs, but only artists with their own music appear in Artists.</p>
+        <p class="small muted">{t('admin.show_credited_note')}</p>
         <label class="switch big">
           <input type="checkbox" bind:checked={settings.original_years} />
-          Use the original release year
+          {t('admin.original_years')}
         </label>
-        <p class="small muted">A reissue's files often carry the reissue's date too. When on, an original release date in the tags wins. Changing this re-reads the library. Years you've corrected in the app stay as you set them.</p>
+        <p class="small muted">{t('admin.original_years_note')}</p>
         <label class="switch big">
           <input type="checkbox" bind:checked={settings.album_folders} />
-          Keep albums with the same name apart
+          {t('admin.album_folders')}
         </label>
-        <p class="small muted">When two folders hold different songs at the same place on an album, such as two different "track 1"s, they show as separate albums, each with its folder's name. Discs of one album stay together.</p>
+        <p class="small muted">{t('admin.album_folders_note')}</p>
         <label>
-          Songs and artists a genre page loads at a time
+          {t('admin.genre_page_size')}
           <input type="number" min="10" max="500" bind:value={settings.genre_page_size} />
         </label>
         <label>
-          Hours before a genre's order is shuffled again
+          {t('admin.genre_refresh')}
           <input type="number" min="0" max="8760" bind:value={settings.genre_refresh_hours} />
-          <span class="small muted">Genre pages show everything in a shuffled order, with what's been played most nearer the top. 0 shuffles on every visit.</span>
+          <span class="small muted">{t('admin.genre_refresh_note')}</span>
         </label>
         <label>
-          How often Discover's shelves change
+          {t('admin.discover_refresh')}
           <select bind:value={settings.discover_refresh_minutes}>
-            <option value={0}>Every time it's opened</option>
-            <option value={1}>Every minute</option>
-            <option value={5}>Every 5 minutes</option>
-            <option value={15}>Every 15 minutes</option>
-            <option value={60}>Every hour</option>
-            <option value={1440}>Every day</option>
+            <option value={0}>{t('admin.every_open')}</option>
+            <option value={1}>{t('admin.every_minute')}</option>
+            <option value={5}>{t('admin.every_minutes', { n: 5 })}</option>
+            <option value={15}>{t('admin.every_minutes', { n: 15 })}</option>
+            <option value={60}>{t('admin.every_hour')}</option>
+            <option value={1440}>{t('admin.every_day')}</option>
           </select>
-          <span class="small muted">The Discover page picks which favorites, albums and artists to show. Refreshing the page shows the same ones until this long has passed.</span>
+          <span class="small muted">{t('admin.discover_refresh_note')}</span>
         </label>
         <label>
-          A play counts once this much of the song is heard: {settings.play_count_percent}%
+          {t('admin.play_count', { pct: settings.play_count_percent })}
           <input type="range" min="0" max="100" step="5" bind:value={settings.play_count_percent} />
-          <span class="small muted">For the play counts in the library lists. A song started again for a moment isn't a play. 0 counts every play.</span>
+          <span class="small muted">{t('admin.play_count_note')}</span>
         </label>
         <label>
-          Names that should never be split, one per line
+          {t('admin.keep_whole')}
           <textarea rows="6" bind:value={settings.artist_keep_whole} spellcheck="false"></textarea>
           <span class="small muted">
-            Songs credited to "A &amp; B" or "A feat. B" still link to each artist. Band names that contain &amp;, commas,
-            or "x" go here so they stay one artist. Saving re-reads the library.
+            {t('admin.keep_whole_note')}
           </span>
         </label>
-        <button class="primary">Save</button>
+        <button class="primary">{t('common.save')}</button>
       </form>
     </section>
   {/if}
@@ -441,11 +441,11 @@
 
 
   {#if picking}
-    <Sheet title="Pick a music folder" onclose={() => (picking = false)}>
+    <Sheet title={t('admin.pick_folder')} onclose={() => (picking = false)}>
       <FolderPicker onpick={addRoot} />
     </Sheet>
   {/if}
-{:else if t === 'audio'}
+{:else if id === 'audio'}
   {@render subtabs('audio', adminSubtabs('audio'))}
   <div data-subtab="sound" hidden={sub.audio !== 'sound'}>
     <div class="cards-2">
@@ -456,112 +456,108 @@
   </div>
   <div data-subtab="outputs" hidden={sub.audio !== 'outputs'}><OutputsPanel /></div>
   <div data-subtab="casting" hidden={sub.audio !== 'casting'}><CastPanel /></div>
-{:else if t === 'smart'}
+{:else if id === 'smart'}
   {@render subtabs('smart', adminSubtabs('smart'))}
   <div data-subtab="play" hidden={sub.smart !== 'play'}><div class="cards-2"><SmartPlayPanel part="play" /></div></div>
   <div data-subtab="styles" hidden={sub.smart !== 'styles'}><SmartPlayPanel part="styles" /></div>
   <div data-subtab="schedule" hidden={sub.smart !== 'schedule'}><SchedulePanel /></div>
-{:else if t === 'ai'}
+{:else if id === 'ai'}
   {@render subtabs('ai', adminSubtabs('ai'))}
   <div data-subtab="search" hidden={sub.ai !== 'search'}><div class="cards-2"><AiPanel part="search" /></div></div>
   <div data-subtab="listen" hidden={sub.ai !== 'listen'}><div class="cards-2"><AiPanel part="listen" /></div></div>
   <div data-subtab="lyrics" hidden={sub.ai !== 'lyrics'}><div class="cards-2"><AiWorkPanel /></div></div>
-{:else if t === 'users'}
+{:else if id === 'users'}
   <div class="cards-2"><UsersPanel /></div>
-{:else if t === 'editor'}
+{:else if id === 'editor'}
   <LibraryEditor />
-{:else if t === 'protected'}
+{:else if id === 'protected'}
   <div class="cards-2"><ProtectedPanel /></div>
-{:else if t === 'go'}
+{:else if id === 'go'}
   <div class="cards-2"><GoPanel /></div>
-{:else if t === 'nodes'}
+{:else if id === 'nodes'}
   <div class="cards-2"><NodesPanel /></div>
-{:else if t === 'visuals'}
+{:else if id === 'visuals'}
   <VisualsPanel />
-{:else if t === 'rooms'}
+{:else if id === 'rooms'}
   <div class="cards-2"><RoomsPanel /></div>
-{:else if t === 'log'}
+{:else if id === 'log'}
   <section class="card">
     <div class="log-head">
-      <h2>Request Log</h2>
-      <button class="small-button" disabled={!log.length} onclick={clearLog}>Clear</button>
+      <h2>{t('admin.request_log')}</h2>
+      <button class="small-button" disabled={!log.length} onclick={clearLog}>{t('common.clear')}</button>
     </div>
     {#each log as entry, i (i)}
       <div class="log">
         <span class="muted small at">{time(entry.at)}</span>
         <div class="grow">
-          <div class="ellipsis">{entry.title ?? '(removed song)'}{entry.artist ? ` · ${entry.artist}` : ''}</div>
+          <div class="ellipsis">{entry.title ?? t('admin.removed_song')}{entry.artist ? ` · ${entry.artist}` : ''}</div>
           <div class="muted small ellipsis">
-            {entry.name ?? 'unknown'} · <span class="mono">{entry.mac ?? entry.ip ?? 'no address'}</span>
+            {entry.name ?? t('admin.unknown')} · <span class="mono">{entry.mac ?? entry.ip ?? t('admin.no_address')}</span>
           </div>
         </div>
       </div>
     {:else}
-      <p class="muted">No requests since the log was last cleared.</p>
+      <p class="muted">{t('admin.no_requests')}</p>
     {/each}
   </section>
-{:else if t === 'rules' && settings}
+{:else if id === 'rules' && settings}
   <section class="card">
-    <h2>Rules</h2>
+    <h2>{t('admin.rules')}</h2>
     <form class="settings" onsubmit={saveSettings}>
       <label class="switch big">
         <input type="checkbox" bind:checked={settings.guest_mode} />
-        Guest mode: people join with just a name, no account
+        {t('admin.guest_mode')}
       </label>
       <label class="switch big">
         <input type="checkbox" bind:checked={settings.tv_page} />
         <span>
-          TV page: what's playing, what's next, and the join code, for a TV or tablet. Open
-          <a href="/tv" target="_blank" rel="noopener">/tv</a> on that screen; no sign-in needed.
+          {t('admin.tv_page_before')}
+          <a href="/tv" target="_blank" rel="noopener">/tv</a> {t('admin.tv_page_after')}
         </span>
       </label>
       {#if settings.tv_page}
         <label class="switch big">
           <input type="checkbox" bind:checked={settings.tv_sound} />
           <span>
-            Sound on the TV page: a button on it plays the party, for a TV browser that isn't cast to.
-            Anyone who can open the page can listen, signed in or not.
+            {t('admin.tv_sound')}
           </span>
         </label>
       {/if}
       <label class="switch big">
         <input type="checkbox" bind:checked={settings.play_here} />
-        Play here: a Tune In button on the Playing tab lets anyone play the party on their own phone
-        or computer, a few seconds behind the speakers
+        {t('admin.play_here')}
       </label>
       <label>
-        Most songs in the queue at once (0 for no limit)
+        {t('admin.max_queue')}
         <input type="number" min="0" max="1000" bind:value={settings.max_queue} />
       </label>
       <label>
-        Songs each person can have queued
+        {t('admin.per_user')}
         <input type="number" min="1" max="50" bind:value={settings.per_user_limit} />
-        <span class="small muted">Asking for a song someone else queued counts too (it moves that song up a place).</span>
+        <span class="small muted">{t('admin.per_user_note')}</span>
       </label>
       <label>
-        Votes needed to skip a song (0 turns skip voting off)
+        {t('admin.skip_votes')}
         <input type="number" min="0" max="100" bind:value={settings.skip_votes} />
         <span class="small muted">
-          Guests get a "Vote to skip" button on the playing screen. Whoever requested a song can always skip it
-          alone, and admins skip right away.
+          {t('admin.skip_votes_note')}
         </span>
       </label>
       <label>
-        Songs before a shuffled playlist song can repeat
+        {t('admin.history_window')}
         <input type="number" min="0" max="500" bind:value={settings.history_window} />
       </label>
       <label class="switch big">
         <input type="checkbox" bind:checked={settings.avoid_copies} />
-        Don't play another copy of a song that just played
+        {t('admin.avoid_copies')}
       </label>
       <p class="small muted">
-        When your library has the same song more than once (see Possible duplicates under Library), the auto mix
-        treats every copy as played.
+        {t('admin.avoid_copies_note')}
       </p>
-      <button class="primary">Save</button>
+      <button class="primary">{t('common.save')}</button>
     </form>
   </section>
-{:else if t === 'system'}
+{:else if id === 'system'}
   <div class="cards-2">
     <AboutPanel part="build" />
     <SystemStatus />
@@ -572,9 +568,9 @@
     <ResetPanel />
     <AboutPanel part="credits" />
   </div>
-{:else if t === 'serverlog'}
+{:else if id === 'serverlog'}
   <LogViewer />
-{:else if t === 'signins'}
+{:else if id === 'signins'}
   <SignInLog />
 {/if}
 {/snippet}
@@ -583,24 +579,24 @@
 <div class="admin" class:one-page={layout === 'page'}>
 <aside class="side">
   {#if OFFER_ONE_PAGE}
-    <div class="layout" role="group" aria-label="Layout">
-      <button class:active={layout === 'page'} aria-pressed={layout === 'page'} onclick={() => setLayout('page')}>One page</button>
-      <button class:active={layout === 'sections'} aria-pressed={layout === 'sections'} onclick={() => setLayout('sections')}>Sections</button>
+    <div class="layout" role="group" aria-label={t('admin.layout')}>
+      <button class:active={layout === 'page'} aria-pressed={layout === 'page'} onclick={() => setLayout('page')}>{t('admin.one_page')}</button>
+      <button class:active={layout === 'sections'} aria-pressed={layout === 'sections'} onclick={() => setLayout('sections')}>{t('admin.sections')}</button>
     </div>
   {/if}
   <label class="find">
     <Icon name="search" size={20} />
-    <input type="search" placeholder="Find a setting" aria-label="Find a setting" bind:value={query} />
+    <input type="search" placeholder={t('admin.find_setting')} aria-label={t('admin.find_setting')} bind:value={query} />
   </label>
   <select
     class="phone-sections"
-    aria-label="Admin section"
+    aria-label={t('admin.section')}
     value={tab}
     onchange={(e) => (location.hash = `#/admin/${e.currentTarget.value}`)}
   >
     {#each adminGroups as group (group.label)}
       <optgroup label={group.label}>
-        {#each group.tabs as t (t.id)}<option value={t.id}>{t.label}</option>{/each}
+        {#each group.tabs as item (item.id)}<option value={item.id}>{item.label}</option>{/each}
       </optgroup>
     {/each}
   </select>
@@ -610,39 +606,39 @@
         <li>
           <button onclick={() => find(entry)}>
             <span>{entry.label}</span>
-            <span class="small muted">{adminTabLabel(entry.tab)}{entry.key && changed.includes(entry.key) ? ', changed' : ''}</span>
+            <span class="small muted">{adminTabLabel(entry.tab)}{entry.key && changed.includes(entry.key) ? t('admin.changed_mark') : ''}</span>
           </button>
         </li>
       {:else}
-        <li class="small muted">Nothing matches.</li>
+        <li class="small muted">{t('admin.nothing_matches')}</li>
       {/each}
     </ul>
   {:else}
-    <nav aria-label="Admin sections">
+    <nav aria-label={t('admin.sections_nav')}>
       {#each adminGroups as group (group.label)}
         <div class="group">
           <div class="group-label">{group.label}</div>
           <div class="links">
-            {#each group.tabs as t (t.id)}
+            {#each group.tabs as item (item.id)}
               {#if layout === 'page'}
-                <button class="nav-item" class:active={inView === t.id} onclick={() => jump(document.getElementById(`admin-${t.id}`))}>
-                  {t.label}
-                  {#if t.id === 'problems' && trouble > 0}<span class="badge">{trouble.toLocaleString()}</span>{/if}
-                  {#if changedTabs.has(t.id)}<span class="changed-dot" title="Has settings changed from the default"></span>{/if}
+                <button class="nav-item" class:active={inView === item.id} onclick={() => jump(document.getElementById(`admin-${item.id}`))}>
+                  {item.label}
+                  {#if item.id === 'problems' && trouble > 0}<span class="badge">{trouble.toLocaleString(locale.code)}</span>{/if}
+                  {#if changedTabs.has(item.id)}<span class="changed-dot" title={t('admin.has_changed')}></span>{/if}
                 </button>
-                {#if (cards[t.id]?.length ?? 0) > 1}
+                {#if (cards[item.id]?.length ?? 0) > 1}
                   <div class="cards">
-                    {#each cards[t.id] as card, i (i)}
+                    {#each cards[item.id] as card, i (i)}
                       <button onclick={() => jump(card.el)}>{card.title}</button>
                     {/each}
                   </div>
                 {/if}
               {:else}
-                <a href="#/admin/{t.id}" class:active={tab === t.id} aria-current={tab === t.id ? 'page' : undefined}>
-                  <Icon name={t.icon} size={20} />
-                  {t.label}
-                  {#if t.id === 'problems' && trouble > 0}<span class="badge">{trouble.toLocaleString()}</span>{/if}
-                  {#if changedTabs.has(t.id)}<span class="changed-dot" title="Has settings changed from the default"></span>{/if}
+                <a href="#/admin/{item.id}" class:active={tab === item.id} aria-current={tab === item.id ? 'page' : undefined}>
+                  <Icon name={item.icon} size={20} />
+                  {item.label}
+                  {#if item.id === 'problems' && trouble > 0}<span class="badge">{trouble.toLocaleString(locale.code)}</span>{/if}
+                  {#if changedTabs.has(item.id)}<span class="changed-dot" title={t('admin.has_changed')}></span>{/if}
                 </a>
               {/if}
             {/each}
@@ -652,7 +648,7 @@
     </nav>
     {#if changedEntries.length}
       <button class="link small" onclick={() => (showChanged = !showChanged)}>
-        {showChanged ? 'Hide' : 'Show'} settings changed from the default ({changedEntries.length})
+        {t(showChanged ? 'admin.hide_changed' : 'admin.show_changed', { n: changedEntries.length })}
       </button>
       {#if showChanged}
         <ul class="results">
@@ -672,16 +668,16 @@
 
 <div class="admin-content" bind:this={content}>
 {#if layout === 'sections'}
-  <div class="crumbs small muted"><Icon name="home" size={16} /> Admin <Icon name="chevron-right" size={16} /> {adminTabLabel(tab)}</div>
+  <div class="crumbs small muted"><Icon name="home" size={16} /> {t('nav.admin')} <Icon name="chevron-right" size={16} /> {adminTabLabel(tab)}</div>
   <PageTitle title={adminTabLabel(tab)} />
 {/if}
 <PublicNetworkNote />
 
 {#if layout === 'page'}
-  {#each allTabs as t (t)}
-    <section class="admin-section" id="admin-{t}" data-tab={t}>
-      <h1 class="section-title">{t === 'home' ? 'Home' : adminTabLabel(t)}</h1>
-      {@render sectionContent(t)}
+  {#each allTabs as id (id)}
+    <section class="admin-section" id="admin-{id}" data-tab={id}>
+      <h1 class="section-title">{adminTabLabel(id)}</h1>
+      {@render sectionContent(id)}
     </section>
   {/each}
 {:else}
