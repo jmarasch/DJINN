@@ -3238,5 +3238,30 @@
   "ip.skipped": {
     "one": "{n} line didn't name a song and was left out.",
     "other": "{n} lines didn't name a song and were left out."
-  }
+  },
+  "np3.and": "{list} & {last}",
+  "np3.tv_title": "Switch to TV display",
+  "np3.tv": "TV display",
+  "np3.viz_title": "A visualizer in step with this room's speakers, with the song and what's coming up",
+  "np3.viz": "Visualizer",
+  "np3.start_over": "Start over",
+  "np3.start_over_title": "Start this song again from the beginning",
+  "np3.skip": "Skip",
+  "np3.skip_less": "Skip and play less like this",
+  "np3.skip_less_title": "Skip it, and the auto mix plays it (and songs like it) less",
+  "np3.volume": "Volume",
+  "np3.output_problem": "Output problem: {error}",
+  "np3.no_output": "No audio output yet",
+  "np3.end_q": "End the party? The music stops in every room, the request queues empty and the auto mix switches off.",
+  "np3.end": "End Party",
+  "np3.end_title": "Stop the music in every room, empty the queues and switch the auto mix off",
+  "tm.open_failed": "Could not open the tags",
+  "tm.put_back_failed": "Could not put it back",
+  "tm.remove_lyrics_q": "Remove the lyrics of {title}?",
+  "tm.radio": "Radio from {title}",
+  "tm.more_for": "More for {title}",
+  "tm.genres": "Genres",
+  "tm.sounds_like": "Sounds like",
+  "tm.took_off": "Took off {genre}.",
+  "tm.edit_tags": "Edit Tags"
 }

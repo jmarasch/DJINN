@@ -1,6 +1,6 @@
 <script lang="ts">
   import MoodDial from '../lib/MoodDial.svelte'
-  import { t } from '../lib/i18n.svelte'
+  import { locale, t } from '../lib/i18n.svelte'
   import { onMount } from 'svelte'
   import { api } from '../lib/api'
   import Art from '../lib/Art.svelte'
@@ -121,7 +121,7 @@
     try {
       await action()
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'That did not work', true)
+      toast(e instanceof Error ? e.message : t('common.failed'), true)
     }
   }
 
@@ -149,7 +149,7 @@
   const requesterText = $derived(
     requesters.length < 2
       ? requesters.join('')
-      : `${requesters.slice(0, -1).join(', ')} & ${requesters[requesters.length - 1]}`,
+      : t('np3.and', { list: requesters.slice(0, -1).join(', '), last: requesters[requesters.length - 1] }),
   )
 
 </script>
@@ -200,11 +200,11 @@
     {#if app.rooms.length > 1}
       <span class="room-pill"><Icon name="home" size={14} /> {app.rooms.find((r) => r.id === app.room)?.name ?? ''}</span>
     {/if}
-    <a class="button" href={app.room > 1 ? `/tv?room=${app.room}` : '/tv'} title="Switch to TV display">TV display</a>
+    <a class="button" href={app.room > 1 ? `/tv?room=${app.room}` : '/tv'} title={t('np3.tv_title')}>{t('np3.tv')}</a>
     <a
       class="button"
       href={app.room > 1 ? `/visualizer?room=${app.room}` : '/visualizer'}
-      title="A visualizer in step with this room's speakers, with the song and what's coming up">Visualizer</a
+      title={t('np3.viz_title')}>{t('np3.viz')}</a
     >
   </div>
 </div>
@@ -287,7 +287,7 @@
       <p class="muted">
         {app.output.error ? t('playing.output_problem', { error: app.output.error }) : t('playing.nothing_hint')}
       </p>
-      <a class="button primary" href="#/search">Find a song</a>
+      <a class="button primary" href="#/search">{t('common.find_a_song')}</a>
     </div>
   {/if}
 
@@ -326,30 +326,30 @@
     <div class="admin-controls">
     <div class="controls">
       {#if app.player.state !== 'playing'}
-        <button class="round big" aria-label="Play" onclick={() => control(api.play)}>
+        <button class="round big" aria-label={t('player.play')} onclick={() => control(api.play)}>
           <Icon name="play" size={32} />
         </button>
       {:else}
-        <button class="round big" aria-label="Pause" onclick={() => control(api.pause)}>
+        <button class="round big" aria-label={t('player.pause')} onclick={() => control(api.pause)}>
           <Icon name="pause" size={32} />
         </button>
       {/if}
       <button
         class="round"
-        aria-label="Start over"
-        title="Start this song again from the beginning"
+        aria-label={t('np3.start_over')}
+        title={t('np3.start_over_title')}
         disabled={!current}
         onclick={() => control(api.startOver)}
       >
         <Icon name="previous" size={26} />
       </button>
-      <button class="round" aria-label="Skip" title="Skip" disabled={!current} onclick={() => control(api.skip)}>
+      <button class="round" aria-label={t('np3.skip')} title={t('np3.skip')} disabled={!current} onclick={() => control(api.skip)}>
         <Icon name="skip" size={26} />
       </button>
       <button
         class="round dislike"
-        aria-label="Skip and play less like this"
-        title="Skip it, and the auto mix plays it (and songs like it) less"
+        aria-label={t('np3.skip_less')}
+        title={t('np3.skip_less_title')}
         disabled={!current}
         onclick={() => control(api.skipLess)}
       >
@@ -358,33 +358,32 @@
     </div>
     <div class="audio">
       <label class="volume">
-        <span class="row-label">Volume <span class="muted">{volume}</span></span>
+        <span class="row-label">{t('np3.volume')} <span class="muted">{volume}</span></span>
         <input type="range" min="0" max="100" bind:value={volume} oninput={onVolume} />
       </label>
       <p class="small muted">
         {#if app.output.error}
-          <span class="error">Output problem: {app.output.error}</span>
+          <span class="error">{t('np3.output_problem', { error: app.output.error })}</span>
         {:else if app.output.device}
-          {app.output.device} · {(app.output.sample_rate ?? 0) / 1000} kHz
+          {app.output.device} · {((app.output.sample_rate ?? 0) / 1000).toLocaleString(locale.code)} kHz
         {:else}
-          No audio output yet
+          {t('np3.no_output')}
         {/if}
       </p>
     </div>
     <div class="end-party">
       {#if confirmEnd}
         <span class="small">
-          End the party? The music stops in every room, the request queues empty and the auto mix
-          switches off.
+          {t('np3.end_q')}
         </span>
-        <button class="danger" onclick={endParty}>End party</button>
-        <button onclick={() => (confirmEnd = false)}>Cancel</button>
+        <button class="danger" onclick={endParty}>{t('np3.end')}</button>
+        <button onclick={() => (confirmEnd = false)}>{t('common.cancel')}</button>
       {:else}
         <button
-          title="Stop the music in every room, empty the queues and switch the auto mix off"
+          title={t('np3.end_title')}
           onclick={() => (confirmEnd = true)}
         >
-          End party
+          {t('np3.end')}
         </button>
       {/if}
     </div>

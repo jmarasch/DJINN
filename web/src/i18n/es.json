@@ -3238,5 +3238,30 @@
   "ip.skipped": {
     "one": "{n} línea no nombraba una canción y se omitió.",
     "other": "{n} líneas no nombraban una canción y se omitieron."
-  }
+  },
+  "np3.and": "{list} y {last}",
+  "np3.tv_title": "Cambiar a la pantalla de TV",
+  "np3.tv": "Pantalla de TV",
+  "np3.viz_title": "Un visualizador sincronizado con los altavoces de esta sala, con la canción y lo que viene",
+  "np3.viz": "Visualizador",
+  "np3.start_over": "Empezar de nuevo",
+  "np3.start_over_title": "Empezar esta canción desde el principio",
+  "np3.skip": "Saltar",
+  "np3.skip_less": "Saltar y poner menos como esta",
+  "np3.skip_less_title": "Sáltala, y la mezcla automática la pondrá menos (y las parecidas)",
+  "np3.volume": "Volumen",
+  "np3.output_problem": "Problema de salida: {error}",
+  "np3.no_output": "Aún no hay salida de audio",
+  "np3.end_q": "¿Terminar la fiesta? La música se detiene en todas las salas, las colas de peticiones se vacían y la mezcla automática se desactiva.",
+  "np3.end": "Terminar la fiesta",
+  "np3.end_title": "Detener la música en todas las salas, vaciar las colas y desactivar la mezcla automática",
+  "tm.open_failed": "No se pudieron abrir las etiquetas",
+  "tm.put_back_failed": "No se pudo restaurar",
+  "tm.remove_lyrics_q": "¿Quitar la letra de {title}?",
+  "tm.radio": "Radio a partir de {title}",
+  "tm.more_for": "Más de {title}",
+  "tm.genres": "Géneros",
+  "tm.sounds_like": "Suena a",
+  "tm.took_off": "Se quitó {genre}.",
+  "tm.edit_tags": "Editar etiquetas"
 }

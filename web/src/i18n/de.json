@@ -3238,5 +3238,30 @@
   "ip.skipped": {
     "one": "{n} Zeile nannte keinen Song und wurde ausgelassen.",
     "other": "{n} Zeilen nannten keinen Song und wurden ausgelassen."
-  }
+  },
+  "np3.and": "{list} und {last}",
+  "np3.tv_title": "Zur TV-Anzeige wechseln",
+  "np3.tv": "TV-Anzeige",
+  "np3.viz_title": "Eine Visualisierung im Takt mit den Lautsprechern dieses Raums, mit dem Song und dem, was kommt",
+  "np3.viz": "Visualisierung",
+  "np3.start_over": "Von vorn",
+  "np3.start_over_title": "Diesen Song von vorn beginnen",
+  "np3.skip": "Überspringen",
+  "np3.skip_less": "Überspringen und weniger davon spielen",
+  "np3.skip_less_title": "Überspringen, und der Auto-Mix spielt ihn (und ähnliche Songs) seltener",
+  "np3.volume": "Lautstärke",
+  "np3.output_problem": "Ausgabeproblem: {error}",
+  "np3.no_output": "Noch kein Audioausgang",
+  "np3.end_q": "Party beenden? Die Musik stoppt in jedem Raum, die Wunschlisten werden geleert und der Auto-Mix schaltet sich aus.",
+  "np3.end": "Party beenden",
+  "np3.end_title": "Musik in jedem Raum stoppen, Warteschlangen leeren und Auto-Mix ausschalten",
+  "tm.open_failed": "Tags konnten nicht geöffnet werden",
+  "tm.put_back_failed": "Konnte nicht zurückgesetzt werden",
+  "tm.remove_lyrics_q": "Den Liedtext von {title} entfernen?",
+  "tm.radio": "Radio ab {title}",
+  "tm.more_for": "Mehr zu {title}",
+  "tm.genres": "Genres",
+  "tm.sounds_like": "Klingt nach",
+  "tm.took_off": "{genre} entfernt.",
+  "tm.edit_tags": "Tags bearbeiten"
 }
