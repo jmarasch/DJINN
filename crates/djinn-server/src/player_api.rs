@@ -28,6 +28,7 @@ pub fn router() -> Router<AppState> {
         .route("/player/pause", post(pause))
         .route("/player/skip", post(skip))
         .route("/player/restart", post(restart))
+        .route("/party/end", post(end_party))
         .route("/player/skip-vote", post(skip_vote))
         .route("/player/volume", put(set_volume))
         .route("/player/crossfade", put(set_crossfade))
@@ -211,6 +212,21 @@ async fn play(AdminUser(admin): AdminUser, State(state): State<AppState>) -> Sta
 async fn pause(AdminUser(admin): AdminUser, State(state): State<AppState>) -> StatusCode {
     state.jukebox_of(admin.id).await.lock().await.pause();
     StatusCode::NO_CONTENT
+}
+
+/// Ends the party in every room: the request queues empty, the auto mix
+/// switches off and the music stops, leaving the house idle (not paused) so
+/// background work and the nodes' AI help can run.
+async fn end_party(
+    AdminUser(admin): AdminUser,
+    State(state): State<AppState>,
+) -> ApiResult<StatusCode> {
+    tracing::info!(by = %admin.username, "party ended");
+    state.store.clear_queue().await?;
+    for jukebox in state.all_jukeboxes() {
+        jukebox.lock().await.end_party().await?;
+    }
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// Plays the song again from its start.

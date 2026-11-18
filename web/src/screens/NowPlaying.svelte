@@ -36,6 +36,12 @@
   const total = $derived(current?.track.duration_ms ?? 0)
   let position = $state(0)
   let volume = $state(app.player.volume)
+  let confirmEnd = $state(false)
+
+  async function endParty() {
+    confirmEnd = false
+    await control(api.endParty)
+  }
 
   // Lyrics under the cover whenever the song has some.
   let lyrics = $state<Lyrics | null | undefined>(undefined)
@@ -365,6 +371,23 @@
         {/if}
       </p>
     </div>
+    <div class="end-party">
+      {#if confirmEnd}
+        <span class="small">
+          End the party? The music stops in every room, the request queues empty and the auto mix
+          switches off.
+        </span>
+        <button class="danger" onclick={endParty}>End party</button>
+        <button onclick={() => (confirmEnd = false)}>Cancel</button>
+      {:else}
+        <button
+          title="Stop the music in every room, empty the queues and switch the auto mix off"
+          onclick={() => (confirmEnd = true)}
+        >
+          End party
+        </button>
+      {/if}
+    </div>
     </div>
   {/if}
   </div>
@@ -680,6 +703,14 @@
 
   .dislike {
     color: var(--muted);
+  }
+
+  .end-party {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
   }
 
   .dislike:hover:not(:disabled) {

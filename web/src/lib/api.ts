@@ -605,6 +605,8 @@ export const api = {
   startOver: () => post<void>('/player/restart'),
   /** Skips and counts it against the song, so the mix plays it less. */
   skipLess: () => post<void>('/player/skip?less=1'),
+  /** Every room: the music stops, request queues empty, the auto mix goes off. */
+  endParty: () => post<void>('/party/end'),
   setVolume: (volume: number) => put<void>('/player/volume', { volume }),
   setCrossfade: (secs: number) => put<void>('/player/crossfade', { secs }),
 
