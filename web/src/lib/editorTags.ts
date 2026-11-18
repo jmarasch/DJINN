@@ -1,7 +1,9 @@
 // The other tags a music file can carry, as the library editor offers them
 // for columns of their own. The names are the server's (lofty's tag names,
 // `write::other_tag_key`); the labels are what the editor shows. The common
-// ones come first in the menu; the rest follow under "More tags".
+// ones come first in the menu; the rest follow under "More tags". The
+// labels are English; translations are `tag.<name>` in the language files.
+import { t } from './i18n.svelte'
 
 export const COMMON_TAGS: [string, string][] = [
   ['Composer', 'Composer'],
@@ -101,8 +103,12 @@ export const MORE_TAGS: [string, string][] = [
 
 const LABELS = new Map([...COMMON_TAGS, ...MORE_TAGS])
 
-/** A tag's label: its own, else its name with spaces between the words. */
+/** A tag's label in the chosen language (`tag.<name>`), else its English
+ * one, else its name with spaces between the words. */
 export function tagLabel(name: string): string {
+  const key = `tag.${name.toLowerCase()}`
+  const translated = t(key)
+  if (translated !== key) return translated
   return LABELS.get(name) ?? name.replace(/([a-z])([A-Z])/g, '$1 $2')
 }
 

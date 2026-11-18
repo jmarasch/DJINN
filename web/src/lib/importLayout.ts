@@ -1,3 +1,4 @@
+import { t } from './i18n.svelte'
 // How a folder brought into the library editor is laid out, so it can be
 // split into one import per album and the folder names can fill tags the
 // files are missing (album, artist, disc, year).
@@ -5,11 +6,11 @@
 export type FolderLayout = 'album' | 'artist' | 'artists' | 'albums' | 'together'
 
 export const FOLDER_LAYOUTS: { key: FolderLayout; label: string; example: string }[] = [
-  { key: 'album', label: 'One album', example: 'Album / songs (disc folders like CD1 are fine)' },
-  { key: 'artist', label: "One artist's albums", example: 'Artist / Album / songs' },
-  { key: 'artists', label: 'Artist and album folders', example: 'Music / Artist / Album / songs' },
-  { key: 'albums', label: 'A folder of albums', example: 'Albums / Album / songs' },
-  { key: 'together', label: 'Something else', example: "one import, folder names aren't used" },
+  { key: 'album', get label() { return t('imp.album') }, get example() { return t('imp.album_ex') } },
+  { key: 'artist', get label() { return t('imp.artist') }, get example() { return t('imp.artist_ex') } },
+  { key: 'artists', get label() { return t('imp.artists') }, get example() { return t('imp.artists_ex') } },
+  { key: 'albums', get label() { return t('imp.albums') }, get example() { return t('imp.albums_ex') } },
+  { key: 'together', get label() { return t('imp.together') }, get example() { return t('imp.together_ex') } },
 ]
 
 /** What a song's folders say about it. */
