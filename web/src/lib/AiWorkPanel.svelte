@@ -6,6 +6,7 @@
   import { onMount } from 'svelte'
   import { api } from './api'
   import { toast } from './state.svelte'
+  import { locale, t } from './i18n.svelte'
   import type { AiListenerStatus, AiWorkStatus } from './types'
 
   let work = $state<AiWorkStatus | null>(null)
@@ -20,7 +21,7 @@
   let known = $state<string[]>([])
   let genreText = $state('')
 
-  const n = (x: number) => x.toLocaleString()
+  const n = (x: number) => x.toLocaleString(locale.code)
   const models = ['tiny', 'base', 'small', 'medium', 'large-v3-turbo']
 
   async function refresh() {
@@ -57,7 +58,7 @@
       })
       if (work.on && listener?.installed && listener.auto_start && !listener.running) await api.startAiListener()
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not save', true)
+      toast(e instanceof Error ? e.message : t('common.save_failed_short'), true)
     }
     void refresh()
   }
@@ -81,7 +82,7 @@
     try {
       await api.setAiListener({ model: listener.model, vocals: listener.vocals, auto_start: listener.auto_start })
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not save', true)
+      toast(e instanceof Error ? e.message : t('common.save_failed_short'), true)
     }
   }
 
@@ -90,7 +91,7 @@
       await run()
       if (done) toast(done)
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'That did not work', true)
+      toast(e instanceof Error ? e.message : t('common.failed'), true)
     }
     void refresh()
   }
@@ -101,7 +102,7 @@
       madeKey = await api.makeAiWorkerKey(newKeyName.trim())
       newKeyName = ''
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not make a key', true)
+      toast(e instanceof Error ? e.message : t('aw.key_failed'), true)
     }
     void refresh()
   }
@@ -109,58 +110,51 @@
   const held = $derived(
     work?.held
       ? work.held.reason === 'music'
-        ? 'music is playing'
-        : `it is outside the hours you set (${work.held.from}:00 to ${work.held.until}:00)`
+        ? t('aw.music')
+        : t('aw.hours', { from: work.held.from, until: work.held.until })
       : '',
   )
 </script>
 
 <section class="card">
-  <h3>Lyrics listening</h3>
+  <h3>{t('aw.title')}</h3>
   <p class="small muted">
-    A local AI listens to songs that have no lyrics and writes them with timing, or times lyrics you already have. It
-    runs on this computer (or others you set up) with models downloaded once; nothing leaves your network. Its lyrics are
-    marked as AI-made, rank below every other source, and show under Library > Problems.
+    {t('aw.intro')}
   </p>
   {#if work}
     <label class="switch">
       <input type="checkbox" bind:checked={work.on} onchange={saveWork} />
-      Let the listener work
+      {t('aw.on')}
     </label>
     <p class="small muted sub">
-      It only works when background work is allowed (the hours or "no music playing" rule under Library) and stops
-      between songs when it isn't.
-      {#if work.on && held}<strong>Paused now: {held}.</strong>{/if}
+      {t('aw.on_note')}
+      {#if work.on && held}<strong>{t('aw.paused', { why: held })}</strong>{/if}
     </p>
     <label class="switch">
       <input type="checkbox" bind:checked={work.new_songs} onchange={saveWork} />
-      Songs with no lyrics (after LRCLIB has been asked)
+      {t('aw.new_songs')}
     </label>
     <label class="switch">
       <input type="checkbox" bind:checked={work.sync_plain} onchange={saveWork} />
-      Time plain lyrics (a person's words, timed by the AI)
+      {t('aw.sync_plain')}
     </label>
     <label class="range">
-      <span>Keep lyrics that score at least <strong>{minMatch ?? work.min_match}%</strong></span>
+      <span>{t('aw.min', { pct: minMatch ?? work.min_match })}</span>
       <input type="range" min="0" max="100" step="1" bind:value={minMatch} onchange={saveWork} />
     </label>
     <p class="small muted sub">
-      For timing, the score is how well the words it heard match the lyrics. For lyrics it writes, it is how sure the
-      model was of the words it heard (half the words at least this sure). Songs that score lower get no AI lyrics and count as failed; lower the minimum,
-      then select Try again, to give them another go.
+      {t('aw.min_note')}
     </p>
-    <h4>Genres to leave out</h4>
+    <h4>{t('aw.skip')}</h4>
     <p class="small muted sub">
-      Songs in these genres get no AI lyrics (a genre takes in its narrower ones, so "metal" covers "black metal"),
-      unless you ask for a song in the library editor. Handy for instrumental or classical music, or vocals the AI
-      can't follow.
+      {t('aw.skip_note')}
     </p>
     {#if skipGenres?.length}
       <div class="chips">
         {#each skipGenres as genre (genre)}
           <span class="chip">
             {genre}
-            <button class="icon-only" aria-label="Stop leaving out {genre}" onclick={() => removeGenre(genre)}>×</button>
+            <button class="icon-only" aria-label={t('aw.unskip', { genre })} onclick={() => removeGenre(genre)}>×</button>
           </span>
         {/each}
       </div>
@@ -172,43 +166,48 @@
         addGenre()
       }}
     >
-      <input list="ai-skip-genres" bind:value={genreText} placeholder="A genre, like classical" aria-label="Genre to leave out" />
+      <input list="ai-skip-genres" bind:value={genreText} placeholder={t('aw.genre_hint')} aria-label={t('aw.genre_label')} />
       <datalist id="ai-skip-genres">
         {#each known as g (g)}<option value={g}></option>{/each}
       </datalist>
-      <button class="small-button" type="submit" disabled={!genreText.trim()}>Leave out</button>
+      <button class="small-button" type="submit" disabled={!genreText.trim()}>{t('aw.leave_out')}</button>
     </form>
     <p class="small">
-      Waiting: {n(work.counts.waiting_listen)} without lyrics, {n(work.counts.waiting_sync)} plain.
-      Working: {n(work.counts.working)}.{#if work.counts.prepared}
-        Vocals ready for nodes: {n(work.counts.prepared)}.{/if} Done: {n(work.counts.done)}. Failed: {n(work.counts.failed)}
-      {#if work.counts.failed}<button class="link" onclick={() => act(api.retryAiWork, 'Will try again')}>Try again</button>{/if}
+      {t('aw.waiting', { listen: n(work.counts.waiting_listen), sync: n(work.counts.waiting_sync) })}
+      {t('aw.working', { n: n(work.counts.working) })}{#if work.counts.prepared}
+        {t('aw.prepared', { n: n(work.counts.prepared) })}{/if}
+      {t('aw.done_failed', { done: n(work.counts.done), failed: n(work.counts.failed) })}
+      {#if work.counts.failed}<button class="link" onclick={() => act(api.retryAiWork, t('aw.retry'))}
+          >{t('common.try_again')}</button
+        >{/if}
     </p>
   {/if}
 
-  <h4>This computer</h4>
+  <h4>{t('aw.computer')}</h4>
   {#if listener}
     <p class="small">
-      Python: {listener.python ?? 'not found'} · ffmpeg: {listener.ffmpeg ? 'found' : 'not found'} · Graphics card:
-      {listener.nvidia ? 'NVIDIA found' : 'none (it will use the processor)'}
+      {t('aw.facts', {
+        python: listener.python ?? t('aw.not_found'),
+        ffmpeg: listener.ffmpeg ? t('aw.found') : t('aw.not_found'),
+        gpu: listener.nvidia ? t('aw.nvidia') : t('aw.no_gpu'),
+      })}
     </p>
     <label>
-      Model
+      {t('aw.model')}
       <select bind:value={listener.model} onchange={saveListener} disabled={listener.installing}>
         {#each models as m (m)}<option value={m}>{m}</option>{/each}
       </select>
     </label>
     <p class="small muted sub">
-      Bigger is more accurate and slower: tiny and base suit a small processor, small a decent one, medium or
-      large-v3-turbo a graphics card.
+      {t('aw.model_note')}
     </p>
     <label class="switch">
       <input type="checkbox" bind:checked={listener.vocals} onchange={saveListener} disabled={listener.installing} />
-      Isolate the vocals first (much bigger download, slower, helps on loud mixes)
+      {t('aw.vocals')}
     </label>
     <label class="switch">
       <input type="checkbox" bind:checked={listener.auto_start} onchange={saveListener} />
-      Start it with DJINN
+      {t('aw.auto_start')}
     </label>
     {#if work}
       <label class="switch">
@@ -218,55 +217,66 @@
           onchange={saveWork}
           disabled={!listener.can_isolate}
         />
-        Isolate the vocals here for nodes that help
+        {t('aw.vocals_nodes')}
       </label>
       <p class="small muted sub">
         {#if listener.can_isolate}
-          This computer does the heavy part (separating the voice from the music) and sends a node only the voice, a
-          few megabytes, to listen to. The node deletes it when done.
+          {t('aw.vocals_nodes_note')}
         {:else}
-          Needs the listener installed here with "Isolate the vocals first". Without it, nodes listen to whole songs.
+          {t('aw.vocals_needs')}
         {/if}
       </p>
     {/if}
     <div class="actions">
       <button onclick={() => act(api.installAiListener)} disabled={listener.installing}>
-        {listener.installed ? 'Install again (after changing the model)' : 'Install the listener'}
+        {listener.installed ? t('aw.reinstall') : t('aw.install')}
       </button>
       {#if listener.installed}
         {#if listener.running}
-          <button onclick={() => act(api.stopAiListener, 'Stopped')}>Stop</button>
+          <button onclick={() => act(api.stopAiListener, t('aw.stopped'))}>{t('common.stop')}</button>
         {:else}
-          <button class="primary" onclick={() => act(api.startAiListener, 'Started')}>Start</button>
+          <button class="primary" onclick={() => act(api.startAiListener, t('aw.started'))}>{t('aw.start')}</button>
         {/if}
       {/if}
-      <span class="small">{listener.installing ? 'Installing...' : listener.running ? 'Running' : listener.installed ? 'Installed, not running' : 'Not installed'}</span>
+      <span class="small"
+        >{listener.installing
+          ? t('aw.installing')
+          : listener.running
+            ? t('aw.running')
+            : listener.installed
+              ? t('aw.idle')
+              : t('aw.not_installed')}</span
+      >
     </div>
     {#if listener.error}<p class="small bad">{listener.error}</p>{/if}
     {#if listener.log.length}<pre class="log small">{listener.log.join('\n')}</pre>{/if}
   {/if}
 
   {#if work?.workers.some((w) => w.node)}
-    <h4>Nodes helping</h4>
+    <h4>{t('aw.nodes_helping')}</h4>
     <ul class="keys">
       {#each work.workers.filter((w) => w.node) as w (w.name)}
         <li>
           <strong>{w.label}</strong>
           <span class="small muted">
-            asked {new Date(w.last_seen).toLocaleTimeString()} · {n(w.done)} done · {n(w.failed)} failed{w.secs_per_minute
-              ? ` · ${Math.round(w.secs_per_minute)} s per minute of song`
-              : ''}
+            {t('aw.node_line', {
+              when: new Date(w.last_seen).toLocaleTimeString(locale.code),
+              done: n(w.done),
+              failed: n(w.failed),
+            })}{w.secs_per_minute ? t('aw.per_minute', { n: Math.round(w.secs_per_minute) }) : ''}
           </span>
         </li>
       {/each}
     </ul>
   {/if}
-  <p class="small muted">Nodes are switched on to help, and given their model, in <a href="#/admin/nodes">Nodes</a>.</p>
-
-  <h4>Other computers</h4>
   <p class="small muted">
-    A computer with a decent processor or graphics card can listen too. Make a key for it, copy the folder
-    <code>ai-listener</code> from DJINN's data folder to it, and run
+    {t('aw.nodes_note')} <a href="#/admin/nodes">{t('admin.menu.nodes')}</a>.
+  </p>
+
+  <h4>{t('aw.others')}</h4>
+  <p class="small muted">
+    {t('aw.others_1')}
+    <code>ai-listener</code> {t('aw.others_2')}
     <code>python worker.py --server http://this-computer:8066 --key KEY</code>.
   </p>
   {#if work}
@@ -275,19 +285,25 @@
         <li>
           <strong>{name}</strong>
           {#each work.workers.filter((w) => w.name === name) as w (w.name)}
-            <span class="small muted">seen {new Date(w.last_seen).toLocaleTimeString()} · {n(w.done)} done · {n(w.failed)} failed</span>
+            <span class="small muted"
+              >{t('aw.seen', {
+                when: new Date(w.last_seen).toLocaleTimeString(locale.code),
+                done: n(w.done),
+                failed: n(w.failed),
+              })}</span
+            >
           {/each}
-          <button class="small-button" onclick={() => act(() => api.removeAiWorkerKey(name))}>Remove</button>
+          <button class="small-button" onclick={() => act(() => api.removeAiWorkerKey(name))}>{t('common.remove')}</button>
         </li>
       {/each}
     </ul>
     <div class="actions">
-      <input placeholder="Name of the computer" bind:value={newKeyName} />
-      <button onclick={makeKey} disabled={!newKeyName.trim()}>Make a key</button>
+      <input placeholder={t('aw.computer_name')} bind:value={newKeyName} />
+      <button onclick={makeKey} disabled={!newKeyName.trim()}>{t('aw.make_key')}</button>
     </div>
     {#if madeKey}
       <p class="small">
-        Key for {madeKey.name} (shown once): <code>{madeKey.key}</code>
+        {t('aw.key_once', { name: madeKey.name })} <code>{madeKey.key}</code>
       </p>
     {/if}
   {/if}
