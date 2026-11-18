@@ -3,6 +3,7 @@
   // speaker and screen, AI lyrics help, its own page and kicking it out. The
   // Rooms page shows this in a window; the node's own page (its address)
   // stays as it is.
+  import { t } from './i18n.svelte'
   import { api } from './api'
   import NodeAiSettings from './NodeAiSettings.svelte'
   import NodeSpeakerSettings from './NodeSpeakerSettings.svelte'
@@ -27,9 +28,9 @@
   async function moveTo(room: number) {
     try {
       await api.setNodeRoom(node.id, room)
-      toast(`${node.name} moved`)
+      toast(t('ns.moved', { name: node.name }))
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not move it', true)
+      toast(e instanceof Error ? e.message : t('rm.move_failed'), true)
     }
     await onchange()
   }
@@ -42,17 +43,17 @@
       const back = `${location.origin}${location.pathname}#/admin/rooms`
       location.href = `${url}&back=${encodeURIComponent(back)}`
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not open it', true)
+      toast(e instanceof Error ? e.message : t('ed.open_failed'), true)
     }
   }
 
   async function kick() {
     try {
       await api.removeNode(node.id)
-      toast(`Kicked ${node.name}; it will wipe its cache`)
+      toast(t('ns.kicked', { name: node.name }))
       onclose()
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not remove', true)
+      toast(e instanceof Error ? e.message : t('common.remove_failed_short'), true)
     }
     await onchange()
   }
@@ -61,12 +62,12 @@
 <section>
   <p class="state">
     <span class="dot" class:on={online(node)}></span>
-    <b>{online(node) ? 'Connected' : `Last seen ${seen(node.last_seen)}`}</b>
+    <b>{online(node) ? t('ns.connected') : t('ns.last_seen', { when: seen(node.last_seen) })}</b>
     {#if online(node)}
       {#if node.same_build}
-        <span class="badge same">Same build as Main</span>
+        <span class="badge same">{t('ns.same_build')}</span>
       {:else}
-        <span class="badge behind">Not Main's build yet</span>
+        <span class="badge behind">{t('ns.behind')}</span>
       {/if}
     {/if}
   </p>
@@ -77,7 +78,7 @@
     {#if node.build_label}<span class="label">{node.build_label}</span>{/if}
   </p>
   <label class="field">
-    Room
+    {t('rm.room')}
     <select value={node.room_id} onchange={(e) => moveTo(Number(e.currentTarget.value))}>
       {#each rooms as room (room.id)}<option value={room.id}>{room.name}</option>{/each}
     </select>
@@ -85,7 +86,7 @@
 </section>
 
 <section>
-  <h3>Speaker and screen</h3>
+  <h3>{t('ns.speaker_screen')}</h3>
   {#key node.id}
     <NodeSpeakerSettings
       audio={node.audio}
@@ -99,35 +100,35 @@
 </section>
 
 <section>
-  <h3>AI lyrics</h3>
+  <h3>{t('ns.ai')}</h3>
   <NodeAiSettings {node} {onchange} />
 </section>
 
 <section>
-  <h3>This node</h3>
+  <h3>{t('ns.this_node')}</h3>
   <div class="actions">
     <button
       title={online(node)
-        ? "Opens the node's own page: diagnostics, its log and a restart"
-        : "The node isn't connected; it can be managed once it is"}
+        ? t('ns.own_page_title')
+        : t('ns.offline_title')}
       disabled={!online(node)}
       onclick={manage}
     >
-      Open the node's own page
+      {t('ns.own_page')}
     </button>
     {#if kicking}
-      <button class="danger" onclick={kick}>Kick and wipe</button>
-      <button onclick={() => (kicking = false)}>Cancel</button>
+      <button class="danger" onclick={kick}>{t('ns.kick_wipe')}</button>
+      <button onclick={() => (kicking = false)}>{t('common.cancel')}</button>
     {:else}
-      <button class="danger" onclick={() => (kicking = true)}>Kick</button>
+      <button class="danger" onclick={() => (kicking = true)}>{t('ns.kick')}</button>
     {/if}
   </div>
   {#if kicking}
     <p class="small muted">
-      {node.name} is shut out at once and wipes every cached song, now if it's connected or when it next starts.
+      {t('ns.kick_note', { name: node.name })}
     </p>
   {/if}
-  <p class="small muted">The node's own page is also at its address, port 8066, any time.</p>
+  <p class="small muted">{t('ns.port_note')}</p>
 </section>
 
 <style>

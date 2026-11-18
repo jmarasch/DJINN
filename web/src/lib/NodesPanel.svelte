@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from './i18n.svelte'
   import { onMount } from 'svelte'
   import { api } from './api'
   import { online, seen, systemName } from './nodeInfo'
@@ -38,10 +39,10 @@
   async function setJoining(open: boolean) {
     try {
       await api.setNodeJoining(open)
-      toast(open ? 'Nodes can ask to join' : 'Joining is off')
+      toast(open ? t('np.can_join') : t('np.join_off'))
       await load()
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not save', true)
+      toast(e instanceof Error ? e.message : t('common.save_failed_short'), true)
     }
   }
 
@@ -50,12 +51,12 @@
     if (!accepting) return
     try {
       await api.acceptNode(accepting.id, password)
-      toast(`${accepting.name} joined`)
+      toast(t('np.joined', { name: accepting.name }))
       accepting = null
       password = ''
       await load()
     } catch (err) {
-      toast(err instanceof Error ? err.message : 'Could not accept', true)
+      toast(err instanceof Error ? err.message : t('np.accept_failed'), true)
     }
   }
 
@@ -67,18 +68,18 @@
       const back = `${location.origin}${location.pathname}#/admin/nodes`
       location.href = `${url}&back=${encodeURIComponent(back)}`
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not open it', true)
+      toast(e instanceof Error ? e.message : t('ed.open_failed'), true)
     }
   }
 
   async function remove(node: HouseNode) {
     try {
       await api.removeNode(node.id)
-      toast(node.status === 'pending' ? `Declined ${node.name}` : `Kicked ${node.name}; it will wipe its cache`)
+      toast(node.status === 'pending' ? t('np.declined', { name: node.name }) : t('ns.kicked', { name: node.name }))
       kicking = null
       await load()
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not remove', true)
+      toast(e instanceof Error ? e.message : t('common.remove_failed_short'), true)
     }
   }
 
@@ -87,8 +88,8 @@
 <Tabs
   wide
   items={[
-    ['options', 'Options'],
-    ['nodes', 'Nodes'],
+    ['options', t('np.options')],
+    ['nodes', t('np.nodes')],
   ]}
   active={shown}
   onselect={(id) => (tab = id as 'options' | 'nodes')}
@@ -96,23 +97,21 @@
 
 {#if shown === 'options'}
 <section class="card wide">
-  <h2>Joining</h2>
+  <h2>{t('np.joining')}</h2>
   <p class="small muted">
-    A node is another DJINN box, like a Raspberry Pi by a room's speakers. It plays that room's music in step with this
-    server and takes everything from here: songs are only cached on it, never kept. Phones always connect to this server.
+    {t('np.intro')}
   </p>
   {#if failed}
-    <p class="error">Could not load the nodes.</p>
+    <p class="error">{t('np.load_failed')}</p>
   {:else if list}
     <label class="switch big">
       <input type="checkbox" checked={list.join_open} onchange={(e) => setJoining(e.currentTarget.checked)} />
-      <b>Allow nodes to ask to join</b>
+      <b>{t('np.allow')}</b>
     </label>
     <p class="small muted">
-      Turn this on while setting up a node, and off again after. Requests still need your password to accept.
+      {t('np.allow_note')}
       {#if list.security_code}
-        A node shows this server's code when it first connects: <b class="code">{list.security_code}</b>. If it shows a
-        different code, it reached something else; don't go on.
+        {t('np.code_1')} <b class="code">{list.security_code}</b>{t('np.code_2')}
       {/if}
     </p>
   {/if}
@@ -120,31 +119,31 @@
 {:else}
 {#if waiting.length}
   <section class="card wide">
-    <h3>Asking to join</h3>
-    <p class="small muted">Check that the code matches the one on the node's screen before accepting.</p>
+    <h3>{t('np.asking')}</h3>
+    <p class="small muted">{t('np.check_code')}</p>
     {#each waiting as node (node.id)}
       <div class="node">
         <div class="grow">
           <b>{node.name}</b>
           <span class="small muted">
-            Code <b class="code">{node.code}</b> · {node.address ?? 'unknown address'}{node.platform
+            {t('np.code')} <b class="code">{node.code}</b> · {node.address ?? t('np.unknown_address')}{node.platform
               ? ` · ${systemName(node.platform)}`
-              : ''} · asked {seen(node.requested_at)}
+              : ''}{t('np.asked', { when: seen(node.requested_at) })}
           </span>
         </div>
-        <button class="primary" onclick={() => ((accepting = node), (password = ''))}>Accept</button>
-        <button onclick={() => remove(node)}>Decline</button>
+        <button class="primary" onclick={() => ((accepting = node), (password = ''))}>{t('np.accept')}</button>
+        <button onclick={() => remove(node)}>{t('np.decline')}</button>
       </div>
       {#if accepting?.id === node.id}
         <form class="accept" onsubmit={accept}>
           <label>
-            Your password, to let {node.name} join
+            {t('np.password', { name: node.name })}
             <!-- svelte-ignore a11y_autofocus -->
             <input type="password" bind:value={password} autocomplete="current-password" autofocus required />
           </label>
           <div class="buttons">
-            <button class="primary" type="submit">Accept {node.name}</button>
-            <button type="button" onclick={() => (accepting = null)}>Cancel</button>
+            <button class="primary" type="submit">{t('np.accept_named', { name: node.name })}</button>
+            <button type="button" onclick={() => (accepting = null)}>{t('common.cancel')}</button>
           </div>
         </form>
       {/if}
@@ -154,26 +153,25 @@
 
 {#if list}
   <section class="card wide">
-    <h3>Joined</h3>
+    <h3>{t('np.joined_title')}</h3>
     {#if joined.length === 0}
-      <p class="small muted">No nodes yet.</p>
+      <p class="small muted">{t('np.none')}</p>
     {:else}
       <p class="small muted">
-        To line a node's speaker up with the others, use <a href="#/admin/rooms">Rooms</a> &gt; Timing on its room: play
-        the timing sound, then move each speaker earlier or later until the tocks land together.
+        {t('np.timing_1')} <a href="#/admin/rooms">{t('admin.menu.rooms')}</a> {t('np.timing_2')}
       </p>
     {/if}
     {#each joined as node (node.id)}
       <div class="joined-node">
         <div class="head">
-          <span class="dot" class:on={online(node)} title={online(node) ? 'Connected' : 'Not connected'}></span>
+          <span class="dot" class:on={online(node)} title={online(node) ? t('ns.connected') : t('np.not_connected')}></span>
           <b class="name">{node.name}</b>
-          <span class="small muted">{online(node) ? 'Connected' : `Last seen ${seen(node.last_seen)}`}</span>
+          <span class="small muted">{online(node) ? t('ns.connected') : t('ns.last_seen', { when: seen(node.last_seen) })}</span>
           {#if online(node)}
             {#if node.same_build}
-              <span class="badge same">Same build as Main</span>
+              <span class="badge same">{t('ns.same_build')}</span>
             {:else}
-              <span class="badge behind">Not Main's build yet</span>
+              <span class="badge behind">{t('ns.behind')}</span>
             {/if}
           {/if}
         </div>
@@ -186,24 +184,24 @@
         <div class="actions">
           <button
             title={online(node)
-              ? "Opens the node's own page, where its speaker, timing and other settings are"
-              : "The node isn't connected; it can be managed once it is"}
+              ? t('np.manage_title')
+              : t('ns.offline_title')}
             disabled={!online(node)}
             onclick={() => manage(node)}
           >
-            Manage
+            {t('np.manage')}
           </button>
           {#if kicking?.id === node.id}
-            <button class="danger" onclick={() => remove(node)}>Kick and wipe</button>
-            <button onclick={() => (kicking = null)}>Cancel</button>
+            <button class="danger" onclick={() => remove(node)}>{t('ns.kick_wipe')}</button>
+            <button onclick={() => (kicking = null)}>{t('common.cancel')}</button>
           {:else}
-            <button class="danger" onclick={() => (kicking = node)}>Kick</button>
+            <button class="danger" onclick={() => (kicking = node)}>{t('ns.kick')}</button>
           {/if}
         </div>
       </div>
       {#if kicking?.id === node.id}
         <p class="small muted">
-          {node.name} is shut out at once and wipes every cached song, now if it's connected or when it next starts.
+          {t('ns.kick_note', { name: node.name })}
         </p>
       {/if}
     {/each}
