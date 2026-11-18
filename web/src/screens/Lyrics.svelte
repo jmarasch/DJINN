@@ -7,7 +7,7 @@
   // here fades back so the visual stands out. The admin can turn it off.
   import ScaleWarning from '../lib/ScaleWarning.svelte'
   import { onMount } from 'svelte'
-  import { houseLanguageIs } from '../lib/i18n.svelte'
+  import { houseLanguageIs, locale, t } from '../lib/i18n.svelte'
   import { followNodeScreen } from '../lib/screenFollow'
   import {
     announce,
@@ -73,7 +73,7 @@
 
   const current = $derived(nowPlaying.current?.track ?? null)
   const art = (hash: string | null, size: number) => (hash ? `/api/lyrics-page/art/${hash}?size=${size}` : null)
-  const artist = (t: Track) => t.credits.map((c) => c.name).join(', ') || t.artist || ''
+  const artist = (track: Track) => track.credits.map((c) => c.name).join(', ') || track.artist || ''
 
   /** Only timed words: plain ones can't follow the song. */
   const timed = $derived(lyrics === undefined ? undefined : lyrics?.lines?.length ? lyrics : null)
@@ -122,7 +122,7 @@
     try {
       const res = await fetch(roomPart ? `/api/lyrics-page?${roomPart}` : '/api/lyrics-page')
       if (!res.ok) {
-        error = (await res.json().catch(() => null))?.error ?? 'The lyrics page is not available.'
+        error = (await res.json().catch(() => null))?.error ?? t('lp.unavailable')
         setTimeout(load, 10_000)
         return
       }
@@ -138,7 +138,7 @@
       listen()
       setTimeout(() => (settled = true), 2500)
     } catch {
-      error = 'Cannot reach the jukebox. Retrying...'
+      error = t('viz.unreachable')
       setTimeout(load, 5_000)
     }
   }
@@ -209,7 +209,7 @@
   }
 
   onMount(() => {
-    document.title = 'Lyrics · DJINN'
+    document.title = t('lp.title')
     load()
     keepAwake()
     wake()
@@ -246,14 +246,14 @@
     </header>
     <main>
       {#if !current}
-        <p class="message">Nothing playing right now.</p>
+        <p class="message">{t('lp.nothing')}</p>
       {:else if !visual}
-        <LyricsView lyrics={timed} {position} big empty="No timed lyrics for this song." />
+        <LyricsView lyrics={timed} {position} big empty={t('lp.no_timed')} />
       {/if}
     </main>
     {#if comingUp.length}
       <aside class="faded">
-        <h2>Coming up</h2>
+        <h2>{t('playing.coming_up')}</h2>
         <ol>
           {#each comingUp as song (song.key)}
             <li>
@@ -273,20 +273,24 @@
       </aside>
     {/if}
     {#if joinUrl}
-      <img class="qr" src="/api/join/qr.svg?v={encodeURIComponent(joinUrl)}{qrQuery}" alt="QR code to join" />
+      <img class="qr" src="/api/join/qr.svg?v={encodeURIComponent(joinUrl)}{qrQuery}" alt={t('tv.qr')} />
     {/if}
   {/if}
   <div class="tools">
     {#if timed?.lines && !visual}
-      <button onclick={() => nudge(-250)} title="Show words earlier">Earlier</button>
-      <span>{shift === 0 ? 'On time' : `${shift > 0 ? '+' : ''}${(shift / 1000).toFixed(2)} s`}</span>
-      <button onclick={() => nudge(250)} title="Show words later">Later</button>
+      <button onclick={() => nudge(-250)} title={t('lp.earlier_title')}>{t('lp.earlier')}</button>
+      <span
+        >{shift === 0
+          ? t('lp.on_time')
+          : `${shift > 0 ? '+' : ''}${(shift / 1000).toLocaleString(locale.code, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} s`}</span
+      >
+      <button onclick={() => nudge(250)} title={t('lp.later_title')}>{t('lp.later')}</button>
     {/if}
     {#if !onNodeScreen}
       <!-- The whole window, not just a visualizer's frame. -->
-      <a class="button" href="/#/" target="_top">Regular display</a>
+      <a class="button" href="/#/" target="_top">{t('tv.regular')}</a>
     {/if}
-    <button onclick={goFullscreen}>Full screen</button>
+    <button onclick={goFullscreen}>{t('tv.full')}</button>
   </div>
 </div>
 

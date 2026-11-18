@@ -7,6 +7,7 @@
   // the same library always looks the same. The top level opens at full size so
   // labels stay readable on a phone; drag to move around, and pinch, scroll or
   // use the buttons to zoom, without zooming the page.
+  import { t } from './i18n.svelte'
   import { untrack } from 'svelte'
   import { api } from './api'
   import Icon from './Icon.svelte'
@@ -14,9 +15,9 @@
 
   const TOP_CHOICES = [50, 100, 200, 300]
   const LINE_CHOICES = [
-    { label: 'Fewer', links: 2 },
-    { label: 'Normal', links: 4 },
-    { label: 'More', links: 8 },
+    { get label() { return t('gcl.fewer') }, links: 2 },
+    { get label() { return t('gcl.normal') }, links: 4 },
+    { get label() { return t('gcl.more') }, links: 8 },
   ]
   /** A zoomed view's genres near the center, and near each of those. */
   const NEAR = 14
@@ -451,11 +452,11 @@
 </script>
 
 {#if failed}
-  <p class="small muted">Could not load the genres.</p>
+  <p class="small muted">{t('gcl.failed')}</p>
 {/if}
-<nav class="trail small" aria-label="Where you are in the cloud">
+<nav class="trail small" aria-label={t('gcl.where')}>
   {#if path.length}
-    <button class="link" onclick={() => go([])}>Top</button>
+    <button class="link" onclick={() => go([])}>{t('gcl.top')}</button>
     {#each path as name, i (name)}
       <span class="muted">/</span>
       {#if i === path.length - 1}
@@ -465,18 +466,18 @@
       {/if}
     {/each}
   {:else if map}
-    <span class="muted">Top {layout.dots.length} of {map.genres.length} genres. Bigger means more songs; lines join related genres.</span>
+    <span class="muted">{t('gcl.top_of', { shown: layout.dots.length, total: map.genres.length })}</span>
   {/if}
 </nav>
 <div class="choices small">
   <label>
-    Genres at the top
+    {t('gcl.at_top')}
     <select bind:value={top}>
       {#each TOP_CHOICES as choice (choice)}<option value={choice}>{choice}</option>{/each}
     </select>
   </label>
   <label>
-    Lines
+    {t('gcl.lines')}
     <select bind:value={links}>
       {#each LINE_CHOICES as choice (choice.links)}<option value={choice.links}>{choice.label}</option>{/each}
     </select>
@@ -489,7 +490,7 @@
     bind:this={svg}
     {viewBox}
     role="img"
-    aria-label="Genres and how they relate"
+    aria-label={t('gcl.svg')}
     onpointerdown={down}
     onpointermove={move}
     onpointerup={up}
@@ -524,24 +525,24 @@
         onfocus={() => (hovered = i)}
         onblur={() => (hovered = null)}
       >
-        <title>{dot.name}: {dot.songs} {dot.songs === 1 ? 'song' : 'songs'}</title>
+        <title>{dot.name}: {t('count.songs', { n: dot.songs })}</title>
         <circle cx={place.x} cy={place.y} r={dot.r} />
         <text x={place.x} y={place.y + dot.r + dot.font} font-size={dot.font}>{dot.name}</text>
       </a>
     {/each}
   </svg>
-  <button class="corner top-left" aria-label="Back to the top" disabled={!path.length} onclick={() => go([])}>
+  <button class="corner top-left" aria-label={t('gcl.back_top')} disabled={!path.length} onclick={() => go([])}>
     <Icon name="home" size={20} />
   </button>
-  <button class="corner top-right" aria-label="Fit this view" onclick={showAll}><Icon name="fit" size={20} /></button>
-  <button class="corner bottom-left" aria-label="Zoom in" onclick={() => zoomBy(1.4)}><Icon name="plus" size={20} /></button>
-  <button class="corner bottom-right" aria-label="Zoom out" onclick={() => zoomBy(1 / 1.4)}><Icon name="minus" size={20} /></button>
+  <button class="corner top-right" aria-label={t('gcl.fit')} onclick={showAll}><Icon name="fit" size={20} /></button>
+  <button class="corner bottom-left" aria-label={t('gcl.zoom_in')} onclick={() => zoomBy(1.4)}><Icon name="plus" size={20} /></button>
+  <button class="corner bottom-right" aria-label={t('gcl.zoom_out')} onclick={() => zoomBy(1 / 1.4)}><Icon name="minus" size={20} /></button>
 </div>
 <p class="hint small muted">
   {center
-    ? `Showing ${center} and what's near it. Tap ${center} to open it, or another genre to move there.`
-    : "Tap a genre to see what's near it."}
-  Drag to move around; pinch, scroll or use + and - to zoom.
+    ? t('gcl.showing', { name: center })
+    : t('gcl.tap')}
+  {t('gcl.drag')}
 </p>
 
 <style>
