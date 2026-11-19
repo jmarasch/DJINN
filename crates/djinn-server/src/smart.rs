@@ -1168,6 +1168,9 @@ fn rank_artists(id: i64, catalog: &Catalog, sound: &SoundIndex) -> Vec<i64> {
 }
 
 #[cfg(test)]
+mod playlist_check;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

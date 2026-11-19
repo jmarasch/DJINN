@@ -108,6 +108,15 @@ impl ReaderState {
         }
     }
 
+    /// Loads the reader on the processor now, whatever the settings say
+    /// (the playlist check).
+    #[cfg(test)]
+    pub(crate) fn load_now(&self) -> Result<(), djinn_ai::AiError> {
+        let reader = Reader::load(&self.dir)?;
+        self.set_model(Some(Backend::Cpu(Box::new(reader))));
+        Ok(())
+    }
+
     /// Loaded and ready to read.
     pub fn ready(&self) -> bool {
         self.model().is_some()

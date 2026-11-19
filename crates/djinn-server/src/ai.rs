@@ -376,19 +376,7 @@ pub fn start(state: &AppState) {
                 return;
             }
             let dir = state.ai.dir.clone();
-            let loaded = tokio::task::spawn_blocking(move || {
-                let clap = Clap::load(&dir)?;
-                let genres: Vec<(String, Vec<f32>)> = GENRES
-                    .iter()
-                    .filter_map(|g| {
-                        clap.embed_text(&format!("This is a {g} song."))
-                            .ok()
-                            .map(|v| ((*g).to_owned(), v))
-                    })
-                    .collect();
-                Ok::<_, djinn_ai::AiError>((clap, genres))
-            })
-            .await;
+            let loaded = tokio::task::spawn_blocking(move || load_model(&dir)).await;
             state.ai.loading.store(false, Ordering::Release);
             match loaded {
                 Ok(Ok((clap, genres))) => {
@@ -413,6 +401,37 @@ pub fn start(state: &AppState) {
         }
         listen(&state).await;
     });
+}
+
+/// The model, and each genre's text embedding for tagging songs.
+type Loaded = (Clap, Vec<(String, Vec<f32>)>);
+
+fn load_model(dir: &Path) -> Result<Loaded, djinn_ai::AiError> {
+    let clap = Clap::load(dir)?;
+    let genres: Vec<(String, Vec<f32>)> = GENRES
+        .iter()
+        .filter_map(|g| {
+            clap.embed_text(&format!("This is a {g} song."))
+                .ok()
+                .map(|v| ((*g).to_owned(), v))
+        })
+        .collect();
+    Ok((clap, genres))
+}
+
+#[cfg(test)]
+impl AiState {
+    /// Loads the model now, whatever the settings say (the playlist check).
+    pub(crate) fn load_now(&self) -> Result<(), djinn_ai::AiError> {
+        let (clap, genres) = load_model(&self.dir)?;
+        if let Ok(mut g) = self.genres.write() {
+            *g = genres;
+        }
+        if let Ok(mut m) = self.model.write() {
+            *m = Some(Arc::new(clap));
+        }
+        Ok(())
+    }
 }
 
 /// Listens to songs not heard yet, a few at a time.
