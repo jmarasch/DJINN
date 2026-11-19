@@ -3515,5 +3515,7 @@
   "guide.not_installed": "La guía de usuario no está instalada con esta copia de DJINN. Viene con los instaladores y con las actualizaciones, en una carpeta guide junto al programa.",
   "guide.online": "Leerla en GitHub",
   "guide.load_failed": "No se pudo cargar esa página de la guía",
-  "guide.english_only": "Por ahora la guía solo está en inglés."
+  "guide.english_only": "Por ahora la guía solo está en inglés.",
+  "guide.search": "Buscar en la guía",
+  "guide.no_results": "Nada en la guía coincide con eso."
 }

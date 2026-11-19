@@ -3515,5 +3515,7 @@
   "guide.not_installed": "Das Benutzerhandbuch ist bei dieser Kopie von DJINN nicht installiert. Es kommt mit den Installationsprogrammen und mit Updates, in einem Ordner guide neben dem Programm.",
   "guide.online": "Auf GitHub lesen",
   "guide.load_failed": "Diese Seite des Handbuchs konnte nicht geladen werden",
-  "guide.english_only": "Das Handbuch gibt es vorerst nur auf Englisch."
+  "guide.english_only": "Das Handbuch gibt es vorerst nur auf Englisch.",
+  "guide.search": "Im Handbuch suchen",
+  "guide.no_results": "Nichts im Handbuch passt dazu."
 }
