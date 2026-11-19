@@ -17,6 +17,12 @@ pub struct Intent {
     /// Each group is one genre asked for, as the genre names that count
     /// for it; a song must fit every group.
     pub genres: Vec<Vec<String>>,
+    /// Neighboring genres ("hard rock" for hair metal): a song with only
+    /// these counts for a little, so it fills in after the real fits.
+    pub near: Vec<String>,
+    /// The years a genre asked for belongs to ("classic rock"), when no
+    /// years were asked for.
+    pub genre_era: Option<(i64, i64)>,
     /// Genres ruled out ("no rap"), grouped the same way; a song fitting
     /// any group is left out.
     pub not_genres: Vec<Vec<String>>,
@@ -95,8 +101,17 @@ impl Vocabulary {
 pub struct SongFacts {
     pub id: i64,
     pub year: Option<i64>,
-    /// Normalized genre names.
+    /// The year it belongs to, when that isn't its own: a greatest hits,
+    /// live album or reissue goes by when its artist made their records.
+    pub era: Option<i64>,
+    /// Normalized genre names: its own, its album's and its artists'.
     pub genres: Vec<String>,
+    /// The song's own and its album's genres, which say the most.
+    pub own_genres: Vec<String>,
+    /// Genres the AI heard in it, which say the least.
+    pub styles: Vec<String>,
+    /// The artist it's by (not a featured one).
+    pub artist: Option<i64>,
     pub popularity: i64,
     pub bpm: Option<f32>,
     /// Onset strength (features[1]).
@@ -118,37 +133,19 @@ pub fn normalize(text: &str) -> String {
 /// Everyday genre names and the tag or MusicBrainz names that count for
 /// them. Names the library itself uses also work as they are.
 const GENRE_WORDS: &[(&str, &[&str])] = &[
-    (
-        "hair metal",
-        &[
-            "glam metal",
-            "hair metal",
-            "glam rock",
-            "heavy metal",
-            "hard rock",
-        ],
-    ),
+    ("hair metal", &["glam metal", "hair metal"]),
     ("glam metal", &["glam metal", "hair metal", "glam rock"]),
     ("glam", &["glam metal", "glam rock", "glam punk"]),
     ("metal", &["metal"]),
     (
         "classic rock",
-        &[
-            "classic rock",
-            "hard rock",
-            "rock",
-            "blues rock",
-            "album rock",
-        ],
+        &["classic rock", "album rock", "blues rock"],
     ),
     ("rock", &["rock"]),
     ("punk", &["punk"]),
     ("emo", &["emo"]),
     ("grunge", &["grunge"]),
-    (
-        "goth",
-        &["gothic rock", "goth", "darkwave", "deathrock", "industrial"],
-    ),
+    ("goth", &["gothic rock", "goth", "darkwave", "deathrock"]),
     ("hip hop", &["hip hop", "rap", "trap"]),
     ("hiphop", &["hip hop", "rap", "trap"]),
     ("rap", &["rap", "hip hop", "trap"]),
@@ -209,21 +206,9 @@ const GENRE_WORDS: &[(&str, &[&str])] = &[
             "liquid funk",
         ],
     ),
-    (
-        "synthwave",
-        &[
-            "synthwave",
-            "synth pop",
-            "new wave",
-            "electropop",
-            "retrowave",
-        ],
-    ),
-    (
-        "synth",
-        &["synth pop", "synthwave", "electropop", "new wave"],
-    ),
-    ("new wave", &["new wave", "synth pop", "post punk"]),
+    ("synthwave", &["synthwave", "retrowave"]),
+    ("synth", &["synth pop", "synthwave", "electropop"]),
+    ("new wave", &["new wave"]),
     ("pop", &["pop"]),
     ("kpop", &["k pop"]),
     ("k pop", &["k pop"]),
@@ -252,6 +237,48 @@ const GENRE_WORDS: &[(&str, &[&str])] = &[
     ("ska", &["ska"]),
     ("gospel", &["gospel"]),
 ];
+
+/// Genres next to an everyday name: a song with only these fits a little.
+const NEAR_GENRES: &[(&str, &[&str])] = &[
+    (
+        "hair metal",
+        &[
+            "glam rock",
+            "hard rock",
+            "heavy metal",
+            "arena rock",
+            "glam punk",
+        ],
+    ),
+    ("glam metal", &["hard rock", "heavy metal", "arena rock"]),
+    (
+        "classic rock",
+        &[
+            "hard rock",
+            "arena rock",
+            "soft rock",
+            "southern rock",
+            "rock",
+        ],
+    ),
+    ("goth", &["industrial", "post punk"]),
+    ("synthwave", &["synth pop", "new wave", "electropop"]),
+    ("synth", &["new wave"]),
+    ("new wave", &["synth pop", "post punk"]),
+    ("disco", &["funk", "soul", "boogie", "dance"]),
+];
+
+/// Genres that belong to an era: a song from outside it fits less, unless
+/// the request names its own years.
+const GENRE_ERAS: &[(&str, i64, i64)] = &[
+    ("classic rock", 1960, 1989),
+    ("hair metal", 1980, 1993),
+    ("grunge", 1987, 1999),
+    ("disco", 1972, 1984),
+    ("new wave", 1976, 1990),
+];
+/// How much a song from outside its genre's era counts.
+const OUT_OF_ERA: f32 = 0.4;
 
 /// Words that say nothing about the music.
 const FILLER: &[&str] = &[
@@ -426,6 +453,8 @@ pub fn parse(query: &str, vocab: &Vocabulary) -> Option<Intent> {
                 intent.summary.push(p.to_owned());
             } else if let Some(group) = genre_group(p, vocab) {
                 intent.genres.push(group);
+                intent.near.extend(near_group(p));
+                intent.genre_era = intent.genre_era.or(genre_era(p));
                 intent.summary.push(p.to_owned());
             } else {
                 continue;
@@ -456,6 +485,27 @@ fn genre_group(phrase: &str, vocab: &Vocabulary) -> Option<Vec<String>> {
         .into_iter()
         .find(|p| vocab.genres.contains(*p))
         .map(|p| vec![p.to_owned()])
+}
+
+/// The neighboring genres of an everyday genre name.
+fn near_group(phrase: &str) -> Vec<String> {
+    near_genres(phrase)
+}
+
+/// The years an everyday genre name belongs to, if it does.
+fn genre_era(phrase: &str) -> Option<(i64, i64)> {
+    GENRE_ERAS
+        .iter()
+        .find(|(word, _, _)| *word == phrase)
+        .map(|(_, from, to)| (*from, *to))
+}
+
+fn near_genres(phrase: &str) -> Vec<String> {
+    NEAR_GENRES
+        .iter()
+        .find(|(word, _)| *word == phrase)
+        .map(|(_, names)| names.iter().map(|n| normalize(n)).collect())
+        .unwrap_or_default()
 }
 
 fn match_negated_tempo(rest: &[String], intent: &mut Intent) -> Option<usize> {
@@ -661,6 +711,8 @@ pub fn merge(
     };
 
     let mut group: Vec<String> = Vec::new();
+    let mut near: Vec<String> = Vec::new();
+    let mut era: Option<(i64, i64)> = None;
     let mut labels: Vec<String> = Vec::new();
     for genre in asked.genres.iter().map(|g| normalize(g)) {
         // Small models file "chill" or "sad" as a genre.
@@ -673,6 +725,12 @@ pub fn merge(
                     group.push(name);
                 }
             }
+            era = era.or(genre_era(&label));
+            for name in near_group(&label) {
+                if !near.contains(&name) {
+                    near.push(name);
+                }
+            }
             if !labels.contains(&label) {
                 labels.push(label);
             }
@@ -681,12 +739,16 @@ pub fn merge(
     if !group.is_empty() || asked.genres.is_empty() {
         // The phrase reader's genres were words out of context.
         let dropped: Vec<String> = intent.genres.drain(..).flatten().collect();
+        intent.near.clear();
+        intent.genre_era = None;
         intent.summary.retain(|label| {
             genre_group(label, vocab).is_none_or(|g| g.iter().all(|n| !dropped.contains(n)))
         });
     }
     if !group.is_empty() {
         intent.genres.push(group);
+        intent.near.extend(near);
+        intent.genre_era = intent.genre_era.or(era);
         intent.summary.push(labels.join(" or "));
     }
     for genre in asked.not_genres.iter().map(|g| normalize(g)) {
@@ -736,11 +798,31 @@ pub fn merge(
     (!intent.is_empty()).then_some(intent)
 }
 
-/// Songs that fit, best first, and how many matched in all.
+/// How much a genre counts when it comes from the song's artist (and not the
+/// song or its album), from what the AI heard, or from a neighboring genre.
+const ARTIST_GENRE: f32 = 0.75;
+const HEARD_GENRE: f32 = 0.45;
+const NEAR_GENRE: f32 = 0.25;
+/// A song from a few years outside the years asked for.
+const NEAR_YEAR: f32 = 0.5;
+const NEAR_YEARS: i64 = 2;
+/// A song in the wrong mood still counts this much.
+const OTHER_MOOD: f32 = 0.8;
+/// How much the AI's sense of the description and popularity move a song
+/// up, at most (the rest of its score is how well it fits). A description
+/// of only a feeling ("party bangers") leans on the sound more.
+const SOUND_PART: f32 = 0.45;
+const FEELING_SOUND_PART: f32 = 0.85;
+const POPULAR_PART: f32 = 0.15;
+
+/// Songs that fit, best first with artists spread out, and how many fit in
+/// all. `heard` is how close each song sounds to the description (the AI's
+/// match), when it's on.
 pub fn rank(
     intent: &Intent,
     songs: &[SongFacts],
     sound: &SoundIndex,
+    heard: Option<&std::collections::HashMap<i64, f32>>,
     limit: usize,
 ) -> (Vec<i64>, usize) {
     // Energy thresholds from this library's own spread of punch.
@@ -752,45 +834,21 @@ pub fn rank(
             .copied()
             .unwrap_or(0.0)
     };
-    let (low_punch, high_punch) = (percentile(0.4), percentile(0.6));
-
-    let fits = |song: &SongFacts| -> bool {
-        if let Some((from, to)) = intent.years {
-            if !song.year.is_some_and(|y| (from..=to).contains(&y)) {
-                return false;
-            }
-        }
-        if let Some((min, max)) = intent.tempo {
-            if !song.bpm.is_some_and(|b| (min..=max).contains(&b)) {
-                return false;
-            }
-        }
-        match intent.energy {
-            Some(Level::High)
-                if !(song.punch.is_some_and(|p| p >= high_punch)
-                    || song.bpm.is_some_and(|b| b >= 120.0)) =>
-            {
-                return false
-            }
-            Some(Level::Low)
-                if !(song.punch.is_some_and(|p| p <= low_punch)
-                    && song.bpm.is_some_and(|b| b <= 112.0)) =>
-            {
-                return false
-            }
-            _ => {}
-        }
-        let in_group = |group: &Vec<String>| {
-            group
-                .iter()
-                .any(|name| song.genres.iter().any(|g| genre_fits(g, name)))
-        };
-        intent.genres.iter().all(in_group) && !intent.not_genres.iter().any(in_group)
-    };
-    let mut matches: Vec<&SongFacts> = songs.iter().filter(|s| fits(s)).collect();
+    let punch = (percentile(0.4), percentile(0.6));
+    let mut matches: Vec<(&SongFacts, f32)> = songs
+        .iter()
+        .map(|s| (s, fit(intent, s, punch)))
+        .filter(|(_, f)| *f > 0.0)
+        .collect();
     let total = matches.len();
+    let artist_of: std::collections::HashMap<i64, i64> = songs
+        .iter()
+        .filter_map(|s| s.artist.map(|a| (s.id, a)))
+        .collect();
+    let artist = |id: i64| artist_of.get(&id).copied();
 
-    // Sound like the named artists: their closest songs first.
+    // Sound like the named artists: their closest songs by the analyzer's
+    // measurements and (in `heard`, when on) by ear, sharing their genres.
     if !intent.like_artists.is_empty() {
         let mut order: std::collections::HashMap<i64, usize> = std::collections::HashMap::new();
         for &artist in &intent.like_artists {
@@ -803,39 +861,301 @@ pub fn rank(
                 *best = (*best).min(rank);
             }
         }
-        matches.retain(|s| order.contains_key(&s.id));
-        matches.sort_by_key(|s| order.get(&s.id).copied().unwrap_or(usize::MAX));
-        return (
-            matches.iter().take(limit).map(|s| s.id).collect(),
-            total.min(order.len()),
-        );
+        let theirs = like_genres(songs, &intent.like_artists);
+        let n = order.len().max(2) as f32 - 1.0;
+        let by_ear = heard.map(|heard| {
+            let mut ranked: Vec<(i64, f32)> = matches
+                .iter()
+                .filter_map(|(s, _)| heard.get(&s.id).map(|h| (s.id, *h)))
+                .collect();
+            ranked.sort_by(|a, b| b.1.total_cmp(&a.1));
+            let m = ranked.len().max(2) as f32 - 1.0;
+            ranked
+                .into_iter()
+                .enumerate()
+                .map(|(i, (id, _))| (id, 1.0 - i as f32 / m))
+                .collect::<std::collections::HashMap<i64, f32>>()
+        });
+        matches.retain(|(s, _)| order.contains_key(&s.id));
+        let scored = matches
+            .iter()
+            .map(|(s, f)| {
+                let measured = 1.0 - order[&s.id] as f32 / n;
+                let close = match &by_ear {
+                    Some(ear) => {
+                        LIKE_EAR * ear.get(&s.id).copied().unwrap_or(0.5)
+                            + (1.0 - LIKE_EAR) * measured
+                    }
+                    None => measured,
+                };
+                // Only the very closest count: square it twice.
+                let close = close.powi(16);
+                (s.id, f * close * theirs.share(&s.genres))
+            })
+            .collect();
+        return (spread(scored, artist, limit), total.min(order.len()));
     }
 
-    // Otherwise: mood fit, then popularity, then a stable shuffle so the
-    // list doesn't read as an alphabetical dump.
-    let mood_score = |s: &SongFacts| -> i32 {
-        match (intent.mood, s.mode) {
-            (Some(Mood::Happy), Some(m)) if m > 0.0 => 1,
-            (Some(Mood::Sad), Some(m)) if m < 0.0 => 1,
-            _ => 0,
-        }
-    };
-    matches.sort_by(|a, b| {
-        mood_score(b)
-            .cmp(&mood_score(a))
-            .then(b.popularity.cmp(&a.popularity))
-            .then(scramble(a.id).cmp(&scramble(b.id)))
+    // Otherwise how well each fits, moved up by how it sounds (from the
+    // middle of the songs that fit, 0, to the closest, 1) and by how often
+    // it's been asked for and played.
+    let sounds: Option<std::collections::HashMap<i64, f32>> = heard.map(|heard| {
+        let mut values: Vec<f32> = matches
+            .iter()
+            .filter_map(|(s, _)| heard.get(&s.id).copied())
+            .collect();
+        values.sort_by(f32::total_cmp);
+        let middle = values.get(values.len() / 2).copied().unwrap_or(0.0);
+        let best = values.last().copied().unwrap_or(1.0);
+        let range = (best - middle).max(1e-6);
+        matches
+            .iter()
+            .filter_map(|(s, _)| {
+                heard
+                    .get(&s.id)
+                    .map(|h| (s.id, ((h - middle) / range).clamp(0.0, 1.0)))
+            })
+            .collect()
     });
-    (matches.iter().take(limit).map(|s| s.id).collect(), total)
+    let most_popular = matches
+        .iter()
+        .map(|(s, _)| s.popularity)
+        .max()
+        .unwrap_or(0)
+        .max(1) as f32;
+    let sound_part = if intent.genres.is_empty() && intent.years.is_none() {
+        FEELING_SOUND_PART
+    } else {
+        SOUND_PART
+    };
+    let scored = matches
+        .iter()
+        .map(|(s, f)| {
+            // Not heard yet: like a song in the middle.
+            let sounds = sounds
+                .as_ref()
+                .map_or(0.5, |p| p.get(&s.id).copied().unwrap_or(0.0));
+            let popular = (s.popularity.max(0) as f32).ln_1p() / most_popular.ln_1p();
+            // A stable shuffle settles ties, so the list doesn't read as an
+            // alphabetical dump.
+            let tie = (scramble(s.id) % 1000) as f32 / 1_000_000.0;
+            let score =
+                f * (1.0 - sound_part + sound_part * sounds) * (1.0 + POPULAR_PART * popular) + tie;
+            (s.id, score)
+        })
+        .collect();
+    (spread(scored, artist, limit), total)
+}
+
+/// How much what the AI heard counts in sounding like an artist.
+const LIKE_EAR: f32 = 0.7;
+
+/// The genres of artists asked to sound like, each weighted by how rare it
+/// is in the library (so sharing "glam metal" says more than "rock").
+struct LikeGenres {
+    weights: std::collections::HashMap<String, f32>,
+    total: f32,
+}
+
+impl LikeGenres {
+    /// 0.25 for a song sharing none of them, up to 1 for all.
+    fn share(&self, genres: &[String]) -> f32 {
+        if self.total <= 0.0 {
+            return 1.0;
+        }
+        let shared: f32 = genres.iter().filter_map(|g| self.weights.get(g)).sum();
+        0.25 + 0.75 * (shared / self.total).min(1.0)
+    }
+}
+
+fn like_genres(songs: &[SongFacts], artists: &[i64]) -> LikeGenres {
+    let mut counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    let mut theirs: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    let mut their_songs = 0;
+    for song in songs {
+        let mine = song.artist.is_some_and(|a| artists.contains(&a));
+        their_songs += usize::from(mine);
+        for g in &song.genres {
+            *counts.entry(g.as_str()).or_default() += 1;
+            if mine {
+                *theirs.entry(g.as_str()).or_default() += 1;
+            }
+        }
+    }
+    let n = songs.len() as f32 + 1.0;
+    // Genres on at least a quarter of their songs.
+    let weights: std::collections::HashMap<String, f32> = theirs
+        .into_iter()
+        .filter(|(_, c)| *c * 4 >= their_songs)
+        .map(|(g, _)| {
+            let rarity = (n / (counts.get(g).copied().unwrap_or(0) as f32 + 1.0))
+                .ln()
+                .max(0.1);
+            (g.to_owned(), rarity)
+        })
+        .collect();
+    LikeGenres {
+        total: weights.values().sum(),
+        weights,
+    }
+}
+
+/// How well `song` fits `intent`, 0 (not at all) to 1. `punch` is this
+/// library's low and high punch.
+fn fit(intent: &Intent, song: &SongFacts, punch: (f32, f32)) -> f32 {
+    if let Some((min, max)) = intent.tempo {
+        if !song.bpm.is_some_and(|b| (min..=max).contains(&b)) {
+            return 0.0;
+        }
+    }
+    let (low_punch, high_punch) = punch;
+    match intent.energy {
+        Some(Level::High)
+            if !(song.punch.is_some_and(|p| p >= high_punch)
+                || song.bpm.is_some_and(|b| b >= 120.0)) =>
+        {
+            return 0.0
+        }
+        Some(Level::Low)
+            if !(song.punch.is_some_and(|p| p <= low_punch)
+                && song.bpm.is_some_and(|b| b <= 112.0)) =>
+        {
+            return 0.0
+        }
+        _ => {}
+    }
+    let fits = |names: &[String], genres: &[String]| {
+        names
+            .iter()
+            .any(|name| genres.iter().any(|g| genre_fits(g, name)))
+    };
+    if intent
+        .not_genres
+        .iter()
+        .any(|group| fits(group, &song.genres) || fits(group, &song.own_genres))
+    {
+        return 0.0;
+    }
+    let mut score: f32 = 1.0;
+    for group in &intent.genres {
+        let this = if fits(group, &song.own_genres) {
+            1.0
+        } else if fits(group, &song.genres) {
+            ARTIST_GENRE
+        } else if song.genres.is_empty() && fits(group, &song.styles) {
+            // The AI's guess only for songs with nothing better: it hears
+            // "glam metal" in pop punk and "disco" in Queen.
+            HEARD_GENRE
+        } else if fits(&intent.near, &song.own_genres) || fits(&intent.near, &song.genres) {
+            NEAR_GENRE
+        } else {
+            0.0
+        };
+        score = score.min(this);
+    }
+    if let Some((from, to)) = intent.years {
+        score *= era_fit(from, to, song);
+    } else if let Some((from, to)) = intent.genre_era {
+        score *= era_fit(from, to, song).max(OUT_OF_ERA);
+    }
+    let mood_fits = match (intent.mood, song.mode) {
+        (Some(Mood::Happy), Some(m)) => m > 0.0,
+        (Some(Mood::Sad), Some(m)) => m < 0.0,
+        _ => true,
+    };
+    if !mood_fits {
+        score *= OTHER_MOOD;
+    }
+    score
+}
+
+/// How well a song's years fit `from..=to`: the year it belongs to, else
+/// its own year, else a little for a year or two outside.
+fn era_fit(from: i64, to: i64, song: &SongFacts) -> f32 {
+    let inside = |y: i64| (from..=to).contains(&y);
+    match (song.era, song.year) {
+        (Some(era), _) if inside(era) => 1.0,
+        (_, Some(year)) if inside(year) => 0.9,
+        (Some(y), _) | (None, Some(y)) => {
+            let off = if y < from { from - y } else { y - to };
+            if off <= NEAR_YEARS {
+                NEAR_YEAR
+            } else {
+                0.0
+            }
+        }
+        (None, None) => 0.0,
+    }
+}
+
+/// Places in a list arranged with artists spread out; the rest follow by
+/// score.
+const SPREAD_AHEAD: usize = 200;
+/// Each further song by an artist already placed counts this much less.
+const REPEAT_FACTOR: f32 = 0.6;
+/// No artist comes back within this many songs if anyone else fits.
+const ARTIST_GAP: usize = 2;
+
+/// Song ids from `scored` (id, score), best first, but with artists spread
+/// out: a further song by an artist already placed counts for less, and an
+/// artist doesn't come back right away while others fit. `artist` says
+/// whose a song is.
+pub fn spread(
+    mut scored: Vec<(i64, f32)>,
+    artist: impl Fn(i64) -> Option<i64>,
+    limit: usize,
+) -> Vec<i64> {
+    scored.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
+    let arrange = limit.min(SPREAD_AHEAD);
+    let window = (arrange * 8).min(scored.len());
+    let rest = scored.split_off(window);
+    let mut pool = scored;
+    let mut out: Vec<i64> = Vec::with_capacity(arrange);
+    let mut placed: std::collections::HashMap<i64, i32> = std::collections::HashMap::new();
+    let mut recent: std::collections::VecDeque<i64> = std::collections::VecDeque::new();
+    while out.len() < arrange && !pool.is_empty() {
+        let mut best = (0, f32::MIN);
+        for (i, (id, score)) in pool.iter().enumerate() {
+            let mut weight = *score;
+            if let Some(a) = artist(*id) {
+                weight *= REPEAT_FACTOR.powi(placed.get(&a).copied().unwrap_or(0));
+                if recent.contains(&a) {
+                    weight *= 0.01;
+                }
+            }
+            if weight > best.1 {
+                best = (i, weight);
+            }
+        }
+        let (id, _) = pool.remove(best.0);
+        out.push(id);
+        if let Some(a) = artist(id) {
+            *placed.entry(a).or_default() += 1;
+            recent.push_back(a);
+            if recent.len() > ARTIST_GAP {
+                recent.pop_front();
+            }
+        }
+    }
+    out.extend(pool.into_iter().chain(rest).map(|(id, _)| id));
+    out.truncate(limit);
+    out
 }
 
 /// Does genre `g` (from a song) count as `name` (from the query)? Exact,
-/// or `name` as a whole word inside it ("deep house" counts as house).
+/// or `name` as a whole word inside it ("deep house" counts as house), but
+/// not a genre that came after or before it ("post grunge" isn't grunge).
 pub fn genre_fits(g: &str, name: &str) -> bool {
-    g == name
-        || g.starts_with(&format!("{name} "))
-        || g.ends_with(&format!(" {name}"))
-        || g.contains(&format!(" {name} "))
+    if g == name {
+        return true;
+    }
+    let other_era = ["post ", "proto "]
+        .iter()
+        .any(|p| g.starts_with(p) && !name.starts_with(p));
+    !other_era
+        && (g.starts_with(&format!("{name} "))
+            || g.ends_with(&format!(" {name}"))
+            || g.contains(&format!(" {name} ")))
 }
 
 /// A cheap, stable hash for ordering.
@@ -903,34 +1223,123 @@ mod tests {
         assert!(parse("Theory of a Deadman", &v).is_none());
     }
 
-    #[test]
-    fn ranks_songs_that_fit() {
-        let song = |id, year, genres: &[&str], popularity, bpm: f32| SongFacts {
+    fn song(id: i64, year: i64, genres: &[&str], popularity: i64, bpm: f32) -> SongFacts {
+        let genres: Vec<String> = genres.iter().map(|g| (*g).to_owned()).collect();
+        SongFacts {
             id,
             year: Some(year),
-            genres: genres.iter().map(|g| (*g).to_owned()).collect(),
+            own_genres: genres.clone(),
+            genres,
             popularity,
             bpm: Some(bpm),
             punch: Some(0.3),
             mode: Some(0.1),
-        };
+            artist: Some(id),
+            ..SongFacts::default()
+        }
+    }
+
+    fn ranked(query: &str, songs: &[SongFacts]) -> (Vec<i64>, usize) {
+        let intent = parse(query, &vocab()).unwrap();
+        rank(&intent, songs, &SoundIndex::default(), None, 10)
+    }
+
+    #[test]
+    fn ranks_songs_that_fit() {
         let songs = vec![
             song(1, 1987, &["glam metal", "hard rock"], 2, 120.0),
             song(2, 1984, &["heavy metal"], 9, 140.0),
             song(3, 1995, &["glam metal"], 50, 120.0),
             song(4, 1986, &["synth pop"], 50, 118.0),
         ];
-        let intent = parse("80s hair metal", &vocab()).unwrap();
-        let (ids, total) = rank(&intent, &songs, &SoundIndex::default(), 10);
+        let (ids, total) = ranked("80s hair metal", &songs);
         assert_eq!(total, 2);
-        assert_eq!(ids, [2, 1], "popular first; 1995 and synth pop don't fit");
+        assert_eq!(
+            ids,
+            [1, 2],
+            "glam metal first, heavy metal only near; 1995 and synth pop don't fit"
+        );
         assert!(genre_fits("deep house", "house"));
         assert!(!genre_fits("housewife", "house"));
+        assert!(!genre_fits("post grunge", "grunge"), "a genre of its own");
+        assert!(genre_fits("post grunge", "post grunge"));
+        assert!(genre_fits("post punk revival", "post punk"));
 
         let no_glam = parse("80s metal, no glam", &vocab()).unwrap();
         assert_eq!(no_glam.summary, ["1980s", "metal", "no glam"]);
-        let (ids, _) = rank(&no_glam, &songs, &SoundIndex::default(), 10);
+        let (ids, _) = rank(&no_glam, &songs, &SoundIndex::default(), None, 10);
         assert_eq!(ids, [2], "the glam metal song is ruled out");
+    }
+
+    #[test]
+    fn the_songs_own_genres_count_most() {
+        let mut by_artist = song(1, 1986, &["rock"], 50, 120.0);
+        by_artist.genres.push("glam metal".into());
+        let mut heard = song(2, 1986, &[], 50, 120.0);
+        heard.styles = vec!["glam metal".into()];
+        let own = song(3, 1986, &["glam metal"], 0, 120.0);
+        // The AI's guess doesn't count against a song's own genres.
+        let mut tagged = song(4, 1986, &["pop punk"], 90, 120.0);
+        tagged.styles = vec!["glam metal".into()];
+        let (ids, total) = ranked("80s glam metal", &[heard, by_artist, own, tagged]);
+        assert_eq!(total, 3);
+        assert_eq!(
+            ids,
+            [3, 1, 2],
+            "its own tag, then its artist's, then the AI's"
+        );
+    }
+
+    #[test]
+    fn a_greatest_hits_goes_by_when_the_songs_were_made() {
+        let mut hits = song(1, 1998, &["glam metal"], 0, 120.0);
+        hits.era = Some(1987);
+        let late = song(2, 1998, &["glam metal"], 0, 120.0);
+        let close = song(3, 1991, &["glam metal"], 0, 120.0);
+        let (ids, total) = ranked("80s hair metal", &[hits, late, close]);
+        assert_eq!(total, 2);
+        assert_eq!(ids, [1, 3], "a year or two out still fits a little");
+    }
+
+    #[test]
+    fn artists_are_spread_out() {
+        let mut songs: Vec<SongFacts> = (1..=4)
+            .map(|id| {
+                let mut s = song(id, 1986, &["glam metal"], 100, 120.0);
+                s.artist = Some(100);
+                s
+            })
+            .collect();
+        songs.extend((5..=10).map(|id| song(id, 1986, &["glam metal"], 0, 120.0)));
+        let (ids, _) = ranked("80s glam metal", &songs);
+        assert_eq!(ids.len(), 10);
+        assert_eq!(ids[0], 4, "the band's most popular song still leads");
+        let mut next: Vec<i64> = ids[1..7].to_vec();
+        next.sort_unstable();
+        assert_eq!(
+            next,
+            [5, 6, 7, 8, 9, 10],
+            "everyone else comes before the band's second song: {ids:?}"
+        );
+    }
+
+    #[test]
+    fn classic_rock_means_older_songs() {
+        let old = song(1, 1975, &["classic rock"], 0, 120.0);
+        let new = song(2, 2023, &["classic rock"], 90, 120.0);
+        let (ids, total) = ranked("classic rock", &[new, old]);
+        assert_eq!(total, 2, "a new song still fits a little");
+        assert_eq!(ids, [1, 2]);
+    }
+
+    #[test]
+    fn spreading_keeps_every_song_once() {
+        let scored: Vec<(i64, f32)> = (0..1000).map(|id| (id, (id % 17) as f32)).collect();
+        let mut ids = spread(scored, |id| Some(id % 3), usize::MAX);
+        assert_eq!(ids.len(), 1000);
+        ids.sort_unstable();
+        ids.dedup();
+        assert_eq!(ids.len(), 1000);
     }
 
     #[test]

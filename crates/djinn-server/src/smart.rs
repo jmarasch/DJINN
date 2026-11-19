@@ -44,6 +44,15 @@ pub struct Catalog {
     styles: HashMap<i64, Vec<String>>,
     /// Each song's genres and styles together.
     tags: HashMap<i64, Vec<String>>,
+    /// Each song's genres without the AI's styles (unless it has nothing
+    /// else), for radio.
+    genres: HashMap<i64, Vec<String>>,
+    /// How much sharing each genre says (rare ones more), for radio.
+    genre_weight: HashMap<String, f32>,
+    /// The year each song belongs to (see `eras`).
+    eras: HashMap<i64, i64>,
+    /// The artist each song is by (not a featured one).
+    lead: HashMap<i64, i64>,
     /// Each artist's songs (the ones they lead, else the ones they're on).
     artist_songs: HashMap<i64, Vec<i64>>,
     /// What the AI model heard in each song (when it's on).
@@ -85,6 +94,32 @@ impl Catalog {
     /// Each song's genres and styles together.
     pub(crate) fn song_tags(&self) -> &HashMap<i64, Vec<String>> {
         &self.tags
+    }
+
+    /// Songs whose own, album or artist genres include `genre`, leaving out
+    /// ones the AI only guessed it for: genre radio.
+    fn songs_with_genre(&self, genre: &str) -> Vec<i64> {
+        self.genres
+            .iter()
+            .filter(|(_, genres)| genres.iter().any(|g| vibe::genre_fits(g, genre)))
+            .map(|(id, _)| *id)
+            .collect()
+    }
+
+    /// What radio knows about the library.
+    fn radio_library<'a>(&'a self, index: &'a SoundIndex) -> djinn_library::radio::Library<'a> {
+        djinn_library::radio::Library {
+            index,
+            genres: &self.genres,
+            genre_weight: Some(&self.genre_weight),
+            heard: Some(&self.heard),
+            eras: Some(&self.eras),
+        }
+    }
+
+    /// Spreads artists out over songs scored (id, score); see `vibe::spread`.
+    fn spread(&self, scored: Vec<(i64, f32)>, limit: usize) -> Vec<i64> {
+        vibe::spread(scored, |id| self.lead.get(&id).copied(), limit)
     }
 
     fn songs_in(&self, genre: &str) -> Vec<i64> {
@@ -144,7 +179,7 @@ impl crate::jukebox::Mixer for SmartMixer {
             }
             RadioSeed::Genre { name } => {
                 let name = vibe::normalize(name);
-                let songs = catalog.songs_in(&name);
+                let songs = catalog.songs_with_genre(&name);
                 Seeds {
                     only: Some(songs.iter().copied().collect()),
                     tracks: songs,
@@ -157,7 +192,12 @@ impl crate::jukebox::Mixer for SmartMixer {
             played: played.to_vec(),
             skipped: skipped.to_vec(),
         };
-        rank(&index, &seeds, &catalog.tags, &session, RADIO_SONGS)
+        rank(
+            &catalog.radio_library(&index),
+            &seeds,
+            &session,
+            RADIO_SONGS,
+        )
     }
 }
 
@@ -177,7 +217,7 @@ fn song_seeds(catalog: &Catalog, id: i64) -> djinn_library::radio::Seeds {
         tracks: vec![id],
         only: None,
         genres: catalog
-            .tags
+            .genres
             .get(&id)
             .cloned()
             .unwrap_or_default()
@@ -199,9 +239,8 @@ pub fn personal_radio(state: &AppState, id: i64, played: &[i64], skipped: &[i64]
         skipped: skipped.to_vec(),
     };
     let ranked = djinn_library::radio::rank(
-        &index,
+        &catalog.radio_library(&index),
         &song_seeds(&catalog, id),
-        &catalog.tags,
         &session,
         RADIO_SONGS,
     );
@@ -663,6 +702,8 @@ pub async fn refresh(state: &AppState) {
             })
             .filter(|(_, found)| !found.is_empty())
             .collect();
+        let lead = leads(&led);
+        let eras = eras(&facts, &lead);
         let songs: Vec<SongFacts> = facts
             .into_iter()
             .map(|f| {
@@ -686,7 +727,11 @@ pub async fn refresh(state: &AppState) {
                 SongFacts {
                     id: f.id,
                     year: f.year,
+                    era: eras.get(&f.id).copied(),
                     genres,
+                    own_genres: split(&f.own_genres),
+                    styles: styles.get(&f.id).cloned().unwrap_or_default(),
+                    artist: lead.get(&f.id).copied(),
                     popularity: f.popularity,
                     bpm: sounded.map(|h| h.0),
                     punch: sounded.map(|h| h.1),
@@ -753,6 +798,11 @@ pub async fn refresh(state: &AppState) {
         for (artist, track, _) in &led {
             song_artists.entry(*track).or_default().push(*artist);
         }
+        let genres: HashMap<i64, Vec<String>> = songs
+            .iter()
+            .map(|song| (song.id, song.genres.clone()))
+            .collect();
+        let genre_weight = djinn_library::radio::genre_weights(&genres);
         let index = SoundIndex::build(rows);
         let links = std::sync::Arc::new(SongLinks {
             artists: song_artists,
@@ -767,6 +817,10 @@ pub async fn refresh(state: &AppState) {
                 artist_genres,
                 song_genres,
                 tags,
+                genres,
+                genre_weight,
+                eras,
+                lead,
                 styles,
                 artist_songs,
                 heard,
@@ -867,7 +921,24 @@ pub async fn describe(
         };
         match (intent, sound) {
             (Some(intent), sound) => {
-                let (mut ids, mut total) = vibe::rank(&intent, &catalog.songs, &index, usize::MAX);
+                // How close each song sounds to the description, or to the
+                // artists it names.
+                let liked = artists_heard(&catalog, &intent.like_artists);
+                let matched: Option<HashMap<i64, f32>> =
+                    liked.as_deref().or(sound.as_deref()).map(|sound| {
+                        catalog
+                            .heard
+                            .iter()
+                            .map(|(id, v)| (*id, djinn_ai::similarity(v, sound)))
+                            .collect()
+                    });
+                let (mut ids, mut total) = vibe::rank(
+                    &intent,
+                    &catalog.songs,
+                    &index,
+                    matched.as_ref(),
+                    usize::MAX,
+                );
                 let mut summary = intent.summary.clone();
                 if let Some(sound) = &sound {
                     if ids.is_empty() && !intent.genres.is_empty() {
@@ -878,9 +949,9 @@ pub async fn describe(
                         let candidates = if loose.is_empty() {
                             catalog.songs.iter().map(|s| s.id).collect()
                         } else {
-                            vibe::rank(&loose, &catalog.songs, &index, usize::MAX).0
+                            vibe::rank(&loose, &catalog.songs, &index, None, usize::MAX).0
                         };
-                        ids = by_sound(&candidates, sound, &catalog.heard);
+                        ids = by_sound(&candidates, sound, &catalog);
                         total = ids.len();
                         if !ids.is_empty() {
                             summary.push("by sound".into());
@@ -888,19 +959,8 @@ pub async fn describe(
                     } else if soft_only(&intent) {
                         // Only mood words ("dark", "sad"): they don't narrow
                         // anything, so keep what sounds like the description.
-                        ids = by_sound(&ids, sound, &catalog.heard);
+                        ids = by_sound(&ids, sound, &catalog);
                         total = ids.len();
-                    } else if intent.like_artists.is_empty() {
-                        // Best-sounding first; songs not heard yet after.
-                        ids.sort_by(|a, b| {
-                            let score = |id: &i64| {
-                                catalog
-                                    .heard
-                                    .get(id)
-                                    .map_or(f32::MIN, |v| djinn_ai::similarity(v, sound))
-                            };
-                            score(b).total_cmp(&score(a))
-                        });
                     }
                 }
                 ids.truncate(DESCRIBED_SONGS);
@@ -908,7 +968,7 @@ pub async fn describe(
             }
             (None, Some(sound)) => {
                 let all: Vec<i64> = catalog.heard.keys().copied().collect();
-                let mut ids = by_sound(&all, &sound, &catalog.heard);
+                let mut ids = by_sound(&all, &sound, &catalog);
                 let total = ids.len();
                 ids.truncate(DESCRIBED_SONGS);
                 (!ids.is_empty()).then(|| {
@@ -997,19 +1057,135 @@ fn soft_only(intent: &vibe::Intent) -> bool {
         && intent.like_artists.is_empty()
 }
 
-/// Of `candidates`, the songs that sound most like `sound`, best first:
-/// those close to the best match and not too far from the description.
-fn by_sound(candidates: &[i64], sound: &[f32], heard: &HashMap<i64, Vec<f32>>) -> Vec<i64> {
-    let mut scored: Vec<(f32, i64)> = candidates
+/// Of `candidates`, the songs that sound most like `sound`, best first
+/// with artists spread out: those close to the best match and not too far
+/// from the description.
+fn by_sound(candidates: &[i64], sound: &[f32], catalog: &Catalog) -> Vec<i64> {
+    let mut scored: Vec<(i64, f32)> = candidates
         .iter()
-        .filter_map(|id| heard.get(id).map(|v| (djinn_ai::similarity(v, sound), *id)))
+        .filter_map(|id| {
+            catalog
+                .heard
+                .get(id)
+                .map(|v| (*id, djinn_ai::similarity(v, sound)))
+        })
         .collect();
-    scored.sort_by(|a, b| b.0.total_cmp(&a.0));
-    let best = scored.first().map_or(0.0, |s| s.0);
-    scored
+    scored.sort_by(|a, b| b.1.total_cmp(&a.1));
+    let best = scored.first().map_or(0.0, |s| s.1);
+    scored.retain(|(_, score)| *score >= SOUND_MIN && *score >= best - SOUND_MARGIN);
+    catalog.spread(scored, usize::MAX)
+}
+
+/// The middle of what the AI heard in `artists`' songs, if it heard any.
+fn artists_heard(catalog: &Catalog, artists: &[i64]) -> Option<Vec<f32>> {
+    let mut center: Vec<f32> = Vec::new();
+    for v in artists
+        .iter()
+        .filter_map(|a| catalog.artist_songs.get(a))
+        .flatten()
+        .filter_map(|id| catalog.heard.get(id))
+    {
+        center.resize(v.len(), 0.0);
+        for (c, x) in center.iter_mut().zip(v) {
+            *c += x;
+        }
+    }
+    let length = center.iter().map(|c| c * c).sum::<f32>().sqrt();
+    (length > 0.0).then(|| center.iter().map(|c| c / length).collect())
+}
+
+/// The artist each song is by: the first one leading it, else the first
+/// one on it. `led` is (artist, track, featured).
+fn leads(led: &[(i64, i64, bool)]) -> HashMap<i64, i64> {
+    let mut lead = HashMap::new();
+    for (artist, track, featured) in led {
+        if !featured {
+            lead.entry(*track).or_insert(*artist);
+        }
+    }
+    for (artist, track, _) in led {
+        lead.entry(*track).or_insert(*artist);
+    }
+    lead
+}
+
+/// Words in an album's title that say its songs were first released
+/// elsewhere, earlier.
+const GATHERED: &[&str] = &[
+    "greatest hits",
+    "best of",
+    "hits",
+    "collection",
+    "anthology",
+    "essential",
+    "essentials",
+    "definitive",
+    "gold",
+    "singles",
+    "retrospective",
+    "compilation",
+    "live",
+    "unplugged",
+    "remaster",
+    "remastered",
+    "deluxe",
+    "anniversary",
+    "expanded",
+    "reissue",
+];
+/// An album with songs by this many artists is a compilation.
+const GATHERED_ARTISTS: usize = 4;
+
+/// The year each song belongs to. Most songs go by their own year, but
+/// one from a greatest hits, a live album, a reissue or a compilation (or
+/// with no year) goes by when its artist made their records: the middle
+/// year of their other albums.
+fn eras(facts: &[djinn_store::TrackFacts], lead: &HashMap<i64, i64>) -> HashMap<i64, i64> {
+    let mut album_artists: HashMap<i64, HashSet<i64>> = HashMap::new();
+    for f in facts {
+        if let (Some(album), Some(artist)) = (f.album_id, lead.get(&f.id)) {
+            album_artists.entry(album).or_default().insert(*artist);
+        }
+    }
+    let gathered = |f: &djinn_store::TrackFacts| {
+        let title = format!(
+            " {} ",
+            vibe::normalize(&f.album.as_deref().unwrap_or_default().replace('$', "s"))
+                .replace(['(', ')', '[', ']', ':', ',', '.', '!'], " ")
+        );
+        GATHERED
+            .iter()
+            .any(|word| title.contains(&format!(" {word} ")))
+            || f.album_id
+                .and_then(|a| album_artists.get(&a))
+                .is_some_and(|artists| artists.len() >= GATHERED_ARTISTS)
+    };
+    // Each artist's own records' years, one per album.
+    let mut records: HashMap<i64, HashMap<i64, i64>> = HashMap::new();
+    for f in facts.iter().filter(|f| !gathered(f)) {
+        if let (Some(album), Some(year), Some(artist)) = (f.album_id, f.year, lead.get(&f.id)) {
+            records.entry(*artist).or_default().insert(album, year);
+        }
+    }
+    let typical: HashMap<i64, i64> = records
         .into_iter()
-        .take_while(|(score, _)| *score >= SOUND_MIN && *score >= best - SOUND_MARGIN)
-        .map(|(_, id)| id)
+        .map(|(artist, albums)| {
+            let mut years: Vec<i64> = albums.into_values().collect();
+            years.sort_unstable();
+            (artist, years[(years.len() - 1) / 2])
+        })
+        .collect();
+    facts
+        .iter()
+        .filter_map(|f| {
+            let theirs = lead.get(&f.id).and_then(|a| typical.get(a)).copied();
+            let era = if gathered(f) || f.year.is_none() {
+                theirs.or(f.year)
+            } else {
+                f.year
+            };
+            era.map(|e| (f.id, e))
+        })
         .collect()
 }
 
@@ -1173,6 +1349,41 @@ mod playlist_check;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn fact(id: i64, year: i64, album_id: i64, album: &str) -> djinn_store::TrackFacts {
+        djinn_store::TrackFacts {
+            id,
+            year: Some(year),
+            genres: String::new(),
+            own_genres: String::new(),
+            popularity: 0,
+            album_id: Some(album_id),
+            album: Some(album.to_owned()),
+        }
+    }
+
+    #[test]
+    fn a_greatest_hits_goes_by_the_artists_records() {
+        let facts = vec![
+            fact(1, 1985, 10, "Theatre of Pain"),
+            fact(2, 1987, 11, "Girls, Girls, Girls"),
+            fact(3, 1989, 12, "Dr. Feelgood"),
+            fact(4, 1998, 13, "Greate$t Hit$"),
+            fact(5, 2008, 14, "Saints of Los Angeles"),
+            // A compilation of four artists: each by their own records.
+            fact(6, 2001, 20, "Party Anthems"),
+            fact(7, 2001, 20, "Party Anthems"),
+            fact(8, 2001, 20, "Party Anthems"),
+            fact(9, 2001, 20, "Party Anthems"),
+        ];
+        let mut lead: HashMap<i64, i64> = (1..=6).map(|id| (id, 100)).collect();
+        lead.extend([(7, 200), (8, 300), (9, 400)]);
+        let eras = super::eras(&facts, &lead);
+        assert_eq!(eras[&4], 1987, "the middle of their own albums");
+        assert_eq!(eras[&5], 2008, "a studio album keeps its own year");
+        assert_eq!(eras[&6], 1987, "their song on a compilation too");
+        assert_eq!(eras[&7], 2001, "nothing else to go by");
+    }
 
     #[test]
     fn artist_genres_from_their_songs() {

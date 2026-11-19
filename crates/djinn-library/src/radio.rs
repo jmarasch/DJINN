@@ -1,15 +1,57 @@
 //! Radio: an endless mix that sounds like a song, an artist, or a genre.
 //!
 //! [`rank`] picks the songs radio draws from next, each with a weight: the
-//! closest in sound to the seed, a little pulled toward what just played
-//! all the way through (so it drifts the way the party goes), away from
-//! songs like the ones people skipped, favoring songs that share the
-//! seed's genres and styles and songs by the artist it started from, and
-//! spread over the other artists.
+//! closest in sound to the seed (the analyzer's measurements and, when it's
+//! on, what the AI heard), a little pulled toward what just played all the
+//! way through (so it drifts the way the party goes), away from songs like
+//! the ones people skipped, favoring songs that share the seed's genres
+//! (rare ones counting more than "rock") and its era, and songs by the
+//! artist it started from, and spread over the other artists.
 
 use std::collections::{HashMap, HashSet};
 
 use crate::sound::SoundIndex;
+
+/// What radio knows about the library.
+pub struct Library<'a> {
+    pub index: &'a SoundIndex,
+    /// Each song's genres: its own, its album's and its artists' (not what
+    /// the AI guessed, unless that's all it has).
+    pub genres: &'a HashMap<i64, Vec<String>>,
+    /// How much sharing each genre says: more for rare ones.
+    pub genre_weight: Option<&'a HashMap<String, f32>>,
+    /// What the AI heard in each song (unit vectors).
+    pub heard: Option<&'a HashMap<i64, Vec<f32>>>,
+    /// The year each song belongs to.
+    pub eras: Option<&'a HashMap<i64, i64>>,
+}
+
+impl<'a> Library<'a> {
+    pub fn new(index: &'a SoundIndex, genres: &'a HashMap<i64, Vec<String>>) -> Self {
+        Self {
+            index,
+            genres,
+            genre_weight: None,
+            heard: None,
+            eras: None,
+        }
+    }
+}
+
+/// How much each genre says: the log of how rare it is in `genres`.
+pub fn genre_weights(genres: &HashMap<i64, Vec<String>>) -> HashMap<String, f32> {
+    let mut counts: HashMap<&str, usize> = HashMap::new();
+    for list in genres.values() {
+        for g in list {
+            *counts.entry(g.as_str()).or_default() += 1;
+        }
+    }
+    let n = genres.len() as f32 + 1.0;
+    counts
+        .into_iter()
+        .map(|(g, c)| (g.to_owned(), (n / (c as f32 + 1.0)).ln().max(0.1)))
+        .collect()
+}
 
 /// Where a radio starts from.
 #[derive(Clone, Debug, Default)]
@@ -51,18 +93,27 @@ const FAVORED_SPREAD: f32 = 0.85;
 /// Every this many places down the list, a song's weight halves, so the
 /// closest few dozen songs make up most of the radio.
 const HALF_RANK: f32 = 12.0;
-/// Songs whose tags share nothing with the seed's genres weigh this much.
-const OFF_GENRE_FACTOR: f32 = 0.4;
+/// Songs whose genres share nothing with the seed's weigh this much; ones
+/// that share them all, `1 + GENRE_BONUS`.
+const OFF_GENRE_FACTOR: f32 = 0.2;
+const GENRE_BONUS: f32 = 0.6;
+/// How much what the AI heard counts in how close a song is, against the
+/// analyzer's measurements (which hear tempo and punch but not style).
+const HEARD_SHARE: f32 = 0.6;
+/// Songs within this many years of the seed's era (plus half its own
+/// spread) weigh in full; further out, half as much every `ERA_HALF` years.
+const ERA_EASY: f32 = 4.0;
+const ERA_HALF: f32 = 4.0;
+/// Seeds spread wider than this (in years, middle half) have no era.
+const ERA_SPREAD_MAX: i64 = 12;
+/// A song whose year isn't known, when the seed has an era.
+const NO_ERA_FACTOR: f32 = 0.7;
 
 /// Up to `limit` songs for the radio, best first, with weights for a
-/// weighted draw. `tags` holds each song's genres and styles.
-pub fn rank(
-    index: &SoundIndex,
-    seeds: &Seeds,
-    tags: &HashMap<i64, Vec<String>>,
-    session: &Session,
-    limit: usize,
-) -> Vec<(i64, f32)> {
+/// weighted draw.
+pub fn rank(library: &Library, seeds: &Seeds, session: &Session, limit: usize) -> Vec<(i64, f32)> {
+    let index = library.index;
+    let tags = library.genres;
     let skipped: HashSet<i64> = session.skipped.iter().copied().collect();
     // Songs that just played are held back by the draw, so the seeds
     // themselves can stay (artist radio plays the artist).
@@ -79,11 +130,9 @@ pub fn rank(
             .take(DRIFT_SONGS)
             .map(|&t| (t, DRIFT_WEIGHT)),
     );
-    let mut near: Vec<(i64, Option<i64>)> = index
-        .around(&points)
+    let mut near: Vec<(i64, Option<i64>)> = closest(library, &points)
         .into_iter()
-        .filter(|n| allowed(n.track_id))
-        .map(|n| (n.track_id, n.artist))
+        .filter(|(id, _)| allowed(*id))
         .collect();
     // Songs not analyzed yet (or no sound to go by): the allowed ones
     // after the analyzed ones, best tag match first.
@@ -116,6 +165,15 @@ pub fn rank(
         })
         .collect();
 
+    let era = seed_era(library, seeds, session);
+    let genre_weight = |g: &String| {
+        library
+            .genre_weight
+            .and_then(|w| w.get(g))
+            .copied()
+            .unwrap_or(1.0)
+    };
+    let seed_weight: f32 = seeds.genres.iter().map(genre_weight).sum();
     let mut by_artist: HashMap<i64, i32> = HashMap::new();
     let mut weighted: Vec<(i64, f32)> = near
         .into_iter()
@@ -124,11 +182,30 @@ pub fn rank(
             let mut weight = 0.5f32.powf(rank as f32 / HALF_RANK);
             let has_tags = tags.get(&id).is_some_and(|t| !t.is_empty());
             if !seeds.genres.is_empty() && has_tags {
-                let shared = overlap_count(tags.get(&id), &seeds.genres) as f32;
+                let shared: f32 = tags
+                    .get(&id)
+                    .into_iter()
+                    .flatten()
+                    .filter(|g| seeds.genres.contains(*g))
+                    .map(genre_weight)
+                    .sum();
                 weight *= if shared > 0.0 {
-                    1.0 + 0.6 * shared / seeds.genres.len() as f32
+                    1.0 + GENRE_BONUS * (shared / seed_weight.max(1e-6)).min(1.0)
                 } else {
                     OFF_GENRE_FACTOR
+                };
+            }
+            if let Some((center, easy)) = era {
+                weight *= match library.eras.and_then(|e| e.get(&id)) {
+                    Some(&year) => {
+                        let off = (year as f32 - center).abs() - easy;
+                        if off > 0.0 {
+                            0.5f32.powf(off / ERA_HALF)
+                        } else {
+                            1.0
+                        }
+                    }
+                    None => NO_ERA_FACTOR,
                 };
             }
             if like_skipped.contains(&id) {
@@ -154,6 +231,94 @@ pub fn rank(
     weighted.sort_by(|a, b| b.1.total_cmp(&a.1));
     weighted.truncate(limit);
     weighted
+}
+
+/// Analyzed songs by how close they are to `points` (track id, weight),
+/// nearest first, with their main artist: the analyzer's measurements and,
+/// for songs the AI heard, what it heard, each by its place in the library.
+fn closest(library: &Library, points: &[(i64, f32)]) -> Vec<(i64, Option<i64>)> {
+    let around = library.index.around(points);
+    let Some(heard) = library.heard.filter(|h| !h.is_empty()) else {
+        return around.into_iter().map(|n| (n.track_id, n.artist)).collect();
+    };
+    // The middle of what the AI heard in the points.
+    let mut center: Vec<f32> = Vec::new();
+    for (track, weight) in points {
+        if let Some(v) = heard.get(track) {
+            center.resize(v.len(), 0.0);
+            for (c, x) in center.iter_mut().zip(v) {
+                *c += x * weight;
+            }
+        }
+    }
+    if center.is_empty() {
+        return around.into_iter().map(|n| (n.track_id, n.artist)).collect();
+    }
+    let mut by_ear: Vec<(f32, i64)> = heard
+        .iter()
+        .map(|(id, v)| (v.iter().zip(&center).map(|(a, b)| a * b).sum(), *id))
+        .collect();
+    by_ear.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
+    let n = by_ear.len().max(2) as f32 - 1.0;
+    let ear: HashMap<i64, f32> = by_ear
+        .into_iter()
+        .enumerate()
+        .map(|(i, (_, id))| (id, 1.0 - i as f32 / n))
+        .collect();
+    let m = around.len().max(2) as f32 - 1.0;
+    let mut blended: Vec<(f32, i64, Option<i64>)> = around
+        .into_iter()
+        .enumerate()
+        .map(|(i, near)| {
+            let measured = 1.0 - i as f32 / m;
+            // Not heard yet: in the middle.
+            let heard = ear.get(&near.track_id).copied().unwrap_or(0.5);
+            (
+                HEARD_SHARE * heard + (1.0 - HEARD_SHARE) * measured,
+                near.track_id,
+                near.artist,
+            )
+        })
+        .collect();
+    blended.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
+    blended
+        .into_iter()
+        .map(|(_, id, artist)| (id, artist))
+        .collect()
+}
+
+/// The year the seed belongs to, pulled a little toward what played
+/// through since, and how many years around it count in full. `None` when
+/// the seed's songs span too many years to have one (a long career, a
+/// genre over decades).
+fn seed_era(library: &Library, seeds: &Seeds, session: &Session) -> Option<(f32, f32)> {
+    let eras = library.eras?;
+    let mut years: Vec<i64> = seeds
+        .tracks
+        .iter()
+        .filter_map(|t| eras.get(t).copied())
+        .collect();
+    if years.is_empty() {
+        return None;
+    }
+    years.sort_unstable();
+    let at = |p: f32| years[((years.len() - 1) as f32 * p).round() as usize];
+    let spread = at(0.75) - at(0.25);
+    if spread > ERA_SPREAD_MAX {
+        return None;
+    }
+    let mut center = at(0.5) as f32;
+    let mut total = 1.0;
+    for year in session
+        .played
+        .iter()
+        .take(DRIFT_SONGS)
+        .filter_map(|t| eras.get(t))
+    {
+        center = (center * total + *year as f32 * DRIFT_WEIGHT) / (total + DRIFT_WEIGHT);
+        total += DRIFT_WEIGHT;
+    }
+    Some((center, ERA_EASY + spread as f32 / 2.0))
 }
 
 fn overlap_count(tags: Option<&Vec<String>>, genres: &HashSet<String>) -> usize {
@@ -200,8 +365,18 @@ mod tests {
             ..Seeds::default()
         };
         let weight = |r: &[(i64, f32)], id| r.iter().find(|x| x.0 == id).unwrap().1;
-        let before = rank(&index(), &plain, &HashMap::new(), &Session::default(), 20);
-        let after = rank(&index(), &favored, &HashMap::new(), &Session::default(), 20);
+        let before = rank(
+            &Library::new(&index(), &HashMap::new()),
+            &plain,
+            &Session::default(),
+            20,
+        );
+        let after = rank(
+            &Library::new(&index(), &HashMap::new()),
+            &favored,
+            &Session::default(),
+            20,
+        );
         for song in [2, 3, 4] {
             assert!(
                 weight(&after, song) > weight(&before, song) * 2.0,
@@ -258,9 +433,8 @@ mod tests {
             ..Seeds::default()
         };
         let ranked = rank(
-            &SoundIndex::build(rows),
+            &Library::new(&SoundIndex::build(rows), &HashMap::new()),
             &seeds,
-            &HashMap::new(),
             &Session::default(),
             150,
         );
@@ -299,7 +473,12 @@ mod tests {
             favored: [1, 77].into_iter().collect(),
             ..Seeds::default()
         };
-        let ranked = rank(&index(), &seeds, &tags, &Session::default(), 20);
+        let ranked = rank(
+            &Library::new(&index(), &tags),
+            &seeds,
+            &Session::default(),
+            20,
+        );
         assert!(ids(&ranked).contains(&77));
     }
 
@@ -314,7 +493,12 @@ mod tests {
             skipped: vec![2],
             ..Session::default()
         };
-        let ranked = rank(&index(), &seeds, &HashMap::new(), &session, 20);
+        let ranked = rank(
+            &Library::new(&index(), &HashMap::new()),
+            &seeds,
+            &session,
+            20,
+        );
         assert!(!ids(&ranked).contains(&2));
     }
 
@@ -324,7 +508,12 @@ mod tests {
             tracks: vec![1],
             ..Seeds::default()
         };
-        let ranked = rank(&index(), &seeds, &HashMap::new(), &Session::default(), 5);
+        let ranked = rank(
+            &Library::new(&index(), &HashMap::new()),
+            &seeds,
+            &Session::default(),
+            5,
+        );
         assert_eq!(ranked.len(), 5);
         assert_eq!(ranked[0].0, 1, "the seed sounds most like itself");
         assert!(!ids(&ranked).contains(&9), "the farthest song falls off");
@@ -336,7 +525,12 @@ mod tests {
             tracks: vec![1],
             ..Seeds::default()
         };
-        let calm = rank(&index(), &seeds, &HashMap::new(), &Session::default(), 20);
+        let calm = rank(
+            &Library::new(&index(), &HashMap::new()),
+            &seeds,
+            &Session::default(),
+            20,
+        );
         let weight = |r: &[(i64, f32)], id| r.iter().find(|x| x.0 == id).map(|x| x.1);
         // 2, 3 and 4 share an artist: 4 gets pushed below 5's neighbor rank.
         assert!(weight(&calm, 4) < weight(&calm, 5));
@@ -345,7 +539,12 @@ mod tests {
             skipped: vec![3],
             ..Session::default()
         };
-        let after = rank(&index(), &seeds, &HashMap::new(), &skipped, 20);
+        let after = rank(
+            &Library::new(&index(), &HashMap::new()),
+            &seeds,
+            &skipped,
+            20,
+        );
         assert!(!ids(&after).contains(&3), "skipped songs don't come back");
         assert!(
             weight(&after, 4) < weight(&calm, 4),
@@ -367,7 +566,12 @@ mod tests {
             genres: ["dance pop".to_owned()].into_iter().collect(),
             ..Seeds::default()
         };
-        let ranked = rank(&index(), &seeds, &tags, &Session::default(), 20);
+        let ranked = rank(
+            &Library::new(&index(), &tags),
+            &seeds,
+            &Session::default(),
+            20,
+        );
         let weight = |id| ranked.iter().find(|x| x.0 == id).map_or(0.0, |x| x.1);
         assert!(
             weight(6) < weight(5) * 0.5,
@@ -392,9 +596,96 @@ mod tests {
             ..Seeds::default()
         };
         // Only the genre's songs, the unanalyzed one too.
-        let ranked = rank(&index(), &seeds, &tags, &Session::default(), 10);
+        let ranked = rank(
+            &Library::new(&index(), &tags),
+            &seeds,
+            &Session::default(),
+            10,
+        );
         let mut got = ids(&ranked);
         got.sort();
         assert_eq!(got, [2, 8, 20]);
+    }
+
+    #[test]
+    fn stays_near_the_seeds_era() {
+        let tags = HashMap::new();
+        // 2 and 9 are both near 1 in sound order terms; 2 is from 2013.
+        let eras: HashMap<i64, i64> = (1..=9)
+            .map(|id| (id, if id == 2 { 2013 } else { 1987 }))
+            .collect();
+        let seeds = Seeds {
+            tracks: vec![1],
+            ..Seeds::default()
+        };
+        let index = index();
+        let plain = rank(
+            &Library::new(&index, &tags),
+            &seeds,
+            &Session::default(),
+            20,
+        );
+        let mut library = Library::new(&index, &tags);
+        library.eras = Some(&eras);
+        let dated = rank(&library, &seeds, &Session::default(), 20);
+        let weight = |r: &[(i64, f32)], id| r.iter().find(|x| x.0 == id).map_or(0.0, |x| x.1);
+        assert!(weight(&dated, 2) < weight(&plain, 2) * 0.1, "26 years off");
+        assert_eq!(
+            weight(&dated, 3),
+            weight(&plain, 3),
+            "same era, same weight"
+        );
+    }
+
+    #[test]
+    fn rare_shared_genres_count_more_than_common_ones() {
+        let mut tags: HashMap<i64, Vec<String>> =
+            (1..=9).map(|id| (id, vec!["rock".to_owned()])).collect();
+        for id in 100..200 {
+            tags.insert(id, vec!["rock".to_owned()]);
+        }
+        tags.insert(1, vec!["rock".into(), "glam metal".into()]);
+        tags.insert(6, vec!["rock".into(), "glam metal".into()]);
+        let weights = genre_weights(&tags);
+        assert!(weights["glam metal"] > weights["rock"] * 3.0);
+        let index = index();
+        let mut library = Library::new(&index, &tags);
+        library.genre_weight = Some(&weights);
+        let seeds = Seeds {
+            tracks: vec![1],
+            genres: tags[&1].iter().cloned().collect(),
+            ..Seeds::default()
+        };
+        let ranked = rank(&library, &seeds, &Session::default(), 20);
+        let weight = |id| ranked.iter().find(|x| x.0 == id).map_or(0.0, |x| x.1);
+        // 5 is closer in sound than 6, but shares only "rock".
+        assert!(weight(6) > weight(5), "{ranked:?}");
+    }
+
+    #[test]
+    fn what_the_ai_heard_moves_songs_closer() {
+        let tags = HashMap::new();
+        // By ear, 9 is the seed's twin; by measurement it's the farthest.
+        let heard: HashMap<i64, Vec<f32>> = (1..=9)
+            .map(|id| {
+                let v = if id == 1 || id == 9 {
+                    vec![1.0, 0.0]
+                } else {
+                    vec![0.0, 1.0]
+                };
+                (id, v)
+            })
+            .collect();
+        let seeds = Seeds {
+            tracks: vec![1],
+            ..Seeds::default()
+        };
+        let index = index();
+        let plain = rank(&Library::new(&index, &tags), &seeds, &Session::default(), 5);
+        assert!(!ids(&plain).contains(&9));
+        let mut library = Library::new(&index, &tags);
+        library.heard = Some(&heard);
+        let by_ear = rank(&library, &seeds, &Session::default(), 5);
+        assert!(ids(&by_ear).contains(&9), "{by_ear:?}");
     }
 }
