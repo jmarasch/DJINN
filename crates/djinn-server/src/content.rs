@@ -70,6 +70,13 @@ pub fn folder(name: &str) -> Option<PathBuf> {
     belongs_here(&dir, env!("CARGO_PKG_VERSION")).then_some(dir)
 }
 
+/// True when this build's guide or language files aren't beside it, as
+/// after an update by a DJINN too old to fetch them, or a program file
+/// copied in by hand. Debug builds read the source tree, so never.
+pub fn missing() -> bool {
+    !cfg!(debug_assertions) && (folder(GUIDE).is_none() || folder(LANG).is_none())
+}
+
 /// A debug build's folder in the source tree.
 fn source_folder(name: &str) -> Option<PathBuf> {
     let source = match name {

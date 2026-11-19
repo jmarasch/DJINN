@@ -272,11 +272,63 @@ pub fn start(state: &AppState) {
     tokio::spawn(async move {
         // Let startup settle first.
         tokio::time::sleep(Duration::from_secs(60)).await;
+        let mut content_tried: Option<std::time::Instant> = None;
         loop {
+            if content_tried.is_none_or(|at| at.elapsed() >= CONTENT_RETRY)
+                && !complete_content(&state).await
+            {
+                content_tried = Some(std::time::Instant::now());
+            }
             tick(&state).await;
             tokio::time::sleep(TICK).await;
         }
     });
+}
+
+/// How long after a failed try DJINN asks again for its guide and
+/// language files.
+const CONTENT_RETRY: Duration = Duration::from_secs(60 * 60);
+
+/// Fetches this version's guide and language files from its release when
+/// they aren't beside the program: an update made by a DJINN from before
+/// they shipped brings only the program, and so does a program file copied
+/// in by hand. Only while update checks are on, since it asks GitHub.
+/// False while they're still missing, so it's tried again later.
+async fn complete_content(state: &AppState) -> bool {
+    if !crate::content::missing() {
+        return true;
+    }
+    if settings::number(&state.store, CHECK_UPDATES, 1).await.ok() != Some(1) {
+        return false;
+    }
+    match fetch_own_content().await {
+        Ok(()) => {
+            tracing::info!("put this version's guide and language files in place");
+            true
+        }
+        Err(e) => {
+            tracing::warn!("couldn't fetch this version's guide and language files: {e}");
+            false
+        }
+    }
+}
+
+async fn fetch_own_content() -> Result<(), String> {
+    let release = this_release()
+        .await?
+        .ok_or("there's no published release for this version")?;
+    let content = release
+        .files
+        .iter()
+        .find(|(name, _, _)| name == crate::content::RELEASE_FILE)
+        .map(|(name, url, size)| Asset {
+            name: name.clone(),
+            url: url.clone(),
+            size: *size,
+        })
+        .ok_or("this version's release has no guide and language files")?;
+    let home = crate::content::home().ok_or("DJINN can't tell where it's installed")?;
+    install_content(&client()?, &content, &release.sums, &home).await
 }
 
 async fn tick(state: &AppState) {
