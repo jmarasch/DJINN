@@ -1,101 +1,166 @@
 # Your library
 
 DJINN reads MP3, FLAC, AAC/M4A, Ogg Vorbis and WAV files, with their tags and
-cover art. It never changes your music files: everything it adds (artwork,
-measurements, identified details) lives in its own folder.
+cover art. A library check only reads: everything DJINN adds (artwork,
+measurements, identified details, lyrics) lives in its own folder. The one
+place that can change your files is the [Library Editor](library-editor.md),
+and only in folders you allow.
+
+**Admin > Library** has four tabs: **Folders and Checks**, **Library
+Settings**, **Online Info** and **Genres**. Problems DJINN finds are on their
+own page, [Library problems](library-problems.md).
 
 ## Music folders
 
-Admin > **Library** lists your music folders.
+**Admin > Library > Folders and Checks** lists your music folders.
 
-- **Add a folder** with the folder picker; on Windows it can be on any drive.
+![Admin > Library > Folders and Checks](images/admin-library-folders.webp)
+
+- **Add a Folder** with the folder picker; on Windows it can be on any drive.
   DJINN reads the new folder right away.
 - **Remove a folder** (×): its songs disappear from DJINN. The files stay.
+- A folder that's unplugged or unreachable shows "Not found right now", and
+  its songs aren't treated as missing while it's away.
+- Folders listed in the settings file (`config.toml`) are marked as such and
+  can only be removed there.
 - DJINN watches your folders and picks up new music by itself. To look for
-  changes now, use **Check for changes**.
+  changes now, use **Check for Changes**. The card says when the last check
+  was, with a link to anything it found under Library problems.
 - While DJINN works through new music, the top of the Library tab shows
   each step: finding music, reading songs, sorting albums and artists, and
   then sound analysis and AI listening when they're on. Songs can be played as
   soon as they've been read; the later steps carry on in the background.
+- **Image Cache:** covers and artist photos DJINN finds are kept on this
+  computer. **Open image folder** shows them.
 
-## Artist names that are never split
+A library check can also run every night: see
+[Library problems](library-problems.md#the-nightly-check).
 
-Songs credited to "A & B" or "A feat. B" count for each artist. Band names
-that contain &, commas or "x" (like "Earth, Wind & Fire") go under Admin >
-Library > **Artist names that are never split**, one per line, so they stay
-one artist. Saving re-reads the library.
+## Library settings
 
-## Extras
+**Admin > Library > Library Settings**:
+
+- **Show all credited artists in the Artists library:** on by default. Off,
+  secondary "&" and "feat." artists stay searchable and linked from songs, but
+  only artists with their own music appear in Artists.
+- **Names that should never be split, one per line:** songs credited to
+  "A & B" or "A feat. B" count for each artist. Band names that contain &,
+  commas or "x" (like "Earth, Wind & Fire") go here so they stay one artist.
+  Saving re-reads the library.
+- **Use the original release year** and **Keep albums with the same name
+  apart:** see below.
+- **A play counts once this much of the song is heard:** 50% by default. For
+  the play counts in the library lists. 0 counts every play.
+- **Songs and artists a genre page loads at a time** and **Hours before a
+  genre's order is shuffled again:** see [Genres](#genres).
+- **How often Discover's shelves change:** the Discover tab picks which
+  favorites, albums and artists to show; refreshing shows the same ones until
+  this long has passed.
+
+![Admin > Library > Library Settings](images/admin-library-settings.webp)
+
+## Online info and extras
 
 A library check reads your music folders and the songs' tags, and that's all
-DJINN needs to play them. Everything else is an extra on Admin > **Library**,
-each off until you switch it on, so a modest computer isn't kept busy with
-work you don't want.
+DJINN needs to play them. Everything on **Admin > Library > Online Info** is
+an extra, each off until you switch it on (lyrics lookups excepted), so a
+modest computer isn't kept busy with work you don't want, and nothing is sent
+online unless you ask.
+
+![Admin > Library > Online Info](images/admin-library-online.webp)
 
 ### Sound analysis
 
 Listens to every song once, on the DJINN computer, for "more like this",
-similar artists, radio by sound, smart play, and even volume for songs without
-ReplayGain tags. It's the heaviest job DJINN does: on a modest computer about
-a song a second, using up to half the processor, so a big library takes hours
-the first time. After that, only new songs.
+similar artists, radio by sound, smart play, the mood dial, and even volume
+for songs without ReplayGain tags. It also takes a short fingerprint of each
+song, used to find [duplicates](library-problems.md#possible-duplicates).
+It's the heaviest job DJINN does: on a modest computer about a song a second,
+using up to half the processor, so a big library takes hours the first time.
+After that, only new songs. The card shows how many songs are done.
 
 ### When heavy work runs
 
-Sound analysis and AI listening can run **any time**, **only while no music is
-playing**, or **only between two hours** you pick (this computer's time; from
-10 PM until 6 AM runs overnight). They pause between songs, so they stop
-within seconds when music starts or the hours end, and carry on where they
-left off. The progress at the top of the Library tab says when they're
-waiting and why.
+Sound analysis, AI listening and AI lyrics can run **Any time**, **Only while
+no music is playing**, or **Only from** one hour **until** another (this
+computer's time; from 22:00 until 06:00 runs overnight). They pause between
+songs, so they stop within seconds when music starts or the hours end, and
+carry on where they left off. The progress at the top of the Library tab says
+when they're waiting and why. **End Party** quiets the house so they can run.
 
 ### Artist photos and bios
 
-From Deezer, Wikimedia Commons (with credit) and Wikipedia: sends artist
-names to them after a library check that finds new artists. Pictures in your
-own folders always win.
+**Artist Photos and Bios:** from Deezer, Wikimedia Commons (with credit) and
+Wikipedia. Sends artist names to them after a library check that finds new
+artists. Pictures in your own folders always win.
+
+![An artist's page, with their photo and albums](images/artist-page.webp)
 
 **More pictures** adds a slideshow to artist pages, and to the TV page while
-their songs play: up to eight photos from the artist's Wikimedia Commons
-category, each with its photographer and license. It needs MusicBrainz too
-(below), which is how DJINN finds the right artist; switching it on rechecks
-your artists once. Each artist's pictures are fetched the first time they're
-shown, so the first visit takes a few seconds. Not every artist has pictures
-on Commons; those pages look as before.
+their songs play, each picture with its credit. It needs MusicBrainz (below)
+to find the right artist. Each artist's pictures are fetched the first time
+they're shown, so the first visit takes a few seconds.
+
+- **Artist Picture Sources:** choose where pictures come from: Deezer,
+  Wikipedia (bios), Wikimedia Commons, fanart.tv (needs your free API key),
+  TheAudioDB (`123` is the free key), and Unsplash (needs an access key; its
+  pictures load straight from Unsplash, so **Allow remote image display**
+  must be on).
+- **Picture Download Limits:** pictures per artist, MB per artist, the art
+  cache's maximum size, the largest image edge, and the smallest picture worth
+  taking. Pictures are resized before they're kept.
+- **On an artist's page**, admins can **Manage Pictures**: put them in
+  slideshow order, remove one, **Find Automatic Pictures Again**, search
+  Unsplash, or **Add a Picture** of your own (a file you have the rights to,
+  with its photo credit).
 
 ### MusicBrainz
 
 Album covers from the Cover Art Archive, album and artist genres, and exact
 artist matches (which also finds better photos and bios). MusicBrainz needs no
 account, but asks apps to say who to contact if something goes wrong: fill in
-an email address or website, then switch it on.
+an email address or website under **Contact**, then switch it on. DJINN asks
+MusicBrainz at most once a second, as it requests.
 
-With either lookup on, **Look up new artists** does it now and **Recheck all**
-redoes every artist. Everything found is kept in DJINN's own folder (**Open
-image folder** shows it).
+With either lookup on, **Look Up New Artists** does it now and **Recheck All**
+redoes every artist. Automatic lookups after a library check only cover
+artists and albums not looked up yet.
 
 ### Identify songs by sound
 
 Finds the album, year and genres for songs whose tags are missing them, by
 how they sound (AcoustID, then MusicBrainz). It only runs when you start it.
 
-1. Fill in the MusicBrainz contact, and an AcoustID key: free for
+1. Fill in the MusicBrainz contact, and an **AcoustID key**: free for
    non-commercial use, register an application at
    [acoustid.org/new-application](https://acoustid.org/new-application) and
    paste its key.
-2. Tap **Identify songs**. DJINN listens for matches in the background.
+2. Tap **Identify Songs**. DJINN listens for matches in the background.
 3. Review what it found. Each match shows what it would fill in and how sure
-   it is. Tap **Use** to keep it or **Skip** to leave the song as it is.
+   it is. Tap **Use** to keep it, or **Use All**.
 
 A match must agree with the title and artist already in the file. What you
-keep is stored in DJINN's database; your files aren't changed.
+keep is stored in DJINN's database; your files aren't changed. Only a
+fingerprint of each song (not the audio) goes to AcoustID.
+
+### Spotify and YouTube
+
+- **Spotify Account for Album Lookups** lets the Library Editor's album
+  layout look albums up on Spotify too. See
+  [Library Editor](library-editor.md#album-layout).
+- **YouTube Playlist Links** lets people import YouTube playlists. See
+  [Playlists and radio](playlists-and-radio.md#turning-on-youtube-links).
+
+### Lyrics
+
+The **Lyrics** card is here too. See [Lyrics](lyrics.md).
 
 ## Album years
 
 A reissue's files often carry the reissue's date. DJINN uses the original
 release date when the tags have one, and an album shows the year most of its
 songs give. To use the file's own date instead, turn off **Use the original
-release year** in Admin > Library; that re-reads the library.
+release year** in **Admin > Library > Library Settings**; that re-reads the library.
 
 ## Albums with the same name
 
@@ -105,7 +170,7 @@ different "track 1"s), DJINN shows them as separate albums, each with its
 folder's name. Discs of one album stay together, whether in folders like `CD1`
 or with their own disc numbers, and so does one song in the wrong folder. Likes
 and playlists stay with the biggest part. **Keep albums with the same name
-apart** in Admin > Library turns this off.
+apart** in **Admin > Library > Library Settings** turns this off.
 
 ## Correct tags
 
@@ -114,10 +179,12 @@ the app (admins only). DJINN keeps the corrections in its own database and
 uses them in place of the file's tags, even after the file is read again;
 the files themselves aren't changed.
 
-- **One song:** open its menu (⋮) and tap **Edit tags**.
-- **A whole album:** on the album's page, tap **Edit album** to change the
+![An album's page](images/album-page.webp)
+
+- **One song:** open its menu (⋯) and tap **Edit Tags**.
+- **A whole album:** on the album's page, tap **Edit Album** to change the
   album name, album artist, year or genre for all its songs at once.
-- **An artist:** on the artist's page, tap **Edit artist** to fix their
+- **An artist:** on the artist's page, tap **Edit Artist** to fix their
   name on every song and album they're on (their photo and bio stay), or
   set the genres of the songs they lead.
 - Genres are separated by commas. Corrected genres take the place of the
@@ -134,101 +201,42 @@ The Library's **Genres** tab lists every genre with its number of songs, or
 shows them as a cloud, where bigger means more songs and lines join related
 genres.
 
+![The genre cloud](images/genre-cloud.webp)
+
 The cloud opens on your 100 biggest genres. Tap one to center on it, with what's
 near it and what's near those; tap it again to open its page, or tap another to
 move there. That way every genre can be reached, however small. **Home** goes
 back to the top from anywhere, and your back button goes back a step. Drag to
 move around, and pinch, scroll or use the buttons to zoom. You can choose how
-many genres the top shows, and how many lines to draw.
+many genres the top shows (**Fewer**, **Normal**, **More**), and how many
+**Lines** to draw.
 
 Each genre's page shows related genres, a row of its artists, a radio button,
 and all its songs, loading more as you scroll. They come in a shuffled order
 that favors what's been played, by anyone, on the jukebox, GO or a phone app.
-The same order stays for a while, so you can come back to it. **Admin > Library**
-sets how many load at a time and how many hours until it's shuffled again.
+The same order stays for a while, so you can come back to it. **Admin > Library >
+Library Settings** sets how many load at a time (100 by default) and how many
+hours until it's shuffled again (24 by default; 0 shuffles on every visit).
 
+### Genre containers
 
-## Importing lyrics from a zip
+A big library can have hundreds of genres, many of them close cousins
+("black metal", "death metal", "speed metal"). **Genre containers** (off by
+default, **Admin > Library > Genres**) group similar genres under one name,
+so they all show as "Metal", without changing anything in your library.
 
-Admin > Library > Lyrics can load lyrics from a zip of files. DJINN keeps them in its database and never writes to your music folders.
+![Admin > Library > Genres, with genre containers](images/admin-library-genres.webp)
 
-**The zip.** Lay the files out like your music folders, the same way Export .lrc files does: under the name of the library folder, at the song's place, named like the song. For example, `Music/Artist/Album/01 Song.lrc` for `/srv/music/Artist/Album/01 Song.flac`. Use `.lrc` or `.txt`, as UTF-8 text.
+1. Tap **Auto-group**. DJINN works out how genres relate: songs they share,
+   and how alike their songs sound (so it works better after
+   [sound analysis](your-library.md#sound-analysis)).
+2. Slide **How many containers** toward **Broader** for fewer, bigger
+   containers, or **Closer** for more, smaller ones.
+3. Rename a container, drag genres between containers (or tap one and
+   choose **Move Here**), or make your own with **Make It**. Genres you
+   place by hand stay put when you Auto-group again.
+4. Tick **Show genres in their containers**.
 
-- A `.lrc` file may start with the header lines `[ar:Artist]`, `[ti:Title]`, `[al:Album]` and `[length:mm:ss]`. DJINN matches the song by artist and title first, using album and length when several songs fit. When those lines are missing, and for every `.txt`, it matches by the path.
-- Timed lines (`[mm:ss.xx]words`) make timed lyrics; anything else is plain lyrics. A file holding only `[Instrumental]` is ignored.
-- A zip may hold up to 250 MB and 150,000 files, and each file up to 200 KB. For a bigger library, send several zips: the import is safe to repeat and any order works.
-
-**What it does.** It only fills songs that have no lyrics. Lyrics from a `.lrc` beside the song, from the song's tags or from LRCLIB always win. By default it skips songs LRCLIB hasn't been asked about yet (while the LRCLIB lookup is on), so LRCLIB gets the first go; a tick box imports them anyway. Songs that already hold lyrics from an earlier import keep them unless you tick "Replace lyrics from an earlier import".
-
-**Replacing other lyrics.** Normally an import only fills songs that have none. Tick "Let better imported lyrics replace lyrics from files, tags and LRCLIB" and an import also replaces those when it ranks better: timed over plain, or a person's words timed by an AI over plain words. Nothing replaces a person's timed lyrics with equal or worse ones, and lyrics an AI made by listening never replace anyone's. The song's file isn't read over the replacement until a recheck. The note under lyrics that an AI worked on can be turned off in the same panel.
-
-**Safety.** Files are read only as text. A file that looks like code or markup (SQL, script or HTML tags, shell commands, binary data) is thrown out and listed as a warning, and program or data files in the zip (`.exe`, `.sql`, `.zip` and so on) are never read. Admin Home reminds you until you clear the report. The rest of the zip still imports.
-
-**Lyrics an AI worked on.** A file whose header says so is stored as such, with the model, the zip it came from and when. Two kinds, both listed under Problems as **Lyrics an AI made** (with how well the timing matched, for the second):
-
-- `[by:... (AI-generated; model=...)]`: an AI wrote the words by listening, so they are guesses. They show with a note, any other source replaces them, LRCLIB is still asked about those songs, and an import of ordinary lyrics replaces them without asking, even when the AI's are timed.
-- `[by:... (AI-synced; model=...; match=84%)]`: a person's words that an AI timed. Timing beats plain words, so these replace plain imported lyrics; a person's own timed lyrics beat them, and so does anything beside the song. The notice line "(AI-generated lyrics)" at the top of such a file is not shown as a lyric. A title and credits line that lyrics websites put first (for example "Song (Guest) - Artist") is dropped when it names the artist and has a dash.
-
-Timed lyrics are always preferred: if a song has both timed and plain imported lyrics, the timed ones are kept, and a later zip with timed lyrics takes the place of plain ones without asking.
-
-When it finishes, the panel shows what was saved and skipped, and the full report can be downloaded. **Remove all imported lyrics** in Admin > System takes back everything that came from zips and leaves other lyrics alone.
-
-## Reporting bad lyrics
-
-On the Playing tab and in DJINN GO, **Report these lyrics** under a song's lyrics lets anyone say they are another song's, out of time, garbled, or missing parts. Reports show in Admin > Library > Problems as **Lyrics listeners reported**, with a button to look at the lyrics. **Remove and block** takes the lyrics away and remembers which source they came from (a `.lrc` file, the song's tags, LRCLIB or an import): that source's same text is not used for the song again. If the source gives different text later, it is used. **Done** clears the reports and keeps the lyrics. **Allow them again** in Admin > Library > Lyrics lifts every block.
-
-## Problems and duplicates
-
-Admin > Library > **Problems** lists what a library check couldn't add or found broken (missing folders, unreadable files, songs that won't play, listeners' reports) and gaps in the tags. One check is about copies:
-
-- **Albums filed twice** are albums by one artist that hold almost the same songs (at least 85% of the larger one's song titles, and nearly the same number of songs): a copy in another folder, or the same album under a slightly different name such as "(Remastered)". A deluxe edition with extra songs isn't listed.
-- **A song on several albums is fine.** A track on both its album and a greatest hits is not a problem. The **Possible duplicates** card lists copies of a song only when they are in the same album (or have no album); tick **Also list copies in different albums** to see the rest.
-
-Other checks on the Problems page (each can be hidden once you know about it):
-
-- **The same file twice in one album**: same size, length and title.
-- **Impossible numbers**: a track or disc number of 0 or less, or a length of 0.
-- **Very short or very long songs**: under 10 seconds or over 3 hours.
-- **Low-quality songs**: under 96 kbps.
-- **Titles with leftovers**: a track number and separator in front ("01 - "), "(Official Video)", a web address, spaces around, all capitals.
-- **File names that don't match the title**: the file's name and folders don't contain the title, ignoring spaces, dashes, colons, quotes and other punctuation.
-- **Artists spelled two ways**: "The Beatles" and "Beatles", "AC/DC" and "ACDC".
-- **Albums split across artist names**: an album's folder filed under two artists.
-- **Albums with different covers inside**.
-- **Albums with missing or repeated track numbers**.
-- **Songs with no lyrics**, and **songs with no loudness data** (only once other songs have it).
-- **Songs that went missing lately**: gone from the library in the last 30 days and not back under another path (a song you moved isn't listed).
-
-Not checked yet: covers that are tiny, huge or not square (DJINN doesn't measure pictures yet), and silent or very quiet files.
-
-DJINN never deletes anything: remove the copy you don't want from your music folders, then check for changes.
-
-### MP3 lengths
-
-Many MP3s have no length header, so a tag reader can only guess their length, and it guesses wrong (often several times too long) for variable bit rate files that open with a quiet stretch. DJINN looks at such files: if the bit rate is the same wherever it samples, the guess stands, otherwise it counts every frame, which is exact. The figure is kept in DJINN's database; your files are never changed. The first library check after an update re-reads every file once to correct existing songs.
-
-## Library editor
-
-Admin > **Library editor** is where library problems will be fixed: tags, names, covers and lengths, in DJINN's database or, when you choose, in the files themselves. It sits behind the lock in Admin > Protected areas (see Accounts and roles), so opening it asks for your password, and a code too at the strictest level. It opens in a window of its own, full width, and asks every time the window opens. It locks again when you close the window, press **Lock and close**, or leave it ten minutes.
-
-**Which folders can be changed.** Every library folder is **view only** until you allow changes in it, in the same page. That lets one folder (say, where new music lands to be tidied) be edited while another, which someone else looks after, can only be watched: you can always see what is going on in a view-only folder, in the compare and on the Problems page, but nothing in it can be changed. Allowing a folder tests that DJINN can write there (it makes and removes a tiny file), so a read-only mount or a share without rights is reported straight away. Choosing is a protected action and is recorded in the audit trail.
-
-The first piece is a **compare**. It reads every song's tags from its file and sets them next to what DJINN's database holds, for title, artist, album, album artist, track and disc number, year and genre. Each difference says why:
-
-- **Corrected in DJINN**: you changed it with Edit tags or Edit album; the file still has the old value.
-- **Filled in by identification**: the file had nothing there and an applied identification filled it in.
-- **Other**: the file changed since DJINN read it (a library check re-reads changed files), or the two readings differ.
-
-The compare only reads; nothing in your music folders or the database changes. About half a minute for 40,000 songs on a local disk.
-
-## Lyrics listening (local AI)
-
-Admin > AI > **Lyrics listening** lets a local AI make lyrics for songs that have none, and time lyrics that are plain. It uses faster-whisper (and Demucs to isolate the vocals, if you tick that) on your own computer: the models are downloaded once, and nothing is sent anywhere but to your own DJINN.
-
-1. **Install the listener.** DJINN sets up a private Python environment for it and downloads the model you chose (tiny and base suit a small processor, small a decent one, medium or large-v3-turbo a graphics card; an NVIDIA card is used when found). The PC install disc already has Python and ffmpeg; on another system install `python3`, `python3-venv` and `ffmpeg` first. The install needs the internet once, for the packages and the model.
-2. **Let it work.** It takes one song at a time, and asks DJINN before each, so it only works when background work is allowed (the hours or "no music playing" rule in Library) and stops between songs when it isn't. It starts with DJINN if you leave that ticked.
-3. **What it makes.** Lyrics for songs with none (once LRCLIB has been asked), marked as AI-made, and, if you tick it, timing for plain lyrics, marked as AI-timed with how well they matched. Both show a note, are listed under Library > Problems as **Lyrics an AI made**, and rank below every other source.
-
-Other computers can help: make a key under **Other computers**, copy the `ai-listener` folder from DJINN's data folder to the computer, and run `python worker.py --server http://this-computer:8066 --key KEY` in it. Keys only work from your home network.
-
-Nodes can help too. In Admin > **Nodes**, open a node's **AI lyrics** and tick **Help with AI lyrics**. The node gets everything it needs from this server, never the internet: this server fetches the packages for the node's Python once (from the keepsake when it has one) and hands over its own copy of the model. So install the listener here first. The model is suggested from the node's memory and processor, and one size smaller if its speed test or its real songs show it is slow; you can pick another. A node only works while it plays nothing and its screen shows no visuals. It pauses the moment music or visuals start, so playback is never affected, and carries on when they stop. When this server has vocal isolation installed, **Isolate the vocals here for nodes that help** (on by default) has this server separate the voice from the music, the heavy part, and send the node only the voice, a few megabytes, which the node deletes when done. Without it, nodes listen to whole songs.
+While it's on, the genre list, the cloud and genre pages show containers,
+and a song's genres show its container first, in pink. Search by description
+still reads the real genres. **Remove Every Container** starts over.

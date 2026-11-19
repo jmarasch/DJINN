@@ -46,6 +46,12 @@ mkdir -p "$work/iso/djinn"
 cp "$binary" "$work/iso/djinn/djinn"
 cp "$here/../common/install-files.sh" "$here/../common/config.toml" "$here/../common/djinn.service" \
     "$here/../common/kiosk.sh" "$here/late.sh" "$work/iso/djinn/"
+# The user guide and language files (packaging/content.sh), beside the
+# program; late.sh hands them to install-files.sh with it.
+content=${DJINN_CONTENT:-$here/../../../target/content}
+for part in guide lang; do
+    if [ -f "$content/$part/VERSION" ]; then cp -r "$content/$part" "$work/iso/djinn/$part"; fi
+done
 if [ -n "${DJINN_KEEPSAKE:-}" ]; then
     echo "Adding the AI keepsake from $DJINN_KEEPSAKE"
     cp -r "$DJINN_KEEPSAKE" "$work/iso/djinn/keep"

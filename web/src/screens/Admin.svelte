@@ -33,6 +33,7 @@
   import { adminGroups, adminSubtabs, adminTabLabel, type AdminTab } from '../lib/adminTabs'
   import { adminEntries, entryLabel, searchAdmin, type AdminEntry } from '../lib/adminSearch'
   import AdminHome from '../lib/AdminHome.svelte'
+  import GuidePanel from '../lib/GuidePanel.svelte'
   import StatsPanel from '../lib/StatsPanel.svelte'
   import SearchesWishes from '../lib/SearchesWishes.svelte'
   import { tick } from 'svelte'
@@ -317,6 +318,8 @@
 {#snippet sectionContent(id: AdminTab)}
 {#if id === 'home'}
   <AdminHome />
+{:else if id === 'guide'}
+  <GuidePanel />
 {:else if id === 'stats'}
   <StatsPanel />
   <SearchesWishes />

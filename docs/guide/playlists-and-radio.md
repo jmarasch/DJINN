@@ -5,7 +5,8 @@ app, on DJINN GO and in the Android app. Guests don't have playlists.
 
 Requests always play first. When the queue runs dry, DJINN keeps the music
 going from the **auto mix**: a playlist, wild play, or radio. Admins choose
-which, and a role with **Choose what the party plays** can start a playlist too. The Playing tab shows what the auto mix is playing from, and the
+which, and a role with **Choose what the party plays** can start a playlist
+too. The Playing tab shows what the auto mix is playing from, and the
 Playlists tab has a **Stop** button to turn it off.
 
 ## Wild play
@@ -19,6 +20,8 @@ toward what the party likes.
 Make one per mood or kind of party ("Chill", "Dance", "Dinner"). Tap a song in
 a playlist to request it, within the usual request limits.
 
+![The Playlists page](images/playlists.webp)
+
 ### Who can see a playlist
 
 A playlist is private to whoever made it, even from admins, until they share
@@ -26,9 +29,11 @@ it. Open it and choose under **Sharing**: everyone on this server, or particular
 people. Sharing needs the **Share playlists** permission on the account's role.
 People you share with can see and play it, but only you can change it.
 
+![A playlist, with its songs and sharing](images/playlist-view.webp)
+
 1. On the Playlists tab, type a name and tap **Create**.
 2. Add music from the Library: open a song, album or artist and tap the
-   playlist button. A song's ⋯ menu also has **Add to playlist**.
+   playlist button. A song's ⋯ menu also has **Add to Playlist**.
 3. Open the playlist and tap **Play**.
 
 Adding a whole album or artist keeps it up to date: music by them that you add
@@ -41,12 +46,15 @@ In a playlist you can:
 - Tap a song in the Songs list to play the playlist from there.
 - Reorder or remove what's in it, rename it (tap its name), or delete it.
 
-A song never repeats too soon: Admin > Rules > "Songs before a shuffled
-playlist song can repeat" (25 by default) sets how many other songs play
+A song never repeats too soon: **Admin > Party and Queue** > "Songs before a
+shuffled playlist song can repeat" (25 by default) sets how many other songs play
 first. Songs that played through requests count too.
 
-**From a search:** search by description (like "80s rock") and tap **Save as
-playlist** to keep the matches. See [Search and AI](search-and-ai.md).
+**From a search:** under the songs a search finds (by name or by description,
+like "80s rock"), **Save as playlist** keeps them as a new playlist, and
+**Play as the auto mix** (admins) saves them and starts playing them right
+away. DJINN GO and the Android app have **Play all** and **Save as playlist**.
+See [Search and AI](search-and-ai.md).
 
 ## Importing playlists
 
@@ -78,7 +86,8 @@ names, and DJINN doesn't send those to YouTube to find out.
 An admin needs a free YouTube Data API key from
 [Google Cloud](https://console.cloud.google.com/apis/library/youtube.googleapis.com).
 Create a project, enable **YouTube Data API v3**, and create an API key. Then go
-to **Admin** > **Library** > **YouTube playlist links** and paste it in.
+to **Admin > Library > Online Info** > **YouTube Playlist Links** and paste
+it in.
 The key is for the whole server, so links then work for everyone, on GO and the
 Android app too.
 
@@ -118,16 +127,21 @@ party: toward songs that play through, away from ones that get skipped.
 
 Start it from:
 
-- **A song:** its ⋯ menu > **Start radio from this song**.
+- **A song:** its ⋯ menu > **Start Radio from This Song**.
 - **An artist:** the **Radio** button on their page.
 - **A genre:** the radio button on the genre's page.
 
 Radio by sound needs [sound analysis](your-library.md#sound-analysis)
-(Admin > Library). Without it, radio plays the same artists and genres.
+(**Admin > Library > Online Info**). Without it, radio plays the same artists and genres.
 
 ## More like this
 
-A song's ⋯ menu also has **More like this**, a list of songs that sound alike,
+A song's ⋯ menu also has **More Like This**, a list of songs that sound alike,
 and shows the song's genres. Artist pages list similar artists. Both need
 [sound analysis](your-library.md#sound-analysis); similar artists also use
 genres from MusicBrainz.
+
+## Genres
+
+Every genre has its own page with a radio button, and the genre cloud shows
+how they relate. See [Your library](your-library.md#genres).

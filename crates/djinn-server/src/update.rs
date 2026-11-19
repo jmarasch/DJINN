@@ -71,6 +71,10 @@ pub struct Release {
     published_at: Option<String>,
     #[serde(skip)]
     asset: Option<Asset>,
+    /// The guide and language files for this version
+    /// ([`crate::content::RELEASE_FILE`]); older releases have none.
+    #[serde(skip)]
+    content: Option<Asset>,
     #[serde(skip)]
     sums: Option<(String, String)>,
 }
@@ -509,17 +513,20 @@ fn from_github(release: GitHubRelease, wanted: &str) -> Release {
                 sig.browser_download_url.clone(),
             )
         });
-    let asset = find(wanted).map(|a| Asset {
+    let to_asset = |a: &GitHubAsset| Asset {
         name: a.name.clone(),
         url: a.browser_download_url.clone(),
         size: a.size,
-    });
+    };
+    let asset = find(wanted).map(to_asset);
+    let content = find(crate::content::RELEASE_FILE).map(to_asset);
     Release {
         version: release.tag_name.trim_start_matches('v').to_owned(),
         url: release.html_url,
         notes: release_notes(release.body.as_deref().unwrap_or_default()),
         published_at: release.published_at,
         asset,
+        content,
         sums,
     }
 }
@@ -687,10 +694,64 @@ async fn install(state: &AppState, release: &Release) -> Result<(), String> {
             .update(|s| s.progress = Some((written, asset.size)));
     }
     out.finish(asset.size, &expected, "the download").await?;
+    if let Some(content) = &release.content {
+        if let Err(e) =
+            install_content(&client, content, &String::from_utf8_lossy(&sums), dir).await
+        {
+            let _ = std::fs::remove_file(&partial);
+            return Err(e);
+        }
+    }
     replace(&exe, &partial).map_err(|e| {
         let _ = std::fs::remove_file(&partial);
         format!("cannot replace {}: {e}", exe.display())
     })
+}
+
+/// Downloads a release's guide and language files, checks them against its
+/// signed checksums, and puts them beside the program (see
+/// [`crate::content`]).
+async fn install_content(
+    client: &reqwest::Client,
+    content: &Asset,
+    sums: &str,
+    dir: &Path,
+) -> Result<(), String> {
+    let expected = expected_sum(sums, &content.name)
+        .ok_or("the release's checksums don't list its guide and language files")?;
+    let home = crate::content::home().ok_or("DJINN can't tell where it's installed")?;
+    std::fs::create_dir_all(&home)
+        .map_err(|e| format!("cannot write to {}: {e}", home.display()))?;
+    let partial = dir.join(".djinn-content.zip");
+    let mut out = CheckedFile::create(&partial)
+        .await
+        .map_err(|e| format!("cannot write to {}: {e}", dir.display()))?;
+    let response = client
+        .get(&content.url)
+        .timeout(Duration::from_secs(600))
+        .send()
+        .await
+        .and_then(|r| r.error_for_status())
+        .map_err(|e| format!("download failed: {e}"))?;
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| format!("download broke off: {e}"))?;
+        out.write(&chunk).await?;
+    }
+    out.finish(content.size, &expected, "the guide and language files")
+        .await?;
+    let zip = partial.clone();
+    let unpacked = tokio::task::spawn_blocking(move || crate::content::unpack(&zip, &home)).await;
+    let _ = std::fs::remove_file(&partial);
+    match unpacked {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(e)) => Err(format!(
+            "couldn't put the guide and language files in place: {e}"
+        )),
+        Err(e) => Err(format!(
+            "couldn't put the guide and language files in place: {e}"
+        )),
+    }
 }
 
 /// Puts `new` in place of the running program at `exe`.

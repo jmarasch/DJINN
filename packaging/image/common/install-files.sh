@@ -9,15 +9,26 @@
 # It only writes files, so a Pi's file system can be prepared from a PC
 # without running anything built for the Pi.
 #
-#   install-files.sh ROOT DJINN_BINARY
+# The user guide and language files (guide/ and lang/, from
+# packaging/content.sh) go beside the program when CONTENT holds them; by
+# default it's the folder the binary is in.
+#
+#   install-files.sh ROOT DJINN_BINARY [CONTENT]
 set -eu
 
 root=${1:?root folder}
 binary=${2:?djinn binary}
+content=${3:-$(dirname "$binary")}
 here=$(cd "$(dirname "$0")" && pwd)
 
 install -d -m 755 "$root/opt/djinn" "$root/etc/djinn" "$root/srv/music" "$root/etc/systemd/system/multi-user.target.wants"
 install -m 755 "$binary" "$root/opt/djinn/djinn"
+for part in guide lang; do
+    if [ -f "$content/$part/VERSION" ]; then
+        rm -rf "$root/opt/djinn/$part"
+        cp -r "$content/$part" "$root/opt/djinn/$part"
+    fi
+done
 install -m 644 "$here/config.toml" "$root/etc/djinn/config.toml"
 install -m 644 "$here/djinn.service" "$root/etc/systemd/system/djinn.service"
 ln -sf /etc/systemd/system/djinn.service "$root/etc/systemd/system/multi-user.target.wants/djinn.service"

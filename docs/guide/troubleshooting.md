@@ -19,7 +19,7 @@
   they ask too.
 - **The address:** the join QR code and the address under it point at this
   computer. They follow it when the router gives it a new address (see
-  below). Admin > System > **Status** lists every address phones can use.
+  below). **Admin > System > Status** lists every address phones can use.
 
 ## The computer's address changed
 
@@ -42,7 +42,7 @@ notices within about 10 seconds and carries on:
   that knew the old address can find it.
 
 Web GO in a browser and saved bookmarks still have the old address: open the
-new one from Admin > System > **Status**, or use the name instead (below).
+new one from **Admin > System > Status**, or use the name instead (below).
 
 ### Keep the same address
 
@@ -53,7 +53,7 @@ The most reliable fix is an address that never changes:
   from the list of devices and keep its current address. Nothing changes on
   the computer itself. Do the same for each node.
 - **Use its name.** On most networks the computer also answers at
-  `http://<name>.local:8066`, listed last under Admin > System > **Status**
+  `http://<name>.local:8066`, listed last under **Admin > System > Status**
   (`http://djinn.local:8066` on the install discs). Phones and laptops can bookmark
   that instead of the numbers. Some Android phones and some routers don't
   resolve these names; the reserved address always works.
@@ -66,35 +66,44 @@ The most reliable fix is an address that never changes:
 ## No sound
 
 - The Playing tab shows "Audio output problem" or "No audio output yet" when
-  DJINN can't play. Check Admin > Audio > **Outputs**: is at least one output
-  **On**?
+  DJINN can't play. Check **Admin > Audio > Outputs**: is at least one output
+  **On**? An output marked **Not connected** says why.
 - A Bluetooth speaker has to be paired and connected to the computer before
-  it shows up under **Add an output**.
+  it shows up under **Add an Output**.
 - Check the computer's own volume and the volume on the Playing tab.
 - Casting? Network devices run a few seconds behind; see
-  [Casting, Play here and the TV page](casting-and-tv.md).
+  [Casting and Play here](casting-and-tv.md).
+- A node with no sound? Open its **Diagnostics** from **Admin > Nodes >
+  Manage**, and try **Restart Node**, then **Restart Computer**. See
+  [Nodes](nodes.md).
 
 ## Speakers are out of time
 
 Raise the **Delay** on the outputs that play early (usually the wired ones,
-since Bluetooth lags) until they line up. See
-[Speakers and sound](speakers-and-sound.md).
+since Bluetooth lags) until they line up. With rooms and nodes, use the
+room's **Timing** window, which plays a ticking sound to line them up by ear.
+See [Speakers and sound](speakers-and-sound.md) and
+[Rooms](rooms.md#timing).
 
 ## Songs are missing
 
-- Is their folder listed under Admin > Library? A folder marked "Not found
-  right now" is unplugged or offline.
-- Tap **Check for changes**.
+- Is their folder listed under **Admin > Library > Folders and Checks**? A
+  folder marked "Not found right now" is unplugged or offline.
+- Tap **Check for Changes**.
 - DJINN reads MP3, FLAC, AAC/M4A, Ogg Vorbis and WAV. Other formats are
-  skipped.
+  listed under **Admin > Library Problems** as "Formats DJINN doesn't play",
+  along with files it couldn't open or read. See
+  [Library problems](library-problems.md).
 - One artist split into two, or two artists merged? See
-  [Artist names that are never split](your-library.md#artist-names-that-are-never-split).
+  [Library settings](your-library.md#library-settings).
 
 ## The computer is busy after adding a lot of music
 
 Some background work is normal after a big library change: DJINN reads each
 new song, and (when they're switched on) analyzes how it sounds and lets the
-AI listen. Admin > Library shows each step and how far along it is.
+AI listen. The top of the Library tab shows each step and how far along it
+is. To keep heavy work out of party hours, see
+[When heavy work runs](your-library.md#when-heavy-work-runs).
 
 On Windows, **Windows Security** also checks every song the first time
 DJINN reads it, and can use more of the processor than DJINN itself during
@@ -125,13 +134,16 @@ Your choices:
 
 ## The admin password is lost
 
-Another admin can reset it under Admin > Users > **Reset password**.
+Another admin can reset it under **Admin > Users and Roles > Reset
+password**. If no admin can sign in, see
+[the host recovery command](accounts-and-roles.md#locked-accounts-and-the-host-recovery-command).
 
 ## Still stuck
 
-Admin > System > **Log** shows what DJINN has been doing; pick **Errors** to
-see what went wrong. Admin > About > **Report a problem** opens an issue on
-GitHub; attach the log from **Download the log**, or choose an earlier day
+**Admin > Server Log** shows what DJINN has been doing; pick **Errors** to
+see what went wrong. **Report a problem** in the credits at the bottom of
+**Admin > System** opens an issue on GitHub; attach the log from **Download
+the Log**, or choose an earlier day
 under **Daily logs**. Dated files such as `djinn-2026-11-01.log` are next
 to `djinn.exe` in `%LOCALAPPDATA%\Programs\DJINN` on Windows, and in
 `~/.config/djinn/` on Linux.

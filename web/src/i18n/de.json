@@ -631,6 +631,7 @@
   "admin.group.system": "System",
   "admin.group.activity": "Aktivität und Protokolle",
   "admin.menu.home": "Übersicht",
+  "admin.menu.guide": "Benutzerhandbuch",
   "admin.menu.library": "Bibliothek",
   "admin.menu.editor": "Bibliothekseditor",
   "admin.menu.rules": "Party und Warteschlange",
@@ -3509,5 +3510,10 @@
   "ed.auto_none": "Kein genauer Treffer bei Deezer. Nutze Albuminfos suchen..., um das Album selbst zu wählen.",
   "ed.dismiss": "Ausblenden",
   "ed.preview_wait": "Es wird berechnet, wohin sie kommen...",
-  "toast.dismiss": "Zum Schließen klicken"
+  "toast.dismiss": "Zum Schließen klicken",
+  "guide.contents": "Inhalt",
+  "guide.not_installed": "Das Benutzerhandbuch ist bei dieser Kopie von DJINN nicht installiert. Es kommt mit den Installationsprogrammen und mit Updates, in einem Ordner guide neben dem Programm.",
+  "guide.online": "Auf GitHub lesen",
+  "guide.load_failed": "Diese Seite des Handbuchs konnte nicht geladen werden",
+  "guide.english_only": "Das Handbuch gibt es vorerst nur auf Englisch."
 }

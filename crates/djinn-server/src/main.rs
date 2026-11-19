@@ -21,6 +21,7 @@ mod cast_api;
 mod client;
 mod compare;
 mod config;
+mod content;
 mod convert;
 mod cpu;
 mod desktop;

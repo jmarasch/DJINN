@@ -37,7 +37,7 @@ async fn get_language(State(state): State<AppState>) -> ApiResult<Json<Language>
 
 /// A language code as the apps name their translation files: two or three
 /// lowercase letters, maybe a region ("pt-br").
-fn looks_like_a_language(code: &str) -> bool {
+pub(crate) fn looks_like_a_language(code: &str) -> bool {
     let mut parts = code.split('-');
     let base = parts.next().unwrap_or("");
     let region = parts.next();

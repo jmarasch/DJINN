@@ -26,9 +26,14 @@ bin="$HOME/.local/bin/djinn"
 desktop="$data/applications/djinn.desktop"
 icon="$data/icons/hicolor/512x512/apps/djinn.png"
 autostart="$conf/autostart/djinn.desktop"
+# The user guide and language files: DJINN looks for them beside its bin
+# folder (crates/djinn-server/src/content.rs).
+shared="$HOME/.local/share/djinn"
 
 if [ "${1:-}" = "--uninstall" ]; then
     rm -f "$bin" "$desktop" "$icon" "$autostart"
+    rm -rf "$shared/guide" "$shared/lang"
+    rmdir "$shared" 2>/dev/null || true
     echo "DJINN removed. Your config and database in $conf/djinn were kept."
     exit 0
 fi
@@ -75,12 +80,15 @@ if [ -f "$here/djinn" ] && [ -f "$here/djinn.desktop.in" ]; then
     built="$here/djinn"
     png="$here/djinn.png"
     template="$here/djinn.desktop.in"
+    content="$here"
 elif [ -f "$here/djinn.desktop.in" ]; then
     # A source checkout (packaging/linux).
     root=$(cd "$here/../.." && pwd)
     built="$root/target/release/djinn"
     png="$root/web/public/icon-512.png"
     template="$here/djinn.desktop.in"
+    # Laid out by packaging/content.sh.
+    content="$root/target/content"
     if [ ! -f "$built" ]; then
         echo "Build first: (cd web && npm ci && npm run build) && cargo build --release" >&2
         exit 1
@@ -133,6 +141,13 @@ if command -v pgrep >/dev/null 2>&1 && pgrep -x djinn >/dev/null 2>&1; then
 fi
 
 install -Dm755 "$built" "$bin"
+for part in guide lang; do
+    if [ -f "$content/$part/VERSION" ]; then
+        rm -rf "${shared:?}/$part"
+        mkdir -p "$shared"
+        cp -r "$content/$part" "$shared/$part"
+    fi
+done
 install -Dm644 "$png" "$icon"
 mkdir -p "$(dirname "$desktop")"
 sed -e "s|@BIN@|$bin|" -e "s|@LOG@|$conf/djinn/djinn.log|" -e "s|@ICON@|$icon|" \

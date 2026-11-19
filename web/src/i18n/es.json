@@ -631,6 +631,7 @@
   "admin.group.system": "Sistema",
   "admin.group.activity": "Actividad y registros",
   "admin.menu.home": "Resumen",
+  "admin.menu.guide": "Guía de usuario",
   "admin.menu.library": "Biblioteca",
   "admin.menu.editor": "Editor de la biblioteca",
   "admin.menu.rules": "Fiesta y cola",
@@ -3509,5 +3510,10 @@
   "ed.auto_none": "No hay coincidencia exacta en Deezer. Usa Buscar datos del álbum... para elegir el álbum tú mismo.",
   "ed.dismiss": "Descartar",
   "ed.preview_wait": "Calculando adónde van...",
-  "toast.dismiss": "Haz clic para cerrar"
+  "toast.dismiss": "Haz clic para cerrar",
+  "guide.contents": "Contenido",
+  "guide.not_installed": "La guía de usuario no está instalada con esta copia de DJINN. Viene con los instaladores y con las actualizaciones, en una carpeta guide junto al programa.",
+  "guide.online": "Leerla en GitHub",
+  "guide.load_failed": "No se pudo cargar esa página de la guía",
+  "guide.english_only": "Por ahora la guía solo está en inglés."
 }

@@ -129,7 +129,7 @@ jobs:
         run: |
           apt-get update
           DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            build-essential ca-certificates curl git libasound2-dev pkg-config xz-utils
+            build-essential ca-certificates curl git libasound2-dev pkg-config xz-utils zip
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -203,6 +203,19 @@ jobs:
           cp "$dir/${{ matrix.binary }}" out/${{ matrix.asset }}
           echo "BUILT=$dir/${{ matrix.binary }}" >> "$GITHUB_ENV"
 
+      # The user guide and language files, beside the program in every
+      # download; in-app updates fetch djinn-content.zip (one copy, from
+      # the Linux build).
+      - name: Guide and language files
+        shell: bash
+        run: |
+          if [ "${{ matrix.asset }}" = djinn-linux-x86_64 ]; then
+            sh packaging/content.sh --zip
+            cp target/content/djinn-content.zip out/
+          else
+            sh packaging/content.sh
+          fi
+
       - name: Linux download (tarball with install.sh)
         if: runner.os == 'Linux'
         shell: bash
@@ -210,6 +223,7 @@ jobs:
           mkdir -p stage/djinn
           cp "$BUILT" packaging/linux/install.sh packaging/linux/djinn.desktop.in LICENSE.md stage/djinn/
           cp web/public/icon-512.png stage/djinn/djinn.png
+          cp -r target/content/guide target/content/lang stage/djinn/
           tar czf out/${{ matrix.asset }}.tar.gz -C stage djinn
 
       - name: Windows setup program
@@ -435,6 +449,14 @@ jobs:
         run: |
           sudo apt-get update
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends xorriso cpio
+      # Numbered like the binaries, so the guide and language files match them.
+      - name: Number the nightly
+        if: needs.plan.outputs.version != ''
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: bash .github/scripts/set-version.sh "$VERSION"
+      - name: Guide and language files
+        run: sh packaging/content.sh
       - name: PC install disc
         run: sh packaging/image/pc/build-iso.sh bins/djinn-linux-x86_64 out/djinn-installer-pc-x86_64.iso
       - name: Raspberry Pi 3, 4, 5

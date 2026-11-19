@@ -7,6 +7,11 @@
 // t('queue.title') or t('queue.count', { n: 3 }): placeholders are {name};
 // a key whose English entry is an object { one, other } picks the plural
 // form for {n} the way the language counts.
+//
+// The files are built in, and DJINN may also have them in a folder beside
+// the program (`/api/language/files`, only when they belong to this
+// version). Those are laid over the built-in ones, so a fixed translation or
+// a new language shows up without a new build.
 
 const files = import.meta.glob('../i18n/*.json', { eager: true, import: 'default' }) as Record<
   string,
@@ -22,9 +27,16 @@ for (const [path, catalog] of Object.entries(files)) {
 }
 
 /** Languages there are translations for, with their own names. */
-export const languages: { code: string; name: string }[] = Object.keys(catalogs)
-  .sort()
-  .map((code) => ({ code, name: String(catalogs[code]['language.name'] ?? code) }))
+export const languages = $state<{ code: string; name: string }[]>(listed())
+
+function listed() {
+  return Object.keys(catalogs)
+    .sort()
+    .map((code) => ({ code, name: String(catalogs[code]['language.name'] ?? code) }))
+}
+
+/** Bumped when the files beside the program arrive, so text redraws. */
+const revision = $state({ n: 0 })
 
 function stored(): string | null {
   try {
@@ -96,8 +108,26 @@ export async function loadHouseLanguage() {
   }
 }
 
+/** Lays the language files beside the program over the built-in ones. */
+export async function loadLanguageFiles() {
+  try {
+    const res = await fetch('/api/language/files')
+    if (!res.ok) return
+    const files = (await res.json()) as Record<string, Catalog>
+    if (!Object.keys(files).length) return
+    for (const [code, catalog] of Object.entries(files)) catalogs[code] = { ...catalogs[code], ...catalog }
+    languages.splice(0, languages.length, ...listed())
+    locale.code = pick()
+    document.documentElement.lang = locale.code
+    revision.n++
+  } catch {
+    // The built-in files stay.
+  }
+}
+
 if (typeof fetch !== 'undefined' && typeof location !== 'undefined') {
   void loadHouseLanguage()
+  void loadLanguageFiles()
   // A phone that kept the app open in the background (web GO, the TV and
   // lyrics pages have no live feed of it) asks again when it comes back.
   document.addEventListener('visibilitychange', () => {
@@ -111,6 +141,7 @@ function lookup(code: string, key: string): string | Record<string, string> | un
 
 /** The text for `key` in the current language. */
 export function t(key: string, params: Record<string, string | number> = {}): string {
+  void revision.n
   let entry = lookup(locale.code, key) ?? lookup('en', key) ?? key
   if (typeof entry === 'object') {
     const n = Number(params.n ?? 0)

@@ -112,6 +112,33 @@ To try the whole workflow without publishing, run it from the Actions tab
 (Run workflow): it builds every download and the GPU pack, and skips
 signing and the release.
 
+## The guide and language files
+
+The user guide (`docs/guide`) and the language files (`web/src/i18n`)
+ship beside the program, not only inside it, so they can be read and fixed
+without a new build. `sh packaging/content.sh` lays them out in
+`target/content/` as `guide/` and `lang/`, each with a `VERSION` file
+holding Cargo's version; `--zip` also makes `djinn-content.zip`.
+
+- Every build job runs it. The Linux tarballs carry both folders, the
+  Windows installer takes them from `target\content` (`/DContent=` to point
+  elsewhere), and the install images copy them into `/opt/djinn`
+  (`DJINN_CONTENT` to point elsewhere). The Linux x86_64 job uploads
+  `djinn-content.zip`, which goes into `SHA256SUMS` like everything else.
+- Installed, they sit next to the program (`%LOCALAPPDATA%\Programs\DJINN`,
+  `/opt/djinn`), or in `~/.local/share/djinn/` for a program in
+  `~/.local/bin`.
+- An in-app update downloads `djinn-content.zip` along with the program,
+  checks it against the signed `SHA256SUMS`, and swaps the folders in before
+  replacing the program. A release without the file updates the program
+  only.
+- DJINN ignores a folder whose `VERSION` isn't its own, so leftovers never
+  show old wording: the web app's built-in language files are used instead,
+  and Admin > User Guide says the guide isn't installed. Nodes update from
+  Main with the program only, so they use their built-in language files.
+- For a local build: run `sh packaging/content.sh` before `iscc` or
+  `packaging/linux/install.sh` so they include the folders.
+
 ## Raspberry Pi builds and install images
 
 Each release also builds DJINN for 64-bit ARM (`djinn-linux-aarch64`, on

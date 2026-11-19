@@ -1,6 +1,6 @@
 # Back up and restore
 
-Admin > **System** > **Back up and restore** saves everything DJINN knows
+**Admin > System > Back Up and Restore** saves everything DJINN knows
 to one file, and puts it back, on this computer or a new one.
 
 A backup holds your settings, accounts, playlists, play and request history,
@@ -18,18 +18,20 @@ restoring someone else's hands them this DJINN.
 
 ## Make a backup
 
-Tap **Download a backup**. Your browser saves a file named like
+Tap **Download a Backup**. Your browser saves a file named like
 `djinn-backup-2026-10-29.zip`. DJINN keeps playing while it's made.
+**Admin > Overview** shows when the last backup was made, and reminds you if
+there's none yet.
 
 ## Restore a backup
 
-1. Tap **Restore from a backup…** and pick the backup file.
+1. Tap **Restore from a Backup...** and pick the backup file.
 2. DJINN shows when the backup was made and the music folders it knew. For
    each folder, say where that music is on this computer: type the folder or
    tap **Browse**. A folder that exists here is filled in already. Leave a
    folder empty if its music isn't on this computer; its songs show as
    missing.
-3. Tap **Restore and restart**. DJINN restarts with the backup in place and
+3. Tap **Restore and Restart**. DJINN restarts with the backup in place and
    checks the music folders.
 4. Sign in with an account from the backup.
 

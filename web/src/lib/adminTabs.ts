@@ -9,13 +9,22 @@ export const adminGroups = [
     get label() {
       return t('admin.group.overview')
     },
-    tabs: [{
+    tabs: [
+      {
         id: 'home',
         icon: 'home',
         get label() {
           return t('admin.menu.home')
         },
-      }],
+      },
+      {
+        id: 'guide',
+        icon: 'book',
+        get label() {
+          return t('admin.menu.guide')
+        },
+      },
+    ],
   },
   {
     get label() {

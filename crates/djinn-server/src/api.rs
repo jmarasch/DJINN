@@ -50,6 +50,7 @@ pub fn router() -> Router<AppState> {
         .merge(nodes::router())
         .merge(crate::visuals::router())
         .merge(crate::language::router())
+        .merge(crate::content::router())
         .merge(crate::appearance::router())
         .merge(crate::discover::router())
         .merge(rooms_api::router())
