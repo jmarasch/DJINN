@@ -97,6 +97,9 @@ jobs:
     needs: [plan, android]
     if: needs.plan.outputs.build == 'true'
     strategy:
+      # Let each build finish, so one failure doesn't cancel the others
+      # and look like several.
+      fail-fast: false
       matrix:
         include:
           # Built on Ubuntu 22.04 (glibc 2.35) so it runs on Ubuntu 22.04+,
@@ -126,10 +129,21 @@ jobs:
       # Git before checkout, so build.rs can read the commit.
       - name: Install build tools
         if: runner.os == 'Linux' && matrix.container
+        # Ubuntu's mirrors sometimes don't answer, and apt-get update still
+        # exits 0 then, so the update and install are retried together.
         run: |
-          apt-get update
-          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            build-essential ca-certificates curl git libasound2-dev pkg-config xz-utils zip
+          echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries
+          ok=
+          for i in 1 2 3 4; do
+            if apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+                 build-essential ca-certificates curl git libasound2-dev pkg-config xz-utils zip; then
+              ok=1
+              break
+            fi
+            echo "apt attempt $i failed, trying again in 60 s"
+            sleep 60
+          done
+          [ -n "$ok" ]
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
