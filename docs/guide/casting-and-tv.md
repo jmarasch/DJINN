@@ -53,4 +53,5 @@ Each person starts out not listening; **Tune In** lights up while it plays.
   the connection drops, it reconnects by itself.
 - Use the device's own volume; the Playing tab's volume is the main speakers'.
 - Like casting, it runs a few seconds behind the speakers.
-- Tune In plays Main's music, even when you're in another room.
+- Tune In plays the room you're in. Switching rooms while listening switches
+  to that room's music.

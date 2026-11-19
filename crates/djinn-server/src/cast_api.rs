@@ -92,17 +92,19 @@ fn on_server(ip: Option<IpAddr>) -> bool {
 
 /// Where Play here listens: the same stream casts play.
 async fn listen(
-    _: CurrentUser,
+    CurrentUser(user): CurrentUser,
     device: Device,
     State(state): State<AppState>,
 ) -> ApiResult<Json<Listen>> {
     let on = settings::flag(&state.store, PLAY_HERE, false).await?;
+    // The room the person is in: its own mix, or what it plays along with.
+    let room = state.room_of(user.id).await;
     Ok(Json(Listen {
         url: state
             .stream
             .as_ref()
             .filter(|_| on && !on_server(device.addr))
-            .map(|_| stream_path(&state.stream_token())),
+            .map(|_| stream_path_in(&state.stream_token(), room)),
     }))
 }
 
@@ -868,6 +870,26 @@ mod tests {
             get_body(&state, "/api/listen", &guest).await,
             (StatusCode::OK, r#"{"url":"/cast/secret/live.mp3"}"#.into())
         );
+
+        // Someone in another room hears that room's music.
+        let patio = state.store.create_room("Patio").await.unwrap();
+        let (_, me) = get_body(&state, "/api/me", &guest).await;
+        let gus = serde_json::from_str::<serde_json::Value>(&me).unwrap()["id"]
+            .as_i64()
+            .unwrap();
+        state.store.set_user_room(gus, patio.id).await.unwrap();
+        assert_eq!(
+            get_body(&state, "/api/listen", &guest).await,
+            (
+                StatusCode::OK,
+                format!(r#"{{"url":"/cast/secret/live.mp3?room={}"}}"#, patio.id)
+            )
+        );
+        state
+            .store
+            .set_user_room(gus, djinn_store::MAIN_ROOM)
+            .await
+            .unwrap();
 
         for (address, expected) in [
             ("127.0.0.1:4321", r#"{"url":null}"#),

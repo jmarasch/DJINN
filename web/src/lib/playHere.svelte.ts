@@ -86,6 +86,20 @@ export function stopPlayHere() {
 
 whenLoggingOut(stopPlayHere)
 
+// Switching rooms while listening switches to that room's sound.
+$effect.root(() => {
+  let last = app.room
+  $effect(() => {
+    const room = app.room
+    if (room === last) return
+    last = room
+    if (playHere.on)
+      void checkPlayHere().then(() => {
+        if (playHere.on) void connect()
+      })
+  })
+})
+
 // Lock screen and notification controls, showing the song playing.
 if ('mediaSession' in navigator) {
   const session = navigator.mediaSession
