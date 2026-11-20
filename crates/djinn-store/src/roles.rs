@@ -109,6 +109,25 @@ macro_rules! permission_columns {
     };
 }
 
+/// Binds each permission in `permission_columns!` order, so adding one
+/// means adding it here and there, never to each query.
+macro_rules! bind_permissions {
+    ($query:expr, $p:expr) => {
+        $query
+            .bind($p.go)
+            .bind($p.go_remote)
+            .bind($p.max_streams)
+            .bind($p.downloads)
+            .bind($p.share_playlists)
+            .bind($p.submit_music)
+            .bind($p.submit_without_review)
+            .bind($p.unlimited_requests)
+            .bind($p.require_two_step)
+            .bind($p.convert)
+            .bind($p.auto_mix)
+    };
+}
+
 macro_rules! role_columns {
     () => {
         concat!(
@@ -203,24 +222,16 @@ impl Store {
     }
 
     pub async fn create_role(&self, name: &str, p: &Permissions) -> Result<AccountRole, RoleError> {
-        let id: i64 = sqlx::query_scalar(
-            "INSERT INTO roles (name, go, go_remote, max_streams, downloads, share_playlists,
-                                submit_music, submit_without_review, unlimited_requests,
-                                require_two_step, convert, auto_mix, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+        let id: i64 = bind_permissions!(
+            sqlx::query_scalar(
+                "INSERT INTO roles (name, go, go_remote, max_streams, downloads, share_playlists,
+                                    submit_music, submit_without_review, unlimited_requests,
+                                    require_two_step, convert, auto_mix, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+            )
+            .bind(name),
+            p
         )
-        .bind(name)
-        .bind(p.go)
-        .bind(p.go_remote)
-        .bind(p.max_streams)
-        .bind(p.downloads)
-        .bind(p.share_playlists)
-        .bind(p.submit_music)
-        .bind(p.submit_without_review)
-        .bind(p.unlimited_requests)
-        .bind(p.require_two_step)
-        .bind(p.convert)
-        .bind(p.auto_mix)
         .bind(now_ms())
         .fetch_one(&self.pool)
         .await?;
@@ -241,25 +252,17 @@ impl Store {
         name: &str,
         p: &Permissions,
     ) -> Result<bool, RoleError> {
-        let result = sqlx::query(
-            "UPDATE roles SET name = ?, go = ?, go_remote = ?, max_streams = ?, downloads = ?,
-                              share_playlists = ?, submit_music = ?, submit_without_review = ?,
-                              unlimited_requests = ?, require_two_step = ?, convert = ?,
-                              auto_mix = ?
-             WHERE id = ?",
+        let result = bind_permissions!(
+            sqlx::query(
+                "UPDATE roles SET name = ?, go = ?, go_remote = ?, max_streams = ?, downloads = ?,
+                                  share_playlists = ?, submit_music = ?, submit_without_review = ?,
+                                  unlimited_requests = ?, require_two_step = ?, convert = ?,
+                                  auto_mix = ?
+                 WHERE id = ?",
+            )
+            .bind(name),
+            p
         )
-        .bind(name)
-        .bind(p.go)
-        .bind(p.go_remote)
-        .bind(p.max_streams)
-        .bind(p.downloads)
-        .bind(p.share_playlists)
-        .bind(p.submit_music)
-        .bind(p.submit_without_review)
-        .bind(p.unlimited_requests)
-        .bind(p.require_two_step)
-        .bind(p.convert)
-        .bind(p.auto_mix)
         .bind(id)
         .execute(&self.pool)
         .await?;

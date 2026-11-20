@@ -30,14 +30,6 @@ pub struct ImportBatch {
     pub started_at: i64,
 }
 
-/// Ids as a JSON list, for `json_each`.
-fn id_list(ids: &[i64]) -> String {
-    format!(
-        "[{}]",
-        ids.iter().map(i64::to_string).collect::<Vec<_>>().join(",")
-    )
-}
-
 impl Store {
     /// A number for a new import.
     pub async fn next_import_batch(&self) -> Result<i64> {
@@ -94,7 +86,7 @@ impl Store {
 
     /// Files waiting in imports, by id (those that exist).
     pub async fn import_files_by_id(&self, ids: &[i64]) -> Result<Vec<ImportFile>> {
-        let ids = id_list(ids);
+        let ids = crate::library::json_ids(ids);
         Ok(sqlx::query_as(
             "SELECT id, batch, name, path, size, added_at, ai_want FROM import_files
              WHERE id IN (SELECT value FROM json_each(?)) ORDER BY id",
@@ -109,7 +101,7 @@ impl Store {
         sqlx::query(
             "UPDATE import_files SET ai_want = ?2 WHERE id IN (SELECT value FROM json_each(?1))",
         )
-        .bind(id_list(ids))
+        .bind(crate::library::json_ids(ids))
         .bind(kind)
         .execute(&self.pool)
         .await?;
@@ -137,7 +129,7 @@ impl Store {
 
     /// Forgets files (added to the library, or thrown away).
     pub async fn remove_import_files(&self, ids: &[i64]) -> Result<()> {
-        let ids = id_list(ids);
+        let ids = crate::library::json_ids(ids);
         sqlx::query("DELETE FROM import_files WHERE id IN (SELECT value FROM json_each(?))")
             .bind(ids)
             .execute(&self.pool)

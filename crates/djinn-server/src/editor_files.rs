@@ -537,8 +537,20 @@ mod tests {
         (status, serde_json::from_slice(&bytes).unwrap_or_default())
     }
 
-    #[tokio::test]
-    async fn files_are_filed_by_pattern_copied_deleted_and_put_back() {
+    /// An editable library folder (`root`, named after `tag`) holding
+    /// `old/song.flac` (a real song, known to DJINN as `id`) and a note,
+    /// with protected areas off: the state, an admin's cookie, the folder,
+    /// `old`, the song's path and id.
+    async fn one_song(
+        tag: &str,
+    ) -> (
+        AppState,
+        String,
+        std::path::PathBuf,
+        std::path::PathBuf,
+        String,
+        i64,
+    ) {
         let state = AppState::for_tests().await;
         let admin = session(&state, "admin", Role::Admin).await;
         state
@@ -546,7 +558,7 @@ mod tests {
             .set_setting(crate::protected::LEVEL, "off")
             .await
             .unwrap();
-        let root = std::env::temp_dir().join(format!("djinn-files-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("{tag}-{}", std::process::id()));
         let old = root.join("old");
         std::fs::create_dir_all(&old).unwrap();
         crate::folders::add_root_for_tests(&state, &root).await;
@@ -574,6 +586,12 @@ mod tests {
             .await
             .unwrap();
         let id = state.store.track_id_at(&path).await.unwrap().unwrap();
+        (state, admin, root, old, path, id)
+    }
+
+    #[tokio::test]
+    async fn files_are_filed_by_pattern_copied_deleted_and_put_back() {
+        let (state, admin, root, old, path, id) = one_song("djinn-files").await;
         // Tags (as DJINN shows them) and a cover to file it by.
         let mut png = Vec::new();
         image::RgbImage::new(4, 4)
@@ -671,41 +689,7 @@ mod tests {
 
     #[tokio::test]
     async fn undo_puts_the_filing_back() {
-        let state = AppState::for_tests().await;
-        let admin = session(&state, "admin", Role::Admin).await;
-        state
-            .store
-            .set_setting(crate::protected::LEVEL, "off")
-            .await
-            .unwrap();
-        let root = std::env::temp_dir().join(format!("djinn-files-undo-{}", std::process::id()));
-        let old = root.join("old");
-        std::fs::create_dir_all(&old).unwrap();
-        crate::folders::add_root_for_tests(&state, &root).await;
-        state
-            .store
-            .set_setting(crate::editable::KEY, &root.to_string_lossy())
-            .await
-            .unwrap();
-        let song = old.join("song.flac");
-        std::fs::copy(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../djinn-engine/tests/fixtures/gapless_a.flac"),
-            &song,
-        )
-        .unwrap();
-        std::fs::write(old.join("notes.txt"), "left behind").unwrap();
-        let path = song.to_string_lossy().into_owned();
-        state
-            .store
-            .save_scanned(&[djinn_store::ScannedTrack {
-                path: path.clone(),
-                title: "song".into(),
-                ..Default::default()
-            }])
-            .await
-            .unwrap();
-        let id = state.store.track_id_at(&path).await.unwrap().unwrap();
+        let (state, admin, root, old, path, id) = one_song("djinn-files-undo").await;
         let rename = format!(r#"{{"ids":[{id}],"pattern":"new/{{title}}","remove_empty":true}}"#);
         let (status, done) = send(&state, "POST", "/api/editor/rename", &rename, &admin).await;
         assert_eq!(status, StatusCode::OK, "{done}");
@@ -719,7 +703,7 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::OK, "{done}");
-        assert!(song.is_file() && old.join("notes.txt").is_file());
+        assert!(old.join("song.flac").is_file() && old.join("notes.txt").is_file());
         assert_eq!(state.store.track_path(id).await.unwrap().unwrap(), path);
         std::fs::remove_dir_all(root).ok();
     }

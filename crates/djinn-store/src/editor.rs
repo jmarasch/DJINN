@@ -211,10 +211,7 @@ impl Store {
 
     /// These songs as the editor's grid shows them, by path.
     pub async fn editor_songs_by_id(&self, ids: &[i64]) -> Result<Vec<EditorSong>> {
-        let list = format!(
-            "[{}]",
-            ids.iter().map(i64::to_string).collect::<Vec<_>>().join(",")
-        );
+        let list = crate::library::json_ids(ids);
         Ok(sqlx::query_as(concat!(
             editor_columns!(),
             " FROM tracks t LEFT JOIN albums a ON a.id = t.album_id

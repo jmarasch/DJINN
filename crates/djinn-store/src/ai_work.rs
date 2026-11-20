@@ -58,14 +58,6 @@ macro_rules! sync_where {
     };
 }
 
-/// Song ids as a JSON list, for `json_each`.
-fn id_list(ids: &[i64]) -> String {
-    format!(
-        "[{}]",
-        ids.iter().map(i64::to_string).collect::<Vec<_>>().join(",")
-    )
-}
-
 impl Store {
     /// Hands `limit` songs to `worker`: songs with no lyrics (once LRCLIB has
     /// been asked, or when `lookups_off`), then songs with plain lyrics to
@@ -83,7 +75,7 @@ impl Store {
         lease_ms: i64,
         skip: &[i64],
     ) -> Result<Vec<AiJob>> {
-        let skip = id_list(skip);
+        let skip = crate::library::json_ids(skip);
         let now = now_ms();
         let lease_cut = now - lease_ms;
         let mut tx = self.write().await?;
@@ -259,10 +251,7 @@ impl Store {
     /// Asks workers for these songs before any others: make lyrics
     /// (`listen`) or time the words they have (`sync`). Returns how many.
     pub async fn ai_ask(&self, ids: &[i64], kind: &str) -> Result<u64> {
-        let list = format!(
-            "[{}]",
-            ids.iter().map(i64::to_string).collect::<Vec<_>>().join(",")
-        );
+        let list = crate::library::json_ids(ids);
         // A song asked again gets a fresh go, failed tries forgotten.
         sqlx::query(
             "DELETE FROM ai_jobs WHERE status IN ('failed', 'done') AND kind = ?2
@@ -370,7 +359,7 @@ impl Store {
         ))
         .bind(cut)
         .bind(lookups_off)
-        .bind(id_list(skip))
+        .bind(crate::library::json_ids(skip))
         .fetch_one(&self.pool)
         .await?)
     }

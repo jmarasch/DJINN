@@ -203,16 +203,7 @@ async fn clear_room(
         .set_setting(CAST_ROOMS, &lines.join("\n"))
         .await?;
     state.caster.stop(&id).await;
-    let targets: Vec<String> = state
-        .caster
-        .active()
-        .into_iter()
-        .filter(|t| *t != id)
-        .collect();
-    state
-        .store
-        .set_setting(CAST_TARGETS, &targets.join("\n"))
-        .await?;
+    save_targets_without(&state, &id).await?;
     Ok(Json(cast_list(&state).await?))
 }
 
@@ -305,17 +296,24 @@ async fn stop(
 ) -> ApiResult<Json<CastList>> {
     state.caster.stop(&id).await;
     // The session ends a moment later; save the list without it now.
+    save_targets_without(&state, &id).await?;
+    Ok(Json(cast_list(&state).await?))
+}
+
+/// Saves the casts to resume after a restart, leaving out `id` (stopped
+/// just now; its session ends a moment later).
+async fn save_targets_without(state: &AppState, id: &str) -> ApiResult<()> {
     let targets: Vec<String> = state
         .caster
         .active()
         .into_iter()
-        .filter(|t| *t != id)
+        .filter(|t| t != id)
         .collect();
     state
         .store
         .set_setting(CAST_TARGETS, &targets.join("\n"))
         .await?;
-    Ok(Json(cast_list(&state).await?))
+    Ok(())
 }
 
 async fn stop_all(_: AdminUser, State(state): State<AppState>) -> ApiResult<StatusCode> {

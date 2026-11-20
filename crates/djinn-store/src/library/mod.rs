@@ -892,7 +892,7 @@ pub(crate) fn json_ids(ids: &[i64]) -> String {
 }
 
 /// Puts `found` in the order of `ids`.
-fn in_order<T>(ids: &[i64], found: Vec<T>, id: impl Fn(&T) -> i64) -> Vec<T> {
+pub(crate) fn in_order<T>(ids: &[i64], found: Vec<T>, id: impl Fn(&T) -> i64) -> Vec<T> {
     let mut by_id: std::collections::HashMap<i64, T> =
         found.into_iter().map(|item| (id(&item), item)).collect();
     ids.iter().filter_map(|i| by_id.remove(i)).collect()

@@ -3,6 +3,29 @@
 
 use super::*;
 
+/// Puts one of an artist's pictures at `position`.
+async fn insert_picture(
+    conn: &mut sqlx::SqliteConnection,
+    artist_id: i64,
+    position: i64,
+    picture: &ArtistPicture,
+) -> Result<()> {
+    sqlx::query(
+        "INSERT INTO artist_pictures (artist_id, position, art_hash, credit, credit_url, source, remote_url)
+         VALUES (?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(artist_id)
+    .bind(position)
+    .bind(&picture.art_hash)
+    .bind(&picture.credit)
+    .bind(&picture.credit_url)
+    .bind(&picture.source)
+    .bind(&picture.remote_url)
+    .execute(conn)
+    .await?;
+    Ok(())
+}
+
 impl Store {
     /// Artists with playable tracks whose online info was never looked up
     /// or was last looked up before `older_than` (Unix ms).
@@ -106,19 +129,7 @@ impl Store {
             .execute(&mut *tx)
             .await?;
         for (position, picture) in (0_i64..).zip(retained.iter().chain(pictures)) {
-            sqlx::query(
-                "INSERT INTO artist_pictures (artist_id, position, art_hash, credit, credit_url, source, remote_url)
-                 VALUES (?, ?, ?, ?, ?, ?, ?)",
-            )
-            .bind(artist_id)
-            .bind(position)
-            .bind(&picture.art_hash)
-            .bind(&picture.credit)
-            .bind(&picture.credit_url)
-            .bind(&picture.source)
-            .bind(&picture.remote_url)
-            .execute(&mut *tx)
-            .await?;
+            insert_picture(&mut tx, artist_id, position, picture).await?;
         }
         sqlx::query("UPDATE artists SET pictures_checked_at = ? WHERE id = ?")
             .bind(now_ms())
@@ -174,19 +185,7 @@ impl Store {
             let Some(picture) = existing.iter().find(|picture| picture.art_hash == *hash) else {
                 return Ok(false);
             };
-            sqlx::query(
-                "INSERT INTO artist_pictures (artist_id, position, art_hash, credit, credit_url, source, remote_url)
-                 VALUES (?, ?, ?, ?, ?, ?, ?)",
-            )
-            .bind(artist_id)
-            .bind(position)
-            .bind(&picture.art_hash)
-            .bind(&picture.credit)
-            .bind(&picture.credit_url)
-            .bind(&picture.source)
-            .bind(&picture.remote_url)
-            .execute(&mut *tx)
-            .await?;
+            insert_picture(&mut tx, artist_id, position, picture).await?;
         }
         tx.commit().await?;
         Ok(true)
