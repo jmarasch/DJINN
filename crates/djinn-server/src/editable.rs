@@ -50,9 +50,15 @@ pub async fn editable_roots(state: &AppState) -> anyhow::Result<Vec<PathBuf>> {
 }
 
 /// Whether a file may be changed: it sits under an editable library folder.
-// Taken by the first route that writes to the music folders (tags, next).
-#[allow(dead_code)]
+/// A path with `..` in it never does, since "/music/../elsewhere" starts with
+/// "/music" piece by piece but isn't inside it.
 pub async fn is_editable(state: &AppState, file: &Path) -> anyhow::Result<bool> {
+    if file
+        .components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
+        return Ok(false);
+    }
     Ok(editable_roots(state)
         .await?
         .iter()
@@ -60,7 +66,6 @@ pub async fn is_editable(state: &AppState, file: &Path) -> anyhow::Result<bool> 
 }
 
 /// Refuses a change to a file in a view-only folder.
-#[allow(dead_code)]
 pub async fn require(state: &AppState, file: &Path) -> ApiResult<()> {
     if is_editable(state, file).await? {
         Ok(())
@@ -213,6 +218,10 @@ mod tests {
         // The quarantine folder may be changed; the pool may not.
         assert!(require(&state, &song).await.is_ok());
         assert!(require(&state, &pool.join("b.mp3")).await.is_err());
+        // Climbing out of the allowed folder doesn't count as inside it.
+        let parent = song.parent().unwrap();
+        let outside = parent.join("..").join("elsewhere.mp3");
+        assert!(require(&state, &outside).await.is_err());
         // Not a library folder: refused.
         assert_eq!(
             put(r#"{"path":"/nowhere","editable":true}"#.into()).await,

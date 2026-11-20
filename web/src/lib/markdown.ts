@@ -20,9 +20,17 @@ export function slug(text: string): string {
     .replace(/ /g, '-')
 }
 
-function safeUrl(url: string): string {
-  const trimmed = url.trim()
-  return /^(javascript|data|vbscript):/i.test(trimmed) ? '#' : trimmed
+/**
+ * Only web, mail and in-guide links. Browsers ignore control characters and
+ * whitespace in a link's scheme ("\u0001java\tscript:"), so they're taken
+ * out before looking.
+ */
+export function safeUrl(url: string): string {
+  // eslint-disable-next-line no-control-regex
+  const plain = url.replace(/[\u0000-\u0020\u007f]/g, '')
+  const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(plain)
+  if (scheme && !['http', 'https', 'mailto'].includes(scheme[1].toLowerCase())) return '#'
+  return plain
 }
 
 function inline(text: string, options: MarkdownOptions): string {
@@ -34,11 +42,12 @@ function inline(text: string, options: MarkdownOptions): string {
   out = escape(out)
   out = out.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (_, alt: string, src: string) => {
     const url = options.image ? options.image(src) : src
-    return `<img src="${escape(safeUrl(url))}" alt="${alt}" loading="lazy">`
+    // Already escaped with the rest of the text.
+    return `<img src="${safeUrl(url)}" alt="${alt}" loading="lazy">`
   })
   out = out.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, label: string, href: string) => {
     const external = /^https?:/i.test(href)
-    return `<a href="${escape(safeUrl(href))}"${external ? ' target="_blank" rel="noopener noreferrer"' : ''}>${label}</a>`
+    return `<a href="${safeUrl(href)}"${external ? ' target="_blank" rel="noopener noreferrer"' : ''}>${label}</a>`
   })
   out = out.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
   out = out.replace(/(^|[^*\w])\*([^*\s][^*]*)\*(?!\w)/g, '$1<em>$2</em>')
