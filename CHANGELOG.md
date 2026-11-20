@@ -1,5 +1,54 @@
 # Changelog
 
+## 2026.11.19 (November 19, 2026)
+
+### Library editor
+
+- **A library editor in Admin**, opened in a window of its own: the folders as they are on disk, the songs in a grid you can sort and group, and the album's cover. Change any cell and the change stays marked until you approve it from a preview, into DJINN's database or into the files themselves. Every change can be undone.
+- **Each library folder is view only** until you allow changes in it. Opening the editor asks for your password (and two-step code), and every change goes in an audit trail.
+- **Tools:** set a field on many songs, number tracks in order, clean up titles, rename and file songs into folders from a pattern, copy, move, set aside or delete to a trash, replace a song's file with a better copy (it keeps its plays and playlists), fix MP3s that show the wrong length, and compare the database with each file's own tags.
+- **Album layout**, like Picard: every MusicBrainz release of an album, or a search on MusicBrainz, Deezer, Apple or Spotify, with the songs laid on the track list and a cover search across them all.
+- **Import new albums:** bring in a folder, split into one import per album by its layout, matched on Deezer automatically, previewed where the songs will go, and added with one Approve Import button.
+- **Lyrics and sound tools:** find lyrics, have the AI write or time the missing ones, and identify songs by their sound.
+
+### Library checks
+
+- **Many more problems found:** identical files, impossible numbers, odd lengths, low bit rates, leftovers in titles, artist spellings, split albums, track number gaps, messy genre tags, albums filed twice, MP3s with no length header, and songs with no lyrics or loudness. Each has a fix, most of them in the editor.
+
+### Lyrics
+
+- **Import lyrics from a zip**, matched to songs by the file's header or its path, with a report.
+- **Report bad lyrics** (web and Android), and **Remove and block** them so the same text isn't taken again.
+- **AI lyrics listening** (Admin > AI > Lyrics): DJINN installs a local listener on request and writes or times lyrics for songs that have none, between parties. Nothing leaves your network once it's installed. Nodes can help, getting everything from Main. A minimum score (85% by default) and genres to leave out keep weak results away, and an install disc can carry the packages and models for computers with no internet.
+- **Microphone marks** show when an AI made a song's lyrics (pink) or only timed a person's (green).
+
+### Rooms, casts and nodes
+
+- **Cast devices belong to rooms** and play that room's music. Admin > Rooms shows a card per room with its speakers, nodes and casts to drag between rooms, and windows for display, plays, queue rules and timing.
+- **Nodes play to several speakers**, each with its own device, delay and trim.
+- **Screens follow their room** unless the node picks its own, and their QR codes join that room.
+- **End party** stops the music in every room and empties the queues.
+- Nodes help with AI lyrics on Windows too, report their own addresses so Manage finds them, and say which build they run.
+
+### Accounts
+
+- **Protected areas:** a lock on anything that changes the library's folders or files (password and code, password, or off), with an audit trail.
+- **Locked accounts:** ten wrong two-step codes lock an account until another admin unlocks it, and `djinn recover` helps on the computer itself when no admin can sign in.
+
+### Search and radio
+
+- **Mixes from descriptions** like "80s hair metal" show only songs that really fit, artists spread out, and nothing rather than a poor guess. "Hair" alone means hair metal, a greatest hits counts by when its songs were made, and "upbeat" or "sad" go by how a song sounds.
+- **Radio** sounds more like the song it started from and stays near its era.
+
+### Everywhere
+
+- **Translated:** the whole web app, DJINN GO and the Android app in English, Spanish and German, with a house language in Admin > System and your own pick on your account page.
+- **The user guide is built in** (Admin > User Guide), searchable, and comes with every update.
+- **Genre containers** (off by default) group similar genres under one name.
+- **Overview** shows the hours of music and an all-time listening card.
+- Updates now bring the guide and language files, and a copy missing them fetches them.
+- The AI search reader loads and answers faster.
+
 ## 2026.11.14 (November 14, 2026)
 
 ### Nodes on Windows
