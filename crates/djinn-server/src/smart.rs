@@ -975,9 +975,13 @@ pub async fn describe(
                 );
                 let mut summary = intent.summary.clone();
                 if let Some(sound) = &sound {
-                    if ids.is_empty() && !intent.genres.is_empty() {
+                    if ids.is_empty()
+                        && !intent.genres.is_empty()
+                        && !vibe::anyone_has_genres(&intent, &catalog.songs)
+                    {
                         // Nobody tagged that genre: keep the other limits
-                        // (decade, tempo) and find it by sound.
+                        // (decade, tempo) and find it by sound. (When songs
+                        // have it but none fit well, nothing is better.)
                         let mut loose = intent.clone();
                         loose.genres.clear();
                         let candidates = if loose.is_empty() {

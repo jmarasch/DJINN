@@ -17,9 +17,6 @@ pub struct Intent {
     /// Each group is one genre asked for, as the genre names that count
     /// for it; a song must fit every group.
     pub genres: Vec<Vec<String>>,
-    /// Neighboring genres ("hard rock" for hair metal): a song with only
-    /// these counts for a little, so it fills in after the real fits.
-    pub near: Vec<String>,
     /// The years a genre asked for belongs to ("classic rock"), when no
     /// years were asked for.
     pub genre_era: Option<(i64, i64)>,
@@ -110,7 +107,8 @@ pub struct SongFacts {
     pub own_genres: Vec<String>,
     /// Its album's genres, most voted first (MusicBrainz).
     pub album_genres: Vec<String>,
-    /// Genres the AI heard in it, which say the least.
+    /// Genres the AI heard in it. Never enough alone (it hears "glam metal"
+    /// in pop punk), but they back up a lesser genre of its album or artist.
     pub styles: Vec<String>,
     /// The artist it's by (not a featured one).
     pub artist: Option<i64>,
@@ -250,48 +248,6 @@ const GENRE_WORDS: &[(&str, &[&str])] = &[
     ("christmas", &["christmas", "holiday"]),
     ("ska", &["ska"]),
     ("gospel", &["gospel"]),
-];
-
-/// Genres next to an everyday name: a song with only these fits a little.
-const NEAR_GENRES: &[(&str, &[&str])] = &[
-    (
-        "hair",
-        &["glam rock", "hard rock", "heavy metal", "arena rock"],
-    ),
-    (
-        "hair bands",
-        &["glam rock", "hard rock", "heavy metal", "arena rock"],
-    ),
-    (
-        "hair band",
-        &["glam rock", "hard rock", "heavy metal", "arena rock"],
-    ),
-    (
-        "hair metal",
-        &[
-            "glam rock",
-            "hard rock",
-            "heavy metal",
-            "arena rock",
-            "glam punk",
-        ],
-    ),
-    ("glam metal", &["hard rock", "heavy metal", "arena rock"]),
-    (
-        "classic rock",
-        &[
-            "hard rock",
-            "arena rock",
-            "soft rock",
-            "southern rock",
-            "rock",
-        ],
-    ),
-    ("goth", &["industrial", "post punk"]),
-    ("synthwave", &["synth pop", "new wave", "electropop"]),
-    ("synth", &["new wave"]),
-    ("new wave", &["synth pop", "post punk"]),
-    ("disco", &["funk", "soul", "dance", "dance pop"]),
 ];
 
 /// Genres that belong to an era: a song from outside it fits less, unless
@@ -487,7 +443,6 @@ pub fn parse(query: &str, vocab: &Vocabulary) -> Option<Intent> {
                 intent.summary.push(p.to_owned());
             } else if let Some(group) = genre_group(p, vocab) {
                 intent.genres.push(group);
-                intent.near.extend(near_group(p));
                 intent.genre_era = intent.genre_era.or(genre_era(p));
                 intent.summary.push(p.to_owned());
             } else {
@@ -521,25 +476,12 @@ fn genre_group(phrase: &str, vocab: &Vocabulary) -> Option<Vec<String>> {
         .map(|p| vec![p.to_owned()])
 }
 
-/// The neighboring genres of an everyday genre name.
-fn near_group(phrase: &str) -> Vec<String> {
-    near_genres(phrase)
-}
-
 /// The years an everyday genre name belongs to, if it does.
 fn genre_era(phrase: &str) -> Option<(i64, i64)> {
     GENRE_ERAS
         .iter()
         .find(|(word, _, _)| *word == phrase)
         .map(|(_, from, to)| (*from, *to))
-}
-
-fn near_genres(phrase: &str) -> Vec<String> {
-    NEAR_GENRES
-        .iter()
-        .find(|(word, _)| *word == phrase)
-        .map(|(_, names)| names.iter().map(|n| normalize(n)).collect())
-        .unwrap_or_default()
 }
 
 fn match_negated_tempo(rest: &[String], intent: &mut Intent) -> Option<usize> {
@@ -745,7 +687,6 @@ pub fn merge(
     };
 
     let mut group: Vec<String> = Vec::new();
-    let mut near: Vec<String> = Vec::new();
     let mut era: Option<(i64, i64)> = None;
     let mut labels: Vec<String> = Vec::new();
     for genre in asked.genres.iter().map(|g| normalize(g)) {
@@ -760,11 +701,6 @@ pub fn merge(
                 }
             }
             era = era.or(genre_era(&label));
-            for name in near_group(&label) {
-                if !near.contains(&name) {
-                    near.push(name);
-                }
-            }
             if !labels.contains(&label) {
                 labels.push(label);
             }
@@ -773,7 +709,6 @@ pub fn merge(
     if !group.is_empty() || asked.genres.is_empty() {
         // The phrase reader's genres were words out of context.
         let dropped: Vec<String> = intent.genres.drain(..).flatten().collect();
-        intent.near.clear();
         intent.genre_era = None;
         intent.summary.retain(|label| {
             genre_group(label, vocab).is_none_or(|g| g.iter().all(|n| !dropped.contains(n)))
@@ -781,7 +716,6 @@ pub fn merge(
     }
     if !group.is_empty() {
         intent.genres.push(group);
-        intent.near.extend(near);
         intent.genre_era = intent.genre_era.or(era);
         intent.summary.push(labels.join(" or "));
     }
@@ -834,16 +768,17 @@ pub fn merge(
 
 /// How much a genre counts when it comes from the song's artist (and not the
 /// song or its album; their first genre, each later one `ARTIST_LATER` as
-/// much again), from another artist on it, from what the AI heard, or from a
-/// neighboring genre.
+/// much again).
 const ARTIST_GENRE: f32 = 0.75;
 const ARTIST_LATER: f32 = 0.75;
 /// The album's first genre, and each later one as much again.
 const ALBUM_GENRE: f32 = 0.9;
 const ALBUM_LATER: f32 = 0.75;
-const OTHER_ARTIST_GENRE: f32 = 0.3;
-const HEARD_GENRE: f32 = 0.45;
-const NEAR_GENRE: f32 = 0.25;
+/// Songs that fit less than this aren't shown: no picks beat poor ones. It
+/// keeps an artist's or album's first two or three genres, a song a year
+/// or two outside the years asked for when its own tag fits, and nothing
+/// in the wrong mood or another genre's era.
+const MIN_FIT: f32 = 0.5;
 /// A song from a few years outside the years asked for.
 const NEAR_YEAR: f32 = 0.5;
 const NEAR_YEARS: i64 = 2;
@@ -883,7 +818,7 @@ pub fn rank(
     let mut matches: Vec<(&SongFacts, f32)> = songs
         .iter()
         .map(|s| (s, fit(intent, s, punch)))
-        .filter(|(_, f)| *f > 0.0)
+        .filter(|(_, f)| *f >= MIN_FIT)
         .collect();
     let total = matches.len();
     let artist_of: std::collections::HashMap<i64, i64> = songs
@@ -1045,6 +980,24 @@ fn like_genres(songs: &[SongFacts], artists: &[i64]) -> LikeGenres {
     }
 }
 
+/// True if any song carries every genre `intent` asks for, however weakly
+/// (its own tag, its album's, or its artists'). When none does, nobody
+/// tagged the genre and it can only be found by sound.
+pub fn anyone_has_genres(intent: &Intent, songs: &[SongFacts]) -> bool {
+    songs.iter().any(|song| {
+        intent.genres.iter().all(|group| {
+            group.iter().any(|name| {
+                song.genres
+                    .iter()
+                    .chain(&song.own_genres)
+                    .chain(&song.album_genres)
+                    .chain(&song.artist_genres)
+                    .any(|g| genre_fits(g, name))
+            })
+        })
+    })
+}
+
 /// How well `song` fits `intent`, 0 (not at all) to 1. `punch` is this
 /// library's low and high punch.
 fn fit(intent: &Intent, song: &SongFacts, punch: (f32, f32)) -> f32 {
@@ -1075,9 +1028,6 @@ fn fit(intent: &Intent, song: &SongFacts, punch: (f32, f32)) -> f32 {
             .iter()
             .any(|name| genres.iter().any(|g| genre_fits(g, name)))
     };
-    // Neighboring genres count only as they're named ("dance", not "dance
-    // rock").
-    let near = |genres: &[String]| genres.iter().any(|g| intent.near.contains(g));
     if intent.not_genres.iter().any(|group| {
         fits(group, &song.own_genres)
             || fits(group, &song.album_genres)
@@ -1085,9 +1035,6 @@ fn fit(intent: &Intent, song: &SongFacts, punch: (f32, f32)) -> f32 {
     }) {
         return 0.0;
     }
-    let knows_genres = !song.own_genres.is_empty()
-        || !song.album_genres.is_empty()
-        || !song.artist_genres.is_empty();
     // Where a genre sits in a list, most voted first.
     let place = |genres: &[String], group: &[String]| {
         genres
@@ -1100,21 +1047,17 @@ fn fit(intent: &Intent, song: &SongFacts, punch: (f32, f32)) -> f32 {
             .map_or(0.0, |p| ALBUM_GENRE * ALBUM_LATER.powi(p as i32));
         let by_artist = place(&song.artist_genres, group)
             .map_or(0.0, |p| ARTIST_GENRE * ARTIST_LATER.powi(p as i32));
+        // Not a featured artist's genres, and not what the AI guessed alone:
+        // it hears "glam metal" in pop punk and "disco" in Queen. But an
+        // artist's or album's lesser genre the AI also hears in this song
+        // counts ("disco" is Earth, Wind & Fire's third).
+        let listed = by_album.max(by_artist);
         let this = if fits(group, &song.own_genres) {
             1.0
-        } else if by_album > 0.0 || by_artist > 0.0 {
-            by_album.max(by_artist)
-        } else if fits(group, &song.genres) {
-            // A featured artist's, or one of several.
-            OTHER_ARTIST_GENRE
-        } else if !knows_genres && fits(group, &song.styles) {
-            // The AI's guess only for songs with nothing better: it hears
-            // "glam metal" in pop punk and "disco" in Queen.
-            HEARD_GENRE
-        } else if near(&song.own_genres) || near(&song.album_genres) || near(&song.artist_genres) {
-            NEAR_GENRE
+        } else if listed > 0.0 && fits(group, &song.styles) {
+            listed.max(MIN_FIT)
         } else {
-            0.0
+            listed
         };
         score = score.min(this);
     }
@@ -1141,6 +1084,8 @@ fn era_fit(from: i64, to: i64, song: &SongFacts) -> f32 {
     let inside = |y: i64| (from..=to).contains(&y);
     match (song.era, song.year) {
         (Some(era), _) if inside(era) => 1.0,
+        (None, Some(year)) if inside(year) => 1.0,
+        // Its own year fits but it belongs to another time (a reissue).
         (_, Some(year)) if inside(year) => 0.9,
         (Some(y), _) | (None, Some(y)) => {
             let off = if y < from { from - y } else { y - to };
@@ -1319,11 +1264,11 @@ mod tests {
             song(4, 1986, &["synth pop"], 50, 118.0),
         ];
         let (ids, total) = ranked("80s hair metal", &songs);
-        assert_eq!(total, 2);
+        assert_eq!(total, 1);
         assert_eq!(
             ids,
-            [1, 2],
-            "glam metal first, heavy metal only near; 1995 and synth pop don't fit"
+            [1],
+            "heavy metal isn't hair metal; 1995 and synth pop don't fit"
         );
         assert!(genre_fits("deep house", "house"));
         assert!(!genre_fits("housewife", "house"));
@@ -1341,19 +1286,13 @@ mod tests {
     fn the_songs_own_genres_count_most() {
         let mut by_artist = song(1, 1986, &["rock"], 50, 120.0);
         by_artist.artist_genres = vec!["hard rock".into(), "glam metal".into()];
-        let mut heard = song(2, 1986, &[], 50, 120.0);
-        heard.styles = vec!["glam metal".into()];
         let own = song(3, 1986, &["glam metal"], 0, 120.0);
-        // The AI's guess doesn't count against a song's own genres.
-        let mut tagged = song(4, 1986, &["pop punk"], 90, 120.0);
-        tagged.styles = vec!["glam metal".into()];
-        let (ids, total) = ranked("80s glam metal", &[heard, by_artist, own, tagged]);
-        assert_eq!(total, 3);
-        assert_eq!(
-            ids,
-            [3, 1, 2],
-            "its own tag, then its artist's, then the AI's"
-        );
+        // A guest's genres don't make the song fit.
+        let mut guest = song(4, 1986, &["pop punk"], 90, 120.0);
+        guest.genres = vec!["pop punk".into(), "glam metal".into()];
+        let (ids, total) = ranked("80s glam metal", &[by_artist, own, guest]);
+        assert_eq!(total, 2);
+        assert_eq!(ids, [3, 1], "its own tag, then its artist's");
     }
 
     #[test]
@@ -1394,8 +1333,8 @@ mod tests {
         let old = song(1, 1975, &["classic rock"], 0, 120.0);
         let new = song(2, 2023, &["classic rock"], 90, 120.0);
         let (ids, total) = ranked("classic rock", &[new, old]);
-        assert_eq!(total, 2, "a new song still fits a little");
-        assert_eq!(ids, [1, 2]);
+        assert_eq!(total, 1, "a song from 2023 isn't classic rock");
+        assert_eq!(ids, [1]);
     }
 
     #[test]
@@ -1410,8 +1349,8 @@ mod tests {
         guest.artist_genres = vec!["heavy metal".into()];
         guest.genres = vec!["heavy metal".into(), "glam rock".into()];
         let (ids, total) = ranked("glam rock", &[guest, sideline, known]);
-        assert_eq!(total, 3);
-        assert_eq!(ids, [1, 2, 3]);
+        assert_eq!(total, 1, "a third genre or a guest's isn't enough");
+        assert_eq!(ids, [1]);
     }
 
     #[test]
@@ -1438,8 +1377,11 @@ mod tests {
         // The AI's mood wins over a major key.
         gloomy.mode = Some(0.5);
         let (ids, total) = ranked("upbeat pop", &[slow, gloomy, hyped]);
-        assert_eq!(total, 2, "the calm song isn't upbeat");
-        assert_eq!(ids, [1, 3], "the gloomy one only after");
+        assert_eq!(
+            total, 1,
+            "neither the calm song nor the gloomy one is upbeat"
+        );
+        assert_eq!(ids, [1]);
     }
 
     #[test]
@@ -1447,6 +1389,41 @@ mod tests {
         let i = parse("80s hair", &vocab()).unwrap();
         assert!(i.genres[0].contains(&"glam metal".to_owned()));
         assert!(i.unknown.is_empty());
+    }
+
+    #[test]
+    fn a_lesser_genre_counts_when_the_ai_hears_it_too() {
+        let genres = vec!["funk".into(), "soul".into(), "disco".into()];
+        let mut heard = song(1, 1978, &[], 0, 120.0);
+        heard.artist_genres = genres.clone();
+        heard.styles = vec!["disco".into()];
+        let mut not_heard = song(2, 1978, &[], 0, 120.0);
+        not_heard.artist_genres = genres;
+        not_heard.styles = vec!["funk".into()];
+        let mut only_heard = song(3, 1978, &["rock"], 0, 120.0);
+        only_heard.styles = vec!["disco".into()];
+        let (ids, total) = ranked("70s disco", &[only_heard, not_heard, heard]);
+        assert_eq!(total, 1);
+        assert_eq!(ids, [1]);
+    }
+
+    #[test]
+    fn no_picks_beat_poor_ones() {
+        let mut heavy = song(1, 1986, &["heavy metal"], 50, 120.0);
+        heavy.artist_genres = vec!["heavy metal".into(), "hard rock".into()];
+        let intent = parse("80s hair metal", &vocab()).unwrap();
+        let songs = [heavy];
+        let (ids, total) = rank(&intent, &songs, &SoundIndex::default(), None, 10);
+        assert!(ids.is_empty() && total == 0);
+        assert!(
+            !anyone_has_genres(&intent, &songs),
+            "so it may be found by sound"
+        );
+        let mut tagged = song(2, 2005, &["glam metal"], 0, 120.0);
+        tagged.era = Some(2005);
+        let songs = [tagged];
+        assert_eq!(rank(&intent, &songs, &SoundIndex::default(), None, 10).1, 0);
+        assert!(anyone_has_genres(&intent, &songs), "so nothing is shown");
     }
 
     #[test]
