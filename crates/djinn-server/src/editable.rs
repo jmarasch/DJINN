@@ -170,7 +170,7 @@ mod tests {
     use djinn_store::Role;
 
     use super::*;
-    use crate::test_util::{call, get_body, session};
+    use crate::test_util::{call, get_body, json_text, session};
 
     #[tokio::test]
     async fn folders_are_view_only_until_allowed_and_the_choice_is_locked() {
@@ -207,7 +207,7 @@ mod tests {
                 .0
             }
         };
-        let quar_json = format!(r#"{{"path":"{}","editable":true}}"#, quar.to_string_lossy());
+        let quar_json = format!(r#"{{"path":{},"editable":true}}"#, json_text(&quar));
         assert_eq!(put(quar_json.clone()).await, StatusCode::LOCKED);
         state
             .store
@@ -228,10 +228,7 @@ mod tests {
             StatusCode::BAD_REQUEST
         );
         // Taking it back.
-        let back = format!(
-            r#"{{"path":"{}","editable":false}}"#,
-            quar.to_string_lossy()
-        );
+        let back = format!(r#"{{"path":{},"editable":false}}"#, json_text(&quar));
         assert_eq!(put(back).await, StatusCode::NO_CONTENT);
         assert!(require(&state, &song).await.is_err());
         for dir in [pool, quar] {

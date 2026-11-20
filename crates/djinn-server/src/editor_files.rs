@@ -640,8 +640,8 @@ mod tests {
         // Copied: a song of its own.
         let copies = root.join("copies");
         let body = format!(
-            r#"{{"ids":[{id}],"folder":"{}"}}"#,
-            copies.to_string_lossy()
+            r#"{{"ids":[{id}],"folder":{}}}"#,
+            crate::test_util::json_text(&copies)
         );
         let (status, done) = send(&state, "POST", "/api/editor/copy", &body, &admin).await;
         assert_eq!(status, StatusCode::OK, "{done}");

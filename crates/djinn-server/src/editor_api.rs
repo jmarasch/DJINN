@@ -1882,8 +1882,8 @@ mod tests {
         assert_eq!(in_quar(state.clone(), quar.clone()).await, 1, "back in");
         // Moving into the pool (view only) is refused.
         let into_pool = format!(
-            r#"{{"ids":[{quar_song}],"folder":"{}"}}"#,
-            pool.to_string_lossy()
+            r#"{{"ids":[{quar_song}],"folder":{}}}"#,
+            crate::test_util::json_text(&pool)
         );
         assert_eq!(
             post_json(&state, "/api/editor/move", &into_pool, &admin)

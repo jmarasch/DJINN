@@ -951,8 +951,8 @@ mod tests {
 
         // Previewed, then added: filed by its tags and taken in by the library.
         let add = format!(
-            r#"{{"folder":"{}","pattern":"{{album_artist}}/{{album}}/{{track}} {{title}}","preview":true}}"#,
-            music.to_string_lossy()
+            r#"{{"folder":{},"pattern":"{{album_artist}}/{{album}}/{{track}} {{title}}","preview":true}}"#,
+            crate::test_util::json_text(&music)
         );
         let path = format!("/api/editor/imports/{batch}/add");
         let (status, plan) = send(&state, "POST", &path, add.clone().into_bytes(), &admin).await;
@@ -1050,8 +1050,8 @@ mod tests {
         )
         .unwrap();
         let add_body = format!(
-            r#"{{"folder":"{}","pattern":"{{album_artist}}/{{album}}/{{track}} {{title}}"}}"#,
-            music.to_string_lossy()
+            r#"{{"folder":{},"pattern":"{{album_artist}}/{{album}}/{{track}} {{title}}"}}"#,
+            crate::test_util::json_text(&music)
         );
         let (status, done) = send(
             &state,
