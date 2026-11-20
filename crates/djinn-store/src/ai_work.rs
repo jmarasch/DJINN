@@ -410,6 +410,9 @@ mod tests {
             .unwrap()
             .is_empty());
         assert_eq!(store.ai_ask(&[ids[1]], "sync").await.unwrap(), 1);
+        // Windows' clock moves in steps of about 15 ms: asked in the same
+        // step, the two would tie.
+        tokio::time::sleep(std::time::Duration::from_millis(40)).await;
         assert_eq!(store.ai_ask(&[ids[0]], "listen").await.unwrap(), 1);
         let batch = store
             .ai_claim("pc", true, true, true, 10, lease, &[])
