@@ -4,6 +4,7 @@
 import { api } from './api'
 import { hasPlaylists, toast } from './state.svelte'
 import type { LikeKind } from './types'
+import { t } from './i18n.svelte'
 
 export const favorites = $state({
   track: new Set<number>(),
@@ -43,6 +44,6 @@ export async function toggleFavorite(kind: LikeKind, id: number) {
     await api.setLike(kind, id, on)
   } catch (e) {
     flip(!on)
-    toast(e instanceof Error ? e.message : 'Could not save that', true)
+    toast(e instanceof Error ? e.message : t('fav.failed'), true)
   }
 }

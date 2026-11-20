@@ -1,5 +1,6 @@
 <script lang="ts">
   // Add a song, album, or artist to one of your playlists (or a new one).
+  import { t } from './i18n.svelte'
   import { api, ApiError } from './api'
   import Icon from './Icon.svelte'
   import Sheet from './Sheet.svelte'
@@ -38,10 +39,10 @@
   async function add(id: number, name: string) {
     try {
       await api.addToPlaylist(id, kind, refId)
-      toast(`Added to ${name}`)
+      toast(t('atp.added', { name }))
       open = false
     } catch (e) {
-      toast(e instanceof ApiError && e.status === 409 ? `Already in ${name}` : 'Could not add it', true)
+      toast(e instanceof ApiError && e.status === 409 ? t('atp.already', { name }) : t('common.add_failed'), true)
     }
   }
 
@@ -54,7 +55,7 @@
       newName = ''
       await add(playlist.id, playlist.name)
     } catch (err) {
-      toast(err instanceof Error ? err.message : 'Could not create the playlist', true)
+      toast(err instanceof Error ? err.message : t('pls.create_failed'), true)
     }
   }
 </script>
@@ -63,24 +64,24 @@
   {#if !trigger}
     <!-- Opened from elsewhere. -->
   {:else if compact}
-    <button class="icon-only" aria-label="Add {label} to a playlist" onclick={show}>
+    <button class="icon-only" aria-label={t('atp.add_label', { label })} onclick={show}>
       <Icon name="playlist" size={20} />
     </button>
   {:else}
-    <button class="pill" onclick={show}><Icon name="playlist" size={18} /> Add to playlist</button>
+    <button class="pill" onclick={show}><Icon name="playlist" size={18} /> {t('atp.add')}</button>
   {/if}
   {#if open}
-    <Sheet title="Add {label} to..." onclose={() => (open = false)}>
+    <Sheet title={t('atp.title', { label })} onclose={() => (open = false)}>
       {#each playlists as playlist (playlist.id)}
         <button class="row" onclick={() => add(playlist.id, playlist.name)}>
           <Icon name="playlist" size={20} />
           <span class="ellipsis">{playlist.name}</span>
-          {#if playlist.active}<span class="badge">Playing</span>{/if}
+          {#if playlist.active}<span class="badge">{t('pls.playing')}</span>{/if}
         </button>
       {/each}
       <form class="new" onsubmit={create}>
-        <input placeholder="New playlist name" bind:value={newName} maxlength="60" />
-        <button class="primary" disabled={!newName.trim()}>Create</button>
+        <input placeholder={t('atp.new')} bind:value={newName} maxlength="60" />
+        <button class="primary" disabled={!newName.trim()}>{t('pls.create')}</button>
       </form>
     </Sheet>
   {/if}

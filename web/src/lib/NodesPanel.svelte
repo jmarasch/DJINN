@@ -1,13 +1,11 @@
 <script lang="ts">
-  // Admin > Nodes: other DJINN boxes that play a room on their own speakers.
-  // Joining is off until switched on; each request is accepted with the
-  // admin's password after checking its code matches the node's screen.
+  import { t } from './i18n.svelte'
   import { onMount } from 'svelte'
   import { api } from './api'
-  import NodeScreenSettings from './NodeScreenSettings.svelte'
+  import { online, seen, systemName } from './nodeInfo'
+  import Tabs from './Tabs.svelte'
   import { toast } from './state.svelte'
   import type { HouseNode, NodeList } from './types'
-  import type { Visuals } from './visuals'
 
   let list = $state<NodeList | null>(null)
   let failed = $state(false)
@@ -15,14 +13,6 @@
   let accepting = $state<HouseNode | null>(null)
   let password = $state('')
   let kicking = $state<HouseNode | null>(null)
-  /** The node whose screen settings are open. */
-  let screenFor = $state<number | null>(null)
-  /** The house's visualizers, where a node's own start from. */
-  let house = $state<Visuals | null>(null)
-  $effect(() => {
-    if (screenFor !== null && !house) api.visuals().then((v) => (house = v)).catch(() => {})
-  })
-
   async function load() {
     try {
       list = await api.nodes()
@@ -42,13 +32,17 @@
   const waiting = $derived(list?.nodes.filter((n) => n.status === 'pending') ?? [])
   const joined = $derived(list?.nodes.filter((n) => n.status === 'approved') ?? [])
 
+  /** Options first, then the nodes; opens on the nodes once there are some. */
+  let tab = $state<'options' | 'nodes' | null>(null)
+  const shown = $derived(tab ?? (list?.nodes.length ? 'nodes' : 'options'))
+
   async function setJoining(open: boolean) {
     try {
       await api.setNodeJoining(open)
-      toast(open ? 'Nodes can ask to join' : 'Joining is off')
+      toast(open ? t('np.can_join') : t('np.join_off'))
       await load()
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not save', true)
+      toast(e instanceof Error ? e.message : t('common.save_failed_short'), true)
     }
   }
 
@@ -57,12 +51,12 @@
     if (!accepting) return
     try {
       await api.acceptNode(accepting.id, password)
-      toast(`${accepting.name} joined`)
+      toast(t('np.joined', { name: accepting.name }))
       accepting = null
       password = ''
       await load()
     } catch (err) {
-      toast(err instanceof Error ? err.message : 'Could not accept', true)
+      toast(err instanceof Error ? err.message : t('np.accept_failed'), true)
     }
   }
 
@@ -74,108 +68,82 @@
       const back = `${location.origin}${location.pathname}#/admin/nodes`
       location.href = `${url}&back=${encodeURIComponent(back)}`
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not open it', true)
+      toast(e instanceof Error ? e.message : t('ed.open_failed'), true)
     }
   }
 
   async function remove(node: HouseNode) {
     try {
       await api.removeNode(node.id)
-      toast(node.status === 'pending' ? `Declined ${node.name}` : `Kicked ${node.name}; it will wipe its cache`)
+      toast(node.status === 'pending' ? t('np.declined', { name: node.name }) : t('ns.kicked', { name: node.name }))
       kicking = null
       await load()
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not remove', true)
+      toast(e instanceof Error ? e.message : t('common.remove_failed_short'), true)
     }
   }
 
-  function seen(ms: number | null): string {
-    if (!ms) return 'never'
-    const minutes = Math.round((Date.now() - ms) / 60_000)
-    if (minutes < 1) return 'just now'
-    if (minutes < 60) return `${minutes} min ago`
-    const hours = Math.round(minutes / 60)
-    if (hours < 48) return `${hours} h ago`
-    return new Date(ms).toLocaleDateString()
-  }
-  // Nodes check in every 5 seconds.
-  const online = (node: HouseNode) => !!node.last_seen && Date.now() - node.last_seen < 30_000
-
-  const PAGE_NAMES: Record<string, string> = { lyrics: 'Timed lyrics', visual: 'Visualizer', tv: 'TV page' }
-  /** A screen setting in a few words. */
-  function screenName(screen: string | undefined): string {
-    if (screen === 'status') return "The node's status"
-    if (screen === 'off') return 'Nothing (blank)'
-    return (screen ?? 'tv')
-      .split(',')
-      .map((p) => PAGE_NAMES[p] ?? p)
-      .join(', then ')
-  }
-
-  /** What a screen plugged into the node shows. Kept here on Main, so it
-   * can be set while the node is off; it changes within seconds once on. */
-  async function setScreen(node: HouseNode, screen: string, visual: Visuals | null) {
-    node.audio = { ...node.audio, screen, visual }
-    try {
-      await api.setNodeAudio(node.id, node.audio)
-      await load()
-    } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not save', true)
-      await load()
-    }
-  }
 </script>
 
-<section class="card">
-  <h2>Joining</h2>
+<Tabs
+  wide
+  items={[
+    ['options', t('np.options')],
+    ['nodes', t('np.nodes')],
+  ]}
+  active={shown}
+  onselect={(id) => (tab = id as 'options' | 'nodes')}
+/>
+
+{#if shown === 'options'}
+<section class="card wide">
+  <h2>{t('np.joining')}</h2>
   <p class="small muted">
-    A node is another DJINN box, like a Raspberry Pi by a room's speakers. It plays that room's music in step with this
-    server and takes everything from here: songs are only cached on it, never kept. Phones always connect to this server.
+    {t('np.intro')}
   </p>
   {#if failed}
-    <p class="error">Could not load the nodes.</p>
+    <p class="error">{t('np.load_failed')}</p>
   {:else if list}
     <label class="switch big">
       <input type="checkbox" checked={list.join_open} onchange={(e) => setJoining(e.currentTarget.checked)} />
-      <b>Allow nodes to ask to join</b>
+      <b>{t('np.allow')}</b>
     </label>
     <p class="small muted">
-      Turn this on while setting up a node, and off again after. Requests still need your password to accept.
+      {t('np.allow_note')}
       {#if list.security_code}
-        A node shows this server's code when it first connects: <b class="code">{list.security_code}</b>. If it shows a
-        different code, it reached something else; don't go on.
+        {t('np.code_1')} <b class="code">{list.security_code}</b>{t('np.code_2')}
       {/if}
     </p>
   {/if}
 </section>
-
+{:else}
 {#if waiting.length}
-  <section class="card">
-    <h3>Asking to join</h3>
-    <p class="small muted">Check that the code matches the one on the node's screen before accepting.</p>
+  <section class="card wide">
+    <h3>{t('np.asking')}</h3>
+    <p class="small muted">{t('np.check_code')}</p>
     {#each waiting as node (node.id)}
       <div class="node">
         <div class="grow">
           <b>{node.name}</b>
           <span class="small muted">
-            Code <b class="code">{node.code}</b> · {node.address ?? 'unknown address'}{node.platform
-              ? ` · ${node.platform}`
-              : ''} · asked {seen(node.requested_at)}
+            {t('np.code')} <b class="code">{node.code}</b> · {node.address ?? t('np.unknown_address')}{node.platform
+              ? ` · ${systemName(node.platform)}`
+              : ''}{t('np.asked', { when: seen(node.requested_at) })}
           </span>
         </div>
-        <button class="primary" onclick={() => ((accepting = node), (password = ''))}>Accept</button>
-        <button onclick={() => remove(node)}>Decline</button>
+        <button class="primary" onclick={() => ((accepting = node), (password = ''))}>{t('np.accept')}</button>
+        <button onclick={() => remove(node)}>{t('np.decline')}</button>
       </div>
       {#if accepting?.id === node.id}
         <form class="accept" onsubmit={accept}>
           <label>
-            Your password, to let {node.name} join
+            {t('np.password', { name: node.name })}
             <!-- svelte-ignore a11y_autofocus -->
             <input type="password" bind:value={password} autocomplete="current-password" autofocus required />
           </label>
           <div class="buttons">
-            <button class="primary" type="submit">Accept {node.name}</button>
-            <button type="button" onclick={() => (accepting = null)}>Cancel</button>
+            <button class="primary" type="submit">{t('np.accept_named', { name: node.name })}</button>
+            <button type="button" onclick={() => (accepting = null)}>{t('common.cancel')}</button>
           </div>
         </form>
       {/if}
@@ -184,73 +152,64 @@
 {/if}
 
 {#if list}
-  <section class="card">
-    <h3>Joined</h3>
+  <section class="card wide">
+    <h3>{t('np.joined_title')}</h3>
     {#if joined.length === 0}
-      <p class="small muted">No nodes yet.</p>
+      <p class="small muted">{t('np.none')}</p>
     {:else}
       <p class="small muted">
-        To line a node's speaker up with the others, use <a href="#/admin/rooms">Rooms</a> &gt; Timing on its room: play
-        the timing sound, then move each speaker earlier or later until the tocks land together.
+        {t('np.timing_1')} <a href="#/admin/rooms">{t('admin.menu.rooms')}</a> {t('np.timing_2')}
       </p>
     {/if}
     {#each joined as node (node.id)}
-      <div class="node">
-        <span class="dot" class:on={online(node)} title={online(node) ? 'Connected' : 'Not connected'}></span>
-        <div class="grow">
-          <b>{node.name}</b>
-          <span class="small muted">
-            {online(node) ? 'Connected' : `Last seen ${seen(node.last_seen)}`}{node.address
-              ? ` · ${node.address}`
-              : ''}{node.version ? ` · ${node.version}` : ''}
-          </span>
+      <div class="joined-node">
+        <div class="head">
+          <span class="dot" class:on={online(node)} title={online(node) ? t('ns.connected') : t('np.not_connected')}></span>
+          <b class="name">{node.name}</b>
+          <span class="small muted">{online(node) ? t('ns.connected') : t('ns.last_seen', { when: seen(node.last_seen) })}</span>
+          {#if online(node)}
+            {#if node.same_build}
+              <span class="badge same">{t('ns.same_build')}</span>
+            {:else}
+              <span class="badge behind">{t('ns.behind')}</span>
+            {/if}
+          {/if}
         </div>
-        <button
-          title="What a screen plugged into this node shows"
-          onclick={() => (screenFor = screenFor === node.id ? null : node.id)}
-        >
-          Screen: {screenName(node.audio.screen)}
-        </button>
-        <button
-          title={online(node)
-            ? "Opens the node's own page, where its speaker, timing and other settings are"
-            : "The node isn't connected; it can be managed once it is"}
-          disabled={!online(node)}
-          onclick={() => manage(node)}
-        >
-          Manage
-        </button>
-        {#if kicking?.id === node.id}
-          <button class="danger" onclick={() => remove(node)}>Kick and wipe</button>
-          <button onclick={() => (kicking = null)}>Cancel</button>
-        {:else}
-          <button onclick={() => (kicking = node)}>Kick</button>
-        {/if}
+        <p class="facts small muted">
+          {#if node.addresses}<span>{node.addresses.split('\n').join(', ')}</span>{:else if node.address}<span>{node.address}</span>{/if}
+          {#if node.platform}<span>{systemName(node.platform)}</span>{/if}
+          {#if node.version}<span>{node.version}</span>{/if}
+          {#if node.build_label}<span class="label">{node.build_label}</span>{/if}
+        </p>
+        <div class="actions">
+          <button
+            title={online(node)
+              ? t('np.manage_title')
+              : t('ns.offline_title')}
+            disabled={!online(node)}
+            onclick={() => manage(node)}
+          >
+            {t('np.manage')}
+          </button>
+          {#if kicking?.id === node.id}
+            <button class="danger" onclick={() => remove(node)}>{t('ns.kick_wipe')}</button>
+            <button onclick={() => (kicking = null)}>{t('common.cancel')}</button>
+          {:else}
+            <button class="danger" onclick={() => (kicking = node)}>{t('ns.kick')}</button>
+          {/if}
+        </div>
       </div>
-      {#if screenFor === node.id}
-        <div class="screen">
-          <NodeScreenSettings
-            screen={node.audio.screen ?? 'tv'}
-            visual={node.audio.visual ?? null}
-            start={house}
-            onchange={(screen, visual) => setScreen(node, screen, visual)}
-          />
-        </div>
-      {/if}
       {#if kicking?.id === node.id}
         <p class="small muted">
-          {node.name} is shut out at once and wipes every cached song, now if it's connected or when it next starts.
+          {t('ns.kick_note', { name: node.name })}
         </p>
       {/if}
     {/each}
   </section>
 {/if}
+{/if}
 
 <style>
-  .screen {
-    margin: 4px 0 12px;
-  }
-
   .node {
     display: flex;
     flex-wrap: wrap;
@@ -303,6 +262,59 @@
 
   .buttons {
     display: flex;
+    gap: 8px;
+  }
+
+  /* A joined node: its name and state, what it runs, then its buttons. */
+  .joined-node {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 10px;
+  }
+
+  .name {
+    font-size: 1.05rem;
+  }
+
+  .badge {
+    padding: 1px 9px;
+    border-radius: 999px;
+    border: 1px solid currentColor;
+    font-size: 0.78rem;
+  }
+
+  .same {
+    color: var(--ok);
+  }
+
+  .behind {
+    color: var(--bad);
+  }
+
+  .facts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px 14px;
+    margin: 0;
+  }
+
+  .facts .label {
+    color: var(--text);
+    font-weight: 600;
+  }
+
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
     gap: 8px;
   }
 </style>

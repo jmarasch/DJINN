@@ -159,6 +159,18 @@ impl Store {
         Ok(album)
     }
 
+    /// Albums by id, in the order given (ones that don't exist left out).
+    pub async fn ss_albums_by_ids(&self, ids: &[i64]) -> Result<Vec<SsAlbum>> {
+        let found: Vec<SsAlbum> = sqlx::query_as(concat!(
+            ss_album!(),
+            "WHERE al.id IN (SELECT value FROM json_each(?)) GROUP BY al.id"
+        ))
+        .bind(crate::library::json_ids(ids))
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(crate::library::in_order(ids, found, |a| a.id))
+    }
+
     /// Artists with playable songs, A to Z, with how many albums they have.
     pub async fn ss_artists(&self) -> Result<Vec<SsArtist>> {
         let artists = sqlx::query_as(concat!(
@@ -177,10 +189,7 @@ impl Store {
 
     /// File details for songs, in no particular order.
     pub async fn track_files(&self, ids: &[i64]) -> Result<Vec<TrackFile>> {
-        let list = format!(
-            "[{}]",
-            ids.iter().map(i64::to_string).collect::<Vec<_>>().join(",")
-        );
+        let list = crate::library::json_ids(ids);
         let files = sqlx::query_as(
             "SELECT id, path, size, added_at FROM tracks
              WHERE id IN (SELECT value FROM json_each(?)) AND removed_at IS NULL",

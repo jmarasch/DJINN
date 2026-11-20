@@ -22,6 +22,8 @@ export interface User {
   permissions?: Permissions
   /** DJINN GO asks this account for two-step sign-in. Only on /me. */
   two_step_required?: boolean
+  /** The password came from the host's recovery command: change it now. Only on /me. */
+  must_change_password?: boolean
 }
 
 /** Login's answer when the password was right but a code is needed. */
@@ -344,6 +346,9 @@ export interface Track {
   likes?: number
   /** Lyrics found: 0 none (or not looked for yet), 1 words, 2 timed. */
   lyrics?: number
+  /** 0 not AI, 1 the words were made by an AI, 2 a person's words timed by an AI. */
+  lyrics_ai?: number
+  lyrics_failed?: number
 }
 
 export type LyricsFilter = 'all' | 'words' | 'timed'
@@ -494,7 +499,7 @@ export interface PlayerState {
 
 /** The mood dial: everyone nudges the auto mix from chill (-1) to hype (1). */
 export interface MoodState {
-  /** In use (Admin > Smart play). */
+  /** In use (Admin > Smart Play). */
   on: boolean
   /** Where it is now. */
   value: number
@@ -838,11 +843,61 @@ export type ProblemKind =
   | 'tags'
   | 'wont_play'
   | 'reported'
+  | 'reported_lyrics'
   | 'no_artist'
   | 'no_album'
   | 'album_no_cover'
   | 'album_no_year'
   | 'album_no_genre'
+  | 'duplicate_albums'
+  | 'identical_files'
+  | 'bogus_values'
+  | 'odd_length'
+  | 'low_bitrate'
+  | 'title_junk'
+  | 'name_mismatch'
+  | 'artist_variants'
+  | 'split_across_artists'
+  | 'cover_differs'
+  | 'track_gaps'
+  | 'no_lyrics'
+  | 'no_loudness'
+  | 'vanished'
+  | 'ai_lyrics'
+  | 'no_length_header'
+  | 'messy_genres'
+
+/** A genre and how many songs have it (Admin > Library > Genres). */
+export interface GenreCountRow {
+  genre: string
+  songs: number
+  /** Placed by hand: Auto-group leaves it where it is. */
+  pinned: boolean
+}
+
+/** Genre containers: similar genres shown under one name. */
+export interface GenreGroups {
+  enabled: boolean
+  containers: { id: number; name: string; auto: boolean; genres: GenreCountRow[] }[]
+  /** Genres in no container. */
+  loose: GenreCountRow[]
+}
+
+/** A way Auto-group can sort the genres. */
+export interface GenreGroupChoice {
+  containers: number
+  grouped: number
+  step: number
+}
+
+/** The thorough check of MP3 length headers. */
+export interface Mp3Check {
+  running: boolean
+  /** MP3s checked as they are now, of `total`. */
+  checked: number
+  total: number
+  missing: number
+}
 
 export interface ProblemCount {
   kind: ProblemKind
@@ -897,6 +952,8 @@ export interface DuplicateListing {
   total: number
   songs: number
   groups: DuplicateGroup[]
+  /** Copies in different albums are listed too. */
+  across_albums: boolean
   sound_analysis: boolean
 }
 
@@ -1061,6 +1118,10 @@ export interface CastDevice {
   /** The device sets its own volume (a TV remote). */
   volume_fixed: boolean
   error: string | null
+  /** The room it plays; Main until it's put in another. */
+  room_id: number
+  /** Someone put it in a room. */
+  placed: boolean
 }
 
 export interface CastList {
@@ -1137,6 +1198,8 @@ export interface About {
   version: string
   commit: string
   commit_date: string
+  /** A test build's label (commit, edits, time); empty for releases. */
+  build_label: string
   repository: string
   contact: string
   check_updates: boolean
@@ -1214,7 +1277,7 @@ export interface IdentificationRow {
   current_year: number | null
 }
 
-/** Smart play's switches (Admin > Smart play). */
+/** Smart Play's switches (Admin > Smart Play). */
 export interface SmartPlaySettings {
   smart_play: boolean
   smart_playlists: boolean
@@ -1299,6 +1362,8 @@ export interface SystemStatus {
   albums: number
   /** The music files' size together. */
   library_bytes: number
+  /** How long the songs last together, in ms. */
+  library_ms: number
   library_folders: number
   scanning: boolean
   last_scan: { found: number; to_read: number; read: number; removed: number; done: boolean } | null
@@ -1336,7 +1401,7 @@ export interface LogSettings {
 }
 
 /** What Admin > System can clear out. */
-export type SystemReset = 'queue' | 'tag_edits' | 'analysis' | 'listening' | 'history' | 'settings' | 'everything'
+export type SystemReset = 'queue' | 'tag_edits' | 'imported_lyrics' | 'analysis' | 'listening' | 'history' | 'settings' | 'everything'
 
 /** A picture of an artist for slideshows. */
 export interface ArtistPicture {
@@ -1360,8 +1425,13 @@ export interface Lyrics {
   lines: LyricLine[] | null
   plain: string | null
   instrumental: boolean
-  /** lrc (a file beside the song), file (its tags) or lrclib (online). */
+  /** lrc (a file beside the song), file (its tags), lrclib (online) or bulk (imported). */
   source: string
+  /** 'made': an AI wrote the words by listening (they may be wrong); 'synced': a person's words that an AI timed. */
+  ai?: 'made' | 'synced' | null
+  ai_model?: string | null
+  /** For 'synced': how well the timing matched the words, in percent. */
+  ai_match?: number | null
 }
 
 /** A song found by its words, with the line that matched. */
@@ -1377,13 +1447,351 @@ export interface LyricsStatus {
   instrumental: number
   unread: number
   not_looked_up: number
+  /** Songs whose lyrics came from an imported zip. */
+  imported: number
+  /** Songs whose lyrics an AI made by listening. */
+  ai: number
+  /** Songs with lyrics an admin removed as bad. */
+  blocked: number
   running: boolean
   phase: '' | 'reading' | 'looking up'
+}
+
+export interface EditorNode {
+  name: string
+  path: string
+  songs: number
+  /** It has folders of its own (an album folder has none). */
+  has_folders: boolean
+  /** Library folders only: changes are allowed in it. */
+  editable: boolean | null
+}
+
+/** What the editor changes: DJINN's own copy, or the files. */
+export type EditTarget = 'database' | 'library'
+
+/** The fields the editor's grid has columns of its own for. */
+export type EditorCoreField = 'title' | 'artist' | 'album' | 'album_artist' | 'track_no' | 'disc_no' | 'year' | 'genre'
+
+/** What the editor changes: a field of its own, or one of the file's
+ * other tags ("x:Composer"; only in the files). */
+export type EditorField = EditorCoreField | `x:${string}`
+
+export interface EditorChange {
+  id: number
+  field: EditorField
+  /** null: back to the file's (database), or taken out of the file. */
+  value: string | null
+}
+
+export interface EditorApplied {
+  songs: number
+  failed: { id: number; error: string }[]
+  /** The approval's number in the history, when files were written. */
+  batch: number | null
+}
+
+/** One approval that wrote files. */
+export interface EditorBatch {
+  batch: number
+  made_at: number
+  made_by: string | null
+  files: number
+  /** tags, cover, rename, or undo-... */
+  kinds: string
+  undone_at: number | null
+  /** Its files went out with the trash: it can't be undone. */
+  final_at: number | null
+}
+
+/** Where a release comes from. */
+export type ReleaseSource = 'musicbrainz' | 'deezer' | 'itunes' | 'spotify'
+
+/** A release found, before its tracks are fetched. */
+export interface ReleaseHit {
+  source: ReleaseSource
+  id: string
+  title: string
+  artist: string
+  date: string | null
+  country: string | null
+  format: string | null
+  tracks: number
+  note: string | null
+}
+
+export interface ReleaseTrack {
+  disc: number
+  number: number
+  title: string
+  /** The track's own artist when it isn't the release's. */
+  artist: string | null
+  genre?: string | null
+  length_ms: number | null
+  extra?: Record<string, string>
+}
+
+export interface Release {
+  source: ReleaseSource
+  id: string
+  title: string
+  artist: string
+  year: number | null
+  genre?: string | null
+  has_cover?: boolean
+  extra?: Record<string, string>
+  tracks: ReleaseTrack[]
+}
+
+/** What happens once files have moved. */
+export interface EditorAfterMove {
+  /** Folders left with no songs go to the trash, with what's left in them. */
+  remove_empty?: boolean
+  /** Each new folder gets a folder.jpg of its album's cover. */
+  folder_art?: boolean
+}
+
+export interface EditorRenamed {
+  id: number
+  from: string
+  to: string
+  problem: string | null
+}
+
+export interface EditorSong {
+  id: number
+  path: string
+  title: string
+  artist: string | null
+  album: string | null
+  album_artist: string | null
+  track_no: number | null
+  disc_no: number | null
+  year: number | null
+  genre: string | null
+  album_id: number | null
+  art_hash: string | null
+  duration_ms: number | null
+  /** Its folder allows changes to the file. */
+  editable: boolean
+  /** Where it is inside its library folder, led by that folder's name
+   * (for a file waiting in an import, the name it came with). */
+  rel_path: string
+  /** Waiting in an import, not in the library yet. */
+  staged?: boolean
+  /** Its lyrics: 0 none, 1 words, 2 timed. */
+  lyrics: number
+  /** AI lyrics work asked for or under way, like "listen asked", "sync
+   * working" or (an import's) "listen after adding". */
+  ai_job: string | null
+  /** What the file says (editing the library); null if it couldn't be read. */
+  file: {
+    title: string
+    artist: string | null
+    album: string | null
+    album_artist: string | null
+    track_no: number | null
+    disc_no: number | null
+    year: number | null
+    genre: string | null
+    /** The file's other text tags (Composer, Comment, Label...). */
+    extra?: Record<string, string>
+  } | null
+}
+
+/** What the editor's lyrics tools did with each song. */
+export interface EditorLyricsOutcomes {
+  songs: {
+    id: number
+    /** had, timed, words, instrumental, none, asked (the AI), skipped or failed. */
+    result: string
+    error?: string
+  }[]
+  /** The AI listener takes work; asked songs wait until it does. */
+  ai_on: boolean
+}
+
+/** What a song's sound was identified as, if anything. */
+export interface EditorHeard {
+  id: number
+  found: {
+    score: number
+    title: string
+    artist: string
+    album: string | null
+    year: number | null
+    genre: string | null
+  } | null
+  error?: string
+}
+
+/** An album brought into the editor, waiting to go into the library. */
+export interface EditorImport {
+  batch: number
+  files: number
+  started_at: number
+  album: string | null
+  artist: string | null
+}
+
+export type CompareWhy = 'correction' | 'identified' | 'other'
+
+export interface CompareDiff {
+  field: string
+  /** What DJINN holds. */
+  database: string | null
+  /** What the file says. */
+  file: string | null
+  why: CompareWhy
+}
+
+export interface EditableFolder {
+  path: string
+  name: string
+  editable: boolean
+}
+
+export interface CompareSong {
+  track_id: number
+  path: string
+  folder: string
+  title: string
+  artist: string | null
+  diffs: CompareDiff[]
+}
+
+export interface CompareRun {
+  started_at: number
+  finished_at: number | null
+  total: number
+  done: number
+  differing: number
+  unreadable: number
+  counts: { field: string; why: CompareWhy; songs: number }[]
+  folders: { path: string; songs: number; differing: number; unreadable: number }[]
+  error: string | null
+}
+
+export interface CompareShown {
+  running: boolean
+  run: CompareRun | null
+  matching: number
+  songs: CompareSong[]
+}
+
+/** How strict the lock on library changes is. */
+export type ProtectedLevel = 'off' | 'medium' | 'max'
+
+export interface ProtectedStatus {
+  level: ProtectedLevel
+  /** This session has the protected areas open (always true when off). */
+  open: boolean
+  seconds_left: number | null
+  two_step: boolean
+  can_open: boolean
+  audit_on: boolean
+  audit_count: number
+  /** The host's recovery command was used (until dismissed). */
+  recovery_used: { at: number; username: string } | null
+}
+
+export interface AuditEntry {
+  id: number
+  at: number
+  user_id: number | null
+  username: string
+  ip: string | null
+  kind: string
+  detail: string
+}
+
+export interface AiWorkStatus {
+  on: boolean
+  new_songs: boolean
+  sync_plain: boolean
+  /** Main isolates vocals for helping nodes when it can. */
+  vocals_for_nodes: boolean
+  /** The least an AI's lyrics must score to be kept, in percent. */
+  min_match: number
+  /** Genres whose songs get no AI lyrics. */
+  skip_genres: string[]
+  counts: {
+    waiting_listen: number
+    waiting_sync: number
+    working: number
+    /** Vocals isolated here, waiting for a node. */
+    prepared: number
+    done: number
+    failed: number
+  }
+  held: { reason: 'music' } | { reason: 'hours'; from: number; until: number } | null
+  keys: string[]
+  workers: {
+    name: string
+    label: string
+    node: boolean
+    last_seen: number
+    done: number
+    failed: number
+    /** Seconds of work per minute of song. */
+    secs_per_minute: number | null
+  }[]
+}
+
+export interface AiListenerStatus {
+  installed: boolean
+  installing: boolean
+  running: boolean
+  /** Vocal isolation is installed, so it can isolate vocals for nodes. */
+  can_isolate: boolean
+  python: string | null
+  ffmpeg: boolean
+  nvidia: boolean
+  model: string
+  vocals: boolean
+  auto_start: boolean
+  error: string | null
+  log: string[]
+}
+
+/** What the last lyrics zip import did. */
+export interface LyricsImportReport {
+  saved_ai: number
+  file: string
+  replace: boolean
+  even_if_unasked: boolean
+  started_at: number
+  finished_at: number | null
+  total: number
+  done: number
+  saved_timed: number
+  saved_plain: number
+  had_lyrics: number
+  kept_import: number
+  waiting_lrclib: number
+  blocked: number
+  instrumental: number
+  empty: number
+  too_big: number
+  ignored: number
+  not_matched: number
+  ambiguous: number
+  mismatched: number
+  warning_count: number
+  warnings: { entry: string; reason: string }[]
+  error: string | null
+}
+
+export interface LyricsImportStatus {
+  running: boolean
+  report: LyricsImportReport | null
 }
 
 export interface LyricsSettings {
   lookup: boolean
   page: boolean
+  /** Show a note on lyrics an AI worked on. */
+  ai_note: boolean
 }
 
 /** Another DJINN box playing a room on its own speakers. */
@@ -1394,8 +1802,14 @@ export interface HouseNode {
   status: 'pending' | 'approved'
   room_id: number
   address: string | null
+  /** The addresses the node says it has itself, one per line; empty until it says. */
+  addresses: string
   version: string | null
   platform: string | null
+  /** "test <commit> ..." when the node runs a test build. */
+  build_label: string | null
+  /** Runs the same build as Main. */
+  same_build: boolean
   requested_at: number
   approved_at: number | null
   last_seen: number | null
@@ -1404,6 +1818,30 @@ export interface HouseNode {
   audio: NodeAudio
   /** The speakers the node reported. */
   speakers: NodeSpeaker[]
+  /** Helps with AI lyrics while it isn't playing or showing visuals. */
+  ai_help: boolean
+  /** The model chosen for it; null for the suggested one. */
+  ai_model: string | null
+  ai: NodeAi
+}
+
+/** A node's AI lyrics helper, as it reported it. */
+export interface NodeAi {
+  /** off, installing, ready, working, paused or failed. */
+  phase: string
+  detail: string | null
+  python: string | null
+  threads: number | null
+  memory_mb: number | null
+  /** The model installed. */
+  model: string | null
+  /** The speed test: milliseconds to hear 30 seconds. */
+  bench_ms: number | null
+  /** The model suggested for it, and the one it uses. */
+  suggested: string
+  using: string
+  /** Seconds of work per minute of song, once it has done some. */
+  secs_per_minute: number | null
 }
 
 /** A node's speaker settings, kept on Main. */
@@ -1413,18 +1851,29 @@ export interface NodeAudio {
   delay_ms: number
   /** Volume trim, 0 to 1. */
   trim: number
+  /** More speakers on the same node, each with its own device, delay and
+   * trim; the first is `device`, `delay_ms` and `trim` above. */
+  outputs?: NodeOutput[]
   equalizer: EqualizerSettings
   /** What to do once Main is gone and what was loaded has played. */
   offline: 'stop' | 'cached'
   /** Plays straight through instead of correcting itself against Main. */
   free_run?: boolean
   /** What a screen plugged into the node shows: 'status', 'off', or pages
-   * to try in order ('lyrics', 'visual', 'tv') joined by commas. */
+   * to try in order ('lyrics', 'visual', 'tv') joined by commas; '' (or
+   * missing) follows its room's display setting. */
   screen?: string
   /** The node's own visualizers, or null to follow the house's. */
   visual?: import('./visuals').Visuals | null
   /** Songs, playing and coming up, the node keeps copies of. */
   cache_ahead?: number
+}
+
+/** One more speaker on a node. */
+export interface NodeOutput {
+  device: string | null
+  delay_ms: number
+  trim: number
 }
 
 export interface NodeSpeaker {
@@ -1459,6 +1908,8 @@ export interface RoomList {
 export interface TimingSpeaker {
   kind: 'output' | 'node'
   id: number
+  /** Which of a node's speakers (0 is its first). */
+  output: number
   name: string
   delay_ms: number
 }

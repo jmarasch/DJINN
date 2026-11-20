@@ -1,6 +1,7 @@
 <script lang="ts">
   // Every song by an artist, on a page of its own (from Show all on the
   // artist's page).
+  import { t } from '../lib/i18n.svelte'
   import { api } from '../lib/api'
   import Icon from '../lib/Icon.svelte'
   import InfiniteList from '../lib/InfiniteList.svelte'
@@ -26,9 +27,9 @@
   }
 </script>
 
-<button class="back" onclick={() => history.back()}><Icon name="back" /> Back</button>
+<button class="back" onclick={() => history.back()}><Icon name="back" /> {t('nav.back')}</button>
 
-<h1>{name ? `Songs by ${name}` : 'Songs'}</h1>
+<h1>{name ? t('as.songs_by', { name }) : t('as.songs')}</h1>
 <div class="head">
   {#if total !== null}<p class="small muted">{total.toLocaleString()} {total === 1 ? 'song' : 'songs'}</p>{/if}
   <QueueAll kind="artist" refId={id} />

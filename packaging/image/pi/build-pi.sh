@@ -23,8 +23,13 @@ esac
 cache=${PI_IMAGE_CACHE:-$(dirname "$out")}
 mkdir -p "$cache" "$(dirname "$out")"
 
+# The user guide and language files (packaging/content.sh) go beside the
+# program when they've been laid out.
+content=${DJINN_CONTENT:-$here/../../target/content}
+[ -f "$content/guide/VERSION" ] || content=$(mktemp -d)
+
 docker run --rm --privileged \
-    -v "$here:/image:ro" -v "$binary:/djinn:ro" -v "$cache:/cache" -v "$(dirname "$out"):/out" \
+    -v "$here:/image:ro" -v "$binary:/djinn:ro" -v "$content:/content:ro" -v "$cache:/cache" -v "$(dirname "$out"):/out" \
     -e LATEST="$latest" -e OUT="/out/$(basename "$out")" -e OWNER="$(id -u):$(id -g)" \
     debian:trixie-slim sh -euc '
 apt-get update -qq >/dev/null
@@ -56,7 +61,7 @@ resize2fs "$root" >/dev/null 2>&1
 mkdir -p /mnt/root
 mount "$root" /mnt/root
 trap "umount /mnt/root 2>/dev/null; losetup -d $root 2>/dev/null" EXIT
-sh /image/common/install-files.sh /mnt/root /djinn
+sh /image/common/install-files.sh /mnt/root /djinn /content
 
 sync
 umount /mnt/root

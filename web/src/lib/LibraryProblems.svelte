@@ -1,63 +1,17 @@
 <script lang="ts">
+  import { findInEditor, openInEditor } from './editorJump.svelte'
   // Admin > Library > Problems: what the last library check couldn't add,
   // songs that won't play or whose tags couldn't be read, and gaps in the
   // tags, each with what to do about it. Kinds the admin already knows
   // about can be hidden.
   import { api } from './api'
   import { app, toast } from './state.svelte'
+  import { locale, t } from './i18n.svelte'
   import { parseReports, reportShort } from './reports'
-  import type { ProblemCount, ProblemItem, ProblemKind, ProblemSummary } from './types'
+  import type { Mp3Check, ProblemCount, ProblemItem, ProblemKind, ProblemSummary } from './types'
 
-  const about: Record<ProblemKind, { label: string; hint: string }> = {
-    missing_folder: {
-      label: 'Music folders not found',
-      hint: "The folder isn't there right now. Plug the drive in or reconnect the share, or remove the folder above if it moved. Its songs stay in DJINN until it's back.",
-    },
-    unreadable: {
-      label: "Folders and files DJINN can't open",
-      hint: "DJINN wasn't allowed to read these. Check that the account DJINN runs as can open them, and that network shares are connected.",
-    },
-    bad_name: {
-      label: "Names DJINN can't read",
-      hint: 'These names use characters that are not valid text, often from an old computer or a ripped CD. Rename the file or folder, then check again.',
-    },
-    unsupported: {
-      label: "Formats DJINN doesn't play",
-      hint: 'DJINN plays MP3, FLAC, AAC and M4A, Ogg Vorbis and WAV. Convert these to FLAC (full quality) or MP3 with a converter, then check again.',
-    },
-    tags: {
-      label: 'Songs with unreadable tags',
-      hint: "DJINN couldn't read these files' tags, so they show under their file names. Fix the tags with a tag editor such as Mp3tag or MusicBrainz Picard, or use Edit tags on the song, which keeps your changes in DJINN without touching the file.",
-    },
-    wont_play: {
-      label: "Songs that won't play",
-      hint: 'These failed when played or checked, so the file is probably damaged or incomplete. Replace it with a good copy. DJINN tries again when the file changes.',
-    },
-    reported: {
-      label: 'Songs listeners reported',
-      hint: 'Listeners said these need fixing. Fix the song (Edit tags, a better copy, or a cover in its folder), then select Done to clear the reports.',
-    },
-    no_artist: {
-      label: 'Songs with no artist',
-      hint: 'Add the artist with Edit tags on the song, or in a tag editor.',
-    },
-    no_album: {
-      label: 'Songs with no album',
-      hint: 'These show as loose songs. Add the album with Edit tags on the song, or in a tag editor.',
-    },
-    album_no_cover: {
-      label: 'Albums with no cover',
-      hint: "Put a cover.jpg in the album's folder or embed a cover with a tag editor. With MusicBrainz on (Library extras, below), DJINN looks covers up.",
-    },
-    album_no_year: {
-      label: 'Albums with no year',
-      hint: 'Add the year with Edit album, or turn on MusicBrainz or Identify songs to fill years in.',
-    },
-    album_no_genre: {
-      label: 'Albums with no genre',
-      hint: 'Add a genre with Edit album, or turn on MusicBrainz or AI listening to fill genres in.',
-    },
-  }
+  /** A problem kind's name and what to do about it (`prob.<kind>`, `prob.<kind>_hint`). */
+  const about = (kind: ProblemKind) => ({ label: t(`prob.${kind}`), hint: t(`prob.${kind}_hint`) })
 
   let summary = $state<ProblemSummary | null>(null)
   let open = $state<ProblemKind | null>(null)
@@ -74,7 +28,7 @@
     try {
       summary = await api.libraryProblems()
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not load problems', true)
+      toast(e instanceof Error ? e.message : t('prob.load_failed'), true)
     }
   }
 
@@ -111,9 +65,41 @@
       const page = await api.libraryProblemList(kind, items.length)
       if (open === kind) items = [...items, ...page]
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not load the list', true)
+      toast(e instanceof Error ? e.message : t('prob.list_failed'), true)
     } finally {
       loading = false
+    }
+  }
+
+  /** Lyrics shown for a reported song, by song id. */
+  let peeking = $state<Record<number, string>>({})
+
+  async function peek(item: ProblemItem) {
+    const id = item.track_id
+    if (id === null) return
+    if (id in peeking) {
+      const { [id]: _gone, ...rest } = peeking
+      peeking = rest
+      return
+    }
+    try {
+      const found = await api.trackLyrics(id)
+      const text = found?.lines ? found.lines.map((l) => l.text).join('\n') : (found?.plain ?? '')
+      peeking = { ...peeking, [id]: text || t('prob.no_lyrics') }
+    } catch (e) {
+      toast(e instanceof Error ? e.message : t('prob.lyrics_failed'), true)
+    }
+  }
+
+  async function removeLyrics(item: ProblemItem) {
+    if (item.track_id === null) return
+    if (!confirm(t('prob.remove_lyrics_q', { title: item.title ?? '' }))) return
+    try {
+      await api.blockLyrics(item.track_id)
+      items = items.filter((i) => i !== item)
+      await load()
+    } catch (e) {
+      toast(e instanceof Error ? e.message : t('prob.remove_lyrics_failed'), true)
     }
   }
 
@@ -124,7 +110,7 @@
       items = items.filter((i) => i !== item)
       await load()
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not clear the reports', true)
+      toast(e instanceof Error ? e.message : t('prob.clear_failed'), true)
     }
   }
 
@@ -136,20 +122,57 @@
       if (hide && open === kind) open = null
       await load()
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not save that', true)
+      toast(e instanceof Error ? e.message : t('prob.save_failed'), true)
     }
   }
 
   async function checkAgain() {
     try {
       const { status } = await api.rescan()
-      toast(status === 'started' ? 'Checking for changes' : 'Already checking for changes')
+      toast(status === 'started' ? t('admin.checking') : t('admin.already_checking'))
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not start the check', true)
+      toast(e instanceof Error ? e.message : t('admin.check_failed'), true)
     }
   }
 
-  const n = (x: number) => x.toLocaleString()
+  const n = (x: number) => x.toLocaleString(locale.code)
+  let mp3 = $state<Mp3Check | null>(null)
+
+  async function loadMp3() {
+    try {
+      mp3 = await api.mp3Check()
+    } catch {
+      // Shown next time.
+    }
+  }
+
+  $effect(() => {
+    void loadMp3()
+    const timer = setInterval(() => {
+      if (mp3?.running) void loadMp3().then(load)
+    }, 5000)
+    return () => clearInterval(timer)
+  })
+
+  async function mp3Again() {
+    try {
+      await api.mp3CheckAgain()
+      toast(t('prob.mp3_again'))
+      await loadMp3()
+    } catch (e) {
+      toast(e instanceof Error ? e.message : t('common.start_failed'), true)
+    }
+  }
+
+  async function measure() {
+    try {
+      await api.measureLoudness()
+      toast(t('prob.measuring'))
+    } catch (e) {
+      toast(e instanceof Error ? e.message : t('common.start_failed'), true)
+    }
+  }
+
   const folder = (path: string) => path.replace(/[\\/][^\\/]*$/, '')
   const name = (path: string) => path.replace(/^.*[\\/]/, '')
 </script>
@@ -158,12 +181,12 @@
   <div class="kind">
     <button class="row" class:open={open === k.kind} aria-expanded={open === k.kind} onclick={() => show(k.kind)}>
       <span class="chevron" aria-hidden="true"></span>
-      <span class="grow">{about[k.kind].label}</span>
+      <span class="grow">{about(k.kind).label}</span>
       <span class="count">{n(k.count)}</span>
     </button>
     {#if open === k.kind}
       <div class="detail">
-        <p class="small muted">{about[k.kind].hint}</p>
+        <p class="small muted">{about(k.kind).hint}</p>
         <ul class="items">
           {#each items as item, i (i)}
             <li>
@@ -171,6 +194,19 @@
                 <a href="#/album/{item.album_id}">{item.album}</a>
                 <span class="muted"> · {item.artist}</span>
                 {#if item.path}<div class="path small mono">{folder(item.path)}</div>{/if}
+                {#if k.kind === 'duplicate_albums' && item.detail}<div class="small muted">{item.detail}</div>{/if}
+                {#if k.kind === 'duplicate_albums'}
+                  <button
+                    class="small-button done"
+                    title={t('prob.compare_title')}
+                    onclick={() => findInEditor([item.album ?? '', /Also filed as "([^"]+)"/.exec(item.detail)?.[1] ?? ''])}
+                    >{t('prob.compare')}</button
+                  >
+                {:else if item.path}
+                  <button class="small-button done" onclick={() => openInEditor(folder(item.path ?? ''))}>{t('prob.fix')}</button>
+                {:else if item.artist}
+                  <button class="small-button done" onclick={() => findInEditor([item.album ?? item.artist ?? ''])}>{t('prob.fix')}</button>
+                {/if}
               {:else if item.track_id !== null}
                 {#if item.album_id !== null}
                   <a href="#/album/{item.album_id}">{item.title}</a>
@@ -182,27 +218,65 @@
                 {#if k.kind === 'reported'}
                   {#each parseReports(item.detail) as report, r (r)}
                     <div class="small">
-                      {reportShort[report.reason] ?? report.reason}{#if report.note}: <span class="muted">{report.note}</span
+                      {reportShort(report.reason)}{#if report.note}: <span class="muted">{report.note}</span
                         >{/if}
                     </div>
                   {/each}
-                  <button class="small-button done" onclick={() => done(item)}>Done</button>
+                  <button class="small-button done" onclick={() => done(item)}>{t('prob.done')}</button>
+                {:else if k.kind === 'reported_lyrics'}
+                  {#each parseReports(item.detail) as report, r (r)}
+                    <div class="small">
+                      {reportShort(report.reason)}{#if report.note}: <span class="muted">{report.note}</span
+                        >{/if}
+                    </div>
+                  {/each}
+                  {#if item.track_id !== null && item.track_id in peeking}
+                    <pre class="peek small">{peeking[item.track_id]}</pre>
+                  {/if}
+                  <button class="small-button done" onclick={() => peek(item)}>{t('prob.show_lyrics')}</button>
+                  <button class="small-button done danger" onclick={() => removeLyrics(item)}>{t('prob.remove_block')}</button>
+                  <button class="small-button done" onclick={() => done(item)}>{t('prob.done')}</button>
                 {:else if item.detail}<div class="small muted">{item.detail}</div>{/if}
+                {#if k.kind === 'low_bitrate' && item.title}
+                  <button
+                    class="small-button done"
+                    title={t('prob.better_title')}
+                    onclick={() => findInEditor([item.title ?? ''])}>{t('prob.better')}</button
+                  >
+                {/if}
+                {#if k.kind === 'vanished' && item.title}
+                  <button
+                    class="small-button done"
+                    title={t('prob.look_title')}
+                    onclick={() => findInEditor([item.title ?? ''])}>{t('prob.look')}</button
+                  >
+                {:else if item.path && k.kind !== 'reported_lyrics'}
+                  <button class="small-button done" onclick={() => openInEditor(folder(item.path ?? ''))}>{t('prob.fix')}</button>
+                {/if}
               {:else}
                 {#if item.path}
                   <div>{name(item.path)}</div>
                   <div class="path small mono">{folder(item.path)}</div>
                 {/if}
                 {#if item.detail && k.kind !== 'unsupported'}<div class="small muted">{item.detail}</div>{/if}
+                {#if k.kind === 'artist_variants' && item.detail}
+                  <button class="small-button done" onclick={() => findInEditor(item.detail.split('/'))}>{t('prob.fix')}</button>
+                {/if}
               {/if}
             </li>
           {/each}
         </ul>
         <div class="actions">
           {#if items.length < openCount}
-            <button class="small-button" disabled={loading} onclick={more}>Show more</button>
+            <button class="small-button" disabled={loading} onclick={more}>{t('common.show_more')}</button>
           {/if}
-          <button class="small-button" onclick={() => setHidden(k.kind, true)}>Hide this kind</button>
+          {#if k.kind === 'no_loudness'}
+            <button class="small-button" onclick={measure}>{t('prob.measure')}</button>
+          {/if}
+          {#if k.kind === 'no_length_header'}
+            <button class="small-button" onclick={mp3Again}>{t('prob.read_again')}</button>
+          {/if}
+          <button class="small-button" onclick={() => setHidden(k.kind, true)}>{t('prob.hide')}</button>
         </div>
       </div>
     {/if}
@@ -211,39 +285,45 @@
 
 <section class="card">
   <h2>
-    Problems
+    {t('prob.title')}
     {#if summary && summary.trouble > 0}<span class="badge">{n(summary.trouble)}</span>{/if}
   </h2>
   <p class="small muted">
-    What the last library check couldn't add or found broken, and gaps in your tags. Only music files are checked;
-    pictures, playlists and other files in your folders are left alone. Select a line to see its files. Your music
-    folders are never changed.
+    {t('prob.intro')}
   </p>
   {#if !summary}
-    <p class="small muted">Loading...</p>
+    <p class="small muted">{t('common.loading')}</p>
   {:else}
     {#if trouble.length}
-      <h3>Needs a look</h3>
+      <h3>{t('prob.needs')}</h3>
       {#each trouble as k (k.kind)}{@render kindRow(k)}{/each}
     {:else}
-      <p class="small">Every file in your music folders made it in and plays.</p>
+      <p class="small">{t('prob.all_good')}</p>
     {/if}
     {#if gaps.length}
-      <h3>Gaps in the tags</h3>
+      <h3>{t('prob.worth')}</h3>
       {#each gaps as k (k.kind)}{@render kindRow(k)}{/each}
     {/if}
     {#if hidden.length}
       <p class="small muted">
-        Hidden:
+        {t('prob.hidden')}
         {#each hidden as k, i (k.kind)}{#if i > 0},
           {/if}<button class="link" onclick={() => setHidden(k.kind, false)}
-            >{about[k.kind].label} ({n(k.count)})</button
-          >{/each}. Select one to show it again.
+            >{about(k.kind).label} ({n(k.count)})</button
+          >{/each}{t('prob.show_again')}
+      </p>
+    {/if}
+    {#if mp3 && mp3.total}
+      <p class="small muted">
+        {t('prob.thorough', { done: n(mp3.checked), total: n(mp3.total) })}{#if mp3.running}{t('prob.working')}{/if}{#if mp3.missing}{t(
+            'prob.missing',
+            { n: n(mp3.missing) },
+          )}{/if}.
       </p>
     {/if}
     <div class="actions">
-      <a class="button small-button" href="/api/library/problems.csv" download>Download as a spreadsheet</a>
-      <button class="small-button" onclick={checkAgain}>Check again</button>
+      <a class="button small-button" href="/api/library/problems.csv" download>{t('prob.csv')}</a>
+      <button class="small-button" onclick={checkAgain}>{t('prob.check_again')}</button>
     </div>
   {/if}
 </section>
@@ -335,6 +415,16 @@
   }
 
   /* List rows otherwise get plain buttons. */
+  .peek {
+    max-height: 200px;
+    overflow: auto;
+    margin: 6px 0;
+    padding: 6px 8px;
+    white-space: pre-wrap;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+  }
+
   .items .done {
     margin-top: 6px;
     background: var(--surface-2);

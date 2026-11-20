@@ -4,6 +4,7 @@
   import { onMount } from 'svelte'
   import { api } from './api'
   import { toast } from './state.svelte'
+  import { locale, t } from './i18n.svelte'
   import type { ConvertSettings } from './types'
 
   let form = $state<ConvertSettings | null>(null)
@@ -16,7 +17,7 @@
       used = s.cache_used_mb
       form = { enabled: s.enabled, kbps: s.kbps, jobs: s.jobs, cache_mb: s.cache_mb }
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not load', true)
+      toast(e instanceof Error ? e.message : t('ed.load_failed'), true)
     }
   })
 
@@ -26,9 +27,9 @@
     try {
       const s = await api.saveConvertSettings(form)
       used = s.cache_used_mb
-      toast(s.enabled ? 'Converting is on' : 'Saved')
+      toast(s.enabled ? t('cv.on') : t('common.saved'))
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not save', true)
+      toast(e instanceof Error ? e.message : t('common.save_failed_short'), true)
     } finally {
       busy = false
     }
@@ -37,42 +38,39 @@
 
 {#if form}
   <section class="card">
-    <h2>Converting</h2>
+    <h2>{t('cv.title')}</h2>
     <p class="small muted">
-      Off unless you turn it on. Then DJINN makes MP3 copies for devices that can't play a song's format, for people who turn on
-      "Save data" in GO, and for phone apps asking for a lower quality. Each song is converted once and kept, so it uses this computer's
-      processor the first time only. Roles choose who can use it (under Users).
+      {t('cv.intro')}
     </p>
     <label class="switch big">
       <input type="checkbox" bind:checked={form.enabled} onchange={save} disabled={busy} />
-      <span>Converting is {form.enabled ? 'on' : 'off'}</span>
+      <span>{form.enabled ? t('cv.is_on') : t('cv.is_off')}</span>
     </label>
     <div class="grid">
       <label>
-        Quality
+        {t('cv.quality')}
         <select bind:value={form.kbps} onchange={save}>
-          <option value={96}>96 kbit/s (smallest)</option>
+          <option value={96}>{t('cv.smallest', { n: 96 })}</option>
           <option value={128}>128 kbit/s</option>
           <option value={160}>160 kbit/s</option>
-          <option value={192}>192 kbit/s (good)</option>
+          <option value={192}>{t('cv.good', { n: 192 })}</option>
           <option value={256}>256 kbit/s</option>
-          <option value={320}>320 kbit/s (best)</option>
+          <option value={320}>{t('cv.best', { n: 320 })}</option>
         </select>
       </label>
       <label>
-        At once
+        {t('cv.at_once')}
         <select bind:value={form.jobs} onchange={save}>
           {#each [1, 2, 3, 4] as n (n)}<option value={n}>{n}</option>{/each}
         </select>
       </label>
       <label>
-        Keep up to (MB)
+        {t('cv.keep')}
         <input type="number" min="100" step="100" bind:value={form.cache_mb} onchange={save} />
       </label>
     </div>
     <p class="small muted">
-      Converted songs use {used} MB now; the oldest are removed past the limit. One conversion at a time keeps the party smooth on most
-      computers.
+      {t('cv.used', { n: used.toLocaleString(locale.code) })}
     </p>
   </section>
 {/if}

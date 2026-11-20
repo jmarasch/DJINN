@@ -6,6 +6,7 @@
   import { api } from './api'
   import { deviceName } from './format'
   import { app } from './state.svelte'
+  import { locale, t } from './i18n.svelte'
   import LanguagePicker from './LanguagePicker.svelte'
   import TwoStepPanel from './TwoStepPanel.svelte'
   import type { Device } from './types'
@@ -43,9 +44,9 @@
       app.me = updated
       username = updated.username
       usernamePassword = ''
-      usernameMessage = 'Username changed. Use it for your next sign-in and in any phone apps.'
+      usernameMessage = t('acc.username_changed')
     } catch (err) {
-      usernameError = err instanceof Error ? err.message : 'Could not change username'
+      usernameError = err instanceof Error ? err.message : t('acc.username_failed')
     } finally {
       usernameBusy = false
     }
@@ -56,17 +57,17 @@
     passwordMessage = ''
     passwordError = ''
     if (next !== confirm) {
-      passwordError = 'The new passwords do not match'
+      passwordError = t('acc.no_match')
       return
     }
     busy = true
     try {
       await api.changePassword(current, next)
       current = next = confirm = ''
-      passwordMessage = 'Password changed. Your other devices are signed out.'
+      passwordMessage = t('acc.password_changed')
       await loadDevices()
     } catch (err) {
-      passwordError = err instanceof Error ? err.message : 'Could not change it'
+      passwordError = err instanceof Error ? err.message : t('lf.change_failed')
     } finally {
       busy = false
     }
@@ -96,69 +97,71 @@
   }
 
   const when = (ms: number) =>
-    new Date(ms).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+    new Date(ms).toLocaleString(locale.code, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 </script>
 
 <section class="card language-card"><LanguagePicker /></section>
 
 {#if app.me?.role !== 'guest'}
   <section class="card">
-    <h2>Username</h2>
-    <p class="small muted">Your sign-in name also goes in phone apps connected to DJINN GO.</p>
+    <h2>{t('acc.username')}</h2>
+    <p class="small muted">{t('acc.username_note')}</p>
     <form class="stack" onsubmit={changeUsername}>
       <label>
-        Username
+        {t('acc.username')}
         <input bind:value={username} maxlength="32" autocomplete="username" autocapitalize="none" required />
       </label>
       <label>
-        Current password
+        {t('acc.current')}
         <input type="password" bind:value={usernamePassword} autocomplete="current-password" required />
       </label>
       {#if usernameError}<p class="error">{usernameError}</p>{/if}
       {#if usernameMessage}<p class="muted">{usernameMessage}</p>{/if}
-      <button class="primary" disabled={usernameBusy}>Change username</button>
+      <button class="primary" disabled={usernameBusy}>{t('acc.change_username')}</button>
     </form>
   </section>
 {/if}
 
 <section class="card">
-  <h2>Password</h2>
+  <h2>{t('acc.password')}</h2>
   <form class="stack" onsubmit={changePassword}>
     <label>
-      Current password
+      {t('acc.current')}
       <input type="password" bind:value={current} autocomplete="current-password" required />
     </label>
     <label>
-      New password
+      {t('acc.new')}
       <input type="password" bind:value={next} autocomplete="new-password" minlength="8" required />
     </label>
     <label>
-      New password again
+      {t('acc.new_again')}
       <input type="password" bind:value={confirm} autocomplete="new-password" required />
     </label>
     {#if passwordError}<p class="error">{passwordError}</p>{/if}
     {#if passwordMessage}<p class="muted">{passwordMessage}</p>{/if}
-    <button class="primary" disabled={busy}>Change password</button>
+    <button class="primary" disabled={busy}>{t('acc.change_password')}</button>
   </form>
 </section>
 
 <TwoStepPanel onchange={twoStepChanged} />
 
 <section class="card">
-  <h2>Signed in on</h2>
+  <h2>{t('acc.signed_in_on')}</h2>
   {#each devices as device (device.id)}
     <div class="device">
       <div class="grow">
-        <div>{deviceName(device.user_agent)} {#if device.current}<span class="muted small">(this one)</span>{/if}</div>
-        <div class="muted small">{device.ip ?? 'Unknown address'}, last used {when(device.last_seen_at)}</div>
+        <div>{deviceName(device.user_agent)} {#if device.current}<span class="muted small">{t('acc.this_one')}</span>{/if}</div>
+        <div class="muted small">
+          {t('acc.device', { ip: device.ip ?? t('up.unknown_address'), when: when(device.last_seen_at) })}
+        </div>
       </div>
       {#if !device.current}
-        <button class="small-button" onclick={() => signOut(device)}>Sign out</button>
+        <button class="small-button" onclick={() => signOut(device)}>{t('up.sign_out')}</button>
       {/if}
     </div>
   {/each}
   {#if devices.length > 1}
-    <button onclick={signOutOthers}>Sign out everywhere else</button>
+    <button onclick={signOutOthers}>{t('acc.sign_out_others')}</button>
   {/if}
 </section>
 

@@ -1,3 +1,4 @@
+import { t } from '../lib/i18n.svelte'
 // DJINN GO's player. Songs come as their original files and this device
 // plays them. Two audio elements take turns: while one plays, the next
 // song loads in the other, so albums run on with hardly a gap.
@@ -92,7 +93,7 @@ export async function toggleLike(kind: LikeKind, id: number) {
   } catch (e) {
     if (on) set.delete(id)
     else set.add(id)
-    toast(e instanceof Error ? e.message : 'Could not save that', true)
+    toast(e instanceof Error ? e.message : t('gp2.save_failed'), true)
   }
 }
 
@@ -142,7 +143,7 @@ export async function setTap(tap: GoPrefs['tap']) {
     await api.setGoPrefs({ ...prefs })
   } catch (e) {
     prefs.tap = before
-    toast(e instanceof Error ? e.message : 'Could not save that', true)
+    toast(e instanceof Error ? e.message : t('gp2.save_failed'), true)
   }
 }
 /** How far the current song got, for history. */
@@ -185,7 +186,7 @@ for (const deck of decks) {
   deck.addEventListener('error', () => {
     if (deck !== decks[active] || !deck.src) return
     const song = current()
-    if (song) toast(`Couldn't play "${song.title}"`, true)
+    if (song) toast(t('gp2.cant_play', { title: song.title }), true)
     player.playing = false
   })
 }
@@ -222,7 +223,7 @@ async function start(index: number, autoplay = true) {
     }
     preloaded = null
     if (!canPlay(links.mime)) {
-      toast(`This device can't play "${song.title}" (${links.mime}), so it was skipped`, true)
+      toast(t('gp2.skipped', { title: song.title, mime: links.mime }), true)
       player.index = index
       return skipAhead()
     }
@@ -240,7 +241,7 @@ async function start(index: number, autoplay = true) {
     preloadNext()
     if (player.radio && player.queue.length - index < 5) extendRadio()
   } catch (e) {
-    toast(e instanceof Error ? e.message : 'Could not play that song', true)
+    toast(e instanceof Error ? e.message : t('gp2.play_failed'), true)
   } finally {
     if (mine === generation) player.loading = false
   }
@@ -331,8 +332,8 @@ export function playNext(tracks: Track[]) {
   if (idle()) return playList(tracks)
   const ahead = addSpot() - player.index - 1
   insertAdded(tracks, addSpot())
-  const what = tracks.length === 1 ? `"${tracks[0].title}"` : `${tracks.length} songs`
-  toast(ahead ? `${what} will play after the ${ahead} you lined up` : `${what} will play next`)
+  const what = tracks.length === 1 ? t('gp2.song_q', { title: tracks[0].title }) : t('count.songs', { n: tracks.length })
+  toast(ahead ? t('gp2.after', { what, n: ahead }) : t('gp2.next', { what }))
 }
 
 /** At the very end of the queue, after everything already there. */
@@ -346,7 +347,11 @@ export function addToEnd(tracks: Track[]) {
   unshuffled.push(...player.queue.slice(from))
   preloaded = null
   preloadNext()
-  toast(`${tracks.length === 1 ? `"${tracks[0].title}"` : `${tracks.length} songs`} added to the end of the queue`)
+  toast(
+    t('gp2.to_end', {
+      what: tracks.length === 1 ? t('gp2.song_q', { title: tracks[0].title }) : t('count.songs', { n: tracks.length }),
+    }),
+  )
 }
 
 /** A tap on a song: plays it now, next, or at the end of the queue, as chosen
@@ -477,7 +482,7 @@ export async function startRadio(track: Track) {
       // From the song that just ended: it doesn't start over.
       if (songs.length > 1 && songs[0]?.id === current()?.id) songs.shift()
       playList(songs, 0, { radio: true, seed: track.id })
-      toast(`Radio from "${track.title}"`)
+      toast(t('gp2.radio', { title: track.title }))
       return
     }
     const keep = player.queue.slice(0, addSpot())
@@ -489,9 +494,9 @@ export async function startRadio(track: Track) {
     radioSeed = track.id
     preloaded = null
     preloadNext()
-    toast(`Radio from "${track.title}" comes after this song`)
+    toast(t('gp2.radio_after', { title: track.title }))
   } catch (e) {
-    toast(e instanceof Error ? e.message : 'Could not start radio', true)
+    toast(e instanceof Error ? e.message : t('player.radio_failed'), true)
   }
 }
 
@@ -500,7 +505,7 @@ export async function playRadio(track: Track) {
   try {
     playList(await api.goRadio(track.id), 0, { radio: true, seed: track.id })
   } catch (e) {
-    toast(e instanceof Error ? e.message : 'Could not play that song', true)
+    toast(e instanceof Error ? e.message : t('gp2.play_failed'), true)
   }
 }
 

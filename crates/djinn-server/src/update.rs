@@ -71,6 +71,10 @@ pub struct Release {
     published_at: Option<String>,
     #[serde(skip)]
     asset: Option<Asset>,
+    /// The guide and language files for this version
+    /// ([`crate::content::RELEASE_FILE`]); older releases have none.
+    #[serde(skip)]
+    content: Option<Asset>,
     #[serde(skip)]
     sums: Option<(String, String)>,
 }
@@ -161,6 +165,9 @@ struct About {
     version: &'static str,
     commit: &'static str,
     commit_date: &'static str,
+    /// A test build says so, with its commit, edits and time; empty for
+    /// releases and nightlies.
+    build_label: &'static str,
     repository: String,
     contact: &'static str,
     check_updates: bool,
@@ -187,6 +194,7 @@ async fn about_info(state: &AppState) -> ApiResult<About> {
         version: env!("DJINN_RELEASE_VERSION"),
         commit: env!("DJINN_COMMIT"),
         commit_date: env!("DJINN_COMMIT_DATE"),
+        build_label: env!("DJINN_BUILD_LABEL"),
         repository: format!("https://github.com/{REPOSITORY}"),
         contact: CONTACT,
         check_updates: settings::flag(&state.store, CHECK_UPDATES, true).await?,
@@ -264,11 +272,63 @@ pub fn start(state: &AppState) {
     tokio::spawn(async move {
         // Let startup settle first.
         tokio::time::sleep(Duration::from_secs(60)).await;
+        let mut content_tried: Option<std::time::Instant> = None;
         loop {
+            if content_tried.is_none_or(|at| at.elapsed() >= CONTENT_RETRY)
+                && !complete_content(&state).await
+            {
+                content_tried = Some(std::time::Instant::now());
+            }
             tick(&state).await;
             tokio::time::sleep(TICK).await;
         }
     });
+}
+
+/// How long after a failed try DJINN asks again for its guide and
+/// language files.
+const CONTENT_RETRY: Duration = Duration::from_secs(60 * 60);
+
+/// Fetches this version's guide and language files from its release when
+/// they aren't beside the program: an update made by a DJINN from before
+/// they shipped brings only the program, and so does a program file copied
+/// in by hand. Only while update checks are on, since it asks GitHub.
+/// False while they're still missing, so it's tried again later.
+async fn complete_content(state: &AppState) -> bool {
+    if !crate::content::missing() {
+        return true;
+    }
+    if settings::number(&state.store, CHECK_UPDATES, 1).await.ok() != Some(1) {
+        return false;
+    }
+    match fetch_own_content().await {
+        Ok(()) => {
+            tracing::info!("put this version's guide and language files in place");
+            true
+        }
+        Err(e) => {
+            tracing::warn!("couldn't fetch this version's guide and language files: {e}");
+            false
+        }
+    }
+}
+
+async fn fetch_own_content() -> Result<(), String> {
+    let release = this_release()
+        .await?
+        .ok_or("there's no published release for this version")?;
+    let content = release
+        .files
+        .iter()
+        .find(|(name, _, _)| name == crate::content::RELEASE_FILE)
+        .map(|(name, url, size)| Asset {
+            name: name.clone(),
+            url: url.clone(),
+            size: *size,
+        })
+        .ok_or("this version's release has no guide and language files")?;
+    let home = crate::content::home().ok_or("DJINN can't tell where it's installed")?;
+    install_content(&client()?, &content, &release.sums, &home).await
 }
 
 async fn tick(state: &AppState) {
@@ -505,17 +565,20 @@ fn from_github(release: GitHubRelease, wanted: &str) -> Release {
                 sig.browser_download_url.clone(),
             )
         });
-    let asset = find(wanted).map(|a| Asset {
+    let to_asset = |a: &GitHubAsset| Asset {
         name: a.name.clone(),
         url: a.browser_download_url.clone(),
         size: a.size,
-    });
+    };
+    let asset = find(wanted).map(to_asset);
+    let content = find(crate::content::RELEASE_FILE).map(to_asset);
     Release {
         version: release.tag_name.trim_start_matches('v').to_owned(),
         url: release.html_url,
         notes: release_notes(release.body.as_deref().unwrap_or_default()),
         published_at: release.published_at,
         asset,
+        content,
         sums,
     }
 }
@@ -683,10 +746,64 @@ async fn install(state: &AppState, release: &Release) -> Result<(), String> {
             .update(|s| s.progress = Some((written, asset.size)));
     }
     out.finish(asset.size, &expected, "the download").await?;
+    if let Some(content) = &release.content {
+        if let Err(e) =
+            install_content(&client, content, &String::from_utf8_lossy(&sums), dir).await
+        {
+            let _ = std::fs::remove_file(&partial);
+            return Err(e);
+        }
+    }
     replace(&exe, &partial).map_err(|e| {
         let _ = std::fs::remove_file(&partial);
         format!("cannot replace {}: {e}", exe.display())
     })
+}
+
+/// Downloads a release's guide and language files, checks them against its
+/// signed checksums, and puts them beside the program (see
+/// [`crate::content`]).
+async fn install_content(
+    client: &reqwest::Client,
+    content: &Asset,
+    sums: &str,
+    dir: &Path,
+) -> Result<(), String> {
+    let expected = expected_sum(sums, &content.name)
+        .ok_or("the release's checksums don't list its guide and language files")?;
+    let home = crate::content::home().ok_or("DJINN can't tell where it's installed")?;
+    std::fs::create_dir_all(&home)
+        .map_err(|e| format!("cannot write to {}: {e}", home.display()))?;
+    let partial = dir.join(".djinn-content.zip");
+    let mut out = CheckedFile::create(&partial)
+        .await
+        .map_err(|e| format!("cannot write to {}: {e}", dir.display()))?;
+    let response = client
+        .get(&content.url)
+        .timeout(Duration::from_secs(600))
+        .send()
+        .await
+        .and_then(|r| r.error_for_status())
+        .map_err(|e| format!("download failed: {e}"))?;
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| format!("download broke off: {e}"))?;
+        out.write(&chunk).await?;
+    }
+    out.finish(content.size, &expected, "the guide and language files")
+        .await?;
+    let zip = partial.clone();
+    let unpacked = tokio::task::spawn_blocking(move || crate::content::unpack(&zip, &home)).await;
+    let _ = std::fs::remove_file(&partial);
+    match unpacked {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(e)) => Err(format!(
+            "couldn't put the guide and language files in place: {e}"
+        )),
+        Err(e) => Err(format!(
+            "couldn't put the guide and language files in place: {e}"
+        )),
+    }
 }
 
 /// Puts `new` in place of the running program at `exe`.
@@ -714,7 +831,8 @@ pub(crate) fn replace(exe: &Path, new: &Path) -> std::io::Result<()> {
 /// Starts the (new) program again with the same arguments. On Unix this
 /// replaces the process; elsewhere it starts a new one and this one ends.
 pub fn restart(exe: &Path) -> std::io::Result<()> {
-    let mut command = std::process::Command::new(exe);
+    let exe = program_now(exe);
+    let mut command = std::process::Command::new(&exe);
     command
         .args(std::env::args_os().skip(1))
         .env(RESTARTED, "1");
@@ -729,10 +847,40 @@ pub fn restart(exe: &Path) -> std::io::Result<()> {
     }
 }
 
+/// The program's file as it is now. Once it was replaced (an update put a
+/// new file in its place), Linux names the running one "<path> (deleted)",
+/// which can't be started; the new file is at the plain path.
+fn program_now(exe: &Path) -> std::path::PathBuf {
+    if !exe.exists() {
+        if let Some(plain) = exe
+            .to_str()
+            .and_then(|path| path.strip_suffix(" (deleted)"))
+        {
+            return std::path::PathBuf::from(plain);
+        }
+    }
+    exe.to_path_buf()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use ed25519_dalek::{Signer, SigningKey};
+
+    #[test]
+    fn a_replaced_program_starts_from_its_plain_path() {
+        let dir = std::env::temp_dir().join(format!("djinn-exe-test-{}", rand::random::<u64>()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("djinn");
+        std::fs::write(&file, b"new").unwrap();
+        let deleted = dir.join("djinn (deleted)");
+        assert_eq!(program_now(&deleted), file);
+        // A real file keeps its name, odd or not.
+        std::fs::write(&deleted, b"odd").unwrap();
+        assert_eq!(program_now(&deleted), deleted);
+        assert_eq!(program_now(&file), file);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn versions() {

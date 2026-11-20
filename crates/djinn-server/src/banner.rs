@@ -25,6 +25,18 @@ pub fn urls(listen: SocketAddr) -> Vec<String> {
         .collect()
 }
 
+/// This computer's own home-network IPv4 addresses, best first (what a node
+/// tells Main so it can be reached however its check-ins arrive).
+pub fn lan_addresses() -> Vec<Ipv4Addr> {
+    lan_ips()
+        .into_iter()
+        .filter_map(|ip| match ip {
+            IpAddr::V4(ip) => Some(ip),
+            IpAddr::V6(_) => None,
+        })
+        .collect()
+}
+
 /// Private IPv4 addresses on physical-looking interfaces, best first. VPN
 /// tunnels, containers, and VM host adapters are skipped: a phone on the
 /// Wi-Fi can't reach those.

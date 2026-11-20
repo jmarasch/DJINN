@@ -36,6 +36,10 @@ pub struct Track {
     pub art_hash: Option<String>,
     /// Lyrics found: 0 none (or not looked for yet), 1 words, 2 timed.
     pub lyrics: i64,
+    /// 0 not AI, 1 the words were made by an AI, 2 a person's words timed by an AI.
+    pub lyrics_ai: i64,
+    /// 1 when an admin removed lyrics an AI had made or timed (shown as a red microphone).
+    pub lyrics_failed: i64,
 }
 
 // Column lists are macros so queries stay `&'static str` (built with
@@ -52,7 +56,9 @@ macro_rules! track_columns {
          t.track_no, t.disc_no, t.year, t.genre, t.duration_ms, \
          coalesce(t.art_hash, (SELECT fa.art_hash FROM albums fa WHERE fa.id = t.album_id)) AS art_hash, \
          coalesce((SELECT CASE WHEN tl.synced IS NOT NULL THEN 2 WHEN tl.plain IS NOT NULL THEN 1 ELSE 0 END \
-                   FROM lyrics tl WHERE tl.track_id = t.id), 0) AS lyrics"
+                   FROM lyrics tl WHERE tl.track_id = t.id), 0) AS lyrics, \
+         coalesce((SELECT al.ai FROM lyrics al WHERE al.track_id = t.id), 0) AS lyrics_ai, \
+         coalesce((SELECT fl.ai_removed FROM lyrics fl WHERE fl.track_id = t.id), 0) AS lyrics_failed"
     };
 }
 pub(crate) use track_columns;
@@ -593,6 +599,16 @@ impl Store {
         Ok(bytes)
     }
 
+    /// How long the playable songs last together, in ms.
+    pub async fn library_duration_ms(&self) -> Result<i64> {
+        let ms = sqlx::query_scalar(
+            "SELECT coalesce(sum(t.duration_ms), 0) FROM tracks t WHERE t.removed_at IS NULL",
+        )
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(ms)
+    }
+
     pub async fn track(&self, id: i64) -> Result<Option<Track>> {
         let track = sqlx::query_as(concat!(
             "SELECT ",
@@ -876,7 +892,7 @@ pub(crate) fn json_ids(ids: &[i64]) -> String {
 }
 
 /// Puts `found` in the order of `ids`.
-fn in_order<T>(ids: &[i64], found: Vec<T>, id: impl Fn(&T) -> i64) -> Vec<T> {
+pub(crate) fn in_order<T>(ids: &[i64], found: Vec<T>, id: impl Fn(&T) -> i64) -> Vec<T> {
     let mut by_id: std::collections::HashMap<i64, T> =
         found.into_iter().map(|item| (id(&item), item)).collect();
     ids.iter().filter_map(|i| by_id.remove(i)).collect()

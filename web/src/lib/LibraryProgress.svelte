@@ -5,6 +5,7 @@
   // nothing is happening.
   import { heldText } from './background'
   import { app } from './state.svelte'
+  import { locale, t } from './i18n.svelte'
 
   type Step = { key: string; label: string }
 
@@ -16,19 +17,19 @@
   /** What finding lyrics is doing, in a line. */
   const lyricsText = $derived.by(() => {
     if (!lyrics) return ''
-    const found = `${n(lyrics.words)} of ${n(lyrics.songs)} songs have lyrics, ${n(lyrics.timed)} timed`
-    if (lyrics.held) return `Finding lyrics: ${heldText(lyrics.held).toLowerCase()} (${found})`
-    if (lyrics.phase === 'reading') return `Reading lyrics from your files: ${n(lyrics.unread)} to go (${found})`
-    if (lyrics.phase === 'looking up') return `Looking up lyrics online: ${n(lyrics.to_ask)} songs to go (${found})`
-    return `Finding lyrics (${found})`
+    const found = t('prog.lyrics_found', { words: n(lyrics.words), songs: n(lyrics.songs), timed: n(lyrics.timed) })
+    if (lyrics.held) return t('prog.lyrics_held', { held: heldText(lyrics.held).toLowerCase(), found })
+    if (lyrics.phase === 'reading') return t('prog.lyrics_reading', { n: n(lyrics.unread), found })
+    if (lyrics.phase === 'looking up') return t('prog.lyrics_online', { n: n(lyrics.to_ask), found })
+    return t('prog.lyrics', { found })
   })
 
   const steps = $derived<Step[]>([
-    { key: 'finding', label: 'Find music' },
-    { key: 'reading', label: 'Read songs' },
-    { key: 'sorting', label: 'Sort albums and artists' },
-    ...(app.loudness?.on ? [{ key: 'analysis', label: 'Analyze sound' }] : []),
-    ...(app.listening?.on ? [{ key: 'listening', label: 'AI listening' }] : []),
+    { key: 'finding', label: t('prog.find') },
+    { key: 'reading', label: t('prog.read') },
+    { key: 'sorting', label: t('prog.sort') },
+    ...(app.loudness?.on ? [{ key: 'analysis', label: t('prog.analyze') }] : []),
+    ...(app.listening?.on ? [{ key: 'listening', label: t('prog.listen') }] : []),
   ])
 
   /** The step running now. */
@@ -41,7 +42,7 @@
     current === 'analysis' ? app.loudness?.held : current === 'listening' ? app.listening?.held : null,
   )
 
-  const n = (x: number) => x.toLocaleString()
+  const n = (x: number) => x.toLocaleString(locale.code)
 
   /** [done, total] for a progress bar, or null when it can't be counted. */
   const amount = $derived.by((): [number, number] | null => {
@@ -56,17 +57,17 @@
   const detail = $derived.by(() => {
     switch (current) {
       case 'finding':
-        return 'Looking through your music folders'
+        return t('prog.finding')
       case 'reading':
-        return amount ? `${n(amount[0])} of ${n(amount[1])} new or changed files` : ''
+        return amount ? t('prog.reading', { done: n(amount[0]), total: n(amount[1]) }) : ''
       case 'sorting':
-        return `${n(app.scan?.found ?? 0)} songs found; picking album and artist pictures`
+        return t('prog.sorting', { n: n(app.scan?.found ?? 0) })
       case 'analysis':
         return amount
-          ? `${n(amount[0])} of ${n(amount[1])} songs, for "more like this", radio and even volume`
+          ? t('prog.analysis', { done: n(amount[0]), total: n(amount[1]) })
           : ''
       case 'listening':
-        return amount ? `${n(amount[0])} of ${n(amount[1])} songs, for genres and searching by sound` : ''
+        return amount ? t('prog.listening', { done: n(amount[0]), total: n(amount[1]) }) : ''
       default:
         return ''
     }
@@ -78,7 +79,7 @@
     {#if current && index >= 0}
       <div class="head">
         {#if !held}<span class="spinner" aria-hidden="true"></span>{/if}
-        <b>Step {index + 1} of {steps.length}: {steps[index].label}</b>
+        <b>{t('prog.step', { n: index + 1, total: steps.length, label: steps[index].label })}</b>
       </div>
       {#if held}<p class="small">{heldText(held)}.</p>{/if}
       {#if detail}<p class="small muted">{detail}</p>{/if}
@@ -96,13 +97,13 @@
         {/each}
       </ol>
       {#if index >= 3}
-        <p class="small muted">Your music is ready to play; this carries on in the background.</p>
+        <p class="small muted">{t('prog.ready')}</p>
       {/if}
     {/if}
     {#if lookingUp}
       <p class="small muted lookup">
         {#if !current}<span class="spinner" aria-hidden="true"></span>{/if}
-        Also looking up artists online
+        {t('prog.lookups')}
       </p>
     {/if}
     {#if lyrics}

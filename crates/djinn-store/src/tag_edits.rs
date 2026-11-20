@@ -17,6 +17,10 @@ pub struct TagEdit {
     pub album_artist: Option<String>,
     pub year: Option<i64>,
     pub genre: Option<String>,
+    pub track_no: Option<i64>,
+    pub disc_no: Option<i64>,
+    /// A cover chosen in the app: an art cache hash, or "none".
+    pub cover: Option<String>,
 }
 
 /// A change to songs' corrections. For each field, `None` leaves it as it
@@ -30,6 +34,9 @@ pub struct TagChange {
     pub album_artist: Option<Option<String>>,
     pub year: Option<Option<i64>>,
     pub genre: Option<Option<String>>,
+    pub track_no: Option<Option<i64>>,
+    pub disc_no: Option<Option<i64>>,
+    pub cover: Option<Option<String>>,
 }
 
 impl TagChange {
@@ -45,6 +52,9 @@ impl TagChange {
         set(&mut edit.album_artist, &self.album_artist);
         set(&mut edit.year, &self.year);
         set(&mut edit.genre, &self.genre);
+        set(&mut edit.track_no, &self.track_no);
+        set(&mut edit.disc_no, &self.disc_no);
+        set(&mut edit.cover, &self.cover);
     }
 }
 
@@ -71,7 +81,7 @@ impl Store {
     /// Every song's corrections, by file path, for the scanner.
     pub async fn tag_edits_by_path(&self) -> Result<HashMap<String, TagEdit>> {
         let rows: Vec<PathEdit> = sqlx::query_as(
-            "SELECT t.path, e.title, e.artist, e.album, e.album_artist, e.year, e.genre \
+            "SELECT t.path, e.title, e.artist, e.album, e.album_artist, e.year, e.genre, e.track_no, e.disc_no, e.cover \
              FROM tag_edits e JOIN tracks t ON t.id = e.track_id",
         )
         .fetch_all(&self.pool)
@@ -82,7 +92,7 @@ impl Store {
     /// A song's corrections; all `None` when it has none.
     pub async fn tag_edit(&self, track_id: i64) -> Result<TagEdit> {
         let edit = sqlx::query_as(
-            "SELECT title, artist, album, album_artist, year, genre FROM tag_edits WHERE track_id = ?",
+            "SELECT title, artist, album, album_artist, year, genre, track_no, disc_no, cover FROM tag_edits WHERE track_id = ?",
         )
         .bind(track_id)
         .fetch_optional(&self.pool)
@@ -144,7 +154,7 @@ impl Store {
                 .await?;
             let Some(path) = path else { continue };
             let mut edit: TagEdit = sqlx::query_as(
-                "SELECT title, artist, album, album_artist, year, genre FROM tag_edits WHERE track_id = ?",
+                "SELECT title, artist, album, album_artist, year, genre, track_no, disc_no, cover FROM tag_edits WHERE track_id = ?",
             )
             .bind(id)
             .fetch_optional(&mut *tx)
@@ -158,12 +168,15 @@ impl Store {
                     .await?;
             } else {
                 sqlx::query(
-                    "INSERT INTO tag_edits (track_id, title, artist, album, album_artist, year, genre, edited_at) \
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?) \
+                    "INSERT INTO tag_edits (track_id, title, artist, album, album_artist, year, genre, \
+                        track_no, disc_no, cover, edited_at) \
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
                      ON CONFLICT (track_id) DO UPDATE SET title = excluded.title, \
                         artist = excluded.artist, album = excluded.album, \
                         album_artist = excluded.album_artist, year = excluded.year, \
-                        genre = excluded.genre, edited_at = excluded.edited_at",
+                        genre = excluded.genre, track_no = excluded.track_no, \
+                        disc_no = excluded.disc_no, cover = excluded.cover, \
+                        edited_at = excluded.edited_at",
                 )
                 .bind(id)
                 .bind(&edit.title)
@@ -172,6 +185,9 @@ impl Store {
                 .bind(&edit.album_artist)
                 .bind(edit.year)
                 .bind(&edit.genre)
+                .bind(edit.track_no)
+                .bind(edit.disc_no)
+                .bind(&edit.cover)
                 .bind(now)
                 .execute(&mut *tx)
                 .await?;

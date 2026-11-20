@@ -880,7 +880,14 @@ impl Services {
         let Some(url) = pick_deezer(&search.data, name) else {
             return Fetch::NotFound;
         };
-        let Some(response) = send(self.web.get(url)).await else {
+        let mut answer = None;
+        for url in deezer_picture_urls(url) {
+            if let Some(response) = send(self.web.get(&url)).await {
+                answer = Some(response);
+                break;
+            }
+        }
+        let Some(response) = answer else {
             return Fetch::Failed;
         };
         match response.bytes().await {
@@ -954,6 +961,129 @@ async fn get_json<T: serde::de::DeserializeOwned>(request: reqwest::RequestBuild
 }
 
 // --- MusicBrainz ---
+
+/// One track of a release, as MusicBrainz lists it.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct ListedTrack {
+    pub disc: i64,
+    pub number: i64,
+    pub title: String,
+    pub length_ms: Option<i64>,
+}
+
+/// A release's track list: its title and tracks in order.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct TrackList {
+    pub release: String,
+    pub tracks: Vec<ListedTrack>,
+}
+
+#[derive(Deserialize)]
+struct MbReleases {
+    #[serde(default)]
+    releases: Vec<MbRelease>,
+}
+
+#[derive(Deserialize)]
+struct MbRelease {
+    title: String,
+    #[serde(default)]
+    status: Option<String>,
+    #[serde(default)]
+    media: Vec<MbMedium>,
+}
+
+#[derive(Deserialize)]
+struct MbMedium {
+    #[serde(default)]
+    position: i64,
+    #[serde(default)]
+    tracks: Vec<MbTrack>,
+}
+
+#[derive(Deserialize)]
+struct MbTrack {
+    #[serde(default)]
+    position: i64,
+    title: String,
+    #[serde(default)]
+    length: Option<i64>,
+}
+
+/// The track list of the release of `release_group` (an album's MusicBrainz
+/// id) that best fits an album of `songs` songs: the same number of tracks
+/// if one has it, official releases first. None when MusicBrainz has none;
+/// an error when it couldn't be asked.
+pub async fn album_tracklist(
+    contact: &str,
+    release_group: &str,
+    songs: usize,
+) -> Result<Option<TrackList>, LibraryError> {
+    let mut services = Services::new(Some(contact))?;
+    let releases: MbReleases = services
+        .musicbrainz_get(
+            "release",
+            &[
+                ("release-group", release_group),
+                ("inc", "recordings+media"),
+                ("limit", "50"),
+            ],
+        )
+        .await
+        .ok_or_else(|| LibraryError::Task("MusicBrainz didn't answer".into()))?;
+    let best = releases.releases.into_iter().min_by_key(|r| {
+        let count: usize = r.media.iter().map(|m| m.tracks.len()).sum();
+        let official = r.status.as_deref() == Some("Official");
+        (count.abs_diff(songs), !official)
+    });
+    Ok(best.map(|release| TrackList {
+        release: release.title,
+        tracks: release
+            .media
+            .iter()
+            .flat_map(|m| {
+                m.tracks.iter().map(|t| ListedTrack {
+                    disc: m.position.max(1),
+                    number: t.position,
+                    title: t.title.clone(),
+                    length_ms: t.length,
+                })
+            })
+            .collect(),
+    }))
+}
+
+/// Matches songs (id, title, length) to a track list by title (as
+/// playlists match them: case, punctuation and version notes aside), the
+/// closest length deciding between tracks of one title. Each track goes to
+/// one song. Returns (song id, disc, track number).
+pub fn match_tracks(
+    list: &TrackList,
+    songs: &[(i64, String, Option<i64>)],
+) -> Vec<(i64, i64, i64)> {
+    let mut used = vec![false; list.tracks.len()];
+    let mut out = Vec::new();
+    for (id, title, length) in songs {
+        let core = crate::playlist_match::core_title(title);
+        if core.is_empty() {
+            continue;
+        }
+        let best = list
+            .tracks
+            .iter()
+            .enumerate()
+            .filter(|(i, t)| !used[*i] && crate::playlist_match::core_title(&t.title) == core)
+            .min_by_key(|(_, t)| match (t.length_ms, length) {
+                (Some(a), Some(b)) => (a - b).abs(),
+                _ => i64::MAX,
+            });
+        if let Some((i, track)) = best {
+            used[i] = true;
+            out.push((*id, track.disc, track.number));
+        }
+    }
+    out
+}
 
 #[derive(Deserialize)]
 struct MbArtistSearch {
@@ -1215,6 +1345,21 @@ struct DeezerArtist {
     picture_big: String,
 }
 
+/// Where to fetch a Deezer picture from, in order. Deezer's API names
+/// `cdn-images.dzcdn.net`, which has refused every request at times (403)
+/// while its other hosts serve the same files, so those are tried first.
+pub(crate) fn deezer_picture_urls(url: &str) -> Vec<String> {
+    const MAIN: &str = "https://cdn-images.dzcdn.net/";
+    match url.strip_prefix(MAIN) {
+        Some(rest) => vec![
+            format!("https://e-cdns-images.dzcdn.net/{rest}"),
+            format!("https://cdns-images.dzcdn.net/{rest}"),
+            url.to_owned(),
+        ],
+        None => vec![url.to_owned()],
+    }
+}
+
 fn pick_deezer<'a>(artists: &'a [DeezerArtist], name: &str) -> Option<&'a str> {
     let wanted = simplify(name);
     artists
@@ -1320,6 +1465,23 @@ mod tests {
     }
 
     #[test]
+    fn deezer_pictures_try_the_hosts_that_answer_first() {
+        let urls = deezer_picture_urls("https://cdn-images.dzcdn.net/images/cover/ab/500x500.jpg");
+        assert_eq!(
+            urls,
+            [
+                "https://e-cdns-images.dzcdn.net/images/cover/ab/500x500.jpg",
+                "https://cdns-images.dzcdn.net/images/cover/ab/500x500.jpg",
+                "https://cdn-images.dzcdn.net/images/cover/ab/500x500.jpg",
+            ]
+        );
+        assert_eq!(
+            deezer_picture_urls("https://other/x.jpg"),
+            ["https://other/x.jpg"]
+        );
+    }
+
+    #[test]
     fn wikipedia_needs_matching_title_and_music() {
         let kream = [
             page("Kream", Some("Norwegian DJ duo")),
@@ -1381,6 +1543,43 @@ mod tests {
             ids,
             ["no", "kr"],
             "exact names only, best first, weak scores dropped"
+        );
+    }
+
+    #[test]
+    fn tracks_match_by_title_and_length() {
+        let list = TrackList {
+            release: "Album".into(),
+            tracks: vec![
+                ListedTrack {
+                    disc: 1,
+                    number: 1,
+                    title: "Intro".into(),
+                    length_ms: Some(60_000),
+                },
+                ListedTrack {
+                    disc: 1,
+                    number: 2,
+                    title: "Song (Remastered)".into(),
+                    length_ms: Some(200_000),
+                },
+                ListedTrack {
+                    disc: 2,
+                    number: 1,
+                    title: "Intro".into(),
+                    length_ms: Some(90_000),
+                },
+            ],
+        };
+        let songs = vec![
+            (10, "song".to_owned(), Some(201_000)),
+            (11, "Intro".to_owned(), Some(89_000)),
+            (12, "Intro".to_owned(), Some(61_000)),
+            (13, "Bonus".to_owned(), None),
+        ];
+        assert_eq!(
+            match_tracks(&list, &songs),
+            [(10, 1, 2), (11, 2, 1), (12, 1, 1)]
         );
     }
 

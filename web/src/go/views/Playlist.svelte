@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '../../lib/i18n.svelte'
   import PageTitle from '../../lib/PageTitle.svelte'
   // One of your playlists (or one someone shared).
   import { api } from '../../lib/api'
@@ -22,7 +23,7 @@
     try {
       list = await api.goPlaylist(which)
     } catch (e) {
-      error = e instanceof Error ? e.message : 'Could not load'
+      error = e instanceof Error ? e.message : t('ed.load_failed')
     }
   }
 
@@ -30,9 +31,9 @@
   const flagged = $derived(list?.rows.filter((row) => row.problem) ?? [])
 
   function reason(row: PlaylistRow) {
-    if (row.problem === 'not_in_library') return 'Not in the library'
-    if (row.problem === 'file_missing') return 'File is missing'
-    return "File won't play"
+    if (row.problem === 'not_in_library') return t('gpl.not_in_library')
+    if (row.problem === 'file_missing') return t('pl.missing_file')
+    return t('pl.cant_play')
   }
 
   async function removeRow(row: PlaylistRow) {
@@ -41,19 +42,19 @@
       await api.removeFromPlaylist(list.id, row.entry_id)
       await load(list.id)
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not remove it', true)
+      toast(e instanceof Error ? e.message : t('common.remove_failed'), true)
     }
   }
 
   async function rename() {
     if (!list) return
-    const name = prompt('Playlist name', list.name)
+    const name = prompt(t('gpl.name_q'), list.name)
     if (!name) return
     try {
       await api.goUpdatePlaylist(list.id, { name })
       list.name = name.trim()
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not rename it', true)
+      toast(e instanceof Error ? e.message : t('gpl.rename_failed'), true)
     }
   }
 
@@ -63,17 +64,17 @@
       await api.goUpdatePlaylist(list.id, { shared })
       list.shared = shared
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not change that', true)
+      toast(e instanceof Error ? e.message : t('ps.failed'), true)
     }
   }
 
   async function remove() {
-    if (!list || !confirm(`Delete ${list.name}?`)) return
+    if (!list || !confirm(t('gpl.delete_q', { name: list.name }))) return
     try {
       await api.goDeletePlaylist(list.id)
       location.hash = '#/library'
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not delete it', true)
+      toast(e instanceof Error ? e.message : t('pl.delete_failed'), true)
     }
   }
 
@@ -83,7 +84,7 @@
       await api.goSetPlaylistSongs(list.id, songs)
       await load(list.id)
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not change it', true)
+      toast(e instanceof Error ? e.message : t('lf.change_failed'), true)
     }
   }
 
@@ -108,36 +109,36 @@
 {#if list}
   <PageTitle title={list.name} />
   <p class="muted small">
-    {list.songs.length}
-    {list.songs.length === 1 ? 'song' : 'songs'}{#if !mine}, shared by {list.owner}{:else if list.shared}, shared{/if}{#if flagged.length},
-      <span class="bad"><Icon name="warning" size={13} /> {flagged.length} can't play and will be skipped</span>{/if}
+    {t('count.songs', { n: list.songs.length })}{#if !mine}{t('gpl.shared_by', { owner: list.owner })}{:else if list.shared}{t(
+        'gpl.shared',
+      )}{/if}{#if flagged.length}<span class="bad"><Icon name="warning" size={13} />{t('gpl.problems', { n: flagged.length })}</span>{/if}
   </p>
   <div class="buttons">
     <button class="primary" onclick={() => list && playList(list.songs)} disabled={!list.songs.length}>
-      <Icon name="play" /> Play
+      <Icon name="play" /> {t('pl.play')}
     </button>
-    <button onclick={() => list && playNext(list.songs)} disabled={!list.songs.length}>Play next</button>
-    <button onclick={() => list && addToEnd(list.songs)} disabled={!list.songs.length}>Add to end of queue</button>
+    <button onclick={() => list && playNext(list.songs)} disabled={!list.songs.length}>{t('gpl.play_next')}</button>
+    <button onclick={() => list && addToEnd(list.songs)} disabled={!list.songs.length}>{t('gpl.add_end')}</button>
     {#if mine}
-      <button onclick={() => (editing = !editing)}>{editing ? 'Done' : 'Edit'}</button>
+      <button onclick={() => (editing = !editing)}>{editing ? t('gpl.done') : t('gpl.edit')}</button>
     {/if}
   </div>
   {#if editing && mine}
     <div class="edit card">
-      <button class="small-button" onclick={rename}>Rename</button>
-      <button class="small-button" onclick={remove}>Delete playlist</button>
+      <button class="small-button" onclick={rename}>{t('common.rename')}</button>
+      <button class="small-button" onclick={remove}>{t('pl.delete')}</button>
     </div>
     <PlaylistSharing id={list.id} shared={list.shared} {setShared} />
     {#each list.songs as track, i (`${track.id}-${i}`)}
       <div class="edit-row">
         <span class="grow">{track.title} <span class="muted small">{track.artist ?? ''}</span></span>
-        <button class="icon" aria-label="Move up" onclick={() => move(i, -1)} disabled={i === 0}>
+        <button class="icon" aria-label={t('player.move_up')} onclick={() => move(i, -1)} disabled={i === 0}>
           <Icon name="up" />
         </button>
-        <button class="icon" aria-label="Move down" onclick={() => move(i, 1)} disabled={i === list.songs.length - 1}>
+        <button class="icon" aria-label={t('player.move_down')} onclick={() => move(i, 1)} disabled={i === list.songs.length - 1}>
           <Icon name="down" />
         </button>
-        <button class="icon" aria-label="Remove {track.title}" onclick={() => drop(i)}><Icon name="close" /></button>
+        <button class="icon" aria-label={t('pl.remove', { name: track.title })} onclick={() => drop(i)}><Icon name="close" /></button>
       </div>
     {/each}
   {:else}
@@ -153,12 +154,12 @@
             <span class="bad small" title={row.error ?? undefined}><Icon name="warning" size={13} /> {reason(row)}</span>
           </span>
           {#if mine && row.removable}
-            <button class="icon" aria-label="Remove {row.title}" onclick={() => removeRow(row)}><Icon name="close" /></button>
+            <button class="icon" aria-label={t('pl.remove', { name: row.title ?? '' })} onclick={() => removeRow(row)}><Icon name="close" /></button>
           {/if}
         </div>
       {/if}
     {:else}
-      <p class="muted">No songs yet. Add some from a song's menu.</p>
+      <p class="muted">{t('gpl.none')}</p>
     {/each}
   {/if}
 {/if}

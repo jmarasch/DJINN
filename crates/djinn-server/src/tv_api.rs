@@ -97,9 +97,8 @@ async fn snapshot(
     let token = state.stream_token();
     let sound = query.key.as_deref() == Some(token.as_str())
         || settings::flag(&state.store, TV_SOUND, false).await?;
-    let room = state
-        .rooms
-        .leader(query.room.unwrap_or(djinn_store::MAIN_ROOM));
+    let asked = query.room.unwrap_or(djinn_store::MAIN_ROOM);
+    let room = state.rooms.leader(asked);
     let (now_playing, player) = {
         let jukebox = state.sound_jukebox_for(room);
         let jukebox = jukebox.lock().await;
@@ -109,13 +108,13 @@ async fn snapshot(
         now_playing,
         player,
         queue: state.store.queue(room).await?,
-        join_url: state.join_url.get(),
+        // The room asked for, so phones join the room this screen is in.
+        join_url: crate::api::join_url_for(&state, query.room),
         guest_mode: state.guest_mode(),
         stream_url: state
-            .stream
-            .as_ref()
+            .stream_for(asked)
             .filter(|_| sound)
-            .map(|_| crate::cast_api::stream_path(&token)),
+            .map(|_| crate::cast_api::stream_path_in(&token, asked)),
     }))
 }
 

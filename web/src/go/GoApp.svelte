@@ -113,7 +113,9 @@
     }
   }
 
-  const themeLabel = $derived({ auto: 'Auto', light: 'Light', dark: 'Dark' }[theme.mode])
+  const themeLabel = $derived(
+    { auto: t('nav.theme_auto'), light: t('nav.theme_light'), dark: t('nav.theme_dark') }[theme.mode],
+  )
   /** Not on Home, where there's nowhere to go back to. */
   const showBack = $derived(navigation.canGoBack && route.path !== '/')
   const albumId = $derived(param('/album'))
@@ -156,15 +158,15 @@
 <Toasts />
 <BackgroundArt name={appearance.background} strength={appearance.strength} fixed />
 {#if !ready}
-  <div class="center-screen muted">Loading...</div>
+  <div class="center-screen muted">{t('common.loading')}</div>
 {:else if !app.me}
   <main class="narrow">
     {#if signingUp}
       <Signup onback={() => (signingUp = false)} ondone={signedIn} />
     {:else}
-      <Login title="DJINN GO" subtitle="Your music, apart from the party." onsignedin={signedIn} />
+      <Login title="DJINN GO" subtitle={t('goa.tagline')} onsignedin={signedIn} />
       {#if app.mode && app.mode.signup !== 'closed'}
-        <button class="text-button" onclick={() => (signingUp = true)}>New here? Create an account</button>
+        <button class="text-button" onclick={() => (signingUp = true)}>{t('app.new_here')}</button>
       {/if}
       <GetApp />
     {/if}
@@ -174,16 +176,16 @@
   <main class="narrow">
     <div class="card">
       <h1>DJINN GO</h1>
-      <p>Your account can't use DJINN GO. Ask the host to allow it.</p>
-      <button onclick={signOut}>Sign out</button>
+      <p>{t('goa.no_go')}</p>
+      <button onclick={signOut}>{t('up.sign_out')}</button>
     </div>
   </main>
 {:else if app.me.two_step_required && !app.me.two_step}
   <main class="narrow">
     <h1>DJINN GO</h1>
-    <p class="muted">Your account needs two-step sign-in for DJINN GO. Set it up once, then you're in.</p>
+    <p class="muted">{t('goa.needs_two_step')}</p>
     <TwoStepPanel onchange={refresh} />
-    <button class="text-button" onclick={signOut}>Sign out</button>
+    <button class="text-button" onclick={signOut}>{t('up.sign_out')}</button>
   </main>
 {:else}
   <header class="topbar" bind:offsetHeight={headerHeight}>
@@ -202,7 +204,7 @@
       </a>
     </div>
   </header>
-  <nav class="side" aria-label="Main navigation">
+  <nav class="side" aria-label={t('goa.main_nav')}>
     <a class="brand side-brand" href="#/" aria-label="DJINN GO">
       <Logo size={48} />
       <span class="brand-text">
@@ -219,7 +221,7 @@
       <a href="#/account" class:active={section === 'account'} aria-label={t('go.account')}><Icon name="person" /><span>{t('go.account')}</span></a>
     </div>
     <div class="extras">
-      <button class="theme-toggle" onclick={cycleTheme} aria-label="Theme: {themeLabel}" title="Theme: {themeLabel}">
+      <button class="theme-toggle" onclick={cycleTheme} aria-label={t('nav.theme', { name: themeLabel })} title={t('nav.theme', { name: themeLabel })}>
         <Icon name="theme" /><span>{themeLabel}</span>
       </button>
     </div>
@@ -249,36 +251,34 @@
     {:else if section === 'library'}
       <Library section={librarySection} />
     {:else if section === 'account'}
-      <PageTitle title="Your account" />
-      <p class="muted">Signed in as <b>{app.me.username}</b>{#if app.me.role_name} ({app.me.role_name}){/if}.</p>
+      <PageTitle title={t('nav.your_account')} />
+      <p class="muted">{t('acc.signed_in_as')} <b>{app.me.username}</b>{#if app.me.role_name} ({app.me.role_name}){/if}.</p>
       <section class="card">
-        <h2>Playing</h2>
-        <p class="small">When you tap a song:</p>
+        <h2>{t('goa.playing')}</h2>
+        <p class="small">{t('goa.when_tap')}</p>
         <label class="switch">
           <input type="radio" name="tap" checked={prefs.tap === 'play'} onchange={() => setTap('play')} />
-          Play it now
+          {t('settings.tap_play')}
         </label>
-        <p class="small">Or add it to the queue:</p>
+        <p class="small">{t('goa.or_queue')}</p>
         <label class="switch indent">
           <input type="radio" name="tap" checked={prefs.tap === 'queue'} onchange={() => setTap('queue')} />
-          Play it next
+          {t('settings.tap_queue')}
         </label>
         <label class="switch indent">
           <input type="radio" name="tap" checked={prefs.tap === 'end'} onchange={() => setTap('end')} />
-          Add it to the end of the queue
+          {t('settings.tap_end')}
         </label>
         <p class="small muted">
-          Play next goes after the song playing and any you lined up before, ahead of the rest of the album, playlist or
-          radio. The end of the queue is after all of it. Drag songs in Up next to change the order. Starting a radio
-          keeps the song playing and lines the radio up after it. This goes for every device you use GO on.
+          {t('goa.tap_note')}
         </p>
       </section>
       {#if player.canConvert}
         <section class="card">
-          <h2>This device</h2>
+          <h2>{t('goa.this_device')}</h2>
           <label class="switch">
             <input type="checkbox" checked={player.saveData} onchange={(e) => setSaveData(e.currentTarget.checked)} />
-            Save data: play smaller MP3 copies on this device
+            {t('goa.save_data')}
           </label>
         </section>
       {/if}
@@ -287,7 +287,7 @@
       <OpenOnPhone />
       <AccountPanels />
       <PhoneApps />
-      <button class="signout" onclick={signOut}>Sign out</button>
+      <button class="signout" onclick={signOut}>{t('up.sign_out')}</button>
     {:else}
       <Home />
     {/if}

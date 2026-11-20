@@ -1,4 +1,5 @@
 <script lang="ts" generics="T extends string">
+  import { t } from './i18n.svelte'
   // A small two-or-three way sort switch, remembered on this device.
   import { onMount } from 'svelte'
 
@@ -6,7 +7,7 @@
     options,
     value = $bindable(),
     storageKey,
-    label = 'Sort',
+    label = t('sort.label'),
   }: {
     options: { value: T; label: string }[]
     value: T

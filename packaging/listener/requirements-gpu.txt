@@ -1,0 +1,3 @@
+# CUDA libraries so faster-whisper can use an NVIDIA graphics card.
+nvidia-cublas-cu12; platform_system == "Linux" and platform_machine == "x86_64"
+nvidia-cudnn-cu12; platform_system == "Linux" and platform_machine == "x86_64"

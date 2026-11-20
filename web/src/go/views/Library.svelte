@@ -72,7 +72,7 @@
       name = ''
       location.hash = `#/playlist/${list.id}`
     } catch (err) {
-      toast(err instanceof Error ? err.message : 'Could not make it', true)
+      toast(err instanceof Error ? err.message : t('gl.make_failed'), true)
     }
   }
 
@@ -87,7 +87,7 @@
   <a href="#/library/genres" class:active={section === 'genres'}>{t('library.genres')}</a>
   <a href="#/library/history" class:active={section === 'history'}>{t('go.history')}</a>
   <a href="#/library/year" class:active={section === 'year'}>{t('go.your_year')}</a>
-  {#if app.me?.permissions?.submit_music}<a href="#/submit">Submit music</a>{/if}
+  {#if app.me?.permissions?.submit_music}<a href="#/submit">{t('gl.submit')}</a>{/if}
 </nav>
 
 {#if section === 'year'}
@@ -95,18 +95,18 @@
 {/if}
 
 {#if section === 'genres'}
-  <div class="genre-views" role="group" aria-label="Layout">
-    <button class:active={genreView === 'tags'} aria-label="List" aria-pressed={genreView === 'tags'} onclick={() => showGenres('tags')}>
+  <div class="genre-views" role="group" aria-label={t('br.layout')}>
+    <button class:active={genreView === 'tags'} aria-label={t('br.list')} aria-pressed={genreView === 'tags'} onclick={() => showGenres('tags')}>
       <Icon name="list" size={20} />
     </button>
-    <button class:active={genreView === 'cloud'} aria-label="Cloud" aria-pressed={genreView === 'cloud'} onclick={() => showGenres('cloud')}>
+    <button class:active={genreView === 'cloud'} aria-label={t('br.cloud')} aria-pressed={genreView === 'cloud'} onclick={() => showGenres('cloud')}>
       <Icon name="cloud" size={20} />
     </button>
   </div>
   {#if !genres}
-    <p class="muted small">Loading genres...</p>
+    <p class="muted small">{t('library.genres_loading')}</p>
   {:else if !genres.genres.length}
-    <p class="muted">No genres yet.</p>
+    <p class="muted">{t('gl.no_genres')}</p>
   {:else if genreView === 'cloud'}
     <GenreCloud />
   {:else}
@@ -146,12 +146,12 @@
   {/if}
   <div class="head">
     <h2>{t('library.songs')}</h2>
-    {#if liked.tracks.length}<button class="small-button" onclick={() => liked && playList(liked.tracks)}>Play all</button>{/if}
+    {#if liked.tracks.length}<button class="small-button" onclick={() => liked && playList(liked.tracks)}>{t('go.play_all')}</button>{/if}
   </div>
   {#if liked.tracks.length}
     <SongList tracks={liked.tracks} />
   {:else}
-    <p class="muted">Tap the heart on a song to keep it here.</p>
+    <p class="muted">{t('gl.liked_empty')}</p>
   {/if}
 {:else if section === 'playlists'}
   <ImportPlaylist
@@ -160,18 +160,20 @@
     }}
   />
   <form class="new" onsubmit={create}>
-    <input bind:value={name} placeholder="New playlist" maxlength="100" required aria-label="New playlist name" />
-    <button class="primary">Make</button>
+    <input bind:value={name} placeholder={t('gl.new')} maxlength="100" required aria-label={t('atp.new')} />
+    <button class="primary">{t('gl.make')}</button>
   </form>
   {#each lists as list (list.id)}
     <a class="list" href="#/playlist/{list.id}">
       <span>{list.name}</span>
       <span class="muted small">
-        {list.tracks} {list.tracks === 1 ? 'song' : 'songs'}{#if list.user_id !== app.me?.id}, by {list.owner}{:else if list.shared}, shared{/if}
+        {t('count.songs', { n: list.tracks })}{#if list.user_id !== app.me?.id}{t('gl.by', { owner: list.owner })}{:else if list.shared}{t(
+          'gpl.shared',
+        )}{/if}
       </span>
     </a>
   {:else}
-    <p class="muted">No playlists yet.</p>
+    <p class="muted">{t('gl.none')}</p>
   {/each}
 {:else if section === 'history'}
   {#each history as played, i (`${played.id}-${played.played_at}-${i}`)}
@@ -180,9 +182,9 @@
       <span class="muted small at">{when(played.played_at)}</span>
     </div>
   {:else}
-    <p class="muted">Songs you play show up here.</p>
+    <p class="muted">{t('go.history_empty')}</p>
   {/each}
-  {#if more && history.length}<button class="more" onclick={loadMore}>Show more</button>{/if}
+  {#if more && history.length}<button class="more" onclick={loadMore}>{t('common.show_more')}</button>{/if}
 {/if}
 
 <style>

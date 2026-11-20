@@ -1,6 +1,7 @@
 <script lang="ts">
   // Using DJINN GO from Subsonic phone apps: the address, your username,
   // and an app password just for them.
+  import { t } from '../lib/i18n.svelte'
   import { onMount } from 'svelte'
   import { api } from '../lib/api'
   import { app, toast } from '../lib/state.svelte'
@@ -31,72 +32,69 @@
       asking = false
       current = ''
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not make one', true)
+      toast(e instanceof Error ? e.message : t('pa2.make_failed'), true)
     }
   }
 
   async function remove() {
-    if (!confirm('Remove the app password? Apps using it stop working.')) return
+    if (!confirm(t('pa2.remove_q'))) return
     try {
       await api.removeAppPassword()
       exists = false
       made = null
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not remove it', true)
+      toast(e instanceof Error ? e.message : t('common.remove_failed'), true)
     }
   }
 
   async function copy(text: string) {
     try {
       await navigator.clipboard.writeText(text)
-      toast('Copied')
+      toast(t('pa2.copied'))
     } catch {
-      toast('Select it and copy it', true)
+      toast(t('pa2.copy_by_hand'), true)
     }
   }
 </script>
 
 <section class="card">
-  <h2>Phone apps</h2>
+  <h2>{t('pa2.title')}</h2>
   <p class="small muted">
-    Apps that speak Subsonic can play DJINN GO with downloads for offline listening (if your role allows), CarPlay and Android Auto:
-    Symfonium, DSub, Ultrasonic and Tempo on Android; play:Sub, Amperfy and Substreamer on iPhone; Feishin and Sonixd on computers.
-    Add a Subsonic (or OpenSubsonic) server with:
+    {t('pa2.intro')}
   </p>
   {#if loaded}
     <dl>
-      <dt>Server</dt>
-      <dd><span class="mono">{location.origin}</span> <button class="small-button" onclick={() => copy(location.origin)}>Copy</button></dd>
-      <dt>Username</dt>
+      <dt>{t('pa2.server')}</dt>
+      <dd><span class="mono">{location.origin}</span> <button class="small-button" onclick={() => copy(location.origin)}>{t('pa2.copy')}</button></dd>
+      <dt>{t('acc.username')}</dt>
       <dd class="mono">{app.me?.username}</dd>
-      <dt>Password</dt>
+      <dt>{t('acc.password')}</dt>
       <dd>
         {#if made}
           <span class="mono">{shown ? made : '••••••••••••••••••••'}</span>
-          <button class="small-button" onclick={() => (shown = !shown)}>{shown ? 'Hide' : 'Show'}</button>
-          <button class="small-button" onclick={() => made && copy(made)}>Copy</button>
+          <button class="small-button" onclick={() => (shown = !shown)}>{shown ? t('pa2.hide') : t('pa2.show')}</button>
+          <button class="small-button" onclick={() => made && copy(made)}>{t('pa2.copy')}</button>
         {:else if exists}
-          <span class="muted">You have one. It's only shown when it's made; make a new one if you've lost it.</span>
+          <span class="muted">{t('pa2.have_one')}</span>
         {:else}
-          <span class="muted">Make an app password first</span>
+          <span class="muted">{t('pa2.make_first')}</span>
         {/if}
       </dd>
     </dl>
     <p class="small muted">
-      The app password works only in these apps, never to sign in here, and skips two-step sign-in, so keep it to your own devices.
-      Changing your account's password removes it, so apps will need a new one after that.
+      {t('pa2.note')}
     </p>
-    {#if made}<p class="small muted">Copy it now: it isn't shown again.</p>{/if}
+    {#if made}<p class="small muted">{t('pa2.copy_now')}</p>{/if}
     {#if asking}
       <form class="buttons" onsubmit={make}>
-        <input type="password" bind:value={current} autocomplete="current-password" placeholder="Your password" required aria-label="Your password" />
-        <button class="small-button">Make it</button>
-        {#if exists}<span class="small muted">Apps using the old one stop working until you give them the new one.</span>{/if}
+        <input type="password" bind:value={current} autocomplete="current-password" placeholder={t('ts.your_password')} required aria-label={t('ts.your_password')} />
+        <button class="small-button">{t('pa2.make_it')}</button>
+        {#if exists}<span class="small muted">{t('pa2.old_stops')}</span>{/if}
       </form>
     {:else}
       <div class="buttons">
-        <button class="small-button" onclick={() => (asking = true)}>{exists ? 'Make a new app password' : 'Make an app password'}</button>
-        {#if exists}<button class="small-button" onclick={remove}>Remove it</button>{/if}
+        <button class="small-button" onclick={() => (asking = true)}>{exists ? t('pa2.make_new') : t('pa2.make')}</button>
+        {#if exists}<button class="small-button" onclick={remove}>{t('pa2.remove')}</button>{/if}
       </div>
     {/if}
   {/if}

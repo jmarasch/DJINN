@@ -7,6 +7,7 @@
   import Icon from './Icon.svelte'
   import Sheet from './Sheet.svelte'
   import TagEditor from './TagEditor.svelte'
+  import { t } from './i18n.svelte'
   import { hasPlaylists, isAdmin, toast } from './state.svelte'
   import type { TagField, Track, TrackEdit, TrackTags } from './types'
 
@@ -24,7 +25,7 @@
     try {
       editing = await api.trackEdit(track.id)
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not open the tags', true)
+      toast(e instanceof Error ? e.message : t('tm.open_failed'), true)
     }
   }
 
@@ -49,7 +50,7 @@
       if (tags) tags.styles = tags.styles.filter((s) => s !== genre)
       removed = genre
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not remove it', true)
+      toast(e instanceof Error ? e.message : t('common.remove_failed'), true)
     }
   }
 
@@ -61,7 +62,7 @@
       if (tags) tags.styles = [...tags.styles, genre]
       removed = null
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not put it back', true)
+      toast(e instanceof Error ? e.message : t('tm.put_back_failed'), true)
     }
   }
 
@@ -70,18 +71,35 @@
     location.hash = `/similar/${track.id}`
   }
 
+  // Takes the song's lyrics away as bad and blocks that source's same text.
+  // When an AI made or timed them, the song keeps a red microphone and the AI
+  // leaves it alone until its lyrics are allowed again.
+  async function removeLyrics() {
+    menu = false
+    if (!confirm(t('tm.remove_lyrics_q', { title: track.title }))) return
+    try {
+      await api.blockLyrics(track.id, 'removed from the song menu')
+      if (track.lyrics_ai) track.lyrics_failed = 1
+      track.lyrics = 0
+      track.lyrics_ai = 0
+      toast(t('lyrics.removed'))
+    } catch (e) {
+      toast(e instanceof Error ? e.message : t('lyrics.remove_failed'), true)
+    }
+  }
+
   async function radio() {
     menu = false
     try {
       await api.playRadio({ kind: 'track', id: track.id })
-      toast(`Radio from ${track.title}`)
+      toast(t('tm.radio', { title: track.title }))
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not start the radio', true)
+      toast(e instanceof Error ? e.message : t('radio.failed'), true)
     }
   }
 </script>
 
-<button class="icon-only" aria-label="More for {track.title}" onclick={() => (menu = true)}>
+<button class="icon-only" aria-label={t('tm.more_for', { title: track.title })} onclick={() => (menu = true)}>
   <Icon name="more" size={20} />
 </button>
 {#if menu}
@@ -89,11 +107,11 @@
     {#if tags && (tags.genres.length || tags.styles.length || removed)}
       <div class="tags">
         {#if tags.genres.length}
-          <span class="small muted">Genres</span>
+          <span class="small muted">{t('tm.genres')}</span>
           <GenreChips genres={tags.genres} onopen={() => (menu = false)} />
         {/if}
         {#if tags.styles.length || removed}
-          <span class="small muted">Sounds like</span>
+          <span class="small muted">{t('tm.sounds_like')}</span>
           <div class="styles">
             <GenreChips
               genres={tags.styles}
@@ -102,33 +120,36 @@
             />
             {#if removed}
               <p class="small muted">
-                Took off {removed}. <button class="link" onclick={undoRemove}>Undo</button>
+                {t('tm.took_off', { genre: removed })} <button class="link" onclick={undoRemove}>{t('rq.undo')}</button>
               </p>
             {/if}
           </div>
         {/if}
       </div>
     {/if}
-    <button class="item" onclick={similar}><Icon name="similar" /> More like this</button>
+    <button class="item" onclick={similar}><Icon name="similar" /> {t('menu.more_like_this')}</button>
     {#if hasPlaylists()}
       <button
         class="item"
         onclick={() => {
           menu = false
           playlist = true
-        }}><Icon name="playlist" /> Add to playlist</button
+        }}><Icon name="playlist" /> {t('menu.add_to_playlist')}</button
       >
     {/if}
     {#if isAdmin()}
-      <button class="item" onclick={radio}><Icon name="radio" /> Start radio from this song</button>
-      <button class="item" onclick={editTags}><Icon name="edit" /> Edit tags</button>
+      <button class="item" onclick={radio}><Icon name="radio" /> {t('menu.start_radio_song')}</button>
+      <button class="item" onclick={editTags}><Icon name="edit" /> {t('menu.edit_tags')}</button>
+      {#if track.lyrics}
+        <button class="item" onclick={removeLyrics}><Icon name="lyrics-outline" /> {t('menu.remove_lyrics')}</button>
+      {/if}
     {/if}
     <button
       class="item"
       onclick={() => {
         menu = false
         reporting = true
-      }}><Icon name="warning" /> Report a problem</button
+      }}><Icon name="warning" /> {t('menu.report')}</button
     >
   </Sheet>
 {/if}
@@ -136,18 +157,18 @@
   <ReportSong song={track} onclose={() => (reporting = false)} />
 {/if}
 {#if editing}
-  {@const t = editing.track}
+  {@const song = editing.track}
   <TagEditor
-    title="Edit tags"
-    trackIds={[t.id]}
+    title={t('tm.edit_tags')}
+    trackIds={[song.id]}
     fields={songFields}
     initial={{
-      title: t.title,
-      artist: t.artist ?? '',
-      album: t.album ?? '',
-      album_artist: t.album_artist ?? '',
-      year: t.year?.toString() ?? '',
-      genre: t.genre ?? tags?.genres.join(', ') ?? '',
+      title: song.title,
+      artist: song.artist ?? '',
+      album: song.album ?? '',
+      album_artist: song.album_artist ?? '',
+      year: song.year?.toString() ?? '',
+      genre: song.genre ?? tags?.genres.join(', ') ?? '',
     }}
     edited={songFields.filter((f) => editing?.edited[f] != null)}
     onclose={() => (editing = null)}

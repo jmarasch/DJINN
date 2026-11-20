@@ -3,6 +3,7 @@
 
 import { api } from './api'
 import { app, isAdmin, toast, whenLoggingOut } from './state.svelte'
+import { t } from './i18n.svelte'
 
 export const playHere = $state({
   /** The stream; null when the host turned Play here off. */
@@ -62,7 +63,7 @@ async function connect() {
     await a.play()
   } catch {
     stopPlayHere()
-    toast("Couldn't play here. Check this device's sound and try again.", true)
+    toast(t('ph.failed'), true)
   }
 }
 
@@ -84,6 +85,20 @@ export function stopPlayHere() {
 }
 
 whenLoggingOut(stopPlayHere)
+
+// Switching rooms while listening switches to that room's sound.
+$effect.root(() => {
+  let last = app.room
+  $effect(() => {
+    const room = app.room
+    if (room === last) return
+    last = room
+    if (playHere.on)
+      void checkPlayHere().then(() => {
+        if (playHere.on) void connect()
+      })
+  })
+})
 
 // Lock screen and notification controls, showing the song playing.
 if ('mediaSession' in navigator) {

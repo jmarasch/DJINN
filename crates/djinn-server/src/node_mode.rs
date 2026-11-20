@@ -110,6 +110,10 @@ impl Pairing {
 #[derive(Clone, Debug, Serialize)]
 pub struct Status {
     pub pairing: Pairing,
+    /// The DJINN this node runs, and a test build's label ("test build
+    /// <commit>, <when>"; empty for a release).
+    pub version: &'static str,
+    pub build: &'static str,
     /// This node's name, as Main lists it.
     pub name: String,
     /// Main's address, like "https://192.168.1.10:8066".
@@ -145,6 +149,9 @@ pub struct Status {
     /// The page a plugged-in screen shows once joined (Main's TV page for
     /// this node's room).
     pub screen: Option<String>,
+    /// What its screen shows (its own choice, else its room's): "status",
+    /// "off" or the pages; None until Main says.
+    pub shows: Option<String>,
     /// The visualizers Main says its screen draws (its own or the house's).
     pub visuals: Option<crate::visuals::Visuals>,
     /// Main DJINNs heard on the network letting nodes join, while this node
@@ -190,6 +197,13 @@ pub struct Node {
     cache: Arc<crate::node_offline::Cache>,
     /// Main's last volume (f32 bits), for playing offline at the same level.
     volume: Arc<AtomicU32>,
+    /// When music from Main last arrived (the shared clock's microseconds, 0
+    /// for never). Being connected to Main's feed isn't playing: it stays
+    /// open while the room is quiet.
+    heard_us: Arc<std::sync::atomic::AtomicI64>,
+    /// Main's song is paused: it may carry on any moment, so the box keeps
+    /// itself free for it as if it played.
+    held: Arc<AtomicBool>,
     /// Browsers let in to manage this node (by a link from Main's Admin >
     /// Nodes > Manage), and until when.
     managers: Arc<Mutex<std::collections::HashMap<String, std::time::Instant>>>,
@@ -202,6 +216,8 @@ pub struct Node {
     searched_at: Arc<Mutex<Option<std::time::Instant>>>,
     /// What the speaker plays, measured for the screen's visualizer.
     levels: djinn_engine::Levels,
+    /// Helping with AI lyrics while idle.
+    ai: Arc<crate::node_ai::Helper>,
 }
 
 /// After a failed update, how long before trying again.
@@ -232,6 +248,8 @@ impl Node {
             store,
             cache_dir: Arc::new(cache_dir.clone()),
             status: Arc::new(RwLock::new(Status {
+                version: env!("DJINN_RELEASE_VERSION"),
+                build: env!("DJINN_BUILD_LABEL"),
                 pairing,
                 name,
                 main,
@@ -249,6 +267,7 @@ impl Node {
                 cached: 0,
                 audio_room: None,
                 screen: None,
+                shows: None,
                 visuals: None,
                 mains: Vec::new(),
                 rooms: Vec::new(),
@@ -264,13 +283,61 @@ impl Node {
                 crate::node_offline::CACHE_LIMIT_BYTES,
             )),
             volume: Arc::new(AtomicU32::new(1.0f32.to_bits())),
+            heard_us: Arc::new(std::sync::atomic::AtomicI64::new(0)),
+            held: Arc::default(),
             managers: Arc::default(),
             updating: Arc::default(),
             update_failed: Arc::default(),
             lost_since: Arc::default(),
             searched_at: Arc::default(),
             levels: djinn_engine::Levels::new(),
+            ai: Arc::new(crate::node_ai::Helper::new(
+                cache_dir
+                    .parent()
+                    .map_or_else(|| PathBuf::from("ai-listener"), |d| d.join("ai-listener")),
+            )?),
         })
+    }
+
+    /// The AI lyrics helper.
+    pub(crate) fn ai(&self) -> Arc<crate::node_ai::Helper> {
+        Arc::clone(&self.ai)
+    }
+
+    /// Playing music, holding a paused song or drawing visuals for a screen:
+    /// AI work must wait (a worker that started during a pause took the
+    /// processor the song needed when it carried on). A quiet room isn't
+    /// busy, though the node stays connected to Main's feed.
+    pub(crate) fn busy(&self) -> bool {
+        let now = djinn_engine::clock::now_micros();
+        self.music_arriving(now)
+            || self.held.load(Ordering::Acquire)
+            || self.status().offline
+            || self.levels.watched(now)
+    }
+
+    /// Whether music from Main arrived in the last few seconds.
+    fn music_arriving(&self, now: i64) -> bool {
+        let heard = self.heard_us.load(Ordering::Acquire);
+        heard != 0 && now - heard < MUSIC_GAP_US
+    }
+
+    /// The port this node's page listens on.
+    pub(crate) fn port(&self) -> u16 {
+        LISTEN.get().map_or(8066, std::net::SocketAddr::port)
+    }
+
+    /// Main's address, a client pinned to its certificate and this node's
+    /// sign-in, once joined.
+    pub(crate) async fn main_client(
+        &self,
+        timeout: Duration,
+    ) -> Option<(String, reqwest::Client, String)> {
+        let (main, pin) = self.joined_main().await?;
+        let (id, secret) = self.identity().await.ok()?;
+        let client =
+            pinned_client_with(Some(pin), Arc::new(Mutex::new(None)), Some(timeout)).ok()?;
+        Some((main, client, format!("Node {id}:{secret}")))
     }
 
     pub fn status(&self) -> Status {
@@ -427,6 +494,8 @@ impl Node {
                         env!("DJINN_RELEASE_VERSION"),
                     )
                     .header(crate::node_builds::BUILD_HEADER, own_build().await)
+                    .header(crate::nodes::NODE_LABEL_HEADER, env!("DJINN_BUILD_LABEL"))
+                    .header(crate::nodes::NODE_ADDRESSES_HEADER, own_addresses())
                     .header(
                         crate::node_builds::SCHEMA_HEADER,
                         djinn_store::schema_version().to_string(),
@@ -493,6 +562,7 @@ impl Node {
         let http = response.status();
         if http == reqwest::StatusCode::UNAUTHORIZED {
             // Main doesn't know this node: declined while waiting, or kicked.
+            self.ai.set_wanted(None);
             if status.pairing == Pairing::Joined {
                 self.wipe_cache();
                 self.set_pairing(Pairing::Kicked).await?;
@@ -547,6 +617,7 @@ impl Node {
             }
             s.audio_room = answer["audio_room"].as_i64();
             s.screen = answer["screen"].as_str().map(str::to_owned);
+            s.shows = answer["shows"].as_str().map(str::to_owned);
             s.visuals = serde_json::from_value(answer["visuals"].clone()).ok();
             s.rooms = serde_json::from_value(answer["rooms"].clone()).unwrap_or_default();
         });
@@ -565,6 +636,9 @@ impl Node {
                 .map(|r| (r.id, r.name.clone()))
                 .collect();
             menu.set(rooms, status.room_id);
+            if let Some(own) = answer.pointer("/audio/screen").and_then(|s| s.as_str()) {
+                menu.set_screen(own);
+            }
         }
         if let Ok(upcoming) =
             serde_json::from_value::<Vec<crate::nodes::Upcoming>>(answer["upcoming"].clone())
@@ -581,6 +655,11 @@ impl Node {
                 self.audio.send_replace(Some(audio));
             }
         }
+        self.ai.set_wanted(
+            serde_json::from_value(answer["ai"].clone())
+                .ok()
+                .filter(|_| joined),
+        );
         if let Ok(update) =
             serde_json::from_value::<crate::node_builds::NodeUpdate>(answer["update"].clone())
         {
@@ -729,6 +808,9 @@ impl Node {
     }
 }
 
+/// How long without music from Main before the node counts as quiet.
+const MUSIC_GAP_US: i64 = 4_000_000;
+
 /// How long Main's music may be gone before playing from the cache (a
 /// shorter blip just waits).
 const OFFLINE_AFTER: Duration = Duration::from_secs(6);
@@ -812,7 +894,7 @@ impl Node {
 
     /// Plays Main's music while joined, reconnecting when the feed drops.
     async fn run_audio(self) {
-        let mut player: Option<(djinn_engine::NodePlayer, u32, Option<String>)> = None;
+        let mut player: Option<Players> = None;
         let mut offline: Option<crate::node_offline::OfflinePlayer> = None;
         let mut lost_since: Option<std::time::Instant> = None;
         loop {
@@ -858,7 +940,10 @@ impl Node {
                 tokio::time::sleep(Duration::from_millis(200)).await;
                 continue;
             }
-            match self.listen(&main, &pin, &mut player).await {
+            let listened = self.listen(&main, &pin, &mut player).await;
+            // Main says again whether it's paused when the node reconnects.
+            self.held.store(false, Ordering::Release);
+            match listened {
                 Ok(()) => lost_since = None,
                 Err(e) => {
                     tracing::debug!(error = %format!("{e:#}"), "node audio stopped");
@@ -989,7 +1074,7 @@ impl Node {
         &self,
         main: &str,
         pin: &str,
-        player: &mut Option<(djinn_engine::NodePlayer, u32, Option<String>)>,
+        player: &mut Option<Players>,
     ) -> anyhow::Result<()> {
         use futures_util::StreamExt;
         let (id, secret) = self.identity().await?;
@@ -1010,29 +1095,55 @@ impl Node {
             .unwrap_or(48_000);
         let mut settings_rx = self.audio.subscribe();
         let audio = settings_rx.borrow_and_update().clone();
-        let device = audio.as_ref().and_then(|a| a.device.clone());
+        let wanted = devices_of(audio.as_ref());
         if player
             .as_ref()
-            .is_none_or(|(_, r, d)| *r != rate || *d != device)
+            .is_none_or(|p| p.rate != rate || p.wanted != wanted)
         {
             *player = None;
-            let offset = Arc::clone(&self.offset);
-            let settings = node_settings(audio.as_ref());
-            let wanted = device.clone();
-            let levels = self.levels.clone();
-            let started = tokio::task::spawn_blocking(move || {
-                djinn_engine::NodePlayer::start(wanted, rate, settings, offset, levels)
-            })
-            .await?;
-            self.report_speakers(main, pin).await;
-            match started {
-                Ok(p) => *player = Some((p, rate, device)),
-                Err(e) => anyhow::bail!("can't open this computer's speakers: {e}"),
+            let mut list = Vec::new();
+            for (index, device) in wanted.iter().cloned().enumerate() {
+                let offset = Arc::clone(&self.offset);
+                let settings = output_settings(audio.as_ref(), index);
+                // Only the first speaker's measurements draw the visualizer.
+                let levels = if index == 0 {
+                    self.levels.clone()
+                } else {
+                    djinn_engine::Levels::new()
+                };
+                let started = tokio::task::spawn_blocking(move || {
+                    djinn_engine::NodePlayer::start(device, rate, settings, offset, levels)
+                })
+                .await?;
+                if index == 0 {
+                    self.report_speakers(main, pin).await;
+                }
+                match started {
+                    Ok(p) => list.push((index, p)),
+                    Err(e) if index == 0 => {
+                        anyhow::bail!("can't open this computer's speakers: {e}")
+                    }
+                    // The others are skipped (a Bluetooth speaker that's
+                    // off, say); the rest still play.
+                    Err(e) => {
+                        tracing::warn!(output = index + 1, error = %e, "can't open one of this node's speakers");
+                        self.update(|s| {
+                            s.audio_problem =
+                                Some(format!("can't open speaker {}: {e}", index + 1));
+                        });
+                    }
+                }
             }
+            *player = Some(Players { rate, wanted, list });
         }
         self.update(|s| {
             s.playing = true;
-            s.audio_problem = None;
+            if player
+                .as_ref()
+                .is_none_or(|p| p.list.len() == p.wanted.len())
+            {
+                s.audio_problem = None;
+            }
         });
         let room = (self.status().room_id, self.status().audio_room);
         let mut buffer = Vec::new();
@@ -1045,25 +1156,44 @@ impl Node {
                 .ok_or_else(|| anyhow::anyhow!("Main sent something odd"))?;
             if settings_rx.has_changed().unwrap_or(false) {
                 let audio = settings_rx.borrow_and_update().clone();
-                let device = audio.as_ref().and_then(|a| a.device.clone());
-                if player.as_ref().is_some_and(|(_, _, d)| *d != device) {
-                    // Another speaker: open it on the next connection.
+                if player
+                    .as_ref()
+                    .is_some_and(|p| p.wanted != devices_of(audio.as_ref()))
+                {
+                    // Other speakers: open them on the next connection.
                     *player = None;
                     break;
                 }
-                if let Some((p, _, _)) = player.as_ref() {
-                    p.set(node_settings(audio.as_ref()))?;
+                if let Some(p) = player.as_ref() {
+                    for (index, one) in &p.list {
+                        one.set(output_settings(audio.as_ref(), *index))?;
+                    }
                 }
             }
-            if let Some((p, _, _)) = player.as_ref() {
+            if let Some(p) = player.as_ref() {
                 for piece in pieces {
-                    if let djinn_engine::Mark::Volume(v) = piece.mark {
-                        self.volume.store(v.to_bits(), Ordering::Release);
+                    if matches!(piece.mark, djinn_engine::Mark::Audio { .. }) {
+                        self.heard_us
+                            .store(djinn_engine::clock::now_micros().max(1), Ordering::Release);
                     }
-                    p.piece(piece)?;
+                    match piece.mark {
+                        djinn_engine::Mark::Volume(v) => {
+                            self.volume.store(v.to_bits(), Ordering::Release);
+                        }
+                        djinn_engine::Mark::Pause => self.held.store(true, Ordering::Release),
+                        djinn_engine::Mark::Resume | djinn_engine::Mark::Flush => {
+                            self.held.store(false, Ordering::Release);
+                        }
+                        djinn_engine::Mark::Audio { .. } => {}
+                    }
+                    for (_, one) in &p.list {
+                        one.piece(piece.clone())?;
+                    }
                 }
-                let error = p.error_ms();
-                self.update(|s| s.speaker_ms = Some(error));
+                if let Some((_, first)) = p.list.first() {
+                    let error = first.error_ms();
+                    self.update(|s| s.speaker_ms = Some(error));
+                }
             }
             if self.status().pairing != Pairing::Joined || MUSIC_STOPPED.load(Ordering::Acquire) {
                 *player = None;
@@ -1318,6 +1448,17 @@ fn announced_mains(wait: Duration) -> Vec<(String, String)> {
     found
 }
 
+/// This node's own home-network addresses for a check-in. Main sees only
+/// where the check-in seems to come from, which a router, NAT or VPN in
+/// between can change.
+fn own_addresses() -> String {
+    crate::banner::lan_addresses()
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
 /// Where to look for Main, as URLs, most likely first and without the
 /// address that just failed: what announces itself with Main's id (any
 /// main DJINN when the id isn't known yet), then the addresses it had
@@ -1368,6 +1509,42 @@ fn best_address(addresses: &[std::net::Ipv4Addr]) -> Option<std::net::Ipv4Addr> 
         .filter(|ip| !ip.is_loopback() && !ip.is_link_local())
         .min_by_key(|ip| rank(ip))
         .copied()
+}
+
+/// The speakers a node plays to: one player each, all fed the same music
+/// (each keeps in step with Main's clock on its own, whatever its device's
+/// own clock does).
+struct Players {
+    rate: u32,
+    /// The devices asked for (None for the system default), first speaker
+    /// first; what's compared to see if they changed.
+    wanted: Vec<Option<String>>,
+    /// The ones that opened, with their place in `wanted`.
+    list: Vec<(usize, djinn_engine::NodePlayer)>,
+}
+
+/// The devices the settings ask for: the first speaker, then any others.
+fn devices_of(audio: Option<&crate::nodes::AudioSettings>) -> Vec<Option<String>> {
+    match audio {
+        Some(a) => std::iter::once(a.device.clone())
+            .chain(a.outputs.iter().map(|o| o.device.clone()))
+            .collect(),
+        None => vec![None],
+    }
+}
+
+/// The settings for speaker `index` (0 is the first): the node's shared
+/// equalizer and mode, with that speaker's own delay and trim.
+fn output_settings(
+    audio: Option<&crate::nodes::AudioSettings>,
+    index: usize,
+) -> djinn_engine::NodeSettings {
+    let mut settings = node_settings(audio);
+    if let Some(output) = audio.and_then(|a| index.checked_sub(1).and_then(|i| a.outputs.get(i))) {
+        settings.delay_ms = output.delay_ms.clamp(0, 2000) as u32;
+        settings.trim = output.trim.clamp(0.0, 1.0) as f32;
+    }
+    settings
 }
 
 /// The player's settings from Main's.
@@ -1565,7 +1742,12 @@ pub fn router(node: Node) -> Router {
         .route("/api/node/log", get(log_lines))
         .route("/api/node/log/file", get(log_file))
         .route("/api/node/restart", post(restart))
+        .route("/api/node/reboot", post(reboot))
         .route("/api/node/levels", get(levels))
+        // The AI lyrics helper's worker, passed on to Main.
+        .route("/api/ai-work/next", post(crate::node_ai::next))
+        .route("/api/ai-work/song/{id}", get(crate::node_ai::song))
+        .route("/api/ai-work/result/{id}", post(crate::node_ai::result))
         .fallback(crate::web::static_handler)
         .layer(axum::middleware::from_fn(crate::security::same_origin))
         .layer(axum::middleware::from_fn(node_headers))
@@ -1708,6 +1890,8 @@ struct Diagnostics {
     version: &'static str,
     /// The start of this program's SHA-256 (test builds share a version).
     build: String,
+    /// "test <commit> ..." for a test build, empty for releases.
+    label: &'static str,
     platform: String,
     uptime_secs: u64,
     addresses: Vec<String>,
@@ -1722,6 +1906,8 @@ struct Diagnostics {
     cached_bytes: u64,
     /// The log's recording level.
     log_level: &'static str,
+    /// This computer lets DJINN restart it (`djinn_platform::power`).
+    can_reboot: bool,
 }
 
 async fn diagnostics(
@@ -1752,14 +1938,16 @@ async fn diagnostics(
             djinn_platform::system::disk(&cache_dir),
             files,
             listen.map(crate::banner::urls).unwrap_or_default(),
+            djinn_platform::power::can_reboot(),
         )
     })
     .await
     .map_err(anyhow::Error::from)?;
-    let (cpu_busy, memory, disk, files, addresses) = found;
+    let (cpu_busy, memory, disk, files, addresses, can_reboot) = found;
     Ok(Json(Diagnostics {
         version: env!("CARGO_PKG_VERSION"),
         build: build.chars().take(12).collect(),
+        label: env!("DJINN_BUILD_LABEL"),
         platform: format!("{} {}", std::env::consts::OS, std::env::consts::ARCH),
         uptime_secs: STARTED.get().map_or(0, |s| s.elapsed().as_secs()),
         addresses,
@@ -1772,6 +1960,7 @@ async fn diagnostics(
         cached_songs: files.len(),
         cached_bytes: files.iter().sum(),
         log_level: crate::logs::record_level(),
+        can_reboot,
     }))
 }
 
@@ -1845,6 +2034,30 @@ async fn restart(
     Ok(StatusCode::ACCEPTED)
 }
 
+/// Restarts the whole computer, for a sound card or driver that hung where
+/// restarting DJINN doesn't help.
+async fn reboot(State(node): State<Node>, headers: axum::http::HeaderMap) -> ApiResult<StatusCode> {
+    must_manage(&node, &headers)?;
+    let allowed = tokio::task::spawn_blocking(djinn_platform::power::can_reboot)
+        .await
+        .unwrap_or(false);
+    if !allowed {
+        return Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "this computer doesn't let DJINN restart it; restart it by hand (sudo reboot)",
+        ));
+    }
+    tracing::warn!("restarting the computer, as asked on the node's page");
+    tokio::spawn(async move {
+        // Let the answer go out first.
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        if let Ok(Err(e)) = tokio::task::spawn_blocking(djinn_platform::power::reboot).await {
+            tracing::warn!(error = %e, "couldn't restart the computer");
+        }
+    });
+    Ok(StatusCode::ACCEPTED)
+}
+
 async fn put_audio(
     State(node): State<Node>,
     headers: axum::http::HeaderMap,
@@ -1894,6 +2107,20 @@ static ROOM_MENU: std::sync::OnceLock<djinn_platform::tray::RoomMenu> = std::syn
 /// Rooms picked in the tray icon, for `serve`'s task to tell Main.
 static ROOM_PICKS: std::sync::OnceLock<tokio::sync::mpsc::UnboundedSender<i64>> =
     std::sync::OnceLock::new();
+/// Screens picked in the tray icon (the setting), for `serve`'s task to tell Main.
+static SCREEN_PICKS: std::sync::OnceLock<tokio::sync::mpsc::UnboundedSender<String>> =
+    std::sync::OnceLock::new();
+
+/// Sets what this node's screen shows on Main, from the tray icon's Screen
+/// menu (`djinn_platform::tray::SCREEN_CHOICES`).
+pub fn pick_screen(index: usize) {
+    if let (Some(picks), Some((value, _))) = (
+        SCREEN_PICKS.get(),
+        djinn_platform::tray::SCREEN_CHOICES.get(index),
+    ) {
+        let _ = picks.send((*value).to_owned());
+    }
+}
 
 /// The main DJINN's page for a browser, once joined.
 static MAIN_PAGE: Mutex<Option<String>> = Mutex::new(None);
@@ -1943,6 +2170,30 @@ impl Node {
             .put(format!("{main}/api/nodes/me/room"))
             .header("authorization", format!("Node {id}:{secret}"))
             .json(&serde_json::json!({ "room_id": room }))
+            .send()
+            .await?;
+        anyhow::ensure!(
+            response.status().is_success(),
+            "Main said {}",
+            response.status()
+        );
+        self.wake.notify_one();
+        Ok(())
+    }
+
+    /// Tells Main what this node's screen shows (empty: follow the room),
+    /// then checks in at once so the screen changes.
+    async fn set_screen(&self, screen: &str) -> anyhow::Result<()> {
+        let (main, pin) = self
+            .joined_main()
+            .await
+            .ok_or_else(|| anyhow::anyhow!("not joined to a main DJINN"))?;
+        let (id, secret) = self.identity().await?;
+        let client = pinned_client(Some(pin), Arc::new(Mutex::new(None)))?;
+        let response = client
+            .put(format!("{main}/api/nodes/me/screen"))
+            .header("authorization", format!("Node {id}:{secret}"))
+            .json(&serde_json::json!({ "screen": screen }))
             .send()
             .await?;
         anyhow::ensure!(
@@ -2044,6 +2295,7 @@ pub async fn serve(
     tokio::spawn(node.clone().run_clock());
     tokio::spawn(node.clone().run_audio());
     tokio::spawn(node.clone().run_cache());
+    tokio::spawn(crate::node_ai::run(node.clone(), node.ai()));
     let (picks, mut picked) = tokio::sync::mpsc::unbounded_channel();
     let _ = ROOM_PICKS.set(picks);
     let mover = node.clone();
@@ -2055,15 +2307,41 @@ pub async fn serve(
             }
         }
     });
+    let (screen_picks, mut screen_picked) = tokio::sync::mpsc::unbounded_channel();
+    let _ = SCREEN_PICKS.set(screen_picks);
+    let changer = node.clone();
+    tokio::spawn(async move {
+        while let Some(screen) = screen_picked.recv().await {
+            match changer.set_screen(&screen).await {
+                Ok(()) => tracing::info!(%screen, "screen changed from the tray"),
+                Err(e) => tracing::warn!(error = %format!("{e:#}"), "couldn't change the screen"),
+            }
+        }
+    });
     let browsing = node.clone();
     std::thread::Builder::new()
         .name("djinn-find-mains".to_owned())
         .spawn(move || browsing.find_mains())?;
     let listener = crate::bind(listen).await?;
     tracing::info!(%listen, "running as a node; its page is at /node");
-    axum::serve(listener, router(node))
-        .with_graceful_shutdown(until)
-        .await?;
+    // A page left open on the node (its live updates never end) would keep
+    // a graceful shutdown waiting for ever, and an old copy running beside
+    // the new one after an update; so open connections get a few seconds.
+    let ending = Arc::new(Notify::new());
+    let signal = Arc::clone(&ending);
+    let serving = std::future::IntoFuture::into_future(
+        axum::serve(listener, router(node)).with_graceful_shutdown(async move {
+            until.await;
+            signal.notify_one();
+        }),
+    );
+    tokio::select! {
+        served = serving => served?,
+        () = async {
+            ending.notified().await;
+            tokio::time::sleep(Duration::from_secs(3)).await;
+        } => tracing::info!("open pages didn't close in time; closing anyway"),
+    }
     tracing::info!("closing the database");
     if tokio::time::timeout(Duration::from_secs(5), store.close())
         .await
@@ -2467,10 +2745,10 @@ mod tests {
             let res = ask("GET", path, None).await.unwrap();
             assert_eq!(res.status(), StatusCode::FORBIDDEN, "{path}");
         }
-        let res = ask("POST", "/api/node/restart", Some("guess"))
-            .await
-            .unwrap();
-        assert_eq!(res.status(), StatusCode::FORBIDDEN);
+        for path in ["/api/node/restart", "/api/node/reboot"] {
+            let res = ask("POST", path, Some("guess")).await.unwrap();
+            assert_eq!(res.status(), StatusCode::FORBIDDEN, "{path}");
+        }
 
         node.managers
             .lock()

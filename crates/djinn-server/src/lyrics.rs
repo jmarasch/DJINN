@@ -27,6 +27,8 @@ use crate::state::AppState;
 pub const LYRICS_LOOKUP: &str = "lyrics_lookup";
 /// Setting key: the public lyrics page; on unless "0".
 pub const LYRICS_PAGE: &str = "lyrics_page";
+/// Setting key: show a note on lyrics an AI worked on; on unless "0".
+pub const LYRICS_AI_NOTE: &str = "lyrics_ai_note";
 
 /// Files read between checks on whether heavy work may run.
 const READ_BATCH: i64 = 200;
@@ -47,6 +49,11 @@ pub fn router() -> Router<AppState> {
         .route("/lyrics/status", get(status))
         .route("/lyrics/settings", get(get_settings).put(put_settings))
         .route("/lyrics/recheck", post(recheck))
+        .route(
+            "/lyrics/{track_id}/block",
+            post(block_lyrics).delete(allow_lyrics),
+        )
+        .route("/lyrics/blocks", axum::routing::delete(allow_all_lyrics))
         .route("/lyrics/export", get(export))
         .route("/lyrics-page", get(page))
         .route("/lyrics-page/events", get(crate::sse::lyrics_events))
@@ -233,6 +240,12 @@ pub struct LyricsView {
     plain: Option<String>,
     instrumental: bool,
     source: String,
+    /// "made" (an AI wrote the words by listening: they may be wrong) or
+    /// "synced" (a person's words that an AI timed), when an AI worked on them.
+    ai: Option<&'static str>,
+    ai_model: Option<String>,
+    /// How well the AI's timing matched the words, in percent.
+    ai_match: Option<i64>,
 }
 
 impl From<StoredLyrics> for LyricsView {
@@ -247,12 +260,26 @@ impl From<StoredLyrics> for LyricsView {
             plain: l.plain,
             instrumental: l.instrumental,
             source: l.source,
+            ai: match l.ai {
+                1 => Some("made"),
+                2 => Some("synced"),
+                _ => None,
+            },
+            ai_model: l.ai_model,
+            ai_match: l.ai_match,
         }
     }
 }
 
 pub async fn lyrics_for(state: &AppState, track_id: i64) -> ApiResult<Option<LyricsView>> {
-    Ok(state.store.lyrics(track_id).await?.map(LyricsView::from))
+    let mut view = state.store.lyrics(track_id).await?.map(LyricsView::from);
+    // The admin can turn the note about AI-made lyrics off.
+    if let Some(v) = view.as_mut() {
+        if !settings::flag(&state.store, LYRICS_AI_NOTE, true).await? {
+            v.ai = None;
+        }
+    }
+    Ok(view)
 }
 
 async fn track_lyrics(
@@ -333,6 +360,7 @@ async fn status(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json<S
 struct LyricsSettings {
     lookup: bool,
     page: bool,
+    ai_note: bool,
 }
 
 async fn get_settings(
@@ -342,6 +370,7 @@ async fn get_settings(
     Ok(Json(LyricsSettings {
         lookup: settings::flag(&state.store, LYRICS_LOOKUP, true).await?,
         page: page_on(&state).await?,
+        ai_note: settings::flag(&state.store, LYRICS_AI_NOTE, true).await?,
     }))
 }
 
@@ -353,9 +382,57 @@ async fn put_settings(
     let was = settings::flag(&state.store, LYRICS_LOOKUP, true).await?;
     settings::set_flag(&state.store, LYRICS_LOOKUP, body.lookup).await?;
     settings::set_flag(&state.store, LYRICS_PAGE, body.page).await?;
+    settings::set_flag(&state.store, LYRICS_AI_NOTE, body.ai_note).await?;
     if body.lookup && !was {
         start(&state);
     }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize, Default)]
+struct BlockBody {
+    #[serde(default)]
+    reason: Option<String>,
+}
+
+/// Removes a song's lyrics as wrong or bad and remembers where they came
+/// from, so that source's same text isn't taken again.
+async fn block_lyrics(
+    admin: AdminUser,
+    State(state): State<AppState>,
+    UrlPath(track_id): UrlPath<i64>,
+    body: Option<Json<BlockBody>>,
+) -> ApiResult<StatusCode> {
+    let reason = body
+        .and_then(|b| b.0.reason)
+        .map(|r| r.trim().chars().take(200).collect::<String>())
+        .filter(|r| !r.is_empty());
+    let source = state
+        .store
+        .block_lyrics(track_id, admin.0.id, reason.as_deref())
+        .await?
+        .ok_or_else(|| ApiError::not_found_with("that song has no lyrics"))?;
+    state.store.clear_lyrics_reports(track_id).await?;
+    tracing::info!(track_id, source, "lyrics removed as bad");
+    // Open lyrics pages and the Library tab's numbers follow.
+    tell(&state, true).await;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Lets one song's removed lyrics come back (they're read and asked about again).
+async fn allow_lyrics(
+    _: AdminUser,
+    State(state): State<AppState>,
+    UrlPath(track_id): UrlPath<i64>,
+) -> ApiResult<StatusCode> {
+    state.store.allow_lyrics_again(Some(track_id)).await?;
+    start(&state);
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn allow_all_lyrics(_: AdminUser, State(state): State<AppState>) -> ApiResult<StatusCode> {
+    state.store.allow_lyrics_again(None).await?;
+    start(&state);
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -498,7 +575,8 @@ async fn page(
         player,
         lyrics,
         queue: state.store.queue(room).await?,
-        join_url: state.join_url.get(),
+        // The room asked for, so phones join the room this screen is in.
+        join_url: crate::api::join_url_for(&state, query.room),
     })
     .into_response())
 }

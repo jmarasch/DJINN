@@ -1,7 +1,14 @@
 //! DJINN storage: SQLite access, migrations, and models.
 
+mod ai_work;
+mod audit;
+mod compare;
 mod duplicates;
+mod editor;
+mod file_edits;
+mod genre_groups;
 mod identify;
+mod imports;
 mod library;
 mod loudness;
 mod lyrics;
@@ -13,6 +20,7 @@ mod personal;
 mod playlists;
 mod problems;
 mod queue;
+mod recovery;
 mod roles;
 mod rooms;
 mod searches;
@@ -23,8 +31,15 @@ mod subsonic;
 mod tag_edits;
 mod users;
 
+pub use ai_work::*;
+pub use audit::*;
+pub use compare::*;
 pub use duplicates::*;
+pub use editor::*;
+pub use file_edits::*;
+pub use genre_groups::*;
 pub use identify::*;
+pub use imports::*;
 pub use library::*;
 pub use loudness::*;
 pub use lyrics::*;
@@ -35,6 +50,7 @@ pub use personal::*;
 pub use playlists::*;
 pub use problems::*;
 pub use queue::*;
+pub use recovery::*;
 pub use roles::*;
 pub use rooms::*;
 pub use searches::*;

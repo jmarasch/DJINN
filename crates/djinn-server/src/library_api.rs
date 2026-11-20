@@ -440,6 +440,7 @@ async fn edit_tracks(
         album_artist: text_field(body.album_artist, "album artist")?,
         year: body.year,
         genre: text_field(body.genre, "genre")?,
+        ..TagChange::default()
     };
     let paths = state.store.edit_tags(&body.track_ids, &change).await?;
     reread(&state, &paths).await?;
@@ -1594,6 +1595,9 @@ pub fn start_scan(state: &AppState) -> bool {
                         tracing::warn!(error = %format!("{e:#}"), "checking wishes failed");
                     }
                 }
+                // Changed or retagged files are read again; quick when
+                // nothing changed.
+                crate::mp3_check::start(&state);
                 // Nothing new or gone: no artists to look up, no songs to
                 // measure, and the playlist is the same.
                 if !changed {

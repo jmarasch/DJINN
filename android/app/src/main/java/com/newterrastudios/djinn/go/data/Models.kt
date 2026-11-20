@@ -35,6 +35,9 @@ data class Track(
     val likes: Long = 0,
     /** 0 no lyrics, 1 plain words, 2 timed lines. */
     val lyrics: Int = 0,
+    /** 0 not AI, 1 the words were made by an AI, 2 a person's words timed by an AI. */
+    @SerialName("lyrics_ai") val lyricsAi: Int = 0,
+    @SerialName("lyrics_failed") val lyricsFailed: Int = 0,
 )
 
 @Serializable
@@ -130,6 +133,10 @@ data class Lyrics(
     val plain: String? = null,
     val instrumental: Boolean = false,
     val source: String = "",
+    /** "made" (an AI wrote the words by listening) or "synced" (a person's words an AI timed). */
+    val ai: String? = null,
+    /** For "synced": how well the timing matched the words, in percent. */
+    @SerialName("ai_match") val aiMatch: Int? = null,
 )
 
 /** A song found by its words. */
@@ -412,6 +419,15 @@ data class NewWish(val artist: String, val title: String)
 data class SongReport(val reason: String, val note: String? = null)
 
 /** Why a song needs fixing, as the server names them, with what to show. */
+/** Why a listener says a song's lyrics are bad (the ids the server knows). */
+val LYRICS_REPORT_REASONS = listOf(
+    "lyrics_wrong_song" to "They're another song's lyrics",
+    "lyrics_out_of_sync" to "They're out of time with the music",
+    "lyrics_garbled" to "They are garbled or in the wrong language",
+    "lyrics_missing" to "Parts are missing",
+    "lyrics_other" to "Something else",
+)
+
 val REPORT_REASONS = listOf(
     "wrong_info" to "The title, artist or album is wrong",
     "wrong_cover" to "The cover is wrong",

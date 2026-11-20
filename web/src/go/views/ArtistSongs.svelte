@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '../../lib/i18n.svelte'
   import PageTitle from '../../lib/PageTitle.svelte'
   // Every song by an artist, on a page of its own (from Show all on the
   // artist's page).
@@ -44,15 +45,15 @@
       const page = await api.artistSongs(id, 0, 5000)
       if (page.tracks.length) playList(page.tracks)
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not play them', true)
+      toast(e instanceof Error ? e.message : t('gar.play_failed'), true)
     }
   }
 </script>
 
-<PageTitle title={name ? `Songs by ${name}` : 'Songs'} />
+<PageTitle title={name ? t('go.songs_by', { name }) : t('as.songs')} />
 {#if total !== null}<p class="small muted">{total.toLocaleString()} {total === 1 ? 'song' : 'songs'}</p>{/if}
 <div class="buttons">
-  <button class="primary" onclick={playAll} disabled={!total}><Icon name="play" /> Play all</button>
+  <button class="primary" onclick={playAll} disabled={!total}><Icon name="play" /> {t('go.play_all')}</button>
 </div>
 <InfiniteList cacheKey="go-artist-songs-{id}" {load} key={(t) => t.id}>
   {#snippet item(track)}

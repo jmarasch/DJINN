@@ -1,6 +1,7 @@
 <script lang="ts">
   import { api } from './api'
   import { app, toast } from './state.svelte'
+  import { locale, t } from './i18n.svelte'
   import type { ReplayGainMode } from './types'
 
   let mode = $state<ReplayGainMode>('off')
@@ -21,15 +22,11 @@
       .catch((e) => toast(e.message, true))
   })
 
-  const modes: { id: ReplayGainMode; label: string; detail: string }[] = [
-    { id: 'off', label: 'Off', detail: 'Songs play as loud as they were made.' },
-    { id: 'track', label: 'Even out every song', detail: 'Best for parties and shuffled playlists.' },
-    {
-      id: 'album',
-      label: 'Even out albums',
-      detail: 'Quiet and loud songs on an album keep their difference. Good for playing whole albums.',
-    },
-  ]
+  const modes: { id: ReplayGainMode; label: string; detail: string }[] = $derived([
+    { id: 'off', label: t('rg.off'), detail: t('rg.off_note') },
+    { id: 'track', label: t('rg.track'), detail: t('rg.track_note') },
+    { id: 'album', label: t('rg.album'), detail: t('rg.album_note') },
+  ])
 
   let timer: ReturnType<typeof setTimeout>
   function save(wait = 0) {
@@ -39,7 +36,7 @@
         const r = await api.saveReplayGain(mode, preamp)
         app.loudness = r.loudness
       } catch (e) {
-        toast(e instanceof Error ? e.message : 'Could not save', true)
+        toast(e instanceof Error ? e.message : t('common.save_failed_short'), true)
       }
     }, wait)
   }
@@ -49,14 +46,12 @@
 </script>
 
 <section class="card">
-  <h2>Volume leveling (ReplayGain)</h2>
+  <h2>{t('rg.title')}</h2>
   <p class="small muted">
-    Keeps songs at an even loudness, so a quiet old track isn't followed by a blast. Uses ReplayGain tags when a file
-    has them. For files without, DJINN measures each song once and keeps the result in its own database; your files
-    aren't changed. Applies from the next song.
+    {t('rg.intro')}
   </p>
   {#if loaded}
-    <div class="modes" role="radiogroup" aria-label="Volume leveling">
+    <div class="modes" role="radiogroup" aria-label={t('rg.group')}>
       {#each modes as m (m.id)}
         <label class="mode" class:active={mode === m.id}>
           <input type="radio" name="replaygain" value={m.id} bind:group={mode} onchange={() => save()} />
@@ -71,30 +66,28 @@
     {#if mode !== 'off'}
       <label class="slider">
         <span class="row-label">
-          Boost <span class="muted">{preamp > 0 ? '+' : ''}{preamp.toFixed(1)} dB</span>
+          {t('rg.boost')} <span class="muted">{preamp > 0 ? '+' : ''}{preamp.toLocaleString(locale.code, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} dB</span>
         </span>
         <input type="range" min={-maxPreamp} max={maxPreamp} step="0.5" bind:value={preamp} oninput={() => save(400)} />
         <span class="small muted">
-          Leveled songs play quieter than most modern masters. Raise this if everything sounds too soft; songs never
-          get pushed into clipping.
+          {t('rg.boost_note')}
         </span>
       </label>
 
       {#if progress && !progress.on}
         <p class="small muted">
-          Songs without ReplayGain tags are measured by sound analysis, which is off, so they play unchanged. Switch it
-          on under <a href="#/admin/library">Library</a>.
+          {t('rg.analysis_off')} <a href="#/admin/library">{t('admin.menu.library')}</a>.
         </p>
       {:else if progress && total > 0}
         {#if progress.waiting > 0}
           <p class="small">
             {#if progress.running}<span class="spinner" aria-hidden="true"></span>{/if}
-            Measured {progress.analyzed} of {total} songs{progress.running ? '' : ' (continues after the next library check)'}.
-            Songs not measured yet play unchanged.
+            {t('rg.measured', { done: progress.analyzed, total })}{progress.running ? '' : t('rg.continues')}.
+            {t('rg.not_yet')}
           </p>
           <progress max={total} value={progress.analyzed}></progress>
         {:else}
-          <p class="small muted">All {total} songs are measured.</p>
+          <p class="small muted">{t('rg.all', { n: total })}</p>
         {/if}
       {/if}
     {/if}

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '../../lib/i18n.svelte'
   import Art from '../../lib/Art.svelte'
   import { duration } from '../../lib/format'
   import Icon from '../../lib/Icon.svelte'
@@ -75,7 +76,7 @@
   })
 
   function clear(clearing: () => () => void) {
-    toast('Queue cleared', false, { label: 'Undo', run: clearing() })
+    toast(t('player.queue_cleared'), false, { label: t('rq.undo'), run: clearing() })
   }
   const upNext = $derived(player.queue.slice(player.index + 1))
 
@@ -125,15 +126,15 @@
 />
 
 {#if lyricsOpen && narrow && song}
-  <div class="lyrics-screen" role="dialog" aria-modal="true" aria-label="Lyrics">
+  <div class="lyrics-screen" role="dialog" aria-modal="true" aria-label={t('playing.lyrics')}>
     <header>
-      <button class="close" aria-label="Back" onclick={toggleLyrics}><Icon name="back" size={24} /></button>
+      <button class="close" aria-label={t('nav.back')} onclick={toggleLyrics}><Icon name="back" size={24} /></button>
       <div class="who">
         <strong class="ellipsis">{song.title}</strong>
         <span class="muted small ellipsis">{song.artist ?? ''}</span>
       </div>
     </header>
-    <div class="body"><LyricsView {lyrics} position={livePosition} big /></div>
+    <div class="body"><LyricsView {lyrics} position={livePosition} big {song} /></div>
   </div>
 {/if}
 
@@ -158,7 +159,7 @@
         step="1"
         value={player.position}
         oninput={(e) => seek(Number(e.currentTarget.value))}
-        aria-label="Position"
+        aria-label={t('gnp.position')}
       />
       <div class="times muted small"><span>{time(player.position)}</span><span>{time(player.duration)}</span></div>
       <div class="controls">
@@ -166,20 +167,20 @@
           class="icon"
           class:on={player.shuffle}
           aria-pressed={player.shuffle}
-          aria-label="Shuffle"
+          aria-label={t('player.shuffle')}
           onclick={() => setShuffle(!player.shuffle)}
         >
           <Icon name="shuffle" />
         </button>
-        <button class="icon" aria-label="Previous" onclick={previous}><Icon name="previous" size={30} /></button>
-        <button class="icon play" aria-label={player.playing ? 'Pause' : 'Play'} onclick={toggle}>
+        <button class="icon" aria-label={t('player.previous')} onclick={previous}><Icon name="previous" size={30} /></button>
+        <button class="icon play" aria-label={player.playing ? t('player.pause') : t('player.play')} onclick={toggle}>
           <Icon name={player.playing ? 'pause' : 'play'} size={36} />
         </button>
-        <button class="icon" aria-label="Next" onclick={next}><Icon name="skip" size={30} /></button>
+        <button class="icon" aria-label={t('player.next')} onclick={next}><Icon name="skip" size={30} /></button>
         <button
           class="icon"
           class:on={player.repeat !== 'off'}
-          aria-label="Repeat: {player.repeat}"
+          aria-label={t('gnp.repeat', { mode: t(`gnp.repeat_${player.repeat}`) })}
           onclick={cycleRepeat}
         >
           <Icon name={player.repeat === 'one' ? 'repeat-one' : 'repeat'} />
@@ -188,40 +189,40 @@
       <div class="extras">
         <button class="small-button" class:on={likes.track.has(song.id)} onclick={() => toggleLike('track', song.id)}>
           <Icon name={likes.track.has(song.id) ? 'heart' : 'heart-outline'} size={18} />
-          {likes.track.has(song.id) ? 'Liked' : 'Like'}
+          {likes.track.has(song.id) ? t('gnp.liked') : t('player.like')}
         </button>
         <button class="small-button" class:on={lyricsOpen} aria-pressed={lyricsOpen} onclick={toggleLyrics}>
-          <Icon name="lyrics" size={18} /> Lyrics
+          <Icon name="lyrics" size={18} /> {t('playing.lyrics')}
         </button>
         <button
           class="small-button"
-          title="Skip it, and play it (and songs like it) less in radio and the mix"
+          title={t('gnp.less_title')}
           onclick={nextPlayLess}
         >
-          <Icon name="thumb-down" size={18} /> Play less like this
+          <Icon name="thumb-down" size={18} /> {t('gnp.less')}
         </button>
-        <button class="small-button" onclick={() => (ui.menu = song)}>More</button>
-        {#if player.downloadUrl}<a class="button small-button" href={player.downloadUrl} download>Download</a>{/if}
+        <button class="small-button" onclick={() => (ui.menu = song)}>{t('gnp.more')}</button>
+        {#if player.downloadUrl}<a class="button small-button" href={player.downloadUrl} download>{t('menu.download')}</a>{/if}
       </div>
       {#if lyricsOpen && !narrow}
-        <div class="lyrics-card"><LyricsView {lyrics} position={livePosition} /></div>
+        <div class="lyrics-card"><LyricsView {lyrics} position={livePosition} {song} /></div>
       {/if}
     </section>
 
     <section class="queue">
       <div class="queue-head">
-        <h2>Up next{#if player.radio}{' '}<span class="muted small">(radio)</span>{/if}</h2>
+        <h2>{t('player.up_next')}{#if player.radio}{' '}<span class="muted small">{t('gnp.radio')}</span>{/if}</h2>
         {#if upNext.length}
-          <button class="small-button" onclick={() => clear(clearUpcoming)}>Clear upcoming</button>
-          <button class="small-button" onclick={() => clear(clearAll)}>Clear all</button>
+          <button class="small-button" onclick={() => clear(clearUpcoming)}>{t('player.clear_upcoming')}</button>
+          <button class="small-button" onclick={() => clear(clearAll)}>{t('player.clear_all')}</button>
         {/if}
       </div>
       {#each upNext as track, i (`${track.id}-${player.index + 1 + i}`)}
         <div class="queued" class:dragging={dragging === i} style:transform={dragging === i ? `translateY(${dragY}px)` : null}>
           <button
             class="icon drag"
-            aria-label="Move {track.title}"
-            title="Drag to move, or use the arrow keys"
+            aria-label={t('player.move', { title: track.title })}
+            title={t('gnp.drag')}
             onpointerdown={(e) => dragBegin(e, i)}
             onpointermove={dragMove}
             onpointerup={dragEnd}
@@ -232,22 +233,22 @@
           </button>
           <button class="queued-song" onclick={() => jumpTo(player.index + 1 + i)}>
             <span class="title">{track.title}</span>
-            <span class="muted small">{track.artist ?? ''}{#if isAdded(track)}{' · '}<span class="added">Added by you</span>{/if}</span>
+            <span class="muted small">{track.artist ?? ''}{#if isAdded(track)}{' · '}<span class="added">{t('gnp.added')}</span>{/if}</span>
           </button>
-          <button class="icon" aria-label="Remove {track.title} from the queue" onclick={() => removeAt(player.index + 1 + i)}>
+          <button class="icon" aria-label={t('gnp.remove', { title: track.title })} onclick={() => removeAt(player.index + 1 + i)}>
             <Icon name="close" size={18} />
           </button>
         </div>
       {:else}
-        <p class="muted">Nothing after this{player.repeat === 'all' ? '; the queue starts over' : ''}.</p>
+        <p class="muted">{player.repeat === 'all' ? t('gnp.starts_over') : t('gnp.nothing_after')}</p>
       {/each}
     </section>
   {:else}
     <section class="empty">
       <img src="/images/nothing-playing.webp" alt="" />
-      <h2>Nothing playing yet</h2>
-      <p class="muted">Find something in the library to start listening.</p>
-      <a class="button primary" href="#/search">Explore the library</a>
+      <h2>{t('gnp.nothing')}</h2>
+      <p class="muted">{t('gnp.find')}</p>
+      <a class="button primary" href="#/search">{t('gnp.explore')}</a>
     </section>
   {/if}
 </div>

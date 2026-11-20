@@ -2,12 +2,15 @@
   // A song's lyrics. Timed ones follow the music: the line being sung is lit
   // and kept in the middle of the box. Plain ones are just the words.
   import type { Lyrics } from './types'
+  import ReportSong from './ReportSong.svelte'
+  import { t } from './i18n.svelte'
 
   let {
     lyrics,
     position,
     big = false,
-    empty = 'No lyrics for this song.',
+    empty = t('lyrics.none'),
+    song,
   }: {
     /** Undefined while loading, null when there are none. */
     lyrics: Lyrics | null | undefined
@@ -16,7 +19,10 @@
     /** The full-screen lyrics page. */
     big?: boolean
     empty?: string
+    /** The song, to offer reporting its lyrics. */
+    song?: { id: number; title: string }
   } = $props()
+  let reporting = $state(false)
 
   let box = $state<HTMLElement>()
   let at = $state(-1)
@@ -61,13 +67,20 @@
   })
 </script>
 
+{#if lyrics?.ai === 'made'}
+  <p class="ai-note small">{t('lyrics.ai_made_note')}</p>
+{:else if lyrics?.ai === 'synced'}
+  <p class="ai-note small">
+    {lyrics.ai_match != null ? t('lyrics.ai_synced_match', { match: lyrics.ai_match }) : t('lyrics.ai_synced_note')}
+  </p>
+{/if}
 <div class="lyrics" class:big bind:this={box}>
   {#if lyrics === undefined}
-    <p class="note">Loading lyrics...</p>
+    <p class="note">{t('lyrics.loading')}</p>
   {:else if lyrics === null}
     <p class="note">{empty}</p>
   {:else if lyrics.instrumental}
-    <p class="note">Instrumental</p>
+    <p class="note">{t('lyrics.instrumental')}</p>
   {:else if lines}
     <div class="pad" aria-hidden="true"></div>
     {#each lines as line, i (i)}
@@ -78,8 +91,33 @@
     <p class="plain">{lyrics.plain}</p>
   {/if}
 </div>
+{#if song && lyrics && !lyrics.instrumental && (lines || lyrics.plain)}
+  <button class="report-link" onclick={() => (reporting = true)}>{t('lyrics.report')}</button>
+{/if}
+{#if reporting && song}
+  <ReportSong {song} about="lyrics" onclose={() => (reporting = false)} />
+{/if}
 
 <style>
+  .ai-note {
+    margin: 0 0 4px;
+    text-align: center;
+    color: var(--muted);
+  }
+
+  .report-link {
+    display: block;
+    margin: 4px auto 0;
+    padding: 2px 8px;
+    background: none;
+    border: 0;
+    box-shadow: none;
+    color: var(--muted);
+    font-size: 0.8rem;
+    text-decoration: underline;
+    cursor: pointer;
+  }
+
   .lyrics {
     position: relative;
     max-height: 320px;

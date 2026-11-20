@@ -11,6 +11,9 @@ use tokio::sync::{broadcast, watch, Notify};
 use crate::events::ServerEvent;
 use crate::jukebox::Jukebox;
 
+/// Cached problem counts: `(kind, count)` pairs.
+pub type ProblemCounts = Vec<(djinn_store::ProblemKind, i64)>;
+
 #[derive(Clone)]
 pub struct AppState {
     pub store: Store,
@@ -54,6 +57,8 @@ pub struct AppState {
     /// Genres worked out, by name, until they're too old.
     pub genre_pulls:
         Arc<std::sync::Mutex<std::collections::HashMap<String, Arc<crate::smart::GenrePull>>>>,
+    /// Genre to container while genre containers are on (empty when off).
+    pub genre_fold: Arc<std::sync::RwLock<std::collections::HashMap<String, String>>>,
     /// Optional AI listening.
     pub ai: Arc<crate::ai::AiState>,
     /// Version checks and self-updates.
@@ -64,11 +69,17 @@ pub struct AppState {
     pub limiter: Arc<crate::security::Limiter>,
     /// Sign-ins waiting for their two-step code.
     pub tickets: Arc<crate::two_step::Tickets>,
+    /// Sessions that have unlocked the protected areas (library changes).
+    pub elevations: Arc<crate::protected::Elevations>,
     /// DJINN GO's optional converting.
     pub converter: Arc<crate::convert::Converter>,
     /// Copies of songs, worked out when asked and kept until the library
     /// changes.
     pub duplicates: Arc<tokio::sync::Mutex<Option<Arc<crate::duplicates::Duplicates>>>>,
+    /// The Problems page's counts and when they were counted (Unix ms).
+    /// Held while counting, so requests that come in meanwhile wait and
+    /// share the answer instead of each starting the slow count again.
+    pub problem_counts: Arc<tokio::sync::Mutex<Option<(i64, ProblemCounts)>>>,
     /// The mix, timed, for nodes.
     pub node_audio: Arc<crate::node_audio::Hub>,
     /// Players for the other rooms, and who follows whom.
@@ -135,13 +146,16 @@ impl AppState {
             sound: Arc::default(),
             catalog: Arc::default(),
             genre_pulls: Arc::default(),
+            genre_fold: Arc::default(),
             ai: Arc::new(crate::ai::AiState::new(&art_dir_for_models)),
             update: Arc::default(),
             go: Arc::default(),
             limiter: Arc::default(),
             tickets: Arc::default(),
+            elevations: Arc::default(),
             converter: Arc::default(),
             duplicates: Arc::default(),
+            problem_counts: Arc::default(),
             node_audio: Arc::default(),
             rooms: Arc::default(),
             open_setup: Arc::new(AtomicBool::new(false)),

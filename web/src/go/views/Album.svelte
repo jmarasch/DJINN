@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '../../lib/i18n.svelte'
   import { api } from '../../lib/api'
   import Art from '../../lib/Art.svelte'
   import Icon from '../../lib/Icon.svelte'
@@ -32,16 +33,16 @@
     </div>
   </header>
   <div class="buttons">
-    <button class="primary" onclick={() => album && playList(album.tracks)}><Icon name="play" /> Play</button>
-    {#if album.tracks[0]}<button onclick={() => album && startRadio(album.tracks[0])}><Icon name="radio" /> Radio</button>{/if}
-    <button onclick={() => album && playNext(album.tracks)}>Play next</button>
-    <button onclick={() => album && addToEnd(album.tracks)}>Add to end of queue</button>
-    <button onclick={() => album && (ui.adding = album.tracks)}>Add to playlist</button>
+    <button class="primary" onclick={() => album && playList(album.tracks)}><Icon name="play" /> {t('pl.play')}</button>
+    {#if album.tracks[0]}<button onclick={() => album && startRadio(album.tracks[0])}><Icon name="radio" /> {t('go.radio')}</button>{/if}
+    <button onclick={() => album && playNext(album.tracks)}>{t('gpl.play_next')}</button>
+    <button onclick={() => album && addToEnd(album.tracks)}>{t('gpl.add_end')}</button>
+    <button onclick={() => album && (ui.adding = album.tracks)}>{t('menu.add_to_playlist')}</button>
     <button
       class="icon"
       class:liked={likes.album.has(album.id)}
       aria-pressed={likes.album.has(album.id)}
-      aria-label="Like this album"
+      aria-label={t('gar.like_album')}
       onclick={() => album && toggleLike('album', album.id)}
     >
       <Icon name={likes.album.has(album.id) ? 'heart' : 'heart-outline'} />

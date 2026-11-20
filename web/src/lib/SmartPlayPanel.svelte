@@ -2,6 +2,7 @@
   import { api } from './api'
   import Icon from './Icon.svelte'
   import { toast } from './state.svelte'
+  import { locale, t } from './i18n.svelte'
   import type { Learned, PartyStyle, SmartPlaySettings } from './types'
 
   // Which cards: the smart play settings, or the party styles.
@@ -36,7 +37,7 @@
       try {
         await api.saveMoodSettings(mood)
       } catch (e) {
-        toast(e instanceof Error ? e.message : 'Could not save', true)
+        toast(e instanceof Error ? e.message : t('common.save_failed_short'), true)
       }
     }, 200)
   }
@@ -48,7 +49,7 @@
       await load()
       return true
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'That did not work', true)
+      toast(e instanceof Error ? e.message : t('common.failed'), true)
       return false
     }
   }
@@ -61,7 +62,7 @@
       try {
         await api.saveSmartPlay(settings)
       } catch (e) {
-        toast(e instanceof Error ? e.message : 'Could not save', true)
+        toast(e instanceof Error ? e.message : t('common.save_failed_short'), true)
       }
     }, 200)
   }
@@ -69,28 +70,28 @@
   async function add(e: SubmitEvent) {
     e.preventDefault()
     const name = newName.trim()
-    if (await attempt(() => api.createPartyStyle(name), `Added ${name}`)) newName = ''
+    if (await attempt(() => api.createPartyStyle(name), t('sp.added', { name }))) newName = ''
   }
 
   function useStyle(style: PartyStyle) {
-    attempt(() => api.usePartyStyle(style.id), `Now learning as ${style.name}`)
+    attempt(() => api.usePartyStyle(style.id), t('sp.now_learning', { name: style.name }))
   }
 
   function rename(style: PartyStyle) {
-    const name = prompt('New name for this style:', style.name)?.trim()
+    const name = prompt(t('sp.rename_q'), style.name)?.trim()
     if (name && name !== style.name) attempt(() => api.renamePartyStyle(style.id, name))
   }
 
   async function clear(style: PartyStyle) {
-    if (!confirm(`Forget what ${style.name} parties liked? The request log keeps its history.`)) return
-    if (await attempt(() => api.clearPartyStyle(style.id), `${style.name} starts fresh`)) {
+    if (!confirm(t('sp.clear_q', { name: style.name }))) return
+    if (await attempt(() => api.clearPartyStyle(style.id), t('sp.fresh', { name: style.name }))) {
       if (showing === style.id) learned = await api.partyLearned(style.id)
     }
   }
 
   async function remove(style: PartyStyle) {
-    if (!confirm(`Delete ${style.name} and what it learned?`)) return
-    if (await attempt(() => api.deletePartyStyle(style.id), `Deleted ${style.name}`)) {
+    if (!confirm(t('sp.delete_q', { name: style.name }))) return
+    if (await attempt(() => api.deletePartyStyle(style.id), t('sp.deleted', { name: style.name }))) {
       if (showing === style.id) showing = null
     }
   }
@@ -104,14 +105,15 @@
       learned = await api.partyLearned(style.id)
       showing = style.id
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not load it', true)
+      toast(e instanceof Error ? e.message : t('common.load_failed'), true)
     }
   }
 
-  const strengthLabel = (n: number) => (n === 0 ? 'Off' : n < 40 ? 'Gentle' : n < 75 ? 'Medium' : 'Strong')
-  const times = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
+  const strengthLabel = (n: number) =>
+    n === 0 ? t('out.off') : n < 40 ? t('sp.gentle') : n < 75 ? t('sp.medium') : t('sp.strong')
   /** "2.1x" for a weight, as how much more or less often it comes up. */
-  const factor = (w: number) => `${w >= 10 ? w.toFixed(0) : w.toFixed(1)}x`
+  const factor = (w: number) =>
+    `${w.toLocaleString(locale.code, { maximumFractionDigits: w >= 10 ? 0 : 1, minimumFractionDigits: w >= 10 ? 0 : 1 })}x`
   const nothingLearned = $derived(
     learned !== null &&
       [learned.songs, learned.artists, learned.genres].every((e) => !e.favored.length && !e.avoided.length),
@@ -121,23 +123,21 @@
 {#if settings}
   {#if part === 'play'}
   <section class="card">
-    <h2>Smart play</h2>
+    <h2>{t('sp.title')}</h2>
     <p class="small muted">
-      When nobody has requested anything, DJINN picks songs itself. Smart play has it learn from the party: songs
-      people request come up more, and so do others by the same artists and in the same genres. Songs people skip
-      come up less.
+      {t('sp.intro')}
     </p>
     <label class="switch">
       <input type="checkbox" bind:checked={settings.smart_play} onchange={save} />
-      Learn from the party for wild play and radio
+      {t('sp.learn')}
     </label>
     <label class="switch">
       <input type="checkbox" bind:checked={settings.smart_playlists} onchange={save} disabled={!settings.smart_play} />
-      Also use it for shuffled playlists (every song still plays once before any repeats)
+      {t('sp.playlists')}
     </label>
     <label class="slider">
       <span class="row-label">
-        How much it counts <span class="muted">{strengthLabel(settings.strength)} ({settings.strength}%)</span>
+        {t('sp.strength')} <span class="muted">{strengthLabel(settings.strength)} ({settings.strength}%)</span>
       </span>
       <input
         type="range"
@@ -153,20 +153,17 @@
 
   {#if mood}
     <section class="card">
-      <h2>Mood dial</h2>
+      <h2>{t('sp.mood')}</h2>
       <p class="small muted">
-        Everyone at the party gets a dial on the Playing tab, from chill to hype. The auto mix then favors songs whose
-        energy fits what the room wants: faster, punchier songs for hype, calmer ones for chill. Each person's setting
-        counts for 40 minutes. It works for wild play, radio and shuffled playlists, using sound analysis (Admin >
-        Library), so songs not analyzed yet aren't moved either way.
+        {t('sp.mood_note')}
       </p>
       <label class="switch">
         <input type="checkbox" bind:checked={mood.on} onchange={saveMood} />
-        Show the mood dial
+        {t('sp.mood_on')}
       </label>
       <label class="slider">
         <span class="row-label">
-          How much the dial counts <span class="muted">{strengthLabel(mood.strength)} ({mood.strength}%)</span>
+          {t('sp.mood_strength')} <span class="muted">{strengthLabel(mood.strength)} ({mood.strength}%)</span>
         </span>
         <input type="range" min="0" max="100" step="5" bind:value={mood.strength} oninput={saveMood} disabled={!mood.on} />
       </label>
@@ -176,34 +173,33 @@
 
   {#if part === 'styles'}
   <section class="card">
-    <h2>Party styles</h2>
+    <h2>{t('sp.styles')}</h2>
     <p class="small muted">
-      Each style keeps its own memory, so a Halloween party doesn't change what plays at the family BBQ. Use the one
-      that fits tonight: requests, songs played through, and skips count toward it.
+      {t('sp.styles_note')}
     </p>
     {#each styles as style (style.id)}
       <div class="style">
         <div class="grow">
           <div>
             {style.name}
-            {#if style.id === active}<span class="badge">In use</span>{/if}
+            {#if style.id === active}<span class="badge">{t('sp.in_use')}</span>{/if}
           </div>
-          <div class="small muted">{times(style.requests, 'request')} · {times(style.plays, 'play')}</div>
+          <div class="small muted">{t('sp.requests', { n: style.requests })} · {t('count.plays', { n: style.plays })}</div>
           <div class="buttons">
             {#if style.id !== active}
-              <button class="small-button primary" onclick={() => useStyle(style)}>Use now</button>
+              <button class="small-button primary" onclick={() => useStyle(style)}>{t('sp.use_now')}</button>
             {/if}
             <button class="small-button" aria-expanded={showing === style.id} onclick={() => toggleLearned(style)}>
-              {showing === style.id ? 'Hide what it learned' : 'What it learned'}
+              {showing === style.id ? t('sp.hide_learned') : t('sp.learned')}
             </button>
-            <button class="small-button" onclick={() => rename(style)}>Rename</button>
+            <button class="small-button" onclick={() => rename(style)}>{t('common.rename')}</button>
             <button class="small-button" disabled={!style.requests && !style.plays} onclick={() => clear(style)}>
-              Clear history
+              {t('sp.clear')}
             </button>
           </div>
         </div>
         {#if style.id !== active}
-          <button class="icon-only" aria-label="Delete {style.name}" onclick={() => remove(style)}>
+          <button class="icon-only" aria-label={t('sp.delete', { name: style.name })} onclick={() => remove(style)}>
             <Icon name="close" />
           </button>
         {/if}
@@ -211,7 +207,7 @@
       {#if showing === style.id && learned}
         <div class="learned">
           {#if nothingLearned}
-            <p class="small muted">Nothing yet. It learns as people request and skip songs while this style is in use.</p>
+            <p class="small muted">{t('sp.nothing')}</p>
           {:else}
             {#snippet list<T>(title: string, items: T[], name: (item: T) => string, weight: (item: T) => number)}
               {#if items.length}
@@ -226,30 +222,29 @@
                 </ol>
               {/if}
             {/snippet}
-            {#each [['Favored', 'favored'], ['Avoided', 'avoided']] as const as [heading, side] (side)}
+            {#each [[t('sp.favored'), 'favored'], [t('sp.avoided'), 'avoided']] as const as [heading, side] (side)}
               {#if learned.songs[side].length || learned.artists[side].length || learned.genres[side].length}
                 <h3>{heading}</h3>
                 {@render list(
-                  'Songs',
+                  t('sp.songs'),
                   learned.songs[side],
                   (s) => `${s.track.title}${s.track.artist ? ` · ${s.track.artist}` : ''}`,
                   (s) => s.weight,
                 )}
-                {@render list('Artists', learned.artists[side], (a) => a.artist.name, (a) => a.weight)}
-                {@render list('Genres', learned.genres[side], (g) => g.name, (g) => g.weight)}
+                {@render list(t('sp.artists'), learned.artists[side], (a) => a.artist.name, (a) => a.weight)}
+                {@render list(t('sp.genres'), learned.genres[side], (g) => g.name, (g) => g.weight)}
               {/if}
             {/each}
             <p class="small muted">
-              The number is how much more (or less) often it comes up. Artists and genres count for less than a song
-              itself.
+              {t('sp.number_note')}
             </p>
           {/if}
         </div>
       {/if}
     {/each}
     <form class="new-style" onsubmit={add}>
-      <input placeholder="New style, like Halloween" bind:value={newName} maxlength="40" required />
-      <button class="primary">Add</button>
+      <input placeholder={t('sp.new_style')} bind:value={newName} maxlength="40" required />
+      <button class="primary">{t('common.add')}</button>
     </form>
   </section>
   {/if}

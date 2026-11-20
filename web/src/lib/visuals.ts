@@ -4,6 +4,7 @@
 
 import { GlVisual } from './nodeGlVisual'
 import { isGlStyle, ShapeVisual, Smoother, type ShapeStyle, type SoundFrame, type VisualStyle } from './nodeVisual'
+import { t } from './i18n.svelte'
 
 export interface Look {
   /** How strongly it reacts, 0.25 to 3. */
@@ -37,40 +38,38 @@ export interface StyleInfo {
   chip: boolean
 }
 
+/** A style's entry; its name (`visual.<style>`, shared with the Android app)
+ * and description (`visual.about_<style>`) follow the chosen language. */
+const info = (style: VisualStyle, chip: boolean): StyleInfo => ({
+  style,
+  chip,
+  get name() {
+    return t(`visual.${style}`)
+  },
+  get about() {
+    return t(`visual.about_${style}`)
+  },
+})
+
 export const STYLES: StyleInfo[] = [
-  { style: 'bars', name: 'Bars', about: 'A bar for each part of the sound, bass on the left.', chip: false },
-  { style: 'ring', name: 'Ring', about: 'The bars around a circle that kicks on each beat.', chip: false },
-  { style: 'mirror', name: 'Mirror', about: 'Bars growing up and down from the middle.', chip: false },
-  { style: 'wave', name: 'Wave', about: 'The sound wave itself, across the screen.', chip: false },
-  {
-    style: 'spectrogram',
-    name: 'Spectrogram',
-    about: 'The song drawn as it plays: time across, pitch up, loudness as color.',
-    chip: false,
-  },
-  { style: 'scope', name: 'Scope', about: 'Left against right: a line for mono, a cloud for wide stereo.', chip: false },
-  { style: 'mountain', name: 'Mountain', about: 'The spectrum as a lit range of hills with its reflection.', chip: false },
-  { style: 'vu', name: 'VU meters', about: 'Two needle meters, left and right, like an old amplifier.', chip: false },
-  { style: 'circle', name: 'Circle', about: 'The wave wrapped around a ring that swells with the bass.', chip: false },
-  { style: 'particles', name: 'Particles', about: 'Sparks thrown out from the middle, a burst on every beat.', chip: false },
-  {
-    style: 'terrain',
-    name: 'Terrain',
-    about: 'A checkerboard of glowing pillars: bass in the middle, treble at the edges, rolling into the distance.',
-    chip: false,
-  },
-  {
-    style: 'flyover',
-    name: 'Flyover',
-    about: 'A checkerboard of pillars seen from a helicopter circling slowly; the middle bounces with the bass, further out with higher sounds.',
-    chip: false,
-  },
-  { style: 'warp', name: 'Warp', about: 'Swirling trails, each frame fed into the next.', chip: true },
-  { style: 'tunnel', name: 'Tunnel', about: 'Flying down a tunnel that rings with the music.', chip: true },
-  { style: 'plasma', name: 'Plasma', about: 'Flowing color that bends with bass and mids.', chip: true },
-  { style: 'kaleidoscope', name: 'Kaleidoscope', about: 'Eight mirrored slices of moving patterns.', chip: true },
-  { style: 'nebula', name: 'Nebula', about: 'Slow clouds of colored gas that glow with the bass.', chip: true },
-  { style: 'stars', name: 'Stars', about: 'Flying through stars, faster with the bass.', chip: true },
+  info('bars', false),
+  info('ring', false),
+  info('mirror', false),
+  info('wave', false),
+  info('spectrogram', false),
+  info('scope', false),
+  info('mountain', false),
+  info('vu', false),
+  info('circle', false),
+  info('particles', false),
+  info('terrain', false),
+  info('flyover', false),
+  info('warp', true),
+  info('tunnel', true),
+  info('plasma', true),
+  info('kaleidoscope', true),
+  info('nebula', true),
+  info('stars', true),
 ]
 
 export const styleInfo = (style: string) => STYLES.find((s) => s.style === style)

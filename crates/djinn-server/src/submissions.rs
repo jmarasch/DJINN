@@ -25,10 +25,11 @@ use tokio::io::AsyncWriteExt;
 use tower::ServiceExt;
 use tower_http::services::ServeFile;
 
-use crate::auth::AdminUser;
+use crate::auth::{AdminUser, Device};
 use crate::backup::data_dir;
 use crate::error::{ApiError, ApiResult};
 use crate::go_library::GoUser;
+use crate::protected::Elevated;
 use crate::state::AppState;
 use crate::{folders, library_api, settings};
 
@@ -359,12 +360,22 @@ async fn listen(
     }
 }
 
+/// Approving puts a file into the library, so it's a protected action.
 async fn approve_one(
-    AdminUser(admin): AdminUser,
+    Elevated(admin): Elevated,
+    device: Device,
     State(state): State<AppState>,
     UrlPath(id): UrlPath<i64>,
 ) -> ApiResult<StatusCode> {
-    approve(&state, id, Some(&admin)).await?;
+    let added = approve(&state, id, Some(&admin)).await?;
+    crate::protected::audit(
+        &state,
+        &admin,
+        device.ip.as_deref(),
+        "approved_submission",
+        &added.to_string_lossy(),
+    )
+    .await;
     Ok(StatusCode::NO_CONTENT)
 }
 

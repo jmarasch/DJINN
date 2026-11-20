@@ -4,6 +4,8 @@
   // coming up over a visual drawn in step with what the room's speakers
   // play. Public like the TV page; the styles and their turns are Admin >
   // Visualizers. Nothing playing shows the TV page instead.
+  import { t } from '../lib/i18n.svelte'
+  import ScaleWarning from '../lib/ScaleWarning.svelte'
   import { onMount } from 'svelte'
   import NodeStage from '../lib/NodeStage.svelte'
   import type { Visuals } from '../lib/visuals'
@@ -20,19 +22,19 @@
     try {
       const res = await fetch('/api/tv/visuals')
       if (!res.ok) {
-        error = (await res.json().catch(() => null))?.error ?? 'The visualizer is not available.'
+        error = (await res.json().catch(() => null))?.error ?? t('viz.unavailable')
         return
       }
       visuals = await res.json()
       error = ''
     } catch {
-      error = 'Cannot reach the jukebox. Retrying...'
+      error = t('viz.unreachable')
       setTimeout(load, 5000)
     }
   }
 
   onMount(() => {
-    document.title = 'Visualizer · DJINN'
+    document.title = t('viz.title')
     void load()
     // Changes in Admin > Visualizers reach a screen already showing it.
     const timer = setInterval(load, 30_000)
@@ -45,6 +47,8 @@
 {:else if visuals}
   <NodeStage url={page} {visuals} {levels} />
 {/if}
+
+<ScaleWarning />
 
 <style>
   .message {

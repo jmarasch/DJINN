@@ -1,0 +1,102 @@
+# The AI keepsake: every Python package and model the lyrics listener needs,
+# published as its own release (tag ai-keepsake) so an install never depends
+# on PyPI, PyTorch's or Hugging Face's servers still having them. It is big
+# (see packaging/listener/make-keepsake.sh), changes only when the pinned
+# requirements or models do, and is not part of every DJINN release: start it
+# by hand (Actions > AI keepsake > Run workflow) after changing
+# packaging/listener/requirements*.txt or models.json. Nothing starts it
+# automatically.
+name: AI keepsake
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release to publish to (made if it doesn't exist)
+        default: ai-keepsake
+
+permissions:
+  contents: read
+
+jobs:
+  # The packages are built for the Python of the Debian the install disc
+  # carries (13 now; 12 for older installs), inside that Debian.
+  wheels:
+    name: Packages for Debian ${{ matrix.debian }}
+    runs-on: ubuntu-latest
+    container: debian:${{ matrix.debian }}
+    strategy:
+      fail-fast: false
+      matrix:
+        debian: [bookworm, trixie]
+    steps:
+      - name: Tools
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            python3 python3-venv ca-certificates zstd git
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Download and check the packages
+        run: sh packaging/listener/make-keepsake.sh "$PWD/keep" --only packages
+      - name: Pack in parts of at most 1.9 GB (a release file can't be more than 2 GB)
+        run: |
+          mkdir assets
+          tar -c -C keep . | zstd -19 -T0 -q | split -b 1900m - "assets/ai-keepsake-wheels-${{ matrix.debian }}.tar.zst.part-"
+          ls -l assets
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: keepsake-wheels-${{ matrix.debian }}
+          path: assets/*
+          if-no-files-found: error
+          compression-level: 0
+
+  models:
+    name: Models
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      # About 12 GB of models and their archive: make room first.
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /usr/local/share/boost
+      - name: Download and check the models (pinned revisions, sizes and checksums)
+        run: sh packaging/listener/make-keepsake.sh "$PWD/keep" --only models
+      - name: Pack in parts of at most 1.9 GB
+        run: |
+          mkdir assets
+          tar -c -C keep . | zstd -19 -T0 -q | split -b 1900m - assets/ai-keepsake-models.tar.zst.part-
+          ls -l assets
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: keepsake-models
+          path: assets/*
+          if-no-files-found: error
+          compression-level: 0
+
+  publish:
+    needs: [wheels, models]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: assets
+          merge-multiple: true
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          cd assets
+          sha256sum ai-keepsake-* > SHA256SUMS
+          cat SHA256SUMS
+          # A pre-release, so it is never DJINN's "latest" version.
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" \
+            --title "AI keepsake" --prerelease --latest=false \
+            --notes "Packages and models for DJINN's lyrics listener, saved so it can be installed offline. Download the parts you need into one folder and run packaging/listener/install-keepsake.sh on it (see docs/releasing.md). Not a DJINN version."
+          gh release upload "$TAG" ai-keepsake-* SHA256SUMS --clobber

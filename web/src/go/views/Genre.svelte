@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '../../lib/i18n.svelte'
   import PageTitle from '../../lib/PageTitle.svelte'
   // One genre: its songs, artists and related genres.
   import { api } from '../../lib/api'
@@ -76,12 +77,12 @@
   </p>
   <div class="buttons">
     <button class="primary" onclick={() => page && playList(page.tracks)} disabled={!page.tracks.length}>
-      <Icon name="play" /> Play
+      <Icon name="play" /> {t('pl.play')}
     </button>
-    <button onclick={shuffleAll} disabled={!page.tracks.length}><Icon name="shuffle" /> Shuffle</button>
+    <button onclick={shuffleAll} disabled={!page.tracks.length}><Icon name="shuffle" /> {t('player.shuffle')}</button>
   </div>
   {#if page.related.length}
-    <h2>Related genres</h2>
+    <h2>{t('gen.related')}</h2>
     <div class="chips">
       {#each page.related as genre (genre.name)}
         <a class="chip" href="#/genre/{encodeURIComponent(genre.name)}">{genre.name}</a>
@@ -89,7 +90,7 @@
     </div>
   {/if}
   {#if artists.length}
-    <h2>Artists <span class="muted small">{page.artist_total}</span></h2>
+    <h2>{t('gen.artists')} <span class="muted small">{page.artist_total}</span></h2>
     <ScrollRow gap={12} nearEnd={moreArtists}>
       {#each artists as artist (artist.id)}
         <div class="tile-wrap">
@@ -102,14 +103,14 @@
       {/each}
     </ScrollRow>
   {/if}
-  <h2>Songs</h2>
+  <h2>{t('gen.songs')}</h2>
   <InfiniteList cacheKey="go-genre-{name}" load={moreSongs} key={(t) => t.id}>
     {#snippet item(track)}
       <SongRow {track} art onplay={() => playFrom(track)} />
     {/snippet}
   </InfiniteList>
 {:else}
-  <p class="muted">Loading...</p>
+  <p class="muted">{t('common.loading')}</p>
 {/if}
 
 <style>

@@ -1,6 +1,7 @@
 <script lang="ts" generics="T">
+  import { t } from './i18n.svelte'
   import { tick, untrack, type Snippet } from 'svelte'
-  import { listCache, rowSizes } from './listCache'
+  import { listCache, onListCacheClear, rowSizes } from './listCache'
   import type { Page } from './types'
 
   let {
@@ -10,7 +11,7 @@
     key,
     count,
     grid = false,
-    empty = 'Nothing here yet.',
+    empty = t('common.nothing_yet'),
     inset = 0,
   }: {
     /** Identifies this list (and its sort) in the cache. */
@@ -156,8 +157,12 @@
     })
   })
 
+  let cacheVersion = $state(0)
+  $effect(() => onListCacheClear(() => cacheVersion++))
+
   $effect(() => {
     const k = cacheKey
+    void cacheVersion
     untrack(() => {
       generation++
       loading = false
@@ -193,7 +198,7 @@
       total = page.items.length ? page.total : start + items.length
       remember()
     } catch (e) {
-      if (gen === generation) error = e instanceof Error ? e.message : 'Could not load'
+      if (gen === generation) error = e instanceof Error ? e.message : t('il.load_failed')
       return
     } finally {
       if (gen === generation) loading = false
@@ -254,7 +259,7 @@
       total = page.total
       remember()
     } catch (e) {
-      if (gen === generation) error = e instanceof Error ? e.message : 'Could not load'
+      if (gen === generation) error = e instanceof Error ? e.message : t('il.load_failed')
       return
     } finally {
       if (gen === generation) loading = false
@@ -301,7 +306,7 @@
 
 {#if start > 0}
   <div bind:this={topSentinel} class="sentinel">
-    {#if loadingEarlier}<span class="muted small">Loading...</span>{/if}
+    {#if loadingEarlier}<span class="muted small">{t('common.loading')}</span>{/if}
   </div>
 {/if}
 
@@ -322,10 +327,10 @@
 {/if}
 
 {#if error}
-  <p class="error">{error} <button onclick={more}>Retry</button></p>
+  <p class="error">{error} <button onclick={more}>{t('il.retry')}</button></p>
 {/if}
 <div bind:this={sentinel} class="sentinel">
-  {#if loading}<span class="muted small">Loading...</span>{/if}
+  {#if loading}<span class="muted small">{t('common.loading')}</span>{/if}
 </div>
 
 <style>

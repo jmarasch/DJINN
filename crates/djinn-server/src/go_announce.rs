@@ -194,7 +194,7 @@ mod tests {
     #[test]
     fn host_names_are_safe() {
         assert_eq!(host_label("my-pc"), "my-pc");
-        assert_eq!(host_label("Jakob's PC"), "Jakob-s-PC");
+        assert_eq!(host_label("Sam's PC"), "Sam-s-PC");
         assert_eq!(host_label("♫♫"), "djinn");
     }
 

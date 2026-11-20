@@ -4,13 +4,14 @@
   import { onMount } from 'svelte'
   import { api } from './api'
   import { toast } from './state.svelte'
+  import { t } from './i18n.svelte'
   import type { LogSettings } from './types'
 
-  const levels = [
-    { value: 'error', label: 'Errors' },
-    { value: 'warn', label: 'Warnings and errors' },
-    { value: 'info', label: 'Everything' },
-  ]
+  const levels = $derived([
+    { value: 'error', label: t('lv.errors') },
+    { value: 'warn', label: t('lv.warnings') },
+    { value: 'info', label: t('lv.everything') },
+  ])
   let level = $state('warn')
   let search = $state('')
   let lines = $state<string[] | null>(null)
@@ -30,11 +31,11 @@
     saving = true
     try {
       settings = await api.saveLogSettings(settings)
-      toast('Log settings saved')
+      toast(t('lv.saved'))
       await load()
       days = await api.logFiles()
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not save log settings', true)
+      toast(e instanceof Error ? e.message : t('lv.save_failed'), true)
     } finally {
       saving = false
     }
@@ -49,7 +50,7 @@
     try {
       lines = (await api.systemLog(level, search.trim())).lines
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not read the log', true)
+      toast(e instanceof Error ? e.message : t('lv.read_failed'), true)
     }
   }
 
@@ -75,54 +76,53 @@
 </script>
 
 <section class="card">
-  <h2>Log</h2>
+  <h2>{t('lv.title')}</h2>
   {#if settings}
     <div class="record-settings">
       <label>
-        Record in the log
+        {t('lv.record')}
         <select bind:value={settings.level}>
-          <option value="trace">Full tracing</option>
-          <option value="warn">Warnings and errors</option>
-          <option value="error">Errors only</option>
+          <option value="trace">{t('lv.trace')}</option>
+          <option value="warn">{t('lv.warnings')}</option>
+          <option value="error">{t('lv.errors_only')}</option>
         </select>
       </label>
       <label>
-        Days to keep
+        {t('lv.keep_days')}
         <input type="number" min="1" max="365" step="1" bind:value={settings.keep_days} />
       </label>
-      <button class="small-button" onclick={saveSettings} disabled={saving || !Number.isInteger(settings.keep_days) || settings.keep_days < 1 || settings.keep_days > 365}>Save log settings</button>
+      <button class="small-button" onclick={saveSettings} disabled={saving || !Number.isInteger(settings.keep_days) || settings.keep_days < 1 || settings.keep_days > 365}>{t('lv.save')}</button>
     </div>
-    <p class="small muted">DJINN starts a dated log each day and removes logs older than the number of days you keep.</p>
+    <p class="small muted">{t('lv.daily_note')}</p>
   {/if}
   <div class="filters">
-    <label class="display-level">Show lines
+    <label class="display-level">{t('lv.show')}
       <select bind:value={level}>
         {#each levels as l (l.value)}
           <option value={l.value}>{l.label}</option>
         {/each}
       </select>
     </label>
-    <input type="search" bind:value={search} placeholder="Search the log" aria-label="Search the log" />
+    <input type="search" bind:value={search} placeholder={t('lv.search')} aria-label={t('lv.search')} />
   </div>
-  <pre bind:this={box} class="lines">{#if lines === null}Loading...{:else if lines.length}{lines.map(short).join(
+  <pre bind:this={box} class="lines">{#if lines === null}{t('common.loading')}{:else if lines.length}{lines.map(short).join(
         '\n',
-      )}{:else}Nothing{search.trim() ? ' matches' : level === 'info' ? ' yet' : ' to worry about'}.{/if}</pre>
+      )}{:else}{search.trim() ? t('lv.no_match') : level === 'info' ? t('lv.nothing_yet') : t('lv.nothing_worry')}{/if}</pre>
   <div class="actions">
     <label class="switch small">
       <input type="checkbox" bind:checked={follow} />
-      Keep up with new lines
+      {t('lv.follow')}
     </label>
-    <a class="button small-button" href="/api/system/log/file" download>Download the log</a>
+    <a class="button small-button" href="/api/system/log/file" download>{t('lv.download')}</a>
   </div>
   {#if days.length > 0}
     <details class="daily-files">
-      <summary>Daily logs ({days.length})</summary>
+      <summary>{t('lv.daily', { n: days.length })}</summary>
       <div>{#each days as day (day)}<a href={`/api/system/log/files/${day}`} download>{day}</a>{/each}</div>
     </details>
   {/if}
   <p class="small muted">
-    The latest lines since DJINN started, with times as the DJINN computer's clock shows them. Attach the
-    download to a problem report; it can include song names and the addresses of devices on your network.
+    {t('lv.note')}
   </p>
 </section>
 

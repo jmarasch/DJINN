@@ -2,6 +2,8 @@
   // A node's own page: where it stands with its main DJINN. Before joining,
   // enter Main's address; then compare the codes and accept it on Main.
   // Once joined this page only shows status; leaving is Main's Kick.
+  import { locale, t } from '../lib/i18n.svelte'
+  import ScaleWarning from '../lib/ScaleWarning.svelte'
   import { onMount } from 'svelte'
   import NodeDiagnostics from '../lib/NodeDiagnostics.svelte'
   import NodeSpeakerSettings from '../lib/NodeSpeakerSettings.svelte'
@@ -12,6 +14,9 @@
   interface NodeStatus {
     pairing: 'setup' | 'waiting' | 'joined' | 'declined' | 'kicked' | 'changed'
     name: string
+    /** The DJINN it runs, and a test build's label (empty for a release). */
+    version?: string
+    build?: string
     main: string | null
     main_name: string | null
     /** Main's page for this node's screen (TV or lyrics), once joined. */
@@ -21,6 +26,8 @@
     /** Main DJINNs heard on this network letting nodes join. */
     mains?: { name: string; address: string; joining: boolean }[]
     audio?: { screen?: string } | null
+    /** What its screen shows: its own choice, else its room's. */
+    shows?: string | null
     main_code: string | null
     code: string | null
     room_id: number | null
@@ -60,10 +67,17 @@
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(audio),
     })
-    if (!res.ok) throw new Error((await res.json().catch(() => null))?.error ?? 'Could not save')
+    if (!res.ok) throw new Error((await res.json().catch(() => null))?.error ?? t('np2.save_failed'))
   }
 
-  const onScreen = new URLSearchParams(location.search).has('screen')
+  // Once joined, the node's page opens on its display (what its room or its
+  // own choice says): from its tray icon, its address, or the kiosk (which
+  // asks with ?screen=1). ?status=1 (the tray's Node status, and a manage
+  // link from the main DJINN) asks for the status and settings instead.
+  const startParams = new URLSearchParams(location.search)
+  const kiosk = startParams.has('screen')
+  const askedStatus = startParams.has('status') || startParams.has('manage') || startParams.has('back')
+  const onScreen = kiosk || (!askedStatus && !startParams.has('code'))
   /** The tray icon's Show code: the party's join QR for this node's room. */
   const showCode = new URLSearchParams(location.search).has('code')
   let join = $state<{ url: string; room: string | null } | null>(null)
@@ -75,7 +89,7 @@
       join = await res.json()
       joinProblem = ''
     } else {
-      joinProblem = (await res?.json().catch(() => null))?.error ?? "Can't reach the main DJINN"
+      joinProblem = (await res?.json().catch(() => null))?.error ?? t('np2.no_main')
     }
   }
   /** Let in to manage this node (a link from the main DJINN's Admin > Nodes > Manage). */
@@ -91,6 +105,8 @@
     if (token || back) {
       params.delete('manage')
       params.delete('back')
+      // A reload stays on the status page.
+      params.set('status', '1')
       const rest = params.toString()
       history.replaceState(null, '', location.pathname + (rest ? `?${rest}` : ''))
     }
@@ -100,7 +116,7 @@
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ token }),
       }).catch(() => null)
-      if (res && !res.ok) error = (await res.json().catch(() => null))?.error ?? 'That manage link did not work'
+      if (res && !res.ok) error = (await res.json().catch(() => null))?.error ?? t('np2.bad_link')
     }
     const res = await fetch('/api/node/manage').catch(() => null)
     managing = !!res?.ok && !!(await res.json()).managing
@@ -126,6 +142,8 @@
       // On the box's own screen (the kiosk opens /screen): Main's page for
       // it once joined, in a frame over this node's visualizer (`NodeStage`).
       stageUrl = onScreen && status?.pairing === 'joined' && status.screen ? status.screen : null
+      // A display set to Off is a blank screen on the kiosk; opened from the
+      // tray or the node's address, the status page is more use than black.
       if (!name && status) name = status.name
     } catch {
       unreachable = true
@@ -151,11 +169,11 @@
         body: JSON.stringify(body ?? {}),
       })
       const data = await res.json().catch(() => null)
-      if (!res.ok) throw new Error(data?.error ?? 'That did not work')
+      if (!res.ok) throw new Error(data?.error ?? t('common.failed'))
       status = data
       editing = false
     } catch (e) {
-      error = e instanceof Error ? e.message : 'That did not work'
+      error = e instanceof Error ? e.message : t('common.failed')
     } finally {
       busy = false
     }
@@ -169,7 +187,7 @@
   const showForm = $derived(!!status && (status.pairing === 'setup' || editing))
 </script>
 
-{#if onScreen && status?.pairing === 'joined' && status.audio?.screen === 'off'}
+{#if kiosk && status?.pairing === 'joined' && status.shows === 'off'}
   <div class="blank"></div>
 {:else if stageUrl}
   {#key stageUrl}<NodeStage url={stageUrl} visuals={status?.visuals ?? null} />{/key}
@@ -178,16 +196,16 @@
 {#if showCode}
   <main class="narrow">
     <div class="card join">
-      <h1>Join the party</h1>
+      <h1>{t('join.join')}</h1>
       {#if join}
-        {#if join.room}<p class="muted">In {join.room}</p>{/if}
-        <img class="qr" src="/api/node/join/qr.svg?v={encodeURIComponent(join.url)}" alt="QR code for {join.url}" />
+        {#if join.room}<p class="muted">{t('np2.in_room', { room: join.room })}</p>{/if}
+        <img class="qr" src="/api/node/join/qr.svg?v={encodeURIComponent(join.url)}" alt={t('ns2.qr', { url: join.url })} />
         <p class="small">{join.url}</p>
       {:else if joinProblem}
         <p class="error">{joinProblem}</p>
-        <button onclick={loadJoin}>Try again</button>
+        <button onclick={loadJoin}>{t('common.try_again')}</button>
       {:else}
-        <p class="small muted"><span class="spinner" aria-hidden="true"></span> Asking the main DJINN...</p>
+        <p class="small muted"><span class="spinner" aria-hidden="true"></span> {t('np2.asking')}</p>
       {/if}
     </div>
   </main>
@@ -195,77 +213,74 @@
 <main class="narrow" class:wide={managing}>
   {#if managing}
     <div class="managing">
-      <span>Managing {status?.name ?? 'this node'}</span>
-      <button class="primary" onclick={exitManaging}>Exit node management</button>
+      <span>{t('np2.managing', { name: status?.name ?? t('np2.this_node') })}</span>
+      <button class="primary" onclick={exitManaging}>{t('np2.exit')}</button>
     </div>
   {/if}
   <div class="card">
     {#if status?.pairing !== 'joined'}<img class="waiting" src="/images/waiting-for-main.webp" alt="" />{/if}
-    <h1>DJINN node</h1>
+    <h1>{t('np2.title')}</h1>
     {#if unreachable && !status}
-      <p class="muted">Can't reach this node's DJINN. Is it running?</p>
+      <p class="muted">{t('np2.unreachable')}</p>
     {:else if status}
       {#if showForm}
         <p class="muted">
-          This computer plays one room's music for a main DJINN. Pick yours below, and turn on Admin &gt; Nodes &gt;
-          "Allow nodes to ask to join" there before asking.
+          {t('np2.intro')}
         </p>
         {#if status.mains?.length}
           <div class="mains">
             {#each status.mains as main (main.address)}
               <button type="button" class:primary={address === main.address} onclick={() => (address = main.address)}>
                 <b>{main.name}</b> <span class="small">{main.address}</span>
-                {#if !main.joining}<br /><span class="small">Not letting nodes join right now</span>{/if}
+                {#if !main.joining}<br /><span class="small">{t('np2.not_joining')}</span>{/if}
               </button>
             {/each}
           </div>
         {:else}
-          <p class="small muted"><span class="spinner" aria-hidden="true"></span> Looking for main DJINNs on this network...</p>
+          <p class="small muted"><span class="spinner" aria-hidden="true"></span> {t('np2.looking')}</p>
         {/if}
         <form onsubmit={connect}>
           <label>
-            Main DJINN's address (pick one above, or type it)
+            {t('np2.address')}
             <input bind:value={address} placeholder="192.168.1.10:8066" autocapitalize="none" required />
           </label>
           <label>
-            This node's name
-            <input bind:value={name} placeholder="Kitchen" maxlength="60" />
+            {t('np2.name')}
+            <input bind:value={name} placeholder={t('np2.name_hint')} maxlength="60" />
           </label>
           {#if error}<p class="error">{error}</p>{/if}
           <div class="buttons">
-            <button class="primary" disabled={busy}>Ask to join</button>
-            {#if editing}<button type="button" onclick={() => (editing = false)}>Cancel</button>{/if}
+            <button class="primary" disabled={busy}>{t('np2.ask')}</button>
+            {#if editing}<button type="button" onclick={() => (editing = false)}>{t('common.cancel')}</button>{/if}
           </div>
         </form>
       {:else}
         <p class="state">
           {#if status.pairing === 'waiting'}
-            <span class="spinner" aria-hidden="true"></span> Waiting for {status.main_name ?? 'the main DJINN'} to accept
-            this node
+            <span class="spinner" aria-hidden="true"></span> {t('np2.waiting', { main: status.main_name ?? t('np2.the_main') })}
           {:else if status.pairing === 'joined'}
-            <span class="dot on"></span> Joined {status.main_name ?? 'the main DJINN'}
+            <span class="dot on"></span> {t('np2.joined', { main: status.main_name ?? t('np2.the_main') })}
           {:else if status.pairing === 'declined'}
-            The main DJINN declined this node.
+            {t('np2.declined')}
           {:else if status.pairing === 'kicked'}
-            The main DJINN kicked this node. Every cached song was wiped.
+            {t('np2.kicked')}
           {:else if status.pairing === 'changed'}
-            The main DJINN answered with a different identity than before.
+            {t('np2.changed')}
           {/if}
         </p>
         {#if status.problem}<p class="error">{status.problem}</p>{/if}
         {#if status.pairing === 'joined'}
           <p class="small">
             {#if status.stopped}
-              Stopped from this computer's tray icon. Untick Stop there to play again.
+              {t('np2.stopped')}
             {:else if status.offline}
-              The main DJINN can't be reached. Playing cached songs until it's back (or quiet, if this node is set to
-              stop).
+              {t('np2.offline')}
             {:else if status.playing}
-              Playing Main's music in step.
+              {t('np2.playing')}
             {:else if status.sync_ms == null}
-              Matching clocks with Main...
+              {t('np2.matching')}
             {:else}
-              Not playing right now.
+              {t('np2.not_playing')}
             {/if}
             {#if status.audio_problem && !status.playing}<span class="error"> {status.audio_problem}</span>{/if}
           </p>
@@ -273,68 +288,76 @@
 
         {#if status.pairing === 'waiting'}
           <p class="muted">
-            On the main DJINN, open Admin &gt; Nodes. Check both codes match before accepting there with your password.
+            {t('np2.accept_note')}
           </p>
         {/if}
         <dl>
-          <dt>Node</dt>
+          <dt>{t('np2.node')}</dt>
           <dd>{status.name}</dd>
-          <dt>Main DJINN</dt>
-          <dd>{status.main ?? 'not set'}</dd>
+          <dt>{t('np2.main')}</dt>
+          <dd>{status.main ?? t('np2.not_set')}</dd>
           {#if status.main_code}
-            <dt>Main's security code</dt>
+            <dt>{t('np2.main_code')}</dt>
             <dd class="code">{status.main_code}</dd>
           {/if}
+          {#if status.version}
+            <dt>{t('np2.version')}</dt>
+            <dd>{status.version}{#if status.build}<br /><span class="small muted">{status.build}</span>{/if}</dd>
+          {/if}
           {#if status.pairing === 'joined'}
-            <dt>Cached songs</dt>
+            <dt>{t('np2.cached')}</dt>
             <dd>{status.cached}</dd>
           {/if}
           {#if status.pairing === 'joined' && status.sync_ms != null}
-            <dt>Clock matched to</dt>
-            <dd>within {status.sync_ms.toFixed(1)} ms</dd>
+            <dt>{t('np2.clock')}</dt>
+            <dd>{t('np2.within', { ms: status.sync_ms.toLocaleString(locale.code, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) })}</dd>
           {/if}
           {#if status.pairing === 'joined' && status.playing && status.speaker_ms != null}
-            <dt>Speaker timing</dt>
+            <dt>{t('np2.speaker')}</dt>
             <dd>
               {Math.abs(status.speaker_ms) < 0.5
-                ? 'on time'
-                : `${Math.abs(status.speaker_ms).toFixed(1)} ms ${status.speaker_ms > 0 ? 'behind' : 'ahead of'} Main`}
+                ? t('np2.on_time')
+                : t(status.speaker_ms > 0 ? 'np2.behind' : 'np2.ahead', {
+                    ms: Math.abs(status.speaker_ms).toLocaleString(locale.code, { minimumFractionDigits: 1, maximumFractionDigits: 1 }),
+                  })}
             </dd>
           {/if}
           {#if status.code && status.pairing === 'waiting'}
-            <dt>This request's code</dt>
+            <dt>{t('np2.request_code')}</dt>
             <dd class="code big">{status.code}</dd>
           {/if}
         </dl>
         {#if status.main_code && status.pairing === 'waiting'}
           <p class="small muted">
-            Main's security code should match the one in Admin &gt; Nodes on the main DJINN. If it doesn't, this node
-            reached something else: change the address.
+            {t('np2.code_note')}
           </p>
         {/if}
         {#if error}<p class="error">{error}</p>{/if}
+        {#if status.pairing === 'joined' && status.screen}
+          <p><a href="/node">{t('np2.show_display')}</a></p>
+        {/if}
         {#if status.pairing === 'joined' && !managing}
           <p class="small muted">
-            To change this node's settings, open it from the main DJINN: Admin &gt; Nodes &gt; Manage.
+            {t('np2.manage_note')}
           </p>
         {/if}
         {#if status.pairing === 'joined' && managing}
-          <button onclick={openSpeaker}>{speakerOpen ? 'Hide speaker settings' : 'Speaker settings'}</button>
+          <button onclick={openSpeaker}>{speakerOpen ? t('np2.hide_speaker') : t('np2.speaker_settings')}</button>
           {#if speakerOpen && speakerView?.audio}
             <NodeSpeakerSettings audio={speakerView.audio} speakers={speakerView.speakers} save={saveAudio} />
           {:else if speakerOpen && speakerView}
-            <p class="small muted">Settings arrive from the main DJINN in a moment.</p>
+            <p class="small muted">{t('np2.arriving')}</p>
           {/if}
         {/if}
         <div class="buttons">
           {#if status.pairing === 'waiting'}
             <button disabled={busy} onclick={() => ((editing = true), (address = status?.main ?? ''))}>
-              Change address
+              {t('np2.change_address')}
             </button>
           {:else if status.pairing === 'declined' || status.pairing === 'kicked' || status.pairing === 'changed'}
-            <button class="primary" disabled={busy} onclick={() => send('/api/node/ask-again')}>Ask to join again</button>
+            <button class="primary" disabled={busy} onclick={() => send('/api/node/ask-again')}>{t('np2.ask_again')}</button>
             <button disabled={busy} onclick={() => ((editing = true), (address = status?.main ?? ''))}>
-              Use another main DJINN
+              {t('np2.another')}
             </button>
           {/if}
         </div>
@@ -346,6 +369,8 @@
   {/if}
 </main>
 {/if}
+
+{#if onScreen}<ScaleWarning />{/if}
 
 <style>
   .join {

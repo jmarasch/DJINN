@@ -1,3 +1,4 @@
+import { t } from './i18n.svelte'
 export function duration(ms: number | null | undefined): string {
   if (ms == null || ms < 0) return ''
   const total = Math.floor(ms / 1000)
@@ -22,7 +23,7 @@ export const byName = <T>(key: (item: T) => string) => (a: T, b: T) =>
 
 /** "Firefox on Windows" from a user agent, or the raw text. */
 export function deviceName(agent: string | null): string {
-  if (!agent) return 'Unknown device'
+  if (!agent) return t('fmt.unknown_device')
   const browser = /Edg\//.test(agent)
     ? 'Edge'
     : /Firefox\//.test(agent)
@@ -33,7 +34,7 @@ export function deviceName(agent: string | null): string {
           ? 'Safari'
           : null
   const system = /iPhone|iPad/.test(agent)
-    ? 'iPhone or iPad'
+    ? t('fmt.iphone')
     : /Android/.test(agent)
       ? 'Android'
       : /Windows/.test(agent)
@@ -43,7 +44,7 @@ export function deviceName(agent: string | null): string {
           : /Linux/.test(agent)
             ? 'Linux'
             : null
-  if (browser && system) return `${browser} on ${system}`
+  if (browser && system) return t('fmt.on', { browser, system })
   return browser ?? system ?? agent.slice(0, 60)
 }
 

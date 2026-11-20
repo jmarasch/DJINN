@@ -1,3 +1,4 @@
+import { t } from './i18n.svelte'
 import type { Visuals } from './visuals'
 import type {
   MoodState,
@@ -11,6 +12,28 @@ import type {
   NodeList,
   Lyrics,
   LyricsSettings,
+  EditorNode,
+  EditTarget,
+  EditorChange,
+  EditorHeard,
+  EditorImport,
+  EditorLyricsOutcomes,
+  EditorApplied,
+  EditorBatch,
+  EditorRenamed,
+  EditorAfterMove,
+  Release,
+  ReleaseHit,
+  ReleaseSource,
+  EditorSong,
+  EditableFolder,
+  AiListenerStatus,
+  AiWorkStatus,
+  CompareShown,
+  AuditEntry,
+  ProtectedLevel,
+  ProtectedStatus,
+  LyricsImportStatus,
   LyricsStatus,
   ConvertSettings,
   Submission,
@@ -115,6 +138,9 @@ import type {
   TrackEdit,
   TrackTags,
   User,
+  Mp3Check,
+  GenreGroups,
+  GenreGroupChoice,
 } from './types'
 
 export class ApiError extends Error {
@@ -141,7 +167,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   })
   if (!res.ok) {
     if (res.status === 401) unauthorized?.()
-    let message = `Request failed (${res.status})`
+    let message = t('api.failed', { status: res.status })
     try {
       const data = await res.json()
       if (typeof data?.error === 'string') message = data.error
@@ -261,6 +287,201 @@ export const api = {
   lyricsSettings: () => get<LyricsSettings>('/lyrics/settings'),
   setLyricsSettings: (settings: LyricsSettings) => put<void>('/lyrics/settings', settings),
   recheckLyrics: () => post<void>('/lyrics/recheck'),
+  aiWork: () => get<AiWorkStatus>('/ai-work'),
+  setAiWork: (s: {
+    on: boolean
+    new_songs: boolean
+    sync_plain: boolean
+    vocals_for_nodes: boolean
+    min_match?: number
+    skip_genres?: string[]
+  }) =>
+    put<void>('/ai-work/settings', s),
+  makeAiWorkerKey: (name: string) => post<{ name: string; key: string }>('/ai-work/keys', { name }),
+  removeAiWorkerKey: (name: string) => del<void>(`/ai-work/keys/${encodeURIComponent(name)}`),
+  retryAiWork: () => post<void>('/ai-work/retry'),
+  aiListener: () => get<AiListenerStatus>('/ai-listener'),
+  setAiListener: (s: { model: string; vocals: boolean; auto_start: boolean }) => put<void>('/ai-listener/settings', s),
+  installAiListener: () => post<void>('/ai-listener/install'),
+  startAiListener: () => post<void>('/ai-listener/start'),
+  stopAiListener: () => post<void>('/ai-listener/stop'),
+  libraryCompare: (offset: number, field?: string, why?: string, folder?: string) =>
+    get<CompareShown>(
+      `/library/compare?offset=${offset}${field ? `&field=${field}` : ''}${why ? `&why=${why}` : ''}${folder ? `&folder=${encodeURIComponent(folder)}` : ''}`,
+    ),
+  editorTree: (path: string) =>
+    get<{ folders: EditorNode[]; songs_here: number }>(`/editor/tree?path=${encodeURIComponent(path)}`),
+  /** A folder's songs, or with `search` (words split by |) songs found across the library. */
+  editorSongs: (folder: string, offset: number, files: boolean, search = '') =>
+    get<{ total: number; editable: boolean; songs: EditorSong[] }>(
+      `/editor/songs?folder=${encodeURIComponent(folder)}&offset=${offset}&files=${files}&search=${encodeURIComponent(search)}`,
+    ),
+  /** Approves the editor's changes: into DJINN's database or the files. */
+  editorApply: (target: EditTarget, changes: EditorChange[]) =>
+    post<EditorApplied>('/editor/apply', { target, changes }),
+  editorHistory: () => get<EditorBatch[]>('/editor/history'),
+  editorUndo: (batch: number) => post<EditorApplied>(`/editor/undo/${batch}`),
+  /** A new cover for songs (a JPEG or PNG), or with `file` null: `remove`
+   * takes it out, `reset` (database) goes back to the file's. */
+  editorCover: async (target: EditTarget, ids: number[], file: File | null, how: 'set' | 'remove' | 'reset') => {
+    const query = `target=${target}&ids=${ids.join(',')}${how === 'remove' ? '&remove=true' : ''}${how === 'reset' ? '&reset=true' : ''}`
+    const res = await fetch(`/api/editor/cover?${query}`, { method: 'POST', body: file ?? new Blob([]) })
+    const data = await res.json().catch(() => null)
+    if (!res.ok) throw new ApiError(res.status, data?.error ?? t('api.failed', { status: res.status }))
+    return data as EditorApplied
+  },
+  /** Puts another song file in place of a song's, keeping the song. */
+  editorReplace: async (id: number, file: File) => {
+    const res = await fetch(`/api/editor/replace/${id}?name=${encodeURIComponent(file.name)}`, { method: 'POST', body: file })
+    const data = await res.json().catch(() => null)
+    if (!res.ok) throw new ApiError(res.status, data?.error ?? t('api.failed', { status: res.status }))
+    return data as EditorApplied
+  },
+  editorRename: (ids: number[], pattern: string, preview: boolean, after: EditorAfterMove = {}) =>
+    post<{ files: EditorRenamed[]; batch: number | null }>('/editor/rename', { ids, pattern, preview, ...after }),
+  /** Moves songs to a folder (keeping their names), or sets them aside out of the library. */
+  /** Moves songs to a folder (keeping their names), or deletes them to the trash. */
+  editorMove: (ids: number[], to: { folder: string } | { delete: true }, preview: boolean, after: EditorAfterMove = {}) =>
+    post<{ files: EditorRenamed[]; batch: number | null }>('/editor/move', { ids, ...to, preview, ...after }),
+  /** Copies songs to a folder, where they become songs of their own. */
+  editorCopy: (ids: number[], folder: string, preview: boolean) =>
+    post<{ files: EditorRenamed[]; batch: number | null }>('/editor/copy', { ids, folder, preview }),
+  editorTrash: () => get<{ files: number; bytes: number }>('/editor/trash'),
+  editorEmptyTrash: () => del<{ files: number; bytes: number }>('/editor/trash'),
+  /** Writes folder.jpg in these songs' folders from their album cover. */
+  editorFolderArt: (ids: number[], replace: boolean) => post<EditorApplied>('/editor/folder-art', { ids, replace }),
+  /** Writes a length header into variable bit rate MP3s that have none. */
+  editorMp3Length: (ids: number[], preview: boolean) =>
+    post<{ files: EditorRenamed[]; batch: number | null }>('/editor/mp3-length', { ids, preview }),
+  /** Starts measuring songs with no loudness data (with the sound analysis). */
+  measureLoudness: () => post<{ started: boolean }>('/library/problems/measure'),
+  mp3Check: () => get<Mp3Check>('/library/mp3-check'),
+  genreFold: () => get<Record<string, string>>('/genre-groups/fold'),
+  genreGroups: () => get<GenreGroups>('/genre-groups'),
+  setGenreGroupsOn: (on: boolean) => put<void>('/genre-groups/enabled', { on }),
+  genreGroupChoices: () => get<{ choices: GenreGroupChoice[] }>('/genre-groups/choices'),
+  autoGenreGroups: (containers: number) =>
+    post<{ containers: number; grouped: number }>('/genre-groups/auto', { containers }),
+  createGenreGroup: (name: string) => post<{ id: number }>('/genre-groups', { name }),
+  renameGenreGroup: (id: number, name: string) => put<void>(`/genre-groups/${id}`, { name }),
+  deleteGenreGroup: (id: number) => del<void>(`/genre-groups/${id}`),
+  placeGenre: (genre: string, group: number | null) => put<void>('/genre-groups/place', { genre, group }),
+  freeGenre: (genre: string) => del<void>(`/genre-groups/free/${encodeURIComponent(genre)}`),
+  clearGenreGroups: () => del<void>('/genre-groups'),
+  mp3CheckAgain: () => post<void>('/library/mp3-check'),
+  /** Track and disc numbers for an album's songs from MusicBrainz. */
+  editorTracklist: (albumId: number) =>
+    get<{
+      release: string
+      tracks: number
+      suggested: { id: number; disc_no: number; track_no: number }[]
+      unmatched: number
+    }>(`/editor/tracklist?album_id=${albumId}`),
+  /** Every MusicBrainz release of an album DJINN looked up. */
+  editorAlbumReleases: (albumId: number) =>
+    get<{ known: boolean; releases: ReleaseHit[] }>(`/editor/releases?album_id=${albumId}`),
+  editorReleaseSearch: (source: ReleaseSource, artist: string, album: string) =>
+    get<ReleaseHit[]>(
+      `/editor/release-search?source=${source}&artist=${encodeURIComponent(artist)}&album=${encodeURIComponent(album)}`,
+    ),
+  /** A release's tracks, with these songs (or, `staged`, files waiting in
+   * an import) matched to them by title. */
+  editorRelease: (source: ReleaseSource, id: string, songIds: number[], staged = false) =>
+    get<{ release: Release; matched: { id: number; track: number }[] }>(
+      `/editor/release?source=${source}&id=${encodeURIComponent(id)}&ids=${songIds.join(',')}${staged ? '&import=true' : ''}`,
+    ),
+  /** Lyrics for songs: their own, then LRCLIB (`staged`: files waiting in an import). */
+  editorLyricsFind: (ids: number[], staged: boolean) =>
+    post<EditorLyricsOutcomes>('/editor/lyrics/find', { ids, staged }),
+  /** Timed lyrics for songs with words only: LRCLIB's, else the AI times them. */
+  editorLyricsTimed: (ids: number[], staged: boolean) =>
+    post<EditorLyricsOutcomes>('/editor/lyrics/timed', { ids, staged }),
+  /** The AI listener makes lyrics for songs that have none. */
+  editorLyricsGenerate: (ids: number[], staged: boolean) =>
+    post<EditorLyricsOutcomes>('/editor/lyrics/generate', { ids, staged }),
+  /** Songs looked up by their sound (AcoustID, then MusicBrainz). */
+  editorIdentify: (ids: number[], staged: boolean) => post<EditorHeard[]>('/editor/identify', { ids, staged }),
+  /** Albums brought into the editor to work on before they go into the library. */
+  editorImports: () => get<EditorImport[]>('/editor/imports'),
+  editorImportStart: () => post<{ batch: number }>('/editor/imports'),
+  /** One song file into an import; it must play. */
+  editorImportUpload: async (batch: number, file: File) => {
+    const res = await fetch(`/api/editor/imports/${batch}/files?name=${encodeURIComponent(file.name)}`, {
+      method: 'POST',
+      body: file,
+    })
+    const data = await res.json().catch(() => null)
+    if (!res.ok) throw new ApiError(res.status, data?.error ?? `Upload failed (${res.status})`)
+    return data as { id: number }
+  },
+  editorImportSongs: (batch: number) =>
+    get<{ total: number; editable: boolean; songs: EditorSong[] }>(`/editor/imports/${batch}/songs`),
+  /** Where these songs' lyrics and AI work stand (library songs, or an import's files). */
+  editorAiStatus: (ids: number[], imported: boolean) =>
+    post<{ id: number; lyrics: number; ai_job: string | null }[]>(
+      imported ? '/editor/imports/ai-status' : '/editor/ai-status',
+      { ids },
+    ),
+  /** The grid's changes, written into the waiting files. */
+  editorImportApply: (changes: EditorChange[]) => post<EditorApplied>('/editor/imports/apply', { changes }),
+  editorImportCover: async (ids: number[], file: File | null) => {
+    const query = `ids=${ids.join(',')}${file ? '' : '&remove=true'}`
+    const res = await fetch(`/api/editor/imports/cover?${query}`, { method: 'POST', body: file ?? new Blob([]) })
+    const data = await res.json().catch(() => null)
+    if (!res.ok) throw new ApiError(res.status, data?.error ?? t('api.failed', { status: res.status }))
+    return data as EditorApplied
+  },
+  /** Moves an import's files into a library folder, placed by `pattern`. */
+  editorImportAdd: (
+    batch: number,
+    folder: string,
+    pattern: string,
+    preview: boolean,
+    ids: number[] = [],
+    changes: EditorChange[] = [],
+  ) =>
+    post<{ files: EditorRenamed[]; batch: number | null }>(`/editor/imports/${batch}/add`, {
+      folder,
+      pattern,
+      preview,
+      ids,
+      changes,
+    }),
+  editorImportThrowAway: (batch: number) => del<EditorApplied>(`/editor/imports/${batch}`),
+  editorImportDropFile: (id: number) => del<EditorApplied>(`/editor/imports/files/${id}`),
+  /** Where a release's cover is served from (through DJINN). */
+  editorReleaseCover: (source: ReleaseSource, id: string) =>
+    `/api/editor/release-cover?source=${source}&id=${encodeURIComponent(id)}`,
+  editableFolders: () => get<EditableFolder[]>('/library/editable'),
+  setFolderEditable: (path: string, editable: boolean) => put<void>('/library/editable', { path, editable }),
+  startLibraryCompare: () => post<void>('/library/compare'),
+  protectedStatus: () => get<ProtectedStatus>('/protected'),
+  protectedEnter: (password: string, code: string) => post<void>('/protected/enter', { password, code }),
+  protectedLeave: () => post<void>('/protected/leave'),
+  lockedAccounts: () => get<number[]>('/protected/locked'),
+  unlockAccount: (id: number) => post<void>(`/users/${id}/unlock`),
+  dismissRecovery: () => post<void>('/protected/recovery/dismiss'),
+  setProtectedLevel: (level: ProtectedLevel, password: string, code: string, confirm: string) =>
+    put<void>('/protected/level', { level, password, code, confirm }),
+  auditPage: (offset: number) => get<{ entries: AuditEntry[]; total: number }>(`/protected/audit?offset=${offset}&limit=50`),
+  setAudit: (enabled: boolean) => put<void>('/protected/audit', { enabled }),
+  purgeAudit: () => del<{ removed: number }>('/protected/audit'),
+  blockLyrics: (trackId: number, reason?: string) => post<void>(`/lyrics/${trackId}/block`, { reason }),
+  allowAllLyrics: () => del<void>('/lyrics/blocks'),
+  lyricsImport: () => get<LyricsImportStatus>('/lyrics/import'),
+  dismissLyricsImport: () => post<void>('/lyrics/import/dismiss'),
+  /** Sends one zip of lyrics files; it's imported in the background. */
+  async importLyrics(file: File, replace: boolean, unasked: boolean, replaceOther: boolean): Promise<void> {
+    const query = new URLSearchParams({
+      name: file.name,
+      replace: String(replace),
+      unasked: String(unasked),
+      replace_other: String(replaceOther),
+    })
+    const res = await fetch(`/api/lyrics/import?${query}`, { method: 'POST', body: file })
+    const data = res.ok ? null : await res.json().catch(() => null)
+    if (!res.ok) throw new ApiError(res.status, data?.error ?? `Upload failed (${res.status})`)
+  },
   rooms: () => get<RoomList>('/rooms'),
   roomPeople: () => get<{ count: number }>('/me/room/people'),
   chooseRoom: (roomId: number) => put<void>('/me/room', { room_id: roomId }),
@@ -281,12 +502,17 @@ export const api = {
   playSyncTone: (id: number) => post<void>(`/rooms/${id}/sync-tone`),
   roomTiming: (id: number) => get<RoomTiming>(`/rooms/${id}/timing`),
   /** Moves one speaker later (+ms) or earlier (-ms). */
-  nudgeTiming: (id: number, kind: TimingSpeaker['kind'], speaker: number, ms: number) =>
-    post<RoomTiming>(`/rooms/${id}/timing`, { kind, id: speaker, ms }),
+  nudgeTiming: (id: number, kind: TimingSpeaker['kind'], speaker: number, output: number, ms: number) =>
+    post<RoomTiming>(`/rooms/${id}/timing`, { kind, id: speaker, output, ms }),
   nodes: () => get<NodeList>('/nodes'),
+  /** What a room's screens show unless a node has its own choice. */
+  roomScreen: (room: number) => get<{ screen: string }>(`/rooms/${room}/screen`),
+  setRoomScreen: (room: number, screen: string) => put<void>(`/rooms/${room}/screen`, { screen }),
   setNodeJoining: (joinOpen: boolean) => put<void>('/nodes/settings', { join_open: joinOpen }),
   acceptNode: (id: number, password: string) => post<void>(`/nodes/${id}/accept`, { password }),
   renameNode: (id: number, name: string) => patch<void>(`/nodes/${id}`, { name }),
+  setNodeAi: (id: number, help: boolean, model: string | null) =>
+    patch<void>(`/nodes/${id}`, { ai_help: help, ai_model: model ?? '' }),
   removeNode: (id: number) => del<void>(`/nodes/${id}`),
   setNodeAudio: (id: number, audio: NodeAudio) => put<void>(`/nodes/${id}/audio`, audio),
   /** What node screens draw, for the whole house. */
@@ -388,6 +614,8 @@ export const api = {
   startOver: () => post<void>('/player/restart'),
   /** Skips and counts it against the song, so the mix plays it less. */
   skipLess: () => post<void>('/player/skip?less=1'),
+  /** Every room: the music stops, request queues empty, the auto mix goes off. */
+  endParty: () => post<void>('/party/end'),
   setVolume: (volume: number) => put<void>('/player/volume', { volume }),
   setCrossfade: (secs: number) => put<void>('/player/crossfade', { secs }),
 
@@ -398,6 +626,10 @@ export const api = {
     post<ImportResult>('/playlists/import', { text, filename, name: name?.trim() || undefined }),
   youtubeKey: () => get<{ has_key: boolean }>('/playlists/youtube-key'),
   setYoutubeKey: (key: string) => put<void>('/playlists/youtube-key', { key }),
+  /** The Spotify developer app for album lookups (the secret is never sent back). */
+  spotify: () => get<{ client_id: string | null; has_secret: boolean }>('/spotify'),
+  setSpotify: (clientId: string, clientSecret: string) =>
+    put<void>('/spotify', { client_id: clientId, client_secret: clientSecret }),
   checkPlaylist: (id: number) => post<void>(`/playlists/${id}/check`),
   playlistCheck: () => get<PlaylistCheck | null>('/playlists/check'),
   shareTargets: () => get<ShareTarget[]>('/playlists/share-targets'),
@@ -527,6 +759,9 @@ export const api = {
   stopCast: (id: string) => post<CastList>(`/cast/${encodeURIComponent(id)}/stop`),
   stopAllCasts: () => post<void>('/cast/stop-all'),
   newStreamLink: () => post<CastList>('/cast/new-link'),
+  clearCastRoom: (id: string) => del<CastList>(`/cast/${encodeURIComponent(id)}/room`),
+  setCastRoom: (id: string, roomId: number) =>
+    put<CastList>(`/cast/${encodeURIComponent(id)}/room`, { room_id: roomId }),
   setCastVolume: (id: string, level: number) => put<void>(`/cast/${encodeURIComponent(id)}/volume`, { level }),
   saveReplayGain: (mode: ReplayGainMode, preamp_db: number) =>
     put<ReplayGainSettings>('/audio/replaygain', { mode, preamp_db }),
@@ -535,9 +770,13 @@ export const api = {
   libraryStatus: () => get<LibraryStatus>('/library/status'),
   openArtFolder: () => post<void>('/library/open-art-folder'),
   rescan: () => post<StartResponse>('/library/rescan'),
-  libraryProblems: () => get<ProblemSummary>('/library/problems'),
+  /** `cached`: counts a few minutes old will do (badges), so it rarely counts. */
+  libraryProblems: (cached = false) =>
+    get<ProblemSummary>(cached ? '/library/problems?cached=true' : '/library/problems'),
   libraryProblemList: (kind: ProblemKind, offset = 0) =>
     get<ProblemItem[]>(`/library/problems/${kind}?offset=${offset}&limit=100`),
+  setDuplicatesAcrossAlbums: (acrossAlbums: boolean) =>
+    put<void>('/library/duplicates/settings', { across_albums: acrossAlbums }),
   duplicates: (offset = 0) => get<DuplicateListing>(`/library/duplicates?offset=${offset}`),
   notDuplicates: (ids: number[]) => post<void>('/library/duplicates/dismiss', { ids }),
   reportSong: (id: number, reason: string, note?: string) => post<void>(`/tracks/${id}/report`, { reason, note }),

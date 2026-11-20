@@ -34,6 +34,8 @@ struct Lists {
     albums: HashMap<(AlbumSort, AlbumFilter), Arc<Listed<Album>>>,
     /// Songs are read a page at a time, so only their order is kept.
     tracks: HashMap<TrackSort, Arc<Listed<i64>>>,
+    /// Albums that are the same album filed twice.
+    album_twins: Option<Arc<Vec<crate::AlbumTwin>>>,
 }
 
 /// Library lists worked out once and kept until `browse_version` says the
@@ -134,6 +136,45 @@ impl Store {
             };
         }
         Ok(lists)
+    }
+
+    /// Pairs of albums by one artist whose songs are nearly the same (at
+    /// least 85% of the larger one's songs, by title, and nearly the same
+    /// number of songs): the same album filed twice, as a copy in another
+    /// folder or under a slightly different name. A deluxe edition with
+    /// extra songs isn't one, and a song on several albums isn't either.
+    pub(crate) async fn album_twins(&self) -> Result<Arc<Vec<crate::AlbumTwin>>> {
+        let mut lists = self.lists().await?;
+        if let Some(found) = &lists.album_twins {
+            return Ok(Arc::clone(found));
+        }
+        let twins: Vec<crate::AlbumTwin> = sqlx::query_as(
+            "WITH t AS (
+                 SELECT t.album_id, a.artist_id, lower(trim(t.title)) AS k
+                 FROM tracks t JOIN albums a ON a.id = t.album_id
+                 WHERE t.removed_at IS NULL
+                 GROUP BY t.album_id, a.artist_id, k),
+             n AS (SELECT album_id, count(*) AS n,
+                          (SELECT coalesce(sum(x.duration_ms), 0) FROM tracks x
+                           WHERE x.album_id = t.album_id AND x.removed_at IS NULL) AS ms
+                   FROM t GROUP BY album_id HAVING count(*) >= 3),
+             pairs AS (
+                 SELECT x.album_id AS a, y.album_id AS b, count(*) AS shared
+                 FROM t x JOIN t y
+                   ON y.artist_id = x.artist_id AND y.k = x.k AND y.album_id > x.album_id
+                 GROUP BY x.album_id, y.album_id)
+             SELECT p.a, p.b, p.shared, na.n AS a_songs, nb.n AS b_songs
+             FROM pairs p JOIN n na ON na.album_id = p.a JOIN n nb ON nb.album_id = p.b
+             WHERE p.shared * 100 >= 85 * max(na.n, nb.n)
+               AND min(na.n, nb.n) * 100 >= 85 * max(na.n, nb.n)
+               AND abs(na.ms - nb.ms) * 100 <= 5 * max(na.ms, nb.ms)
+             ORDER BY p.a, p.b",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        let twins = Arc::new(twins);
+        lists.album_twins = Some(Arc::clone(&twins));
+        Ok(twins)
     }
 
     async fn artist_list(

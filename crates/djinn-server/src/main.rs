@@ -7,6 +7,9 @@
 mod accounts;
 mod address;
 mod ai;
+mod ai_kit;
+mod ai_listener;
+mod ai_work;
 mod api;
 mod appearance;
 mod audio_api;
@@ -16,16 +19,25 @@ mod backup;
 mod banner;
 mod cast_api;
 mod client;
+mod compare;
 mod config;
+mod content;
 mod convert;
 mod cpu;
 mod desktop;
 mod discover;
 mod download;
 mod duplicates;
+mod editable;
+mod editor_api;
+mod editor_files;
+mod editor_import;
+mod editor_lookup;
+mod editor_lyrics;
 mod error;
 mod events;
 mod folders;
+mod genre_groups;
 mod go;
 mod go_announce;
 mod go_app;
@@ -40,8 +52,11 @@ mod library_api;
 mod likes_api;
 mod logs;
 mod lyrics;
+mod lyrics_import;
 mod mood_api;
+mod mp3_check;
 mod network;
+mod node_ai;
 mod node_audio;
 mod node_builds;
 mod node_mode;
@@ -53,7 +68,9 @@ mod playlist_api;
 mod playlist_import;
 mod presence;
 mod problems_api;
+mod protected;
 mod reader;
+mod recover_cmd;
 mod rooms_api;
 mod rooms_rt;
 mod schedule;
@@ -100,9 +117,11 @@ use crate::state::AppState;
 #[derive(Parser)]
 #[command(name = "djinn", version = env!("DJINN_RELEASE_VERSION"), about)]
 struct Cli {
+    #[command(subcommand)]
+    command: Option<Command>,
     /// Path to config.toml. Defaults to next to the binary on Windows and
     /// ~/.config/djinn/config.toml elsewhere.
-    #[arg(long)]
+    #[arg(long, global = true)]
     config: Option<PathBuf>,
     /// Don't show a system tray icon, even on a desktop.
     #[arg(long)]
@@ -110,6 +129,13 @@ struct Cli {
     /// Write logs to this file instead of the terminal.
     #[arg(long)]
     log_file: Option<PathBuf>,
+}
+
+#[derive(clap::Subcommand)]
+enum Command {
+    /// Last resort for an admin locked out of DJINN: run on the computer
+    /// DJINN is installed on. Only works when no admin account can sign in.
+    Recover,
 }
 
 fn main() {
@@ -146,6 +172,9 @@ async fn run() -> anyhow::Result<()> {
     // terminal that started a Windows release build.
     let has_console = djinn_platform::console::attach_parent_console();
     let cli = Cli::parse();
+    if let Some(Command::Recover) = cli.command {
+        return recover_cmd::run(cli.config.as_deref()).await;
+    }
 
     // Always keep dated files; also show lines in an attached terminal.
     let log_file = cli.log_file.clone().or_else(default_log_file);
@@ -227,6 +256,12 @@ async fn run() -> anyhow::Result<()> {
             until,
         )
         .await?;
+        // Whatever is slow to wind down (a worker, a speaker, the tray), this
+        // copy ends within seconds: a second copy must never run beside it.
+        std::thread::spawn(|| {
+            std::thread::sleep(std::time::Duration::from_secs(8));
+            std::process::exit(0);
+        });
         drop(tray);
         if node_mode::restart_requested() {
             let exe = std::env::current_exe().context("finding this program")?;
@@ -455,6 +490,9 @@ async fn run() -> anyhow::Result<()> {
     scheduled_check::start(state.clone());
     schedule::start(state.clone());
     lyrics::start(&state);
+    mp3_check::start(&state);
+    genre_groups::reload(&state).await;
+    ai_listener::resume(&state).await;
     update::start(&state);
     if let Err(e) = convert::apply(&state).await {
         tracing::error!(error = %format!("{e:#}"), "couldn't read the converting settings");
@@ -666,7 +704,13 @@ async fn party_headers(State(state): State<AppState>, request: Request, next: Ne
     let screen = security::SCREEN_PAGES.contains(&request.uri().path());
     let mut response = next.run(request).await;
     if screen {
-        security::set_headers(response.headers_mut(), security::SCREEN_CSP, origin.https);
+        // Nodes' pages may frame it from their own addresses too.
+        let nodes = crate::nodes::node_addresses(&state).await;
+        security::set_headers(
+            response.headers_mut(),
+            security::screen_csp(&nodes),
+            origin.https,
+        );
         response
             .headers_mut()
             .remove(axum::http::header::X_FRAME_OPTIONS);

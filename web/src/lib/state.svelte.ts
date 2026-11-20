@@ -1,7 +1,7 @@
 // App-wide state, kept current by Server-Sent Events.
 
 import { api, ApiError } from './api'
-import { locale, t } from './i18n.svelte'
+import { houseLanguageIs, locale, t } from './i18n.svelte'
 import { clearListCache } from './listCache'
 import type {
   AiStatus,
@@ -173,6 +173,7 @@ export function connect() {
   })
   on<IdentifyStatus>('identify_status', (data) => (app.identify = data))
   on<{ url: string }>('address', (data) => (app.address = data.url))
+  on<{ default: string }>('language', (data) => houseLanguageIs(data.default))
   on<LyricsProgress>('lyrics', (data) => (app.lyrics = data))
 
   void loadLibraryWork()
@@ -290,15 +291,15 @@ export async function requestTrack(trackId: number) {
   try {
     const item = await api.addRequest(trackId)
     toast(
-      item.outcome === 'backed' ? 'You asked for it too, so it moved up a place' : 'Added to the queue',
+      item.outcome === 'backed' ? t('rq.backed') : t('rq.added'),
       false,
-      { label: 'Undo', run: () => cancelRequest(item.id) },
+      { label: t('rq.undo'), run: () => cancelRequest(item.id) },
     )
   } catch (e) {
     const next = new Set(app.pending)
     next.delete(trackId)
     app.pending = next
-    toast(e instanceof Error ? e.message : 'Could not add that song', true)
+    toast(e instanceof Error ? e.message : t('rq.add_failed'), true)
   }
 }
 
@@ -340,7 +341,7 @@ export async function cancelRequest(queueId: number) {
     toast(message)
   } catch (e) {
     app.queue = before
-    toast(e instanceof Error ? e.message : 'Could not remove that song', true)
+    toast(e instanceof Error ? e.message : t('rq.remove_failed'), true)
   }
 }
 
@@ -367,13 +368,13 @@ export function tapTrack(track: { id: number; title: string }) {
       requestTrack(track.id)
       break
     case 'playing':
-      toast('Playing now')
+      toast(t('rq.playing'))
       break
     case 'mine':
-      toast('You asked for this one. Tap the check to step back.')
+      toast(t('rq.yours'))
       break
     default:
-      toast('Adding it...')
+      toast(t('rq.adding'))
   }
 }
 

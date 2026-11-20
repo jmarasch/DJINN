@@ -601,6 +601,55 @@ async fn skip_is_recorded_with_who_skipped() {
 }
 
 #[tokio::test]
+async fn end_party_stops_everything_without_counting_a_skip() {
+    let mut h = Harness::new(3).await;
+    h.event(EngineEvent::NextNeeded { after: None }).await;
+    let id = h.play_next().await;
+    let user = h.user.clone();
+    h.jukebox
+        .add_request(&user, h.tracks[4], &origin())
+        .await
+        .unwrap();
+    h.jukebox.pause();
+    h.sent.lock().unwrap().clear();
+
+    h.store.clear_queue().await.unwrap();
+    h.jukebox.end_party().await.unwrap();
+    {
+        let sent = h.sent.lock().unwrap();
+        // Nothing lined up, then the song sent away, then not paused.
+        let next_cleared = sent
+            .iter()
+            .position(|c| matches!(c, Command::SetNext(None)))
+            .expect("next slot emptied");
+        let skip = sent
+            .iter()
+            .position(|c| matches!(c, Command::Skip))
+            .expect("song stopped");
+        assert!(next_cleared < skip);
+        assert!(matches!(sent.last(), Some(Command::Play)));
+    }
+    assert_eq!(h.jukebox.active_playlist(), None);
+    h.event(EngineEvent::TrackEnded {
+        id: TrackId(id),
+        played_ms: 4200,
+        reason: EndReason::Skipped,
+    })
+    .await;
+    let skipped: i64 =
+        djinn_store::sqlx::query_scalar("SELECT skipped FROM play_events WHERE track_id = ?")
+            .bind(id)
+            .fetch_one(h.store.pool())
+            .await
+            .unwrap();
+    assert_eq!(skipped, 0, "ending the party isn't a skip");
+    // Asked what's next, it has nothing.
+    h.event(EngineEvent::NextNeeded { after: None }).await;
+    assert_eq!(h.last_next(), None);
+    assert!(h.jukebox.now_playing().later.is_empty());
+}
+
+#[tokio::test]
 async fn broken_request_is_dropped() {
     let mut h = Harness::new(2).await;
     let user = h.user.clone();
@@ -822,6 +871,8 @@ fn next_song_on_the_album_joins_gaplessly() {
         duration_ms: None,
         art_hash: None,
         lyrics: 0,
+        lyrics_ai: 0,
+        lyrics_failed: 0,
     };
     assert!(follows_on_album(
         &track(Some(1), None, Some(3)),

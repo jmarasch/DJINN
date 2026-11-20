@@ -1,11 +1,13 @@
 <script lang="ts">
   // A node's page, while managing it: what the node says about itself, its
-  // log, and a restart. Talks to the node's own DJINN, not Main.
+  // log, a restart, and restarting the whole computer. Talks to the node's own DJINN, not Main.
   import { onMount } from 'svelte'
+  import { locale, t } from './i18n.svelte'
 
   interface Diagnostics {
     version: string
     build: string
+    label: string
     platform: string
     uptime_secs: number
     addresses: string[]
@@ -18,6 +20,7 @@
     cached_songs: number
     cached_bytes: number
     log_level: string
+    can_reboot: boolean
   }
 
   let facts = $state<Diagnostics | null>(null)
@@ -28,26 +31,29 @@
   let error = $state('')
   let restarting = $state(false)
   let confirmRestart = $state(false)
+  let rebooting = $state(false)
+  let confirmReboot = $state(false)
   let logBox = $state<HTMLElement>()
 
-  const gb = (bytes: number) => `${(bytes / 1024 ** 3).toFixed(1)} GB`
-  const mb = (bytes: number) => `${Math.round(bytes / 1024 ** 2).toLocaleString()} MB`
+  const gb = (bytes: number) =>
+    `${(bytes / 1024 ** 3).toLocaleString(locale.code, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} GB`
+  const mb = (bytes: number) => `${Math.round(bytes / 1024 ** 2).toLocaleString(locale.code)} MB`
 
   function uptime(secs: number) {
     const d = Math.floor(secs / 86400)
     const h = Math.floor((secs % 86400) / 3600)
     const m = Math.floor((secs % 3600) / 60)
-    return d ? `${d} d ${h} h` : h ? `${h} h ${m} min` : `${m} min`
+    return d ? t('nd.d_h', { d, h }) : h ? t('nd.h_m', { h, m }) : t('nd.m', { m })
   }
 
   async function loadFacts() {
     try {
       const res = await fetch('/api/node/diagnostics')
-      if (!res.ok) throw new Error((await res.json().catch(() => null))?.error ?? 'Could not load')
+      if (!res.ok) throw new Error((await res.json().catch(() => null))?.error ?? t('nd.load_failed'))
       facts = await res.json()
       error = ''
     } catch (e) {
-      error = e instanceof Error ? e.message : 'Could not load'
+      error = e instanceof Error ? e.message : t('nd.load_failed')
     }
   }
 
@@ -76,6 +82,22 @@
     }, 8000)
   }
 
+  async function reboot() {
+    confirmReboot = false
+    const res = await fetch('/api/node/reboot', { method: 'POST' }).catch(() => null)
+    if (!res?.ok) {
+      error = (await res?.json().catch(() => null))?.error ?? t('nd.reboot_failed')
+      return
+    }
+    error = ''
+    rebooting = true
+    // Off for a minute or two; the page's status check shows it coming back.
+    setTimeout(() => {
+      rebooting = false
+      void loadFacts()
+    }, 120000)
+  }
+
   onMount(() => {
     void loadFacts()
     void loadLog()
@@ -97,70 +119,90 @@
 </script>
 
 <section class="card">
-  <h2>Diagnostics</h2>
+  <h2>{t('nd.title')}</h2>
   {#if error}<p class="error">{error}</p>{/if}
   {#if facts}
     <dl>
-      <dt>Version</dt>
-      <dd>{facts.version} <span class="muted small">build {facts.build}</span></dd>
-      <dt>System</dt>
-      <dd>{facts.platform}, {facts.threads} threads</dd>
-      <dt>Running for</dt>
+      <dt>{t('nd.version')}</dt>
+      <dd>{facts.version} <span class="muted small">{t('nd.build', { build: facts.build })}</span>{#if facts.label}
+          <b>{facts.label}</b>{/if}</dd>
+      <dt>{t('nd.system')}</dt>
+      <dd>{t('nd.threads', { platform: facts.platform, n: facts.threads })}</dd>
+      <dt>{t('nd.uptime')}</dt>
       <dd>{uptime(facts.uptime_secs)}</dd>
       {#if facts.addresses.length}
-        <dt>Addresses</dt>
+        <dt>{t('nd.addresses')}</dt>
         <dd>{facts.addresses.join(', ')}</dd>
       {/if}
       {#if facts.cpu_busy != null}
-        <dt>Processor</dt>
-        <dd>{Math.round(facts.cpu_busy * 100)}% busy</dd>
+        <dt>{t('admin.home.processor')}</dt>
+        <dd>{t('admin.home.busy', { pct: Math.round(facts.cpu_busy * 100) })}</dd>
       {/if}
       {#if facts.memory_total != null && facts.memory_available != null}
-        <dt>Memory</dt>
-        <dd>{gb(facts.memory_available)} free of {gb(facts.memory_total)}</dd>
+        <dt>{t('admin.home.memory')}</dt>
+        <dd>{t('admin.home.free_of', { free: gb(facts.memory_available), total: gb(facts.memory_total) })}</dd>
       {/if}
       {#if facts.disk_total != null && facts.disk_available != null}
-        <dt>Disk</dt>
-        <dd>{gb(facts.disk_available)} free of {gb(facts.disk_total)}</dd>
+        <dt>{t('admin.home.disk')}</dt>
+        <dd>{t('admin.home.free_of', { free: gb(facts.disk_available), total: gb(facts.disk_total) })}</dd>
       {/if}
-      <dt>Song cache</dt>
-      <dd>{facts.cached_songs.toLocaleString()} files, {mb(facts.cached_bytes)}</dd>
+      <dt>{t('nd.song_cache')}</dt>
+      <dd>{t('nd.cache_files', { n: facts.cached_songs.toLocaleString(locale.code), size: mb(facts.cached_bytes) })}</dd>
     </dl>
   {/if}
   <div class="buttons">
     {#if confirmRestart}
-      <span class="small">Restart this node? Its music stops for a few seconds.</span>
-      <button class="danger" onclick={restart}>Restart</button>
-      <button onclick={() => (confirmRestart = false)}>Cancel</button>
+      <span class="small">{t('nd.restart_q')}</span>
+      <button class="danger" onclick={restart}>{t('nd.restart')}</button>
+      <button onclick={() => (confirmRestart = false)}>{t('common.cancel')}</button>
     {:else}
       <button disabled={restarting} onclick={() => (confirmRestart = true)}>
-        {restarting ? 'Restarting...' : 'Restart node'}
+        {restarting ? t('nd.restarting') : t('nd.restart_node')}
       </button>
     {/if}
   </div>
+  {#if facts?.can_reboot}
+    <div class="buttons">
+      {#if confirmReboot}
+        <span class="small">
+          {t('nd.reboot_q')}
+        </span>
+        <button class="danger" onclick={reboot}>{t('nd.reboot')}</button>
+        <button onclick={() => (confirmReboot = false)}>{t('common.cancel')}</button>
+      {:else}
+        <button disabled={rebooting} onclick={() => (confirmReboot = true)}>
+          {rebooting ? t('nd.rebooting') : t('nd.reboot')}
+        </button>
+      {/if}
+    </div>
+  {:else if facts}
+    <p class="small muted">
+      {t('nd.no_reboot')}
+    </p>
+  {/if}
 </section>
 
 <section class="card">
-  <h2>Log</h2>
+  <h2>{t('nd.log')}</h2>
   <div class="filters">
     <label>
-      <span class="small muted">Show</span>
+      <span class="small muted">{t('nd.show')}</span>
       <select bind:value={level}>
-        <option value="trace">Everything</option>
-        <option value="debug">Debug and up</option>
-        <option value="info">Info and up</option>
-        <option value="warn">Warnings and errors</option>
-        <option value="error">Errors only</option>
+        <option value="trace">{t('nd.trace')}</option>
+        <option value="debug">{t('nd.debug')}</option>
+        <option value="info">{t('nd.info')}</option>
+        <option value="warn">{t('nd.warn')}</option>
+        <option value="error">{t('nd.error')}</option>
       </select>
     </label>
-    <input type="search" bind:value={search} placeholder="Search the log" aria-label="Search the log" />
-    <label class="follow"><input type="checkbox" bind:checked={follow} /> Keep updating</label>
-    <a class="button" href="/api/node/log/file" download>Download log</a>
+    <input type="search" bind:value={search} placeholder={t('nd.search')} aria-label={t('nd.search')} />
+    <label class="follow"><input type="checkbox" bind:checked={follow} /> {t('nd.follow')}</label>
+    <a class="button" href="/api/node/log/file" download>{t('nd.download')}</a>
   </div>
   {#if facts && (facts.log_level === 'warn' || facts.log_level === 'error')}
-    <p class="small muted">This node only records {facts.log_level === 'warn' ? 'warnings and errors' : 'errors'}.</p>
+    <p class="small muted">{facts.log_level === 'warn' ? t('nd.only_warn') : t('nd.only_error')}</p>
   {/if}
-  <pre class="log" bind:this={logBox}>{lines.length ? lines.join('\n') : 'Nothing logged yet.'}</pre>
+  <pre class="log" bind:this={logBox}>{lines.length ? lines.join('\n') : t('nd.nothing')}</pre>
 </section>
 
 <style>

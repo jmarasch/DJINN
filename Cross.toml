@@ -8,6 +8,10 @@ pre-build = [
     "apt-get update && apt-get install -y --no-install-recommends libasound2-dev:$CROSS_DEB_ARCH",
 ]
 
+# A test build's label reaches the build inside the container.
+[build.env]
+passthrough = ["DJINN_BUILD_LABEL"]
+
 # The ARMv6 build needs Debian's multiarch folder for pkg-config. Set these
 # when building (cc-rs already compiles bundled C code for ARMv6 on this
 # target; tract's ARMv7 NEON kernels are only used where the CPU has them,
@@ -16,3 +20,15 @@ pre-build = [
 #   PKG_CONFIG_ALLOW_CROSS=1
 [target.arm-unknown-linux-gnueabihf.env]
 passthrough = ["PKG_CONFIG_PATH_arm_unknown_linux_gnueabihf", "PKG_CONFIG_ALLOW_CROSS"]
+
+# Windows (cross's MinGW image) has no ALSA to install: audio is WASAPI.
+# A test build for a Windows node, from Linux:
+#   cross build --release --target x86_64-pc-windows-gnu -p djinn-server
+# The image's older MinGW has no libsynchronization (WaitOnAddress and
+# friends), which Rust's Windows crates link to, so an import library for it
+# is made from a list of its three functions.
+[target.x86_64-pc-windows-gnu]
+pre-build = [
+    "printf 'LIBRARY api-ms-win-core-synch-l1-2-0.dll\\nEXPORTS\\nWaitOnAddress\\nWakeByAddressAll\\nWakeByAddressSingle\\n' > /tmp/synchronization.def",
+    "x86_64-w64-mingw32-dlltool -d /tmp/synchronization.def -l /usr/x86_64-w64-mingw32/lib/libsynchronization.a",
+]

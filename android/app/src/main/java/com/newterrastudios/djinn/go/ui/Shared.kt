@@ -147,7 +147,7 @@ fun SongRow(track: Track, nav: Nav, note: String? = null, onClick: () -> Unit) {
         title = track.title,
         subtitle = line,
         art = { Art(nav.api.artUrl(track.artHash), 44.dp) },
-        titleMark = { LyricsMark(track.lyrics) },
+        titleMark = { LyricsMark(track.lyrics, track.lyricsAi, track.lyricsFailed) },
         onClick = {
             // With nothing playing a tap always plays.
             when {
@@ -188,13 +188,36 @@ fun SongRow(track: Track, nav: Nav, note: String? = null, onClick: () -> Unit) {
 
 /** Beside a song's title: a hollow microphone for lyrics, a filled one when they're timed. */
 @Composable
-fun LyricsMark(lyrics: Int) {
-    if (lyrics <= 0) return
+fun LyricsMark(lyrics: Int, ai: Int = 0, failed: Int = 0) {
+    if (lyrics <= 0) {
+        // Red when an AI's lyrics for the song were removed as bad.
+        if (failed > 0) {
+            Icon(
+                Icons.Outlined.MicNone,
+                contentDescription = t("lyrics.ai_failed_mark"),
+                tint = androidx.compose.ui.graphics.Color(0xFFFF3B4F),
+                modifier = Modifier.padding(start = 4.dp).size(14.dp),
+            )
+        }
+        return
+    }
     val timed = lyrics >= 2
+    // Neon pink when an AI made the words, neon green when it only timed a person's.
+    val aiColor = when (ai) {
+        1 -> androidx.compose.ui.graphics.Color(0xFFFF4FD8)
+        2 -> androidx.compose.ui.graphics.Color(0xFF7DFF4F)
+        else -> null
+    }
     Icon(
         if (timed) Icons.Default.Mic else Icons.Outlined.MicNone,
-        contentDescription = t(if (timed) "lyrics.timed_mark" else "lyrics.words_mark"),
-        tint = if (timed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+        contentDescription = t(
+            when (ai) {
+                1 -> "lyrics.ai_made_mark"
+                2 -> "lyrics.ai_timed_mark"
+                else -> if (timed) "lyrics.timed_mark" else "lyrics.words_mark"
+            },
+        ),
+        tint = aiColor ?: if (timed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(start = 4.dp).size(14.dp),
     )
 }

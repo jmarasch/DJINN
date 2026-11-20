@@ -2,7 +2,7 @@
 //! from the internet on their own (the way phones get GO's app from it).
 //!
 //! When a node checks in with an older version, Main fetches the release
-//! file for that node's processor from its own release (checked against the
+//! file for that node's system and processor from its own release (checked against the
 //! signed SHA256SUMS, like Main's own updates), keeps it in
 //! `<db dir>/node-builds/<version>/`, and offers it in the node's next
 //! check-in. The node downloads it over its pinned connection, checks the
@@ -118,10 +118,14 @@ pub struct NodeUpdate {
 }
 
 /// The release file for a node's platform ("linux-aarch64" and so on), if
-/// releases have one.
+/// releases have one. Main fetches it whatever it runs on itself: a Linux
+/// Main updates Windows nodes and a Windows Main updates Linux ones.
 fn asset(platform: &str) -> Option<String> {
-    matches!(platform, "linux-x86_64" | "linux-aarch64" | "linux-arm")
-        .then(|| format!("djinn-{platform}"))
+    match platform {
+        "linux-x86_64" | "linux-aarch64" | "linux-arm" => Some(format!("djinn-{platform}")),
+        "windows-x86_64" => Some("djinn-windows-x86_64.exe".to_owned()),
+        _ => None,
+    }
 }
 
 fn builds_dir(state: &AppState) -> PathBuf {
@@ -360,6 +364,11 @@ mod tests {
             Some("djinn-linux-aarch64")
         );
         assert_eq!(asset("linux-arm").as_deref(), Some("djinn-linux-arm"));
-        assert_eq!(asset("windows-x86_64"), None);
+        assert_eq!(
+            asset("windows-x86_64").as_deref(),
+            Some("djinn-windows-x86_64.exe"),
+            "the file releases publish for Windows"
+        );
+        assert_eq!(asset("macos-aarch64"), None, "no release for it");
     }
 }

@@ -36,8 +36,38 @@ pub fn output_devices() -> Result<Vec<DeviceInfo>, EngineError> {
             })
         })
         .collect();
+    found.retain(|d| !alsa_noise(&d.id));
     number_twins(&mut found);
     Ok(found)
+}
+
+/// ALSA lists every way to reach a card: the raw hardware, the same output
+/// through plug converters, mixers, surround layouts and a "discard
+/// everything" device, all under one name. Without a sound server a
+/// computer shows dozens of them, so the plumbing is left out: what stays is
+/// the default, each card's own entry, each HDMI port, and anything not
+/// known as plumbing. (A device chosen earlier still opens by its id.)
+fn alsa_noise(id: &str) -> bool {
+    let Some(pcm) = id.strip_prefix("alsa:") else {
+        return false;
+    };
+    let kind = pcm.split([':', ',']).next().unwrap_or(pcm);
+    matches!(
+        kind,
+        "null"
+            | "hw"
+            | "plughw"
+            | "front"
+            | "dmix"
+            | "dsnoop"
+            | "iec958"
+            | "usbstream"
+            | "samplerate"
+            | "speexrate"
+            | "lavrate"
+            | "upmix"
+            | "vdownmix"
+    ) || kind.starts_with("surround")
 }
 
 /// Gives devices that share a name (two identical monitors on one graphics
@@ -73,6 +103,30 @@ mod tests {
             id: id.to_owned(),
             name: name.to_owned(),
             is_default: false,
+        }
+    }
+
+    #[test]
+    fn alsa_plumbing_is_left_out() {
+        for plumbing in [
+            "alsa:null",
+            "alsa:hw:CARD=PCH,DEV=3",
+            "alsa:plughw:CARD=PCH,DEV=0",
+            "alsa:front:CARD=PCH,DEV=0",
+            "alsa:surround51:CARD=PCH,DEV=0",
+            "alsa:dmix:CARD=PCH,DEV=0",
+            "alsa:iec958:CARD=PCH,DEV=0",
+        ] {
+            assert!(alsa_noise(plumbing), "{plumbing}");
+        }
+        for wanted in [
+            "alsa:default",
+            "alsa:sysdefault:CARD=PCH",
+            "alsa:hdmi:CARD=PCH,DEV=3",
+            "alsa:pulse",
+            "wasapi:{e0dd}",
+        ] {
+            assert!(!alsa_noise(wanted), "{wanted}");
         }
     }
 

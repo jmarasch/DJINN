@@ -60,6 +60,12 @@ fn apply_edit(
     if let Some(genre) = &edit.genre {
         track.genre = Some(genre.clone());
     }
+    if edit.track_no.is_some() {
+        track.track_no = edit.track_no;
+    }
+    if edit.disc_no.is_some() {
+        track.disc_no = edit.disc_no;
+    }
 }
 
 pub fn read(
@@ -91,6 +97,7 @@ pub fn read(
         Ok(file) => {
             (artists, album_artists) = fill_from_tags(&mut track, &file, original_years);
             embedded_art = cover_picture(&file);
+            fix_mpeg_length(&mut track, path);
         }
         // Still list the file: symphonia may play what lofty can't parse.
         Err(e) => {
@@ -106,7 +113,8 @@ pub fn read(
     }
 
     // Corrections made in the app replace what the tags say.
-    if let Some(edit) = edits.get(path_str) {
+    let edit = edits.get(path_str);
+    if let Some(edit) = edit {
         apply_edit(&mut track, edit, &mut artists, &mut album_artists);
     }
 
@@ -130,6 +138,15 @@ pub fn read(
     track.folder_art = path
         .parent()
         .and_then(|dir| cached(&cache.folders, dir, || art::find_folder_art(dir), art_dir));
+    // A cover chosen in the app wins over the file's and the folder's.
+    match edit.and_then(|e| e.cover.as_deref()) {
+        Some("none") => {
+            track.embedded_art = None;
+            track.folder_art = None;
+        }
+        Some(hash) => track.embedded_art = Some(hash.to_owned()),
+        None => {}
+    }
     let artist = track
         .album_owner
         .clone()
@@ -166,6 +183,7 @@ pub fn basics(path: &Path) -> Option<Basics> {
     let file = lofty::read_from_path(path).ok()?;
     let mut track = ScannedTrack::default();
     let (artists, album_artists) = fill_from_tags(&mut track, &file, true);
+    fix_mpeg_length(&mut track, path);
     Some(Basics {
         title: Some(track.title).filter(|t| !t.is_empty()),
         artist: (!artists.is_empty()).then(|| artists.join(" & ")),
@@ -173,6 +191,17 @@ pub fn basics(path: &Path) -> Option<Basics> {
         album_artist: (!album_artists.is_empty()).then(|| album_artists.join(" & ")),
         duration_ms: track.duration_ms.filter(|d| *d > 0),
     })
+}
+
+/// An MP3 with no length header and a varying bit rate gets its real length
+/// (see `mpeg`); the tag reader only guesses from the first frame. Only DJINN's
+/// database holds the figure: the file is never changed.
+fn fix_mpeg_length(track: &mut ScannedTrack, path: &Path) {
+    if track.codec.as_deref() == Some("mpeg") {
+        if let Some(ms) = crate::mpeg::exact_duration_ms(path) {
+            track.duration_ms = Some(ms).filter(|d| *d > 0);
+        }
+    }
 }
 
 /// The year a date tag starts with: "2005", "2005-04-27".
@@ -185,7 +214,7 @@ fn year_of(date: &str) -> Option<i64> {
         .flatten()
 }
 
-fn fill_from_tags(
+pub(crate) fn fill_from_tags(
     track: &mut ScannedTrack,
     file: &TaggedFile,
     original_years: bool,

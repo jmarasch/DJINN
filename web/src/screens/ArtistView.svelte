@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { locale, t } from '../lib/i18n.svelte'
   import AddToPlaylist from '../lib/AddToPlaylist.svelte'
   import GenreChips from '../lib/GenreChips.svelte'
   import QueueAll from '../lib/QueueAll.svelte'
@@ -75,7 +76,6 @@
       .then((page) => (songTotal = page.total))
       .catch(() => {})
   })
-  const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
 
   let albumSort = $state<'year' | 'name'>('year')
   /** Newest first (unknown years last), or A to Z. */
@@ -84,10 +84,10 @@
     if (albumSort === 'name') return list.sort(byName((a) => a.title))
     return list.sort((a, b) => (b.year ?? -Infinity) - (a.year ?? -Infinity) || byName<Album>((x) => x.title)(a, b))
   }
-  const albumOrders: { value: 'year' | 'name'; label: string }[] = [
-    { value: 'year', label: 'Newest' },
-    { value: 'name', label: 'A to Z' },
-  ]
+  const albumOrders: { value: 'year' | 'name'; label: string }[] = $derived([
+    { value: 'year', label: t('av.newest') },
+    { value: 'name', label: t('av.az') },
+  ])
 </script>
 
 {#if error}
@@ -113,8 +113,8 @@
             <QueueAll kind="artist" refId={artist.id} />
             <AddToPlaylist kind="artist" refId={artist.id} label={artist.name} />
             {#if isAdmin()}
-              <button class="pill" onclick={() => (editing = true)}><Icon name="edit" size={18} /> Edit artist</button>
-              <button class="pill" onclick={() => (managing = true)}>Manage pictures</button>
+              <button class="pill" onclick={() => (editing = true)}><Icon name="edit" size={18} /> {t('av.edit')}</button>
+              <button class="pill" onclick={() => (managing = true)}>{t('av.manage')}</button>
             {/if}
           </div>
         </div>
@@ -123,12 +123,12 @@
     {#if pictures[pictureShown]}
       {@const picture = pictures[pictureShown]}
       <p class="credit small muted">
-        Slideshow photo: {#if picture.credit_url}<a href={picture.credit_url} target="_blank" rel="noopener noreferrer">{picture.credit}</a>{:else}{picture.credit}{/if}{picture.source === 'commons' ? ', Wikimedia Commons' : ''}
+        {t('av.slideshow')} {#if picture.credit_url}<a href={picture.credit_url} target="_blank" rel="noopener noreferrer">{picture.credit}</a>{:else}{picture.credit}{/if}{picture.source === 'commons' ? ', Wikimedia Commons' : ''}
       </p>
     {/if}
     {#if artist.photo_credit}
       <p class="credit small muted">
-        Photo: {#if artist.photo_credit_url}<a href={artist.photo_credit_url} target="_blank" rel="noopener"
+        {t('av.photo')} {#if artist.photo_credit_url}<a href={artist.photo_credit_url} target="_blank" rel="noopener"
             >{artist.photo_credit}</a
           >{:else}{artist.photo_credit}{/if}, Wikimedia Commons
       </p>
@@ -138,7 +138,7 @@
       <section class="bio">
         <p class:clamped={!bioOpen}>{artist.bio}</p>
         <div class="bio-links">
-          <button class="link" onclick={() => (bioOpen = !bioOpen)}>{bioOpen ? 'Less' : 'More'}</button>
+          <button class="link" onclick={() => (bioOpen = !bioOpen)}>{bioOpen ? t('av.less') : t('av.more')}</button>
           {#if artist.bio_url}
             <a href={artist.bio_url} target="_blank" rel="noopener">Wikipedia</a>
           {/if}
@@ -148,23 +148,23 @@
 
     {#if songs.length}
       <h2>
-        {ranked ? 'Top songs' : 'Songs'}{#if songTotal}<span class="muted small"
-            >{` (${songTotal.toLocaleString()})`}</span
+        {ranked ? t('av.top_songs') : t('av.songs')}{#if songTotal}<span class="muted small"
+            >{` (${songTotal.toLocaleString(locale.code)})`}</span
           >{/if}
       </h2>
       {#each artist.top_tracks as track (track.id)}
-        <TrackRow {track} note={track.requests ? plural(track.requests, 'request') : null} />
+        <TrackRow {track} note={track.requests ? t('admin.home.n_requests', { n: track.requests }) : null} />
       {/each}
       {#if artist.top_tracks.length < songTotal}
-        <a class="more-songs button" href="#/artist/{artist.id}/songs">Show all {songTotal.toLocaleString()} songs</a>
+        <a class="more-songs button" href="#/artist/{artist.id}/songs">{t('av.show_all', { n: songTotal.toLocaleString(locale.code) })}</a>
       {/if}
     {/if}
 
     {#if artist.albums.length}
       <div class="section-head">
-        <h2>Albums</h2>
+        <h2>{t('av.albums')}</h2>
         {#if artist.albums.length > 1}
-          <SortChoice options={albumOrders} bind:value={albumSort} storageKey="djinn-artist-album-sort" label="Sort albums" />
+          <SortChoice options={albumOrders} bind:value={albumSort} storageKey="djinn-artist-album-sort" label={t('av.sort_albums')} />
         {/if}
       </div>
       <div class="albums">
@@ -182,7 +182,7 @@
     {/if}
 
     {#if artist.appears_on.length}
-      <h2>Appears on</h2>
+      <h2>{t('av.appears_on')}</h2>
       <div class="albums">
         {#each sorted(artist.appears_on) as album (album.id)}
           <div class="album-tile">
@@ -198,7 +198,7 @@
     {/if}
 
     {#if similar.length}
-      <h2>Similar artists</h2>
+      <h2>{t('av.similar')}</h2>
       <ScrollRow>
         {#each similar as other (other.id)}
           <div class="album-tile">
@@ -214,9 +214,9 @@
   </div>
   {#if editing}
     <TagEditor
-      title="Edit artist"
+      title={t('av.edit')}
       save={saveArtist}
-      applies="A new name goes on every song and album they're on; genres go on the songs they lead."
+      applies={t('av.edit_applies')}
       fields={['artist', 'genre']}
       initial={{ artist: artist.name, genre: artist.genres ?? '' }}
       onclose={() => (editing = false)}

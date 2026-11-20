@@ -39,6 +39,8 @@ pub fn router() -> Router<AppState> {
         .route("/nodes/me/audio", put(put_my_audio))
         .route("/nodes/me/devices", post(put_my_devices))
         .route("/nodes/me/room", put(put_my_room))
+        .route("/nodes/me/screen", put(put_my_screen))
+        .route("/rooms/{id}/screen", get(room_screen).put(put_room_screen))
         .route("/nodes/song/{id}", get(song))
         .route("/nodes/{id}/audio", put(put_audio))
         .route("/nodes/{id}/screen", get(screen_of))
@@ -51,6 +53,28 @@ pub fn router() -> Router<AppState> {
         .route("/nodes/settings", put(put_settings))
         .route("/nodes/{id}/accept", post(accept))
         .route("/nodes/{id}", axum::routing::patch(update).delete(remove))
+}
+
+/// Every address accepted nodes have said they have, or seem to check in
+/// from: where a node's own page may be opened, to frame Main's screen pages.
+pub async fn node_addresses(state: &AppState) -> Vec<std::net::IpAddr> {
+    let Ok(nodes) = state.store.nodes().await else {
+        return Vec::new();
+    };
+    let mut out: Vec<std::net::IpAddr> = nodes
+        .iter()
+        .filter(|node| node.status == "approved")
+        .flat_map(|node| {
+            node.addresses
+                .lines()
+                .chain(node.address.as_deref())
+                .filter_map(|a| a.trim().parse().ok())
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    out.sort();
+    out.dedup();
+    out
 }
 
 /// SHA-256 of a secret, hex.
@@ -215,6 +239,19 @@ impl FromRequestParts<AppState> for NodeAuth {
     }
 }
 
+/// How many speakers a node may play to at once, the first included.
+pub const MAX_NODE_OUTPUTS: usize = 6;
+
+/// One more speaker on a node: its own device, delay and volume trim.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct OutputSettings {
+    /// Device id; None for the system default.
+    pub device: Option<String>,
+    pub delay_ms: i64,
+    /// Volume trim, 0 to 1.
+    pub trim: f64,
+}
+
 /// A node's speaker settings as pages and nodes see them.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct AudioSettings {
@@ -223,15 +260,20 @@ pub struct AudioSettings {
     pub delay_ms: i64,
     /// Volume trim, 0 to 1.
     pub trim: f64,
+    /// The node's other speakers, beyond the first (`device`, `delay_ms` and
+    /// `trim`); each plays everything in step with its own delay and trim.
+    #[serde(default)]
+    pub outputs: Vec<OutputSettings>,
     pub equalizer: EqualizerSettings,
     /// "stop" or "cached".
     pub offline: String,
     /// Plays straight through instead of correcting itself against Main.
     #[serde(default)]
     pub free_run: bool,
-    /// What a screen plugged into it shows: "status", "off", or pages from
-    /// `SCREEN_PAGES` to try in order, joined by commas.
-    #[serde(default = "default_screen")]
+    /// Its own choice of what a screen plugged into it shows: "status",
+    /// "off", or pages from `SCREEN_PAGES` to try in order, joined by
+    /// commas. Empty to follow its room's display setting (`ROOM_SCREEN`).
+    #[serde(default)]
     pub screen: String,
     /// Its own visualizers instead of the house's (Admin > Visualizers);
     /// None to follow the house.
@@ -251,8 +293,29 @@ fn default_cache_ahead() -> i64 {
 /// speaker is playing, and Main's TV page.
 const SCREEN_PAGES: &[&str] = &["lyrics", "visual", "tv"];
 
-fn default_screen() -> String {
-    "tv".to_owned()
+/// Setting (per room, `room_key`): what the room's screens show unless a
+/// node has its own choice. The TV page when unset.
+pub const ROOM_SCREEN: &str = "screen";
+/// What a room's screens show when it hasn't said.
+const DEFAULT_SCREEN: &str = "tv";
+
+/// What `room`'s screens show by default.
+async fn room_default_screen(state: &AppState, room: i64) -> ApiResult<String> {
+    Ok(state
+        .store
+        .get_setting(&crate::jukebox::room_key(room, ROOM_SCREEN))
+        .await?
+        .filter(|s| !s.is_empty() && valid_screen(s))
+        .unwrap_or_else(|| DEFAULT_SCREEN.to_owned()))
+}
+
+/// What a node's screen shows: its own choice, else its room's.
+async fn shown_screen(state: &AppState, node: &Node) -> ApiResult<String> {
+    if node.screen.is_empty() {
+        room_default_screen(state, node.room_id).await
+    } else {
+        Ok(node.screen.clone())
+    }
 }
 
 /// The pages a screen setting tries, in order; None for the node's own page
@@ -264,6 +327,8 @@ fn screen_order(screen: &str) -> Option<Vec<&str>> {
     Some(screen.split(',').map(str::trim).collect())
 }
 
+/// A screen setting that names pages it can show (empty, following the
+/// room, is checked apart: only a node can follow).
 fn valid_screen(screen: &str) -> bool {
     let Some(order) = screen_order(screen) else {
         return true;
@@ -282,6 +347,7 @@ impl AudioSettings {
             device: node.device.clone(),
             delay_ms: node.delay_ms,
             trim: node.trim,
+            outputs: serde_json::from_str(&node.extra_outputs).unwrap_or_default(),
             equalizer: node
                 .equalizer
                 .as_deref()
@@ -307,10 +373,20 @@ async fn save_audio(state: &AppState, id: i64, audio: &AudioSettings) -> ApiResu
             "those speaker settings are out of range",
         ));
     }
+    if audio.outputs.len() >= MAX_NODE_OUTPUTS
+        || audio
+            .outputs
+            .iter()
+            .any(|o| !(0..=2000).contains(&o.delay_ms) || !(0.0..=1.0).contains(&o.trim))
+    {
+        return Err(ApiError::bad_request(
+            "those speaker settings are out of range",
+        ));
+    }
     if let Some(visual) = &audio.visual {
         visual.check()?;
     }
-    if !valid_screen(&audio.screen) {
+    if !audio.screen.is_empty() && !valid_screen(&audio.screen) {
         return Err(ApiError::bad_request(
             "that's not something a screen can show",
         ));
@@ -324,6 +400,11 @@ async fn save_audio(state: &AppState, id: i64, audio: &AudioSettings) -> ApiResu
         None => String::new(),
     };
     let device = audio.device.as_deref().filter(|d| !d.is_empty());
+    let extra_outputs = if audio.outputs.is_empty() {
+        String::new()
+    } else {
+        serde_json::to_string(&audio.outputs)?
+    };
     state
         .store
         .set_node_audio(
@@ -338,6 +419,7 @@ async fn save_audio(state: &AppState, id: i64, audio: &AudioSettings) -> ApiResu
                 screen: &audio.screen,
                 visual: &visual,
                 cache_ahead: audio.cache_ahead,
+                extra_outputs: &extra_outputs,
             },
         )
         .await?;
@@ -426,6 +508,9 @@ struct MeAnswer {
     /// The page a screen plugged into the node shows; None for the node's
     /// own page (its status, or blank).
     screen: Option<String>,
+    /// What its screen shows (its own choice or its room's): "status",
+    /// "off", or the pages, as `AudioSettings::screen` has them.
+    shows: String,
     /// A newer DJINN for the node to put in place, when it's behind.
     update: Option<crate::node_builds::NodeUpdate>,
     /// The visualizers its screen draws: its own, or else the house's.
@@ -434,6 +519,14 @@ struct MeAnswer {
     /// changes, and its name on the network (`<host>.local`).
     server_id: String,
     host: String,
+    /// Help with AI lyrics (while not playing or showing visuals) with this
+    /// model; None to stop the helper.
+    ai: Option<NodeAiWanted>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NodeAiWanted {
+    pub model: String,
 }
 
 /// A node's own visualizers, if it has them.
@@ -443,15 +536,104 @@ fn audio_visual(node: &Node) -> Option<crate::visuals::Visuals> {
 
 /// The header a node's check-in says its version in.
 pub const NODE_VERSION_HEADER: &str = "x-djinn-version";
+/// A test build's label (commit, edits, time); absent from releases.
+pub const NODE_LABEL_HEADER: &str = "x-djinn-label";
+/// The node's own addresses on its network, comma separated.
+pub const NODE_ADDRESSES_HEADER: &str = "x-djinn-addresses";
 
-/// The page on Main that a node's screen should show, or None for the
-/// node's own page. Pages opened this way check back (`screen_of`), so a
-/// change of setting reaches a screen already showing one.
+/// Most addresses kept for one node.
+const MAX_NODE_ADDRESSES: usize = 6;
+
+/// The home-network addresses in a node's report: private IPv4 only (what a
+/// node on a LAN has), at most `MAX_NODE_ADDRESSES`, no repeats. Anything
+/// else is dropped, so a node can't point Manage links at somewhere
+/// outside the house.
+pub fn parse_addresses(report: &str) -> Vec<std::net::Ipv4Addr> {
+    let mut found: Vec<std::net::Ipv4Addr> = Vec::new();
+    for part in report.split(',') {
+        if let Ok(ip) = part.trim().parse::<std::net::Ipv4Addr>() {
+            if ip.is_private() && !found.contains(&ip) && found.len() < MAX_NODE_ADDRESSES {
+                found.push(ip);
+            }
+        }
+    }
+    found
+}
+
+/// Where a node's page can be opened from here, most likely first: the
+/// addresses it reports for itself, then where its check-ins come from
+/// (which a router, NAT or VPN in between can change). The first that
+/// answers on the page's port wins; if none does, the first one.
+async fn reachable_address(node: &Node, port: u16) -> Option<String> {
+    let mut candidates: Vec<String> = node
+        .addresses
+        .lines()
+        .map(str::to_owned)
+        .filter(|a| !a.is_empty())
+        .collect();
+    if let Some(seen) = &node.address {
+        if !candidates.contains(seen) {
+            candidates.push(seen.clone());
+        }
+    }
+    for candidate in &candidates {
+        let Ok(ip) = candidate.parse::<std::net::IpAddr>() else {
+            continue;
+        };
+        let connect = tokio::net::TcpStream::connect((ip, port));
+        if matches!(
+            tokio::time::timeout(std::time::Duration::from_millis(700), connect).await,
+            Ok(Ok(_))
+        ) {
+            return Some(candidate.clone());
+        }
+    }
+    candidates.into_iter().next()
+}
+
+/// What each node's program calls itself, from its last check-in (kept in
+/// memory: a node says it again every few seconds).
+static LABELS: std::sync::Mutex<Vec<(i64, String)>> = std::sync::Mutex::new(Vec::new());
+
+fn note_label(node: i64, label: &str) {
+    if let Ok(mut labels) = LABELS.lock() {
+        labels.retain(|(id, _)| *id != node);
+        if !label.is_empty() {
+            labels.push((node, label.to_owned()));
+        }
+    }
+}
+
+/// Whether a node runs what Main runs: with a test build, the same label
+/// (one run of the build script gives every program it makes the same one);
+/// otherwise the same version.
+fn same_build(node: &Node) -> bool {
+    let own = env!("DJINN_BUILD_LABEL");
+    if own.is_empty() {
+        node.version.as_deref() == Some(env!("DJINN_RELEASE_VERSION"))
+    } else {
+        label_of(node.id).as_deref() == Some(own)
+    }
+}
+
+fn label_of(node: i64) -> Option<String> {
+    LABELS
+        .lock()
+        .ok()?
+        .iter()
+        .find(|(id, _)| *id == node)
+        .map(|(_, label)| label.clone())
+}
+
+/// The page on Main that a node's screen should show, given what it shows
+/// (`shown_screen`), or None for the node's own page. Pages opened this way
+/// check back (`screen_of`), so a change of setting reaches a screen
+/// already showing one.
 /// With more than one page to try, or the visualizer, the page carries the
 /// order and switches between them itself. The visualizer's settings come
 /// in check-ins (`MeAnswer::visuals`), since the node draws it.
-fn screen_url(state: &AppState, node: &Node) -> Option<String> {
-    let order = screen_order(&node.screen)?;
+fn screen_url(state: &AppState, node: &Node, shown: &str) -> Option<String> {
+    let order = screen_order(shown)?;
     let page = if order.first() == Some(&"tv") {
         "tv"
     } else {
@@ -502,9 +684,11 @@ async fn manage_link(
         .await?
         .filter(|node| node.status == "approved")
         .ok_or_else(ApiError::not_found)?;
-    let address = node.address.ok_or_else(|| {
-        ApiError::bad_request("this node hasn't checked in yet, so its address isn't known")
-    })?;
+    let address = reachable_address(&node, NODE_PAGE_PORT)
+        .await
+        .ok_or_else(|| {
+            ApiError::bad_request("this node hasn't checked in yet, so its address isn't known")
+        })?;
     let token = crate::security::random_hex(16)?;
     let now = djinn_store::now_ms();
     if let Ok(mut links) = MANAGE_LINKS.lock() {
@@ -562,8 +746,9 @@ async fn screen_of(
         .await?
         .filter(|node| node.status == "approved")
         .ok_or_else(ApiError::not_found)?;
+    let shown = shown_screen(&state, &node).await?;
     Ok(Json(ScreenAnswer {
-        url: screen_url(&state, &node),
+        url: screen_url(&state, &node, &shown),
     }))
 }
 
@@ -585,16 +770,48 @@ async fn me(
         .store
         .node_seen(node.id, address.as_deref(), version.as_deref())
         .await?;
+    if let Some(report) = headers
+        .get(NODE_ADDRESSES_HEADER)
+        .and_then(|v| v.to_str().ok())
+    {
+        let own: Vec<String> = parse_addresses(report)
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        state
+            .store
+            .set_node_addresses(node.id, &own.join("\n"))
+            .await?;
+    }
     let running = crate::node_builds::Running::from_headers(&headers, node.version.as_deref());
+    note_label(
+        node.id,
+        &headers
+            .get(NODE_LABEL_HEADER)
+            .and_then(|v| v.to_str().ok())
+            .map(|v| v.chars().take(80).collect::<String>())
+            .unwrap_or_default(),
+    );
     let node = Node {
         version: version.or(node.version),
         ..node
     };
     let audio = AudioSettings::of(&node);
+    let shows = shown_screen(&state, &node).await?;
     let upcoming = if node.status == "approved" {
         upcoming(&state, node.room_id, node.cache_ahead as usize).await?
     } else {
         Vec::new()
+    };
+    let ai = if node.status == "approved"
+        && node.ai_help
+        && settings::flag(&state.store, crate::ai_work::WORK_ON, false).await?
+    {
+        Some(NodeAiWanted {
+            model: crate::ai_work::model_for(&node),
+        })
+    } else {
+        None
     };
     let rooms = if node.status == "approved" {
         state
@@ -615,7 +832,8 @@ async fn me(
         upcoming,
         rooms,
         audio_room: state.rooms.audio_leader(node.room_id),
-        screen: screen_url(&state, &node),
+        screen: screen_url(&state, &node, &shows),
+        shows,
         update: crate::node_builds::offer(&state, &node, &running),
         visuals: match audio_visual(&node) {
             Some(own) => own,
@@ -627,6 +845,7 @@ async fn me(
         server_name: crate::go_announce::server_name(&state.store).await?,
         server_id: crate::go_announce::server_id(&state.store).await?,
         host: crate::go_announce::host_label(&crate::go_announce::computer_name()),
+        ai,
     }))
 }
 
@@ -637,8 +856,25 @@ struct ListedNode {
     /// The code the node's own screen shows, to compare.
     code: String,
     audio: AudioSettings,
+    /// "test <commit> ..." when the node runs a test build.
+    build_label: Option<String>,
+    /// The node runs the same build as Main (the same test build, or the
+    /// same version when this isn't one).
+    same_build: bool,
     /// The speakers the node reported.
     speakers: Vec<serde_json::Value>,
+    /// Its AI helper: what it reported, the model suggested and in use, and
+    /// its measured speed.
+    ai: ListedAi,
+}
+
+#[derive(Serialize)]
+struct ListedAi {
+    #[serde(flatten)]
+    report: crate::ai_work::NodeAiReport,
+    suggested: &'static str,
+    using: String,
+    secs_per_minute: Option<f64>,
 }
 
 #[derive(Serialize)]
@@ -658,11 +894,22 @@ async fn list(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json<Nod
         .map(|node| ListedNode {
             code: pairing_code(&node.node_id, &node.secret_hash),
             audio: AudioSettings::of(&node),
+            build_label: label_of(node.id),
+            same_build: same_build(&node),
             speakers: node
                 .devices
                 .as_deref()
                 .and_then(|d| serde_json::from_str(d).ok())
                 .unwrap_or_default(),
+            ai: ListedAi {
+                report: crate::ai_work::NodeAiReport::of(&node),
+                suggested: crate::ai_work::suggested_model(
+                    &crate::ai_work::NodeAiReport::of(&node),
+                    crate::ai_work::speed_of(&crate::ai_work::node_worker(&node)),
+                ),
+                using: crate::ai_work::model_for(&node),
+                secs_per_minute: crate::ai_work::speed_of(&crate::ai_work::node_worker(&node)),
+            },
             node,
         })
         .collect();
@@ -836,6 +1083,9 @@ fn any_missing<'a>(nodes: impl IntoIterator<Item = (&'a str, Option<i64>)>, now:
 struct NodeChange {
     name: Option<String>,
     room_id: Option<i64>,
+    /// Help with AI lyrics, with this model ("" or none for the suggested one).
+    ai_help: Option<bool>,
+    ai_model: Option<String>,
 }
 
 async fn update(
@@ -857,6 +1107,13 @@ async fn update(
         if !state.store.set_node_room(id, room).await? {
             return Err(ApiError::bad_request("there's no such room"));
         }
+    }
+    if let Some(help) = body.ai_help {
+        let model = body.ai_model.as_deref().filter(|m| !m.is_empty());
+        if model.is_some_and(|m| !crate::ai_listener::MODELS.contains(&m)) {
+            return Err(ApiError::bad_request("unknown model"));
+        }
+        state.store.set_node_ai(id, help, model).await?;
     }
     Ok(StatusCode::NO_CONTENT)
 }
@@ -892,6 +1149,65 @@ async fn put_my_room(
         return Err(ApiError::bad_request("there's no such room"));
     }
     tracing::info!(node = %node.name, room = body.room_id, "node moved to another room from its tray");
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+struct ScreenChoice {
+    /// What to show, as `AudioSettings::screen`; empty to follow the room.
+    screen: String,
+}
+
+/// The node's own choice of screen, from its tray icon.
+async fn put_my_screen(
+    State(state): State<AppState>,
+    NodeAuth(node): NodeAuth,
+    Json(body): Json<ScreenChoice>,
+) -> ApiResult<StatusCode> {
+    if node.status != "approved" {
+        return Err(ApiError::forbidden());
+    }
+    let mut audio = AudioSettings::of(&node);
+    audio.screen = body.screen;
+    save_audio(&state, node.id, &audio).await?;
+    tracing::info!(node = %node.name, screen = %audio.screen, "node's screen changed from its tray");
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Serialize)]
+struct RoomScreen {
+    screen: String,
+}
+
+/// What a room's screens show unless a node has its own choice.
+async fn room_screen(
+    _: AdminUser,
+    State(state): State<AppState>,
+    Path(room): Path<i64>,
+) -> ApiResult<Json<RoomScreen>> {
+    Ok(Json(RoomScreen {
+        screen: room_default_screen(&state, room).await?,
+    }))
+}
+
+async fn put_room_screen(
+    _: AdminUser,
+    State(state): State<AppState>,
+    Path(room): Path<i64>,
+    Json(body): Json<ScreenChoice>,
+) -> ApiResult<StatusCode> {
+    if !valid_screen(&body.screen) {
+        return Err(ApiError::bad_request(
+            "that's not something a screen can show",
+        ));
+    }
+    if !state.store.rooms().await?.iter().any(|r| r.id == room) {
+        return Err(ApiError::not_found());
+    }
+    state
+        .store
+        .set_setting(&crate::jukebox::room_key(room, ROOM_SCREEN), &body.screen)
+        .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -980,6 +1296,56 @@ async fn remove(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_node_reports_only_home_addresses() {
+        let found = parse_addresses(
+            "192.168.0.195, 100.84.45.127,8.8.8.8,127.0.0.1,fe80::1,192.168.0.195,10.0.0.7,junk",
+        );
+        assert_eq!(
+            found,
+            vec![
+                "192.168.0.195".parse::<std::net::Ipv4Addr>().unwrap(),
+                "10.0.0.7".parse().unwrap()
+            ]
+        );
+        assert!(parse_addresses("").is_empty());
+    }
+
+    #[tokio::test]
+    async fn manage_uses_the_address_that_answers_not_where_check_ins_come_from() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let store = djinn_store::Store::open_in_memory().await.unwrap();
+        store
+            .request_node_join(&JoinRequest {
+                node_id: "n1",
+                name: "Kitchen",
+                secret_hash: "aa",
+                // A router or VPN in between: nothing listens here.
+                address: Some("192.0.2.1"),
+                version: None,
+                platform: None,
+            })
+            .await
+            .unwrap();
+        let id = store.node_by_node_id("n1").await.unwrap().unwrap().id;
+        store
+            .set_node_addresses(id, "192.0.2.2\n127.0.0.1")
+            .await
+            .unwrap();
+        let node = store.node(id).await.unwrap().unwrap();
+        assert_eq!(
+            reachable_address(&node, port).await.as_deref(),
+            Some("127.0.0.1")
+        );
+        // Nothing answers: the first address the node reported.
+        drop(listener);
+        assert_eq!(
+            reachable_address(&node, port).await.as_deref(),
+            Some("192.0.2.2")
+        );
+    }
     use axum::body::Body;
 
     #[test]
@@ -1072,27 +1438,45 @@ mod tests {
         assert_eq!(status, StatusCode::NOT_FOUND);
 
         let node = state.store.node(id).await.unwrap().unwrap();
+        // A new node follows its room, whose screens show the TV page.
+        assert_eq!(node.screen, "");
+        assert_eq!(shown_screen(&state, &node).await.unwrap(), "tv");
         assert_eq!(
-            screen_url(&state, &node).unwrap(),
+            screen_url(&state, &node, "tv").unwrap(),
             format!("http://main:8066/tv?room=1&screen_for={id}")
         );
-        let with = |screen: &str| Node {
-            screen: screen.to_owned(),
-            ..node.clone()
-        };
-        assert!(screen_url(&state, &with("lyrics"))
+        assert!(screen_url(&state, &node, "lyrics")
             .unwrap()
             .contains("/lyrics?room=1"));
-        assert_eq!(screen_url(&state, &with("status")), None);
-        assert_eq!(screen_url(&state, &with("off")), None);
+        assert_eq!(screen_url(&state, &node, "status"), None);
+        assert_eq!(screen_url(&state, &node, "off"), None);
         // An order: the first page that isn't the TV, which switches itself.
         assert_eq!(
-            screen_url(&state, &with("lyrics,visual,tv")).unwrap(),
+            screen_url(&state, &node, "lyrics,visual,tv").unwrap(),
             format!("http://main:8066/lyrics?room=1&screen_for={id}&order=lyrics,visual,tv")
         );
-        assert!(screen_url(&state, &with("tv,lyrics"))
+        assert!(screen_url(&state, &node, "tv,lyrics")
             .unwrap()
             .contains("/tv?room=1&screen_for=1&order=tv,lyrics"));
+
+        // The room's setting is what it shows, until the node has its own.
+        state
+            .store
+            .set_setting(ROOM_SCREEN, "lyrics,tv")
+            .await
+            .unwrap();
+        assert_eq!(shown_screen(&state, &node).await.unwrap(), "lyrics,tv");
+        let own = Node {
+            screen: "off".to_owned(),
+            ..node.clone()
+        };
+        assert_eq!(shown_screen(&state, &own).await.unwrap(), "off");
+        // Another room's setting is its own.
+        let other = Node {
+            room_id: 7,
+            ..node.clone()
+        };
+        assert_eq!(shown_screen(&state, &other).await.unwrap(), "tv");
     }
 
     #[test]
@@ -1584,6 +1968,107 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_node_can_play_to_several_speakers_and_each_is_timed() {
+        let state = AppState::for_tests().await;
+        let admin = admin_with_password(&state).await;
+        let cookie = Some(("cookie", admin.as_str()));
+        state.store.set_setting(NODES_JOIN, "1").await.unwrap();
+        send(
+            &state,
+            Method::POST,
+            "/api/nodes/join",
+            Some(JOIN),
+            None,
+            true,
+        )
+        .await;
+        let id = state
+            .store
+            .node_by_node_id("kitchen-0001")
+            .await
+            .unwrap()
+            .unwrap()
+            .id;
+        state.store.approve_node(id, 1).await.unwrap();
+        let signed = format!("Node kitchen-0001:{SECRET}");
+        let node = Some(("authorization", signed.as_str()));
+        let audio = |outputs: &str| {
+            format!(
+                r#"{{"device":"hw:1","delay_ms":0,"trim":1.0,"outputs":{outputs},"offline":"stop","equalizer":{{"enabled":false,"bands_db":[0,0,0,0,0,0,0,0,0,0,0,0],"output_gain_db":0}}}}"#
+            )
+        };
+        let path = format!("/api/nodes/{id}/audio");
+        let (status, _) = send(
+            &state,
+            Method::PUT,
+            &path,
+            Some(&audio(r#"[{"device":"hw:2","delay_ms":30,"trim":0.5}]"#)),
+            cookie,
+            false,
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        let (_, me) = send(&state, Method::GET, "/api/nodes/me", None, node, true).await;
+        assert!(
+            me.contains(r#""outputs":[{"device":"hw:2","delay_ms":30,"trim":0.5}]"#),
+            "{me}"
+        );
+        // Out of range, and too many.
+        for bad in [
+            r#"[{"device":null,"delay_ms":9000,"trim":0.5}]"#.to_owned(),
+            r#"[{"device":null,"delay_ms":0,"trim":2}]"#.to_owned(),
+            format!(
+                "[{}]",
+                [r#"{"device":null,"delay_ms":0,"trim":1}"#; MAX_NODE_OUTPUTS].join(",")
+            ),
+        ] {
+            let (status, _) = send(
+                &state,
+                Method::PUT,
+                &path,
+                Some(&audio(&bad)),
+                cookie,
+                false,
+            )
+            .await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{bad}");
+        }
+        // The room's timing lists each speaker, and moves the second alone.
+        let (_, timing) = send(
+            &state,
+            Method::GET,
+            "/api/rooms/1/timing",
+            None,
+            cookie,
+            false,
+        )
+        .await;
+        assert!(
+            timing.contains("Kitchen, speaker 1") && timing.contains("Kitchen, speaker 2"),
+            "{timing}"
+        );
+        let (status, timing) = send(
+            &state,
+            Method::POST,
+            "/api/rooms/1/timing",
+            Some(&format!(
+                r#"{{"kind":"node","id":{id},"output":1,"ms":10}}"#
+            )),
+            cookie,
+            false,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{timing}");
+        let node = state.store.node(id).await.unwrap().unwrap();
+        assert_eq!(node.delay_ms, 0);
+        assert!(
+            node.extra_outputs.contains(r#""delay_ms":40"#),
+            "{}",
+            node.extra_outputs
+        );
+    }
+
+    #[tokio::test]
     async fn speaker_settings_go_both_ways_and_are_checked() {
         let state = AppState::for_tests().await;
         let admin = admin_with_password(&state).await;
@@ -1740,5 +2225,230 @@ mod tests {
         assert!(!valid_id("short"));
         assert!(!valid_id("has space in it"));
         assert!(!valid_id(&"x".repeat(65)));
+    }
+
+    /// Like `send`, from a computer at home (as AI workers must be).
+    async fn from_home(
+        state: &AppState,
+        method: Method,
+        path: &str,
+        body: Option<&str>,
+        auth: Option<(&str, &str)>,
+    ) -> (StatusCode, String) {
+        let mut req = Request::builder().method(method).uri(path);
+        if body.is_some() {
+            req = req.header(header::CONTENT_TYPE, "application/json");
+        }
+        if let Some((name, value)) = auth {
+            req = req.header(name, value);
+        }
+        let req = req
+            .extension(axum::extract::ConnectInfo(std::net::SocketAddr::from((
+                [192, 168, 1, 20],
+                4000,
+            ))))
+            .body(body.map_or_else(Body::empty, |b| Body::from(b.to_owned())))
+            .unwrap();
+        let res = crate::app(state.clone()).oneshot(req).await.unwrap();
+        let status = res.status();
+        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        (status, String::from_utf8_lossy(&bytes).into_owned())
+    }
+
+    #[tokio::test]
+    async fn a_node_helps_with_ai_lyrics_from_vocals_main_isolated() {
+        use djinn_store::{NewLyrics, ScannedTrack};
+        let state = AppState::for_tests().await;
+        admin_with_password(&state).await;
+        settings::set_flag(&state.store, NODES_JOIN, true)
+            .await
+            .unwrap();
+        send(
+            &state,
+            Method::POST,
+            "/api/nodes/join",
+            Some(JOIN),
+            None,
+            true,
+        )
+        .await;
+        let id = state
+            .store
+            .node_by_node_id("kitchen-0001")
+            .await
+            .unwrap()
+            .unwrap()
+            .id;
+        state.store.approve_node(id, 1).await.unwrap();
+        let signed = format!("Node kitchen-0001:{SECRET}");
+        let node = Some(("authorization", signed.as_str()));
+        let me = |body: &str| -> serde_json::Value {
+            serde_json::from_str::<serde_json::Value>(body).unwrap()["ai"].clone()
+        };
+        // Off until the admin switches it on (and lyrics listening is on).
+        let (_, body) = send(&state, Method::GET, "/api/nodes/me", None, node, true).await;
+        assert!(me(&body).is_null(), "{body}");
+        let (status, _) = send(
+            &state,
+            Method::POST,
+            "/api/nodes/ai/next",
+            Some("{}"),
+            node,
+            true,
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        settings::set_flag(&state.store, crate::ai_work::WORK_ON, true)
+            .await
+            .unwrap();
+        state.store.set_node_ai(id, true, None).await.unwrap();
+        let (_, body) = send(&state, Method::GET, "/api/nodes/me", None, node, true).await;
+        assert_eq!(me(&body)["model"], "tiny", "nothing known about it yet");
+        // It reports a decent box: a bigger model is suggested.
+        let report = r#"{"phase":"ready","threads":8,"memory_mb":16000,"bench_ms":2000}"#;
+        let (status, _) = send(
+            &state,
+            Method::PUT,
+            "/api/nodes/ai/report",
+            Some(report),
+            node,
+            true,
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        let (_, body) = send(&state, Method::GET, "/api/nodes/me", None, node, true).await;
+        assert_eq!(me(&body)["model"], "small");
+
+        // Two songs without lyrics.
+        let song = |t: &str| ScannedTrack {
+            path: format!("/m/{t}.mp3"),
+            title: t.into(),
+            artist: Some("Band".into()),
+            duration_ms: Some(60_000),
+            ..Default::default()
+        };
+        state
+            .store
+            .save_scanned(&[song("One"), song("Two")])
+            .await
+            .unwrap();
+        for row in state.store.compare_rows().await.unwrap() {
+            state
+                .store
+                .save_read_lyrics(row.id, 1, &NewLyrics::NONE)
+                .await
+                .unwrap();
+            state
+                .store
+                .save_looked_up_lyrics(row.id, None)
+                .await
+                .unwrap();
+        }
+        // The node asks first and gets a whole song.
+        let (_, body) = send(
+            &state,
+            Method::POST,
+            "/api/nodes/ai/next",
+            Some(r#"{"max":1}"#),
+            node,
+            true,
+        )
+        .await;
+        let first: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(first["jobs"][0]["vocals"], false, "{body}");
+        // This computer's listener, able to isolate vocals, is asked to
+        // prepare the other for the node that is helping.
+        let key = crate::ai_work::replace_key(&state, crate::ai_listener::LOCAL_KEY_NAME)
+            .await
+            .unwrap();
+        let worker = format!("Worker {key}");
+        let local = Some(("authorization", worker.as_str()));
+        let (_, body) = from_home(
+            &state,
+            Method::POST,
+            "/api/ai-work/next",
+            Some(r#"{"max":1,"can_isolate":true}"#),
+            local,
+        )
+        .await;
+        let prep: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(prep["jobs"][0]["prepare"], true, "{body}");
+        let two = prep["jobs"][0]["track_id"].as_i64().unwrap();
+        let (status, _) = from_home(
+            &state,
+            Method::POST,
+            &format!("/api/ai-work/vocals/{two}"),
+            Some("not flac"),
+            local,
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        let (status, _) = from_home(
+            &state,
+            Method::POST,
+            &format!("/api/ai-work/vocals/{two}"),
+            Some("fLaC vocals"),
+            local,
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        // The node gets it as vocals, and only its holder can fetch it.
+        let (_, body) = send(
+            &state,
+            Method::POST,
+            "/api/nodes/ai/next",
+            Some(r#"{"max":1}"#),
+            node,
+            true,
+        )
+        .await;
+        let got: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(
+            (
+                got["jobs"][0]["track_id"].as_i64(),
+                got["jobs"][0]["vocals"].as_bool()
+            ),
+            (Some(two), Some(true)),
+            "{body}"
+        );
+        let (_, audio) = send(
+            &state,
+            Method::GET,
+            &format!("/api/nodes/ai/song/{two}"),
+            None,
+            node,
+            true,
+        )
+        .await;
+        assert_eq!(audio, "fLaC vocals");
+        let (status, _) = from_home(
+            &state,
+            Method::GET,
+            &format!("/api/ai-work/song/{two}"),
+            None,
+            local,
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        // Its lyrics come back; the vocals are deleted.
+        let lrc = r#"{"lrc":"[ar:Band]\n[ti:Two]\n[by:lyrics-listener (AI-generated; model=tiny)]\n\n[00:01.00]hello","elapsed_ms":30000}"#;
+        let (status, text) = send(
+            &state,
+            Method::POST,
+            &format!("/api/nodes/ai/result/{two}"),
+            Some(lrc),
+            node,
+            true,
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT, "{text}");
+        assert_eq!(state.store.lyrics(two).await.unwrap().unwrap().ai, 1);
+        assert!(!crate::ai_listener::dir(&state)
+            .join("vocals")
+            .join(format!("{two}.flac"))
+            .exists());
+        assert_eq!(crate::ai_work::speed_of("node:kitchen-0001"), Some(30.0));
     }
 }

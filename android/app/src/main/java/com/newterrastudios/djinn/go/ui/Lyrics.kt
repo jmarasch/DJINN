@@ -51,6 +51,14 @@ fun lineAt(lines: List<LyricLine>, ms: Long): Int {
 @Composable
 fun LyricsBlock(lyrics: Lyrics?, loading: Boolean, position: () -> Long, big: Boolean = false) {
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
+    // Whether an AI made or timed them (the server leaves it out when the admin turned the note off).
+    when (lyrics?.ai) {
+        "made" -> Note(t("lyrics.ai_made_note"))
+        "synced" -> Note(
+            lyrics.aiMatch?.let { t("lyrics.ai_synced_match", "match" to it.toString()) }
+                ?: t("lyrics.ai_synced_note"),
+        )
+    }
     when {
         loading -> Note(t("lyrics.loading"))
         lyrics == null -> Note(t("lyrics.none"))

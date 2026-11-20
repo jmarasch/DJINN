@@ -3,6 +3,7 @@
   // authenticator app, confirm a code, keep the recovery codes.
   import { onMount } from 'svelte'
   import { api } from './api'
+  import { t } from './i18n.svelte'
   import type { TwoStepSetup, TwoStepStatus } from './types'
 
   let { onchange }: { onchange?: (on: boolean) => void } = $props()
@@ -24,7 +25,7 @@
     try {
       status = await api.twoStep()
     } catch (e) {
-      error = e instanceof Error ? e.message : 'Could not load'
+      error = e instanceof Error ? e.message : t('uf.load_failed')
     }
   }
 
@@ -34,7 +35,7 @@
     try {
       await action()
     } catch (e) {
-      error = e instanceof Error ? e.message : 'That did not work'
+      error = e instanceof Error ? e.message : t('common.failed')
     } finally {
       busy = false
     }
@@ -82,72 +83,72 @@
 </script>
 
 <section class="card">
-  <h2>Two-step sign-in</h2>
+  <h2>{t('ts.title')}</h2>
   {#if !status}
-    <p class="muted">Loading...</p>
+    <p class="muted">{t('common.loading')}</p>
   {:else if recovery}
-    <p>Two-step sign-in is on. Keep these recovery codes somewhere safe, like a password manager. Each one works once if you lose your phone. They aren't shown again.</p>
+    <p>{t('ts.on_codes')}</p>
     <ul class="codes">
       {#each recovery as c (c)}<li>{c}</li>{/each}
     </ul>
-    <div class="row">
-      <button onclick={copyCodes}>Copy codes</button>
-      <button class="primary" onclick={() => (recovery = null)}>I've saved them</button>
+    <div class="actions">
+      <button onclick={copyCodes}>{t('ts.copy')}</button>
+      <button class="primary" onclick={() => (recovery = null)}>{t('ts.saved')}</button>
     </div>
   {:else if setup}
-    <p>Scan this with an authenticator app (like Google Authenticator, Microsoft Authenticator, 1Password or Bitwarden), then type the 6-digit code it shows.</p>
+    <p>{t('ts.scan')}</p>
     <!-- The QR code is an SVG DJINN made itself. -->
     <div class="qr">{@html setup.qr_svg}</div>
-    <p class="small muted">Can't scan? Type this key into the app: <span class="mono">{setup.secret}</span></p>
-    <form class="row" onsubmit={confirm}>
-      <input bind:value={code} inputmode="numeric" autocomplete="one-time-code" maxlength="7" placeholder="123456" required aria-label="Code from the app" />
-      <button class="primary" disabled={busy}>Turn on</button>
+    <p class="small muted">{t('ts.cant_scan')} <span class="mono">{setup.secret}</span></p>
+    <form class="actions" onsubmit={confirm}>
+      <input bind:value={code} inputmode="numeric" autocomplete="one-time-code" maxlength="7" placeholder="123456" required aria-label={t('ts.code_label')} />
+      <button class="primary" disabled={busy}>{t('ts.turn_on')}</button>
     </form>
-    <button class="link" onclick={() => (setup = null)}>Cancel</button>
+    <button class="link" onclick={() => (setup = null)}>{t('common.cancel')}</button>
   {:else if status.on}
-    <p>On. Signing in asks for a code from your authenticator app. {status.recovery_codes_left} recovery {status.recovery_codes_left === 1 ? 'code' : 'codes'} left.</p>
+    <p>{t('ts.on')} {t('ts.left', { n: status.recovery_codes_left })}</p>
     {#if starting}
-      <form class="row" onsubmit={begin}>
-        <input type="password" bind:value={password} autocomplete="current-password" placeholder="Your password" required aria-label="Your password" />
-        <button class="primary" disabled={busy}>Continue</button>
+      <form class="actions" onsubmit={begin}>
+        <input type="password" bind:value={password} autocomplete="current-password" placeholder={t('ts.your_password')} required aria-label={t('ts.your_password')} />
+        <button class="primary" disabled={busy}>{t('ts.continue')}</button>
       </form>
     {:else if turningOff}
-      <form class="row" onsubmit={turnOff}>
-        <input type="password" bind:value={password} autocomplete="current-password" placeholder="Your password" required aria-label="Your password" />
-        <button disabled={busy}>Turn off</button>
+      <form class="actions" onsubmit={turnOff}>
+        <input type="password" bind:value={password} autocomplete="current-password" placeholder={t('ts.your_password')} required aria-label={t('ts.your_password')} />
+        <button class="danger" disabled={busy}>{t('ts.turn_off')}</button>
       </form>
-      {#if status.required}<p class="small muted">DJINN GO needs it for your account, so GO stops working until you turn it on again.</p>{/if}
+      {#if status.required}<p class="small muted">{t('ts.go_needs_off')}</p>{/if}
     {:else}
-      <div class="row">
-        <button onclick={() => (starting = true)} disabled={busy}>New phone or new codes</button>
-        <button onclick={() => (turningOff = true)}>Turn off</button>
+      <div class="actions">
+        <button onclick={() => (starting = true)} disabled={busy}>{t('ts.new_phone')}</button>
+        <button class="danger" onclick={() => (turningOff = true)}>{t('ts.turn_off')}</button>
       </div>
     {/if}
   {:else}
     <p>
-      {status.required ? 'DJINN GO needs this for your account.' : 'Off.'}
-      After your password, signing in also asks for a code from an app on your phone, so a stolen password isn't enough.
+      {status.required ? t('ts.go_needs') : t('ts.off')}
+      {t('ts.why')}
     </p>
     {#if starting}
-      <form class="row" onsubmit={begin}>
-        <input type="password" bind:value={password} autocomplete="current-password" placeholder="Your password" required aria-label="Your password" />
-        <button class="primary" disabled={busy}>Continue</button>
+      <form class="actions" onsubmit={begin}>
+        <input type="password" bind:value={password} autocomplete="current-password" placeholder={t('ts.your_password')} required aria-label={t('ts.your_password')} />
+        <button class="primary" disabled={busy}>{t('ts.continue')}</button>
       </form>
     {:else}
-      <button class="primary" onclick={() => (starting = true)} disabled={busy}>Set up two-step sign-in</button>
+      <button class="primary" onclick={() => (starting = true)} disabled={busy}>{t('ts.set_up')}</button>
     {/if}
   {/if}
   {#if error}<p class="error">{error}</p>{/if}
 </section>
 
 <style>
-  .row {
+  .actions {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
   }
 
-  .row input {
+  .actions input {
     flex: 1;
     min-width: 0;
   }

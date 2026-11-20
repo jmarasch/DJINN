@@ -3,6 +3,7 @@
   import Icon from './Icon.svelte'
   import Sheet from './Sheet.svelte'
   import { app, toast } from './state.svelte'
+  import { locale, t } from './i18n.svelte'
   import type { AudioDevice, LiveOutput, OutputConfig } from './types'
 
   let outputs = $state<OutputConfig[]>([])
@@ -35,7 +36,7 @@
         try {
           await api.updateOutput(output)
         } catch (e) {
-          toast(e instanceof Error ? e.message : 'Could not save', true)
+          toast(e instanceof Error ? e.message : t('common.save_failed_short'), true)
         }
       }, wait),
     )
@@ -47,7 +48,7 @@
   }
 
   async function rename(output: OutputConfig) {
-    const label = prompt('Name this output (for example "Left monitor"):', output.label)?.trim()
+    const label = prompt(t('out.rename_q'), output.label)?.trim()
     if (!label || label === output.label) return
     const before = output.label
     output.label = label
@@ -55,7 +56,7 @@
       await api.updateOutput(output)
     } catch (e) {
       output.label = before
-      toast(e instanceof Error ? e.message : 'Could not rename it', true)
+      toast(e instanceof Error ? e.message : t('common.rename_failed'), true)
     }
   }
 
@@ -66,7 +67,7 @@
       devices = await api.audioDevices()
     } catch (e) {
       adding = false
-      toast(e instanceof Error ? e.message : 'Could not list devices', true)
+      toast(e instanceof Error ? e.message : t('out.list_failed'), true)
     }
   }
 
@@ -75,44 +76,43 @@
       const output = await api.addOutput(device.id, device.name)
       if (!outputs.some((o) => o.id === output.id)) outputs.push(output)
       adding = false
-      toast(`Added ${output.label}`)
+      toast(t('out.added', { name: output.label }))
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not add it', true)
+      toast(e instanceof Error ? e.message : t('common.add_failed'), true)
     }
   }
 
   async function remove(output: OutputConfig) {
-    if (!confirm(`Stop playing through ${output.label} and remove it?`)) return
+    if (!confirm(t('out.remove_q', { name: output.label }))) return
     try {
       await api.removeOutput(output.id)
       outputs = outputs.filter((o) => o.id !== output.id)
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not remove it', true)
+      toast(e instanceof Error ? e.message : t('common.remove_failed'), true)
     }
   }
 
   function statusText(output: OutputConfig, l: LiveOutput | undefined): string {
-    if (!output.enabled) return 'Off'
-    if (!l || l.state === 'waiting') return l?.error ? `Not connected: ${l.error}` : 'Connecting...'
+    if (!output.enabled) return t('out.off')
+    if (!l || l.state === 'waiting') return l?.error ? t('out.not_connected', { error: l.error }) : t('out.connecting')
     const device = output.device_id ? '' : `${l.device} · `
-    return `${device}${(l.sample_rate ?? 0) / 1000} kHz`
+    return `${device}${t('out.khz', { n: ((l.sample_rate ?? 0) / 1000).toLocaleString(locale.code) })}`
   }
 
   function syncText(l: LiveOutput): string {
-    if (l.clock) return playingCount > 1 ? 'Others keep time with this one' : ''
+    if (l.clock) return playingCount > 1 ? t('out.clock_note') : ''
     // A few milliseconds apart is far below what anyone can hear.
-    const offset = Math.abs(l.offset_ms) < 5 ? 'In sync' : `${l.offset_ms > 0 ? 'Behind' : 'Ahead'} by ${Math.abs(l.offset_ms).toFixed(0)} ms, catching up`
-    const speed = l.drift_ppm === 0 ? '' : ` · speed ${l.drift_ppm > 0 ? '+' : ''}${l.drift_ppm.toFixed(0)} ppm`
+    const ms = Math.abs(l.offset_ms).toFixed(0)
+    const offset = Math.abs(l.offset_ms) < 5 ? t('out.in_sync') : t(l.offset_ms > 0 ? 'out.behind' : 'out.ahead', { ms })
+    const speed = l.drift_ppm === 0 ? '' : t('out.speed', { ppm: `${l.drift_ppm > 0 ? '+' : ''}${l.drift_ppm.toFixed(0)}` })
     return offset + speed
   }
 </script>
 
 <section class="card">
-  <h2>Outputs</h2>
+  <h2>{t('out.title')}</h2>
   <p class="small muted">
-    Play through more than one device at once, like the stereo and a Bluetooth speaker in the next room. DJINN keeps
-    them in time. Bluetooth lags a few hundred milliseconds behind wired outputs, so raise the delay on the wired ones
-    until everything lines up.
+    {t('out.intro')}
   </p>
 
   {#each outputs as output (output.id)}
@@ -128,7 +128,7 @@
         <div class="grow">
           <div class="label">
             {output.label}
-            {#if l?.clock && playingCount > 1}<span class="badge">Clock</span>{/if}
+            {#if l?.clock && playingCount > 1}<span class="badge">{t('out.clock')}</span>{/if}
           </div>
           <div class="small muted" class:error={output.enabled && !!l?.error && l.state !== 'playing'}>
             {statusText(output, l)}
@@ -139,16 +139,16 @@
         </div>
         <label class="switch">
           <input type="checkbox" bind:checked={output.enabled} onchange={() => save(output, 0)} />
-          On
+          {t('out.on')}
         </label>
-        <button class="icon" aria-label="Rename {output.label}" onclick={() => rename(output)}><Icon name="edit" /></button>
+        <button class="icon" aria-label={t('out.rename', { name: output.label })} onclick={() => rename(output)}><Icon name="edit" /></button>
         {#if output.device_id}
-          <button class="icon" aria-label="Remove {output.label}" onclick={() => remove(output)}><Icon name="close" /></button>
+          <button class="icon" aria-label={t('out.remove', { name: output.label })} onclick={() => remove(output)}><Icon name="close" /></button>
         {/if}
       </div>
 
       <label class="slider">
-        <span class="row-label">Volume <span class="muted">{Math.round(output.volume_trim * 100)}%</span></span>
+        <span class="row-label">{t('out.volume')} <span class="muted">{Math.round(output.volume_trim * 100)}%</span></span>
         <input
           type="range"
           min="0"
@@ -161,9 +161,9 @@
       </label>
 
       <div class="slider">
-        <label for="delay-{output.id}" class="row-label">Delay <span class="muted">{output.delay_ms} ms</span></label>
+        <label for="delay-{output.id}" class="row-label">{t('out.delay')} <span class="muted">{output.delay_ms} ms</span></label>
         <div class="delay">
-          <button class="step" aria-label="10 ms less delay" disabled={!output.enabled} onclick={() => nudge(output, -10)}
+          <button class="step" aria-label={t('out.less')} disabled={!output.enabled} onclick={() => nudge(output, -10)}
             >-10</button
           >
           <input
@@ -176,7 +176,7 @@
             oninput={() => save(output)}
             disabled={!output.enabled}
           />
-          <button class="step" aria-label="10 ms more delay" disabled={!output.enabled} onclick={() => nudge(output, 10)}
+          <button class="step" aria-label={t('out.more')} disabled={!output.enabled} onclick={() => nudge(output, 10)}
             >+10</button
           >
         </div>
@@ -184,30 +184,30 @@
     </div>
   {/each}
 
-  <button class="primary" onclick={openPicker}>Add an output</button>
+  <button class="primary" onclick={openPicker}>{t('out.add')}</button>
 </section>
 
 {#if adding}
-  <Sheet title="Add an output" onclose={() => (adding = false)}>
+  <Sheet title={t('out.add')} onclose={() => (adding = false)}>
     {#if devices === null}
-      <p class="muted">Looking for devices...</p>
+      <p class="muted">{t('out.looking')}</p>
     {:else}
       {#each devices as device (device.id)}
         <button class="device" disabled={device.added} onclick={() => add(device)}>
           <span class="grow">
             <span class="label">{device.name}</span>
             {#if device.added}
-              <span class="small muted">Already added</span>
+              <span class="small muted">{t('out.already')}</span>
             {:else if device.is_default}
-              <span class="small muted">The system default right now, which already plays through "System default"</span>
+              <span class="small muted">{t('out.default')}</span>
             {/if}
           </span>
           {#if !device.added}<Icon name="plus" />{/if}
         </button>
       {:else}
-        <p class="muted">No other devices found. Connect a Bluetooth speaker or plug something in, then try again.</p>
+        <p class="muted">{t('out.none')}</p>
       {/each}
-      <p class="small muted">Bluetooth speakers show up here once they're paired and connected to this computer.</p>
+      <p class="small muted">{t('out.bt_note')}</p>
     {/if}
   </Sheet>
 {/if}

@@ -12,6 +12,10 @@
 #ifndef Binary
   #define Binary "..\..\target\release\djinn.exe"
 #endif
+#ifndef Content
+  ; The user guide and language files, laid out by packaging/content.sh.
+  #define Content "..\..\target\content"
+#endif
 #ifndef Version
   ; A local build uses Cargo's version. Release builds pass the padded date.
   #define Version GetStringFileInfo(Binary, "ProductVersion")
@@ -54,6 +58,13 @@ Name: autostart; Description: "Start DJINN when I sign in to Windows"
 [Files]
 Source: "{#Binary}"; DestDir: "{app}"; DestName: "djinn.exe"; Flags: ignoreversion
 Source: "djinn.ico"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#Content}\guide\*"; DestDir: "{app}\guide"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
+Source: "{#Content}\lang\*"; DestDir: "{app}\lang"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
+
+[InstallDelete]
+; The guide and language files are replaced whole, so no old page lingers.
+Type: filesandordirs; Name: "{app}\guide"
+Type: filesandordirs; Name: "{app}\lang"
 
 [Icons]
 Name: "{autoprograms}\DJINN"; Filename: "{app}\djinn.exe"; IconFilename: "{app}\djinn.ico"; Comment: "Party jukebox, lives in the system tray"
@@ -68,6 +79,9 @@ Filename: "{app}\djinn.exe"; Description: "Start DJINN now"; Flags: nowait posti
 [UninstallDelete]
 ; Left behind by an in-app update.
 Type: files; Name: "{app}\djinn.old.exe"
+; Updates rewrite these, so the uninstaller doesn't know all their files.
+Type: filesandordirs; Name: "{app}\guide"
+Type: filesandordirs; Name: "{app}\lang"
 Type: dirifempty; Name: "{app}"
 
 [Code]

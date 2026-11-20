@@ -117,6 +117,11 @@ fn live_addresses(listen: SocketAddr, join: &str) -> Vec<String> {
     found
 }
 
+/// The port guests (and DJINN's own helpers) reach DJINN on.
+pub fn party_port() -> u16 {
+    STARTUP.get().map_or(8066, |s| s.party_listen.port())
+}
+
 /// Records when DJINN started, its database, and the port guests use.
 pub fn started(database: &Path, party_listen: SocketAddr) {
     let _ = STARTUP.set(Startup {
@@ -281,6 +286,8 @@ struct Status {
     albums: i64,
     /// The music files' size together.
     library_bytes: i64,
+    /// How long the songs last together, in ms.
+    library_ms: i64,
     library_folders: usize,
     scanning: bool,
     last_scan: Option<ScanProgress>,
@@ -411,6 +418,7 @@ async fn status(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json<S
             .await?
             .total,
         library_bytes: state.store.library_bytes().await?,
+        library_ms: state.store.library_duration_ms().await?,
         library_folders: folders::library_roots(&state).await?.len(),
         scanning: state
             .scan
@@ -599,6 +607,8 @@ async fn quit(_: AdminUser, State(state): State<AppState>) -> StatusCode {
 enum Reset {
     Queue,
     TagEdits,
+    /// Lyrics that came from an imported zip.
+    ImportedLyrics,
     Analysis,
     Listening,
     History,
@@ -636,6 +646,13 @@ async fn reset(
             if !paths.is_empty() {
                 library_api::reread(&state, &paths).await?;
             }
+            false
+        }
+        Reset::ImportedLyrics => {
+            let removed = state.store.remove_bulk_lyrics().await?;
+            tracing::info!(removed, "imported lyrics removed");
+            // The songs can be looked up again.
+            crate::lyrics::start(&state);
             false
         }
         // These change what's loaded in memory all over; a restart picks

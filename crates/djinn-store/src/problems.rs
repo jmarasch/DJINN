@@ -28,15 +28,55 @@ pub enum ProblemKind {
     WontPlay,
     /// Listeners said it needs fixing.
     Reported,
+    /// Listeners said its lyrics are wrong or bad.
+    ReportedLyrics,
     NoArtist,
     NoAlbum,
     AlbumNoCover,
     AlbumNoYear,
     AlbumNoGenre,
+    /// The same album filed twice (a copy in another folder, or under
+    /// another name).
+    DuplicateAlbums,
+    /// The same file twice in one album.
+    IdenticalFiles,
+    /// A track or disc number of 0 or less, or a length of 0.
+    BogusValues,
+    /// Under 10 seconds or over 3 hours long.
+    OddLength,
+    /// A bit rate under 96 kbps.
+    LowBitrate,
+    /// "(Official Video)", a track number or a web address in the title, ...
+    TitleJunk,
+    /// The file's name doesn't contain the song's title.
+    NameMismatch,
+    /// Two names for one artist ("The Beatles" and "Beatles").
+    ArtistVariants,
+    /// An album's folder holds it under two artists' names.
+    SplitAcrossArtists,
+    /// Songs of one album with different covers.
+    CoverDiffers,
+    /// Missing or repeated track numbers.
+    TrackGaps,
+    /// No lyrics found for the song.
+    NoLyrics,
+    /// No ReplayGain tags and no measurement, in a library that uses it.
+    NoLoudness,
+    /// Songs that went missing from the library in the last 30 days.
+    Vanished,
+    /// Lyrics an AI made by listening (guesses worth checking).
+    AiLyrics,
+    /// A variable bit rate MP3 with no length header (found by the thorough
+    /// check), so players other than DJINN show the wrong length.
+    NoLengthHeader,
+    /// A genre tag that isn't a clean genre: several run together
+    /// ("Rock;Pop"), an old genre number ("(17)"), a placeholder
+    /// ("Unknown") or a whole sentence.
+    MessyGenres,
 }
 
 impl ProblemKind {
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 30] = [
         Self::MissingFolder,
         Self::Unreadable,
         Self::BadName,
@@ -44,11 +84,29 @@ impl ProblemKind {
         Self::Tags,
         Self::WontPlay,
         Self::Reported,
+        Self::ReportedLyrics,
         Self::NoArtist,
         Self::NoAlbum,
         Self::AlbumNoCover,
         Self::AlbumNoYear,
         Self::AlbumNoGenre,
+        Self::DuplicateAlbums,
+        Self::IdenticalFiles,
+        Self::BogusValues,
+        Self::OddLength,
+        Self::LowBitrate,
+        Self::TitleJunk,
+        Self::NameMismatch,
+        Self::ArtistVariants,
+        Self::SplitAcrossArtists,
+        Self::CoverDiffers,
+        Self::TrackGaps,
+        Self::NoLyrics,
+        Self::NoLoudness,
+        Self::Vanished,
+        Self::AiLyrics,
+        Self::NoLengthHeader,
+        Self::MessyGenres,
     ];
 
     /// Kinds a library check finds while walking the folders. Each check
@@ -69,11 +127,29 @@ impl ProblemKind {
             Self::Tags => "tags",
             Self::WontPlay => "wont_play",
             Self::Reported => "reported",
+            Self::ReportedLyrics => "reported_lyrics",
             Self::NoArtist => "no_artist",
             Self::NoAlbum => "no_album",
             Self::AlbumNoCover => "album_no_cover",
             Self::AlbumNoYear => "album_no_year",
             Self::AlbumNoGenre => "album_no_genre",
+            Self::DuplicateAlbums => "duplicate_albums",
+            Self::IdenticalFiles => "identical_files",
+            Self::BogusValues => "bogus_values",
+            Self::OddLength => "odd_length",
+            Self::LowBitrate => "low_bitrate",
+            Self::TitleJunk => "title_junk",
+            Self::NameMismatch => "name_mismatch",
+            Self::ArtistVariants => "artist_variants",
+            Self::SplitAcrossArtists => "split_across_artists",
+            Self::CoverDiffers => "cover_differs",
+            Self::TrackGaps => "track_gaps",
+            Self::NoLyrics => "no_lyrics",
+            Self::NoLoudness => "no_loudness",
+            Self::Vanished => "vanished",
+            Self::AiLyrics => "ai_lyrics",
+            Self::NoLengthHeader => "no_length_header",
+            Self::MessyGenres => "messy_genres",
         }
     }
 
@@ -84,13 +160,18 @@ impl ProblemKind {
     /// Files that never made it into the library, or songs that are there
     /// but broken: the ones worth a badge. Tag gaps are only listed.
     pub fn is_trouble(self) -> bool {
-        !matches!(
+        matches!(
             self,
-            Self::NoArtist
-                | Self::NoAlbum
-                | Self::AlbumNoCover
-                | Self::AlbumNoYear
-                | Self::AlbumNoGenre
+            Self::MissingFolder
+                | Self::Unreadable
+                | Self::BadName
+                | Self::Unsupported
+                | Self::Tags
+                | Self::WontPlay
+                | Self::Reported
+                | Self::ReportedLyrics
+                | Self::DuplicateAlbums
+                | Self::IdenticalFiles
         )
     }
 
@@ -98,9 +179,39 @@ impl ProblemKind {
     pub fn per_album(self) -> bool {
         matches!(
             self,
-            Self::AlbumNoCover | Self::AlbumNoYear | Self::AlbumNoGenre
+            Self::AlbumNoCover
+                | Self::AlbumNoYear
+                | Self::AlbumNoGenre
+                | Self::DuplicateAlbums
+                | Self::SplitAcrossArtists
+                | Self::CoverDiffers
+                | Self::TrackGaps
         )
     }
+}
+
+/// Two albums that are the same album: how many songs they share and hold.
+#[derive(Clone, Debug, PartialEq, Eq, FromRow)]
+pub struct AlbumTwin {
+    /// The smaller album id.
+    pub a: i64,
+    pub b: i64,
+    pub shared: i64,
+    pub a_songs: i64,
+    pub b_songs: i64,
+}
+
+/// An artist's name with capitals, "The", "&", spaces and punctuation taken
+/// out, so spellings of one name meet.
+fn artist_key(name: &str) -> String {
+    let lower = name.to_lowercase().replace('&', "and");
+    let lower = lower.strip_prefix("the ").unwrap_or(&lower);
+    lower.chars().filter(|c| c.is_alphanumeric()).collect()
+}
+
+/// Songs that went missing after this time (Unix ms) are listed as gone.
+fn vanished_since() -> i64 {
+    now_ms() - 30 * 24 * 60 * 60 * 1000
 }
 
 /// Something a library check found while walking the folders.
@@ -143,7 +254,14 @@ macro_rules! wont_play_from {
 }
 macro_rules! reported_from {
     () => {
-        "FROM song_reports r JOIN tracks t ON t.id = r.track_id AND t.removed_at IS NULL"
+        "FROM song_reports r JOIN tracks t ON t.id = r.track_id AND t.removed_at IS NULL
+         WHERE substr(r.reason, 1, 7) != 'lyrics_'"
+    };
+}
+macro_rules! reported_lyrics_from {
+    () => {
+        "FROM song_reports r JOIN tracks t ON t.id = r.track_id AND t.removed_at IS NULL
+         WHERE substr(r.reason, 1, 7) = 'lyrics_'"
     };
 }
 macro_rules! no_artist_from {
@@ -179,8 +297,221 @@ macro_rules! album_no_genre {
              AND t.removed_at IS NULL AND trim(coalesce(t.genre, '')) <> '')"
     };
 }
+/// Songs listed only once the same file (size, length and title) sits twice
+/// in one album.
+macro_rules! identical_from {
+    () => {
+        "FROM tracks t JOIN (
+             SELECT album_id, size, duration_ms, lower(title) AS lt FROM tracks
+             WHERE removed_at IS NULL GROUP BY album_id, size, duration_ms, lt HAVING count(*) > 1
+         ) d ON d.album_id IS t.album_id AND d.size = t.size AND d.duration_ms IS t.duration_ms
+             AND d.lt = lower(t.title)
+         WHERE t.removed_at IS NULL"
+    };
+}
+macro_rules! bogus_from {
+    () => {
+        "FROM tracks t WHERE t.removed_at IS NULL
+           AND (t.track_no <= 0 OR t.disc_no <= 0 OR t.duration_ms <= 0)"
+    };
+}
+macro_rules! bogus_detail {
+    () => {
+        "CASE WHEN t.track_no <= 0 THEN 'Track number ' || t.track_no
+              WHEN t.disc_no <= 0 THEN 'Disc number ' || t.disc_no
+              ELSE 'Length of ' || t.duration_ms || ' ms' END"
+    };
+}
+macro_rules! odd_length_from {
+    () => {
+        "FROM tracks t WHERE t.removed_at IS NULL AND t.duration_ms > 0
+           AND (t.duration_ms < 10000 OR t.duration_ms > 10800000)"
+    };
+}
+macro_rules! odd_length_detail {
+    () => {
+        "CASE WHEN t.duration_ms < 10000 THEN 'Only ' || (t.duration_ms / 1000) || ' seconds long'
+              ELSE (t.duration_ms / 60000) || ' minutes long' END"
+    };
+}
+macro_rules! low_bitrate_from {
+    () => {
+        "FROM tracks t WHERE t.removed_at IS NULL AND t.duration_ms >= 10000
+           AND t.size * 8 / t.duration_ms < 96"
+    };
+}
+/// MP3s the thorough check found with no length header, while the file is
+/// still the one checked.
+macro_rules! no_length_header_from {
+    () => {
+        "FROM mp3_header_checks c JOIN tracks t ON t.id = c.track_id
+         WHERE c.missing = 1 AND t.removed_at IS NULL AND c.size = t.size AND c.mtime = t.mtime"
+    };
+}
+macro_rules! low_bitrate_detail {
+    () => {
+        "(t.size * 8 / t.duration_ms) || ' kbps'"
+    };
+}
+/// Titles with leftovers: a video tag, a web address, a track number in
+/// front, spaces around, or all capitals.
+macro_rules! junk_where {
+    () => {
+        "(lower(t.title) LIKE '%(official%' OR lower(t.title) LIKE '%[official%'
+          OR lower(t.title) LIKE '%(lyric%' OR lower(t.title) LIKE '%[lyric%'
+          OR lower(t.title) LIKE '%(audio)%' OR lower(t.title) LIKE '%(video)%'
+          OR lower(t.title) LIKE '%www.%' OR lower(t.title) LIKE '%.com%'
+          OR t.title GLOB '[0-9][0-9]. *' OR t.title GLOB '[0-9][0-9] - *'
+          OR t.title GLOB '[0-9][0-9]-*' OR t.title GLOB '[0-9][0-9]_*'
+          OR t.title <> trim(t.title)
+          OR (length(t.title) > 8 AND instr(t.title, ' ') > 0
+              AND t.title = upper(t.title) AND t.title <> lower(t.title)))"
+    };
+}
+/// Genre tags that aren't clean genres: several run together with ";",
+/// "|" or a backslash (commas are how DJINN lists genres, so they're fine), an old
+/// ID3 genre number, a placeholder, or one name too long to be a genre.
+macro_rules! messy_genre_where {
+    () => {
+        "(instr(t.genre, ';') > 0 OR instr(t.genre, '|') > 0 OR instr(t.genre, '\\') > 0
+          OR instr(t.genre, ' / ') > 0 OR instr(t.genre, '//') > 0
+          OR trim(t.genre) NOT GLOB '*[^0-9]*' OR t.genre GLOB '*([0-9])*'
+          OR t.genre GLOB '*([0-9][0-9])*' OR t.genre GLOB '*([0-9][0-9][0-9])*'
+          OR lower(trim(t.genre)) IN ('unknown', 'unknown genre', '<unknown>', 'genre', 'none',
+                                      'misc', 'default', 'n/a', '-', '?', 'other', 'other genre')
+          OR (instr(t.genre, ',') = 0 AND length(t.genre) > 40))"
+    };
+}
+macro_rules! messy_genres_from {
+    () => {
+        concat!(
+            "FROM tracks t WHERE t.removed_at IS NULL AND t.genre IS NOT NULL AND trim(t.genre) <> '' AND ",
+            messy_genre_where!()
+        )
+    };
+}
+macro_rules! messy_genres_detail {
+    () => {
+        "CASE WHEN instr(t.genre, ';') > 0 OR instr(t.genre, '|') > 0 OR instr(t.genre, '\\') > 0
+                   OR instr(t.genre, ' / ') > 0 OR instr(t.genre, '//') > 0
+                THEN 'Several genres run together: ' || t.genre
+              WHEN trim(t.genre) NOT GLOB '*[^0-9]*' OR t.genre GLOB '*([0-9]*)*'
+                THEN 'A genre number instead of a name: ' || t.genre
+              WHEN length(t.genre) > 40 THEN 'Too long for a genre: ' || t.genre
+              ELSE 'A placeholder, not a genre: ' || t.genre END"
+    };
+}
+macro_rules! title_junk_from {
+    () => {
+        concat!(
+            "FROM tracks t WHERE t.removed_at IS NULL AND ",
+            junk_where!()
+        )
+    };
+}
+macro_rules! title_junk_detail {
+    () => {
+        "CASE WHEN t.title <> trim(t.title) THEN 'Spaces around the title'
+              WHEN t.title GLOB '[0-9][0-9][.-_]*' THEN 'A track number in the title'
+              WHEN lower(t.title) LIKE '%www.%' OR lower(t.title) LIKE '%.com%' THEN 'A web address in the title'
+              WHEN t.title = upper(t.title) THEN 'All capitals'
+              ELSE 'A video or lyrics tag in the title' END"
+    };
+}
+/// An expression with what file names change (spaces, dashes, colons, slashes,
+/// question marks, quotes, dots, ...) taken out, so "11:00am" meets "11-00am".
+macro_rules! plain {
+    ($e:literal) => {
+        concat!(
+            "replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(",
+            "replace(replace(replace(replace(replace(replace(replace(", $e,
+            ", ' ', ''), '-', ''), '_', ''), ':', ''), '/', ''), '?', ''), '*', ''), '\"', ''), ",
+            "'<', ''), '>', ''), '|', ''), '''', ''), '.', ''), ',', ''), '!', ''), '’', ''), '&', '')"
+        )
+    };
+}
+macro_rules! name_mismatch_from {
+    () => {
+        concat!(
+            "FROM tracks t WHERE t.removed_at IS NULL AND length(trim(t.title)) > 1
+               AND instr(",
+            plain!("lower(t.path)"),
+            ", ",
+            plain!("lower(t.title)"),
+            ") = 0"
+        )
+    };
+}
+macro_rules! no_lyrics_from {
+    () => {
+        "FROM tracks t LEFT JOIN lyrics l ON l.track_id = t.id
+         WHERE t.removed_at IS NULL AND (l.track_id IS NULL OR l.source = 'none')"
+    };
+}
+macro_rules! no_loudness_from {
+    () => {
+        "FROM tracks t WHERE t.removed_at IS NULL
+           AND t.rg_track_gain IS NULL AND t.loudness_lufs IS NULL
+           AND (SELECT 1 FROM tracks o
+                WHERE o.rg_track_gain IS NOT NULL OR o.loudness_lufs IS NOT NULL LIMIT 1) IS NOT NULL"
+    };
+}
+macro_rules! ai_lyrics_from {
+    () => {
+        "FROM lyrics l JOIN tracks t ON t.id = l.track_id
+         WHERE t.removed_at IS NULL AND l.ai > 0"
+    };
+}
+macro_rules! ai_lyrics_detail {
+    () => {
+        "CASE WHEN l.ai = 2 THEN 'Timed by an AI' ELSE 'Words made by an AI' END
+         || ' (' || coalesce(l.ai_model, 'AI')
+         || CASE WHEN l.ai_match IS NOT NULL THEN ', match ' || l.ai_match || '%' ELSE '' END
+         || ')' || CASE WHEN l.import_name IS NOT NULL THEN ', from ' || l.import_name ELSE '' END"
+    };
+}
+macro_rules! vanished_from {
+    () => {
+        "FROM tracks t WHERE t.removed_at IS NOT NULL AND t.removed_at > ?
+           AND instr(t.path, '.djinn-trash') = 0
+           AND NOT EXISTS (SELECT 1 FROM tracks a WHERE a.removed_at IS NULL
+                           AND a.size = t.size AND lower(a.title) = lower(t.title))"
+    };
+}
+/// A folder (path without the file name), same for `/` and `\` paths.
+macro_rules! dirs_cte {
+    () => {
+        "WITH p AS (SELECT t.album_id, replace(t.path, '\\', '/') AS q FROM tracks t
+                    WHERE t.removed_at IS NULL AND t.album_id IS NOT NULL),
+              dirs AS (SELECT DISTINCT album_id, rtrim(q, replace(q, '/', '')) AS dir FROM p) "
+    };
+}
+macro_rules! split_where {
+    () => {
+        " AND EXISTS (SELECT 1 FROM dirs d1 JOIN dirs d2 ON d2.dir = d1.dir AND d2.album_id <> d1.album_id
+                      JOIN albums b ON b.id = d2.album_id
+                      WHERE d1.album_id = a.id AND b.title = a.title AND b.artist_id <> a.artist_id)"
+    };
+}
+macro_rules! cover_differs_where {
+    () => {
+        " AND (SELECT count(DISTINCT t.art_hash) FROM tracks t
+               WHERE t.album_id = a.id AND t.removed_at IS NULL AND t.art_hash IS NOT NULL) > 1"
+    };
+}
+/// Per disc: numbers starting at 1 with holes, or one number used twice.
+macro_rules! track_gaps_where {
+    () => {
+        " AND EXISTS (SELECT 1 FROM (
+              SELECT album_id, min(track_no) AS lo, max(track_no) AS hi,
+                     count(DISTINCT track_no) AS uniq, count(*) AS n
+              FROM tracks WHERE removed_at IS NULL AND track_no > 0
+              GROUP BY album_id, coalesce(disc_no, 1)) g
+              WHERE g.album_id = a.id AND ((g.lo = 1 AND g.hi > g.uniq) OR g.n > g.uniq))"
+    };
+}
 macro_rules! song_columns {
-    ($detail:literal, $noticed:literal) => {
+    ($detail:expr, $noticed:literal) => {
         concat!(
             "SELECT t.path, ",
             $detail,
@@ -200,13 +531,96 @@ macro_rules! album_columns {
 }
 
 /// Why a listener says a song needs fixing.
-pub const REPORT_REASONS: [&str; 5] = [
+pub const REPORT_REASONS: [&str; 10] = [
     "wrong_info",
     "wrong_cover",
     "sounds_bad",
     "wrong_song",
     "other",
+    // About the song's lyrics.
+    "lyrics_wrong_song",
+    "lyrics_out_of_sync",
+    "lyrics_garbled",
+    "lyrics_missing",
+    "lyrics_other",
 ];
+
+/// An MP3 the thorough check hasn't looked at since it last changed.
+#[derive(Clone, Debug, PartialEq, Eq, FromRow)]
+pub struct Mp3ToCheck {
+    pub id: i64,
+    pub path: String,
+    pub size: i64,
+    pub mtime: i64,
+}
+
+/// How the thorough check stands: MP3s checked (for their current file) and
+/// MP3s in the library.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, FromRow, serde::Serialize)]
+pub struct Mp3CheckCounts {
+    pub checked: i64,
+    pub total: i64,
+    pub missing: i64,
+}
+
+impl Store {
+    /// MP3s whose header hasn't been checked for the file as it is now.
+    pub async fn mp3s_to_check(&self, limit: i64) -> Result<Vec<Mp3ToCheck>> {
+        Ok(sqlx::query_as(
+            "SELECT t.id, t.path, t.size, t.mtime FROM tracks t
+             WHERE t.removed_at IS NULL AND t.codec = 'mpeg'
+               AND NOT EXISTS (SELECT 1 FROM mp3_header_checks c WHERE c.track_id = t.id
+                               AND c.size = t.size AND c.mtime = t.mtime)
+             ORDER BY t.id LIMIT ?",
+        )
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
+    /// Keeps what the check found for each file: (song, whether its length
+    /// header is missing).
+    pub async fn save_mp3_checks(&self, found: &[(Mp3ToCheck, bool)]) -> Result<()> {
+        let mut tx = self.write().await?;
+        for (song, missing) in found {
+            sqlx::query(
+                "INSERT INTO mp3_header_checks (track_id, size, mtime, missing) VALUES (?, ?, ?, ?)
+                 ON CONFLICT (track_id) DO UPDATE SET size = excluded.size, mtime = excluded.mtime,
+                     missing = excluded.missing",
+            )
+            .bind(song.id)
+            .bind(song.size)
+            .bind(song.mtime)
+            .bind(i64::from(*missing))
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// Forgets every result, so the thorough check reads every MP3 again.
+    pub async fn forget_mp3_checks(&self) -> Result<()> {
+        sqlx::query("DELETE FROM mp3_header_checks")
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn mp3_check_counts(&self) -> Result<Mp3CheckCounts> {
+        Ok(sqlx::query_as(
+            "SELECT
+               (SELECT count(*) FROM mp3_header_checks c JOIN tracks t ON t.id = c.track_id
+                WHERE t.removed_at IS NULL AND c.size = t.size AND c.mtime = t.mtime) AS checked,
+               (SELECT count(*) FROM tracks t WHERE t.removed_at IS NULL AND t.codec = 'mpeg') AS total,
+               (SELECT count(*) FROM mp3_header_checks c JOIN tracks t ON t.id = c.track_id
+                WHERE c.missing = 1 AND t.removed_at IS NULL AND c.size = t.size
+                  AND c.mtime = t.mtime) AS missing",
+        )
+        .fetch_one(&self.pool)
+        .await?)
+    }
+}
 
 impl Store {
     /// Records a listener's report on a song, replacing their last one.
@@ -251,6 +665,17 @@ impl Store {
             .bind(track_id)
             .execute(&self.pool)
             .await?;
+        Ok(done.rows_affected())
+    }
+
+    /// Clears the reports about a song's lyrics only.
+    pub async fn clear_lyrics_reports(&self, track_id: i64) -> Result<u64> {
+        let done = sqlx::query(
+            "DELETE FROM song_reports WHERE track_id = ? AND substr(reason, 1, 7) = 'lyrics_'",
+        )
+        .bind(track_id)
+        .execute(&self.pool)
+        .await?;
         Ok(done.rows_affected())
     }
 
@@ -315,6 +740,49 @@ impl Store {
             K::Reported => {
                 sqlx::query_scalar(concat!("SELECT COUNT(DISTINCT t.id) ", reported_from!()))
             }
+            K::ReportedLyrics => sqlx::query_scalar(concat!(
+                "SELECT COUNT(DISTINCT t.id) ",
+                reported_lyrics_from!()
+            )),
+            K::DuplicateAlbums => {
+                return Ok(i64::try_from(self.album_twins().await?.len()).unwrap_or(i64::MAX))
+            }
+            K::IdenticalFiles => sqlx::query_scalar(concat!("SELECT COUNT(*) ", identical_from!())),
+            K::BogusValues => sqlx::query_scalar(concat!("SELECT COUNT(*) ", bogus_from!())),
+            K::OddLength => sqlx::query_scalar(concat!("SELECT COUNT(*) ", odd_length_from!())),
+            K::LowBitrate => sqlx::query_scalar(concat!("SELECT COUNT(*) ", low_bitrate_from!())),
+            K::NoLengthHeader => {
+                sqlx::query_scalar(concat!("SELECT COUNT(*) ", no_length_header_from!()))
+            }
+            K::TitleJunk => sqlx::query_scalar(concat!("SELECT COUNT(*) ", title_junk_from!())),
+            K::MessyGenres => sqlx::query_scalar(concat!("SELECT COUNT(*) ", messy_genres_from!())),
+            K::NameMismatch => {
+                sqlx::query_scalar(concat!("SELECT COUNT(*) ", name_mismatch_from!()))
+            }
+            K::NoLyrics => sqlx::query_scalar(concat!("SELECT COUNT(*) ", no_lyrics_from!())),
+            K::NoLoudness => sqlx::query_scalar(concat!("SELECT COUNT(*) ", no_loudness_from!())),
+            K::AiLyrics => sqlx::query_scalar(concat!("SELECT COUNT(*) ", ai_lyrics_from!())),
+            K::Vanished => sqlx::query_scalar(concat!("SELECT COUNT(*) ", vanished_from!()))
+                .bind(vanished_since()),
+            K::ArtistVariants => {
+                return Ok(i64::try_from(self.artist_variants().await?.len()).unwrap_or(i64::MAX))
+            }
+            K::SplitAcrossArtists => sqlx::query_scalar(concat!(
+                dirs_cte!(),
+                "SELECT COUNT(*) ",
+                album_from!(),
+                split_where!()
+            )),
+            K::CoverDiffers => sqlx::query_scalar(concat!(
+                "SELECT COUNT(*) ",
+                album_from!(),
+                cover_differs_where!()
+            )),
+            K::TrackGaps => sqlx::query_scalar(concat!(
+                "SELECT COUNT(*) ",
+                album_from!(),
+                track_gaps_where!()
+            )),
             K::NoArtist => sqlx::query_scalar(concat!("SELECT COUNT(*) ", no_artist_from!())),
             K::NoAlbum => sqlx::query_scalar(concat!("SELECT COUNT(*) ", no_album_from!())),
             K::AlbumNoCover => sqlx::query_scalar(concat!(
@@ -332,6 +800,104 @@ impl Store {
             )),
         };
         Ok(query.fetch_one(&self.pool).await?)
+    }
+
+    /// Names that differ only by capitals, a leading "The", punctuation or
+    /// spaces ("The Beatles" and "Beatles", "AC/DC" and "ACDC"): the groups
+    /// of names, for artists that have songs.
+    async fn artist_variants(&self) -> Result<Vec<Vec<String>>> {
+        let names: Vec<String> = sqlx::query_scalar(
+            "SELECT DISTINCT ar.name FROM artists ar
+             JOIN tracks t ON t.artist_id = ar.id AND t.removed_at IS NULL
+             ORDER BY ar.name",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        let mut groups: HashMap<String, Vec<String>> = HashMap::new();
+        for name in names {
+            let key = artist_key(&name);
+            if !key.is_empty() {
+                groups.entry(key).or_default().push(name);
+            }
+        }
+        let mut found: Vec<Vec<String>> = groups.into_values().filter(|g| g.len() > 1).collect();
+        found.sort();
+        Ok(found)
+    }
+
+    async fn artist_variant_rows(&self, offset: i64, limit: i64) -> Result<Vec<ProblemItem>> {
+        let groups = self.artist_variants().await?;
+        let start = usize::try_from(offset.max(0))
+            .unwrap_or(0)
+            .min(groups.len());
+        let end = start
+            .saturating_add(usize::try_from(limit.max(0)).unwrap_or(0))
+            .min(groups.len());
+        Ok(groups[start..end]
+            .iter()
+            .map(|names| ProblemItem {
+                detail: names.join("  /  "),
+                artist: names.first().cloned(),
+                ..ProblemItem::default()
+            })
+            .collect())
+    }
+
+    /// One row per pair of albums that are the same album: the first of
+    /// them, and where the other is.
+    async fn duplicate_album_rows(&self, offset: i64, limit: i64) -> Result<Vec<ProblemItem>> {
+        #[derive(FromRow)]
+        struct Row {
+            title: String,
+            artist: String,
+            path: Option<String>,
+        }
+        let twins = self.album_twins().await?;
+        let start = usize::try_from(offset.max(0)).unwrap_or(0).min(twins.len());
+        let end = start
+            .saturating_add(usize::try_from(limit.max(0)).unwrap_or(0))
+            .min(twins.len());
+        let mut items = Vec::with_capacity(end - start);
+        for twin in &twins[start..end] {
+            let mut rows = Vec::with_capacity(2);
+            for id in [twin.a, twin.b] {
+                let row: Option<Row> = sqlx::query_as(
+                    "SELECT a.title, ar.name AS artist,
+                            (SELECT t.path FROM tracks t WHERE t.album_id = a.id
+                             AND t.removed_at IS NULL ORDER BY t.disc_no, t.track_no LIMIT 1) AS path
+                     FROM albums a JOIN artists ar ON ar.id = a.artist_id WHERE a.id = ?",
+                )
+                .bind(id)
+                .fetch_optional(&self.pool)
+                .await?;
+                rows.push(row);
+            }
+            let (Some(first), Some(second)) = (rows.remove(0), rows.remove(0)) else {
+                continue;
+            };
+            let folder = |path: &Option<String>| {
+                path.as_deref()
+                    .and_then(|p| p.rsplit_once(['/', '\\']).map(|(dir, _)| dir.to_owned()))
+                    .unwrap_or_default()
+            };
+            items.push(ProblemItem {
+                path: first.path.clone(),
+                detail: format!(
+                    "Also filed as \"{}\" in {}: {} of {} songs match",
+                    second.title,
+                    folder(&second.path),
+                    twin.shared,
+                    twin.a_songs.max(twin.b_songs)
+                ),
+                track_id: None,
+                album_id: Some(twin.a),
+                title: None,
+                artist: Some(first.artist),
+                album: Some(first.title),
+                noticed_at: None,
+            });
+        }
+        Ok(items)
     }
 
     /// A page of one kind, ordered by path (albums by artist and title).
@@ -371,6 +937,96 @@ impl Store {
                         max(r.created_at) AS noticed_at ",
                 reported_from!(),
                 " GROUP BY t.id ORDER BY noticed_at DESC LIMIT ? OFFSET ?"
+            )),
+            K::ReportedLyrics => sqlx::query_as(concat!(
+                "SELECT t.path,
+                        group_concat(r.reason || char(31) || coalesce(r.note, ''), char(30)) AS detail,
+                        t.id AS track_id, t.album_id, t.title, t.artist, t.album,
+                        max(r.created_at) AS noticed_at ",
+                reported_lyrics_from!(),
+                " GROUP BY t.id ORDER BY noticed_at DESC LIMIT ? OFFSET ?"
+            )),
+            K::DuplicateAlbums => return self.duplicate_album_rows(offset, limit).await,
+            K::ArtistVariants => return self.artist_variant_rows(offset, limit).await,
+            K::IdenticalFiles => sqlx::query_as(concat!(
+                song_columns!("'The same file twice in this album'", "NULL"),
+                identical_from!(),
+                " ORDER BY t.album_id, lower(t.title), t.path LIMIT ? OFFSET ?"
+            )),
+            K::BogusValues => sqlx::query_as(concat!(
+                song_columns!(bogus_detail!(), "NULL"),
+                bogus_from!(),
+                " ORDER BY t.path LIMIT ? OFFSET ?"
+            )),
+            K::OddLength => sqlx::query_as(concat!(
+                song_columns!(odd_length_detail!(), "NULL"),
+                odd_length_from!(),
+                " ORDER BY t.duration_ms LIMIT ? OFFSET ?"
+            )),
+            K::NoLengthHeader => sqlx::query_as(concat!(
+                song_columns!("'Variable bit rate, no length header'", "NULL"),
+                no_length_header_from!(),
+                " ORDER BY t.path LIMIT ? OFFSET ?"
+            )),
+            K::LowBitrate => sqlx::query_as(concat!(
+                song_columns!(low_bitrate_detail!(), "NULL"),
+                low_bitrate_from!(),
+                " ORDER BY t.size * 8 / t.duration_ms, t.path LIMIT ? OFFSET ?"
+            )),
+            K::TitleJunk => sqlx::query_as(concat!(
+                song_columns!(title_junk_detail!(), "NULL"),
+                title_junk_from!(),
+                " ORDER BY t.path LIMIT ? OFFSET ?"
+            )),
+            K::MessyGenres => sqlx::query_as(concat!(
+                song_columns!(messy_genres_detail!(), "NULL"),
+                messy_genres_from!(),
+                " ORDER BY t.path LIMIT ? OFFSET ?"
+            )),
+            K::NameMismatch => sqlx::query_as(concat!(
+                song_columns!("'The file name doesn''t contain the title'", "NULL"),
+                name_mismatch_from!(),
+                " ORDER BY t.path LIMIT ? OFFSET ?"
+            )),
+            K::NoLyrics => sqlx::query_as(concat!(
+                song_columns!("''", "NULL"),
+                no_lyrics_from!(),
+                " ORDER BY t.path LIMIT ? OFFSET ?"
+            )),
+            K::NoLoudness => sqlx::query_as(concat!(
+                song_columns!("''", "NULL"),
+                no_loudness_from!(),
+                " ORDER BY t.path LIMIT ? OFFSET ?"
+            )),
+            K::AiLyrics => sqlx::query_as(concat!(
+                song_columns!(ai_lyrics_detail!(), "l.imported_at"),
+                ai_lyrics_from!(),
+                " ORDER BY t.path LIMIT ? OFFSET ?"
+            )),
+            K::Vanished => sqlx::query_as(concat!(
+                song_columns!("'Gone from the library'", "t.removed_at"),
+                vanished_from!(),
+                " ORDER BY t.removed_at DESC LIMIT ? OFFSET ?"
+            ))
+            .bind(vanished_since()),
+            K::SplitAcrossArtists => sqlx::query_as(concat!(
+                dirs_cte!(),
+                album_columns!(),
+                album_from!(),
+                split_where!(),
+                " ORDER BY ar.name, a.title LIMIT ? OFFSET ?"
+            )),
+            K::CoverDiffers => sqlx::query_as(concat!(
+                album_columns!(),
+                album_from!(),
+                cover_differs_where!(),
+                " ORDER BY ar.name, a.title LIMIT ? OFFSET ?"
+            )),
+            K::TrackGaps => sqlx::query_as(concat!(
+                album_columns!(),
+                album_from!(),
+                track_gaps_where!(),
+                " ORDER BY ar.name, a.title LIMIT ? OFFSET ?"
             )),
             K::NoArtist => sqlx::query_as(concat!(
                 song_columns!("''", "NULL"),
@@ -413,6 +1069,62 @@ impl Store {
 mod tests {
     use super::*;
     use crate::ScannedTrack;
+
+    #[tokio::test]
+    async fn mp3s_missing_a_length_header_are_listed_until_the_file_changes() {
+        let store = Store::open_in_memory().await.unwrap();
+        let mp3 = |path: &str, title: &str| ScannedTrack {
+            codec: Some("mpeg".into()),
+            size: 1000,
+            mtime: 5,
+            ..song(path, title)
+        };
+        store
+            .save_scanned(&[
+                mp3("/m/a.mp3", "A"),
+                mp3("/m/b.mp3", "B"),
+                song("/m/c.flac", "C"),
+            ])
+            .await
+            .unwrap();
+        // Only the MP3s are checked.
+        let todo = store.mp3s_to_check(10).await.unwrap();
+        assert_eq!(todo.len(), 2);
+        let found: Vec<_> = todo
+            .into_iter()
+            .map(|s| {
+                let a = s.title_is_a();
+                (s, a)
+            })
+            .collect();
+        store.save_mp3_checks(&found).await.unwrap();
+        assert!(store.mp3s_to_check(10).await.unwrap().is_empty());
+        let listed = store
+            .problems(ProblemKind::NoLengthHeader, 0, 10)
+            .await
+            .unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].path.as_deref(), Some("/m/a.mp3"));
+        let counts = store.mp3_check_counts().await.unwrap();
+        assert_eq!((counts.checked, counts.total, counts.missing), (2, 2, 1));
+        // Once the file changes (fixed in the editor), it's off the list and checked again.
+        sqlx::query("UPDATE tracks SET size = 1200 WHERE path = '/m/a.mp3'")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        assert!(store
+            .problems(ProblemKind::NoLengthHeader, 0, 10)
+            .await
+            .unwrap()
+            .is_empty());
+        assert_eq!(store.mp3s_to_check(10).await.unwrap().len(), 1);
+    }
+
+    impl Mp3ToCheck {
+        fn title_is_a(&self) -> bool {
+            self.path.ends_with("a.mp3")
+        }
+    }
 
     fn song(path: &str, title: &str) -> ScannedTrack {
         ScannedTrack {
@@ -469,6 +1181,295 @@ mod tests {
         store.replace_walk_problems(&[]).await.unwrap();
         let counts = store.problem_counts().await.unwrap();
         assert_eq!(count(&counts, ProblemKind::Unsupported), 0);
+    }
+
+    #[tokio::test]
+    async fn lyrics_reports_are_their_own_kind() {
+        let store = Store::open_in_memory().await.unwrap();
+        store.save_scanned(&[song("/m/x.mp3", "x")]).await.unwrap();
+        let id = store.problems(ProblemKind::NoArtist, 0, 1).await.unwrap();
+        assert!(id.is_empty());
+        let track: i64 = sqlx::query_scalar("SELECT id FROM tracks")
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO users (username, password_hash, role, created_at) VALUES ('a', 'x', 'admin', 1)")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        let user: i64 = sqlx::query_scalar("SELECT id FROM users")
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+        assert!(store
+            .report_song(track, user, "lyrics_out_of_sync", Some("late"))
+            .await
+            .unwrap());
+        let counts = store.problem_counts().await.unwrap();
+        assert_eq!(count(&counts, ProblemKind::ReportedLyrics), 1);
+        assert_eq!(count(&counts, ProblemKind::Reported), 0);
+        assert_eq!(store.clear_lyrics_reports(track).await.unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn the_same_album_filed_twice_is_a_problem_but_a_deluxe_edition_or_a_shared_song_is_not()
+    {
+        let store = Store::open_in_memory().await.unwrap();
+        let track = |path: &str, album: &str, title: &str, n: i64| ScannedTrack {
+            track_no: Some(n),
+            album: Some(album.into()),
+            ..song(path, title)
+        };
+        let mut songs = Vec::new();
+        // Twelve songs filed twice under two folders and names.
+        for n in 1..=12 {
+            songs.push(track(
+                &format!("/m/a/{n}.flac"),
+                "Abbey Road",
+                &format!("Song {n}"),
+                n,
+            ));
+            songs.push(track(
+                &format!("/m/b/{n}.flac"),
+                "Abbey Road (Remastered)",
+                &format!("Song {n}"),
+                n,
+            ));
+        }
+        // A deluxe edition with extra songs, and a greatest hits with a few of them.
+        for n in 1..=20 {
+            songs.push(track(
+                &format!("/m/c/{n}.flac"),
+                "Abbey Road Deluxe",
+                &format!("Song {n}"),
+                n,
+            ));
+        }
+        for n in 1..=3 {
+            songs.push(track(
+                &format!("/m/d/{n}.flac"),
+                "Hits",
+                &format!("Song {n}"),
+                n,
+            ));
+        }
+        store.save_scanned(&songs).await.unwrap();
+        let counts = store.problem_counts().await.unwrap();
+        assert_eq!(count(&counts, ProblemKind::DuplicateAlbums), 1);
+        let rows = store
+            .problems(ProblemKind::DuplicateAlbums, 0, 10)
+            .await
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert!(
+            rows[0].detail.contains("12 of 12 songs match"),
+            "{}",
+            rows[0].detail
+        );
+        assert!(rows[0].detail.contains("/m/"), "{}", rows[0].detail);
+    }
+
+    #[tokio::test]
+    async fn messy_genres_are_listed_and_clean_ones_left_alone() {
+        let store = Store::open_in_memory().await.unwrap();
+        let with = |n: usize, genre: &str| ScannedTrack {
+            genre: Some(genre.into()),
+            ..song(&format!("/m/g/{n}.flac"), &format!("Song {n}"))
+        };
+        let messy = [
+            "rock;alternative pop rock;pop",
+            "Rock | Pop",
+            "Rock / Pop",
+            "(17)",
+            "(17)Rock",
+            "13",
+            "Unknown",
+            "Other",
+            "an extremely long genre that someone typed as a sentence",
+        ];
+        let clean = [
+            "Rock",
+            "Hip-Hop/Rap",
+            "R&B",
+            "80s Pop",
+            "2 Tone",
+            "Rock, Pop, Alternative",
+            "Drum & Bass",
+        ];
+        let songs: Vec<_> = messy
+            .iter()
+            .chain(clean.iter())
+            .enumerate()
+            .map(|(n, g)| with(n, g))
+            .collect();
+        store.save_scanned(&songs).await.unwrap();
+        let counts = store.problem_counts().await.unwrap();
+        assert_eq!(count(&counts, ProblemKind::MessyGenres), messy.len() as i64);
+        let rows = store
+            .problems(ProblemKind::MessyGenres, 0, 50)
+            .await
+            .unwrap();
+        let detail = |genre: &str| {
+            rows.iter()
+                .find(|r| r.detail.ends_with(&format!(": {genre}")))
+                .map(|r| r.detail.clone())
+                .unwrap_or_default()
+        };
+        assert!(detail("rock;alternative pop rock;pop").starts_with("Several genres"));
+        assert!(detail("(17)").starts_with("A genre number"));
+        assert!(detail("13").starts_with("A genre number"));
+        assert!(detail("Unknown").starts_with("A placeholder"));
+        assert!(detail("Other").starts_with("A placeholder"));
+        assert!(detail(messy[8]).starts_with("Too long"));
+    }
+
+    #[tokio::test]
+    async fn every_new_check_finds_its_case_and_leaves_good_songs_alone() {
+        use ProblemKind as K;
+        let store = Store::open_in_memory().await.unwrap();
+        let good = |path: &str, title: &str| ScannedTrack {
+            size: 5_000_000,
+            duration_ms: Some(200_000),
+            ..song(path, title)
+        };
+        let mut songs = vec![good("/m/ok/Fine Song.flac", "Fine Song")];
+        // Bogus values, odd length, a low bit rate.
+        songs.push(ScannedTrack {
+            track_no: Some(0),
+            ..good("/m/odd/Zero.flac", "Zero")
+        });
+        songs.push(ScannedTrack {
+            duration_ms: Some(5_000),
+            ..good("/m/odd/Short.flac", "Short")
+        });
+        songs.push(ScannedTrack {
+            duration_ms: Some(14_400_000),
+            size: 900_000_000,
+            ..good("/m/odd/Long.flac", "Long")
+        });
+        songs.push(ScannedTrack {
+            size: 400_000,
+            ..good("/m/odd/Thin.mp3", "Thin")
+        });
+        // Junk in titles, and a file name that doesn't say the title.
+        songs.push(good("/m/junk/a.flac", "01 - Numbered"));
+        songs.push(good("/m/junk/b.flac", "Tagged (Official Video)"));
+        songs.push(good("/m/junk/c.flac", "SHOUTING TITLE"));
+        songs.push(good("/m/junk/track07.mp3", "Real Name"));
+        // Two spellings of one artist.
+        let by = |path: &str, artist: &str| ScannedTrack {
+            artist: Some(artist.into()),
+            album: Some(format!("{artist} album")),
+            ..good(path, "Song")
+        };
+        songs.extend([
+            by("/m/b1/x.flac", "The Beatles"),
+            by("/m/b2/x.flac", "Beatles"),
+            by("/m/b3/x.flac", "AC/DC"),
+            by("/m/b4/x.flac", "ACDC"),
+        ]);
+        // An album with a hole in its numbers and covers that differ.
+        for (n, art) in [(1, "a"), (2, "a"), (4, "b")] {
+            songs.push(ScannedTrack {
+                track_no: Some(n),
+                album: Some("Holey".into()),
+                embedded_art: Some(art.into()),
+                ..good(&format!("/m/holey/{n}.flac"), &format!("Hole {n}"))
+            });
+        }
+        // The same album in one folder under two artists.
+        for (n, artist) in [(1, "Left"), (2, "Right")] {
+            songs.push(ScannedTrack {
+                album: Some("Split".into()),
+                album_artist: Some(artist.into()),
+                track_no: Some(n),
+                ..good(&format!("/m/split/{n}.flac"), &format!("Split {n}"))
+            });
+        }
+        // The same file twice in one album.
+        for dir in ["x", "y"] {
+            songs.push(ScannedTrack {
+                album: Some("Twice".into()),
+                ..good(&format!("/m/{dir}/Echo.flac"), "Echo")
+            });
+        }
+        store.save_scanned(&songs).await.unwrap();
+        // Loudness known for one song only; one song gone.
+        sqlx::query("UPDATE tracks SET loudness_lufs = -14 WHERE title = 'Fine Song'")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE tracks SET removed_at = ? WHERE title = 'Zero'")
+            .bind(now_ms())
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        let counts = store.problem_counts().await.unwrap();
+        let n = |k| count(&counts, k);
+        // Zero is gone, so it isn't a bogus value any more but is listed as vanished.
+        assert_eq!(n(K::BogusValues), 0);
+        assert_eq!(n(K::Vanished), 1);
+        assert_eq!(n(K::OddLength), 2);
+        assert_eq!(n(K::LowBitrate), 1);
+        assert_eq!(n(K::TitleJunk), 3);
+        assert!(n(K::NameMismatch) >= 1);
+        assert_eq!(n(K::ArtistVariants), 2);
+        assert_eq!(n(K::TrackGaps), 1);
+        assert_eq!(n(K::CoverDiffers), 1);
+        assert_eq!(n(K::SplitAcrossArtists), 2);
+        assert_eq!(n(K::IdenticalFiles), 2);
+        assert!(n(K::NoLyrics) > 10);
+        assert!(n(K::NoLoudness) > 10);
+        assert_eq!(n(K::NoLengthHeader), 0);
+        // Each list answers without an SQL error, with the detail where there is one.
+        for (kind, _) in &counts {
+            store.problems(*kind, 0, 5).await.unwrap();
+        }
+        let long = store.problems(K::OddLength, 0, 5).await.unwrap();
+        assert!(long.iter().any(|i| i.detail.contains("seconds long")));
+        let variants = store.problems(K::ArtistVariants, 0, 5).await.unwrap();
+        assert!(variants.iter().any(|i| i.detail.contains("The Beatles")));
+        // Good songs aren't in any of the new lists.
+        for kind in [K::BogusValues, K::OddLength, K::LowBitrate, K::TitleJunk] {
+            let rows = store.problems(kind, 0, 50).await.unwrap();
+            assert!(
+                rows.iter().all(|r| r.title.as_deref() != Some("Fine Song")),
+                "{kind:?}"
+            );
+        }
+    }
+
+    /// Run by hand: `cargo test -p djinn-store --release big_library -- --ignored --nocapture`.
+    #[tokio::test]
+    #[ignore = "timing on a big library"]
+    async fn problem_counts_on_a_big_library() {
+        let store = Store::open_in_memory().await.unwrap();
+        let mut songs = Vec::new();
+        for album in 0..3000 {
+            for n in 1..=12 {
+                songs.push(ScannedTrack {
+                    path: format!("/m/{}/{album}/{n:02} Song {n}.flac", album % 50),
+                    title: format!("Song {}", (album * 12 + n) % 9000),
+                    artist: Some(format!("Artist {}", album % 800)),
+                    album: Some(format!("Album {album}")),
+                    track_no: Some(n),
+                    size: 5_000_000,
+                    duration_ms: Some(200_000),
+                    ..Default::default()
+                });
+            }
+        }
+        for chunk in songs.chunks(2000) {
+            store.save_scanned(chunk).await.unwrap();
+        }
+        let started = std::time::Instant::now();
+        let counts = store.problem_counts().await.unwrap();
+        println!("all counts: {:?}", started.elapsed());
+        for kind in ProblemKind::ALL {
+            let at = std::time::Instant::now();
+            store.problems(kind, 0, 100).await.unwrap();
+            println!("{:?}: {:?} ({})", kind, at.elapsed(), count(&counts, kind));
+        }
     }
 
     #[tokio::test]

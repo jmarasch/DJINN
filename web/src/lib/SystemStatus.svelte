@@ -4,6 +4,7 @@
   import { api } from './api'
   import { reloadAfterRestart } from './restart'
   import { toast } from './state.svelte'
+  import { locale, t } from './i18n.svelte'
   import type { ServerPorts, SystemStatus } from './types'
 
   let status = $state<SystemStatus | null>(null)
@@ -25,7 +26,7 @@
     try {
       status = await api.systemStatus()
     } catch (e) {
-      if (!leaving) toast(e instanceof Error ? e.message : 'Could not load the status', true)
+      if (!leaving) toast(e instanceof Error ? e.message : t('admin.home.load_failed'), true)
     }
   }
 
@@ -44,16 +45,16 @@
     try {
       ports = await api.saveSystemPorts(portForm)
       portForm = { party_port: ports.pending_party_port, go_port: ports.pending_go_port }
-      toast('Ports saved. Restart DJINN to apply them.')
+      toast(t('ss.ports_saved'))
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not save ports', true)
+      toast(e instanceof Error ? e.message : t('ss.ports_failed'), true)
     } finally {
       savingPorts = false
     }
   }
 
   async function restart() {
-    if (!confirm('Restart DJINN? The music stops for a few seconds, then carries on where it was.')) return
+    if (!confirm(t('ss.restart_q'))) return
     try {
       restartTarget = undefined
       if (ports && ports.pending_party_port !== ports.party_port && Number(location.port) === ports.party_port) {
@@ -64,145 +65,158 @@
       await api.restart()
       leaving = 'restart'
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not restart', true)
+      toast(e instanceof Error ? e.message : t('ss.restart_failed'), true)
     }
   }
 
   async function quit() {
-    if (!confirm('Quit DJINN? The music stops, and nobody can use DJINN until it is started again on its computer.'))
+    if (!confirm(t('ss.quit_q')))
       return
     try {
       await api.quit()
       leaving = 'quit'
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not quit', true)
+      toast(e instanceof Error ? e.message : t('ss.quit_failed'), true)
     }
   }
 
   const size = (bytes: number) =>
     bytes >= 1e12
-      ? `${(bytes / 1e12).toFixed(2)} TB`
+      ? `${num(bytes / 1e12, 2)} TB`
       : bytes >= 1e9
-        ? `${(bytes / 1e9).toFixed(1)} GB`
-        : `${(bytes / 1e6).toFixed(bytes >= 1e7 ? 0 : 1)} MB`
+        ? `${num(bytes / 1e9, 1)} GB`
+        : `${num(bytes / 1e6, bytes >= 1e7 ? 0 : 1)} MB`
+  /** A number with this many decimals, in the language's own way. */
+  const num = (x: number, digits: number) =>
+    x.toLocaleString(locale.code, { minimumFractionDigits: digits, maximumFractionDigits: digits })
 
   function uptime(since: number): string {
     const minutes = Math.floor((Date.now() - since) / 60_000)
-    if (minutes < 1) return 'less than a minute'
-    if (minutes < 60) return `${minutes} min`
+    if (minutes < 1) return t('ss.under_minute')
+    if (minutes < 60) return t('ss.min', { n: minutes })
     const hours = Math.floor(minutes / 60)
-    if (hours < 48) return `${hours} h ${minutes % 60} min`
-    return `${Math.floor(hours / 24)} days`
+    if (hours < 48) return t('ss.h_min', { h: hours, m: minutes % 60 })
+    return t('ss.days', { n: Math.floor(hours / 24) })
   }
 
-  const stateLabel = { idle: 'Nothing playing', playing: 'Playing', paused: 'Paused' }
+  const stateLabel = $derived({
+    idle: t('admin.home.nothing_playing'),
+    playing: t('admin.home.playing'),
+    paused: t('admin.home.paused'),
+  })
 </script>
 
 <section class="card">
-  <h2>Status</h2>
+  <h2>{t('ss.title')}</h2>
   {#if leaving === 'restart'}
-    <p class="small"><span class="spinner" aria-hidden="true"></span> Restarting. This page reloads when DJINN is back.</p>
+    <p class="small"><span class="spinner" aria-hidden="true"></span> {t('ss.restarting')}</p>
   {:else if leaving === 'quit'}
-    <p class="small">DJINN has quit. Start it again on its computer to carry on.</p>
+    <p class="small">{t('ss.quit')}</p>
   {:else if status}
     <dl class="facts small">
       <dt>DJINN</dt>
       <dd>
-        {status.version}{#if status.started_ms}, running for {uptime(status.started_ms)}{/if}
+        {status.version}{#if status.started_ms}{t('ss.running_for', { time: uptime(status.started_ms) })}{/if}
       </dd>
 
-      <dt>Phones open</dt>
+      <dt>{t('ss.phones_open')}</dt>
       <dd>
         {#each status.addresses as address (address)}
           <div><a href={address} target="_blank" rel="noopener noreferrer">{address}</a></div>
         {:else}
-          <span class="muted">Unknown</span>
+          <span class="muted">{t('ss.unknown')}</span>
         {/each}
         {#if status.public_network}
-          <div class="bad">Windows has this network set to Public, which keeps phones out.</div>
+          <div class="bad">{t('admin.home.public_network')}.</div>
         {/if}
       </dd>
 
-      <dt>Library</dt>
+      <dt>{t('admin.library')}</dt>
       <dd>
-        {status.songs.toLocaleString()} songs, {status.artists.toLocaleString()} artists,
-        {status.albums.toLocaleString()} albums: {size(status.library_bytes)} of music in {status.library_folders}
-        {status.library_folders === 1 ? 'folder' : 'folders'}{#if status.scanning}, checking for changes...{/if}
+        {t('ss.library_line', {
+          songs: status.songs.toLocaleString(locale.code),
+          artists: status.artists.toLocaleString(locale.code),
+          albums: status.albums.toLocaleString(locale.code),
+          size: size(status.library_bytes),
+          folders: t('admin.home.n_folders', { n: status.library_folders }),
+        })}{#if status.scanning}{t('ss.checking')}{/if}
       </dd>
 
-      <dt>Music</dt>
+      <dt>{t('admin.home.music')}</dt>
       <dd>{stateLabel[status.state]}</dd>
 
-      <dt>Speakers</dt>
+      <dt>{t('ss.speakers')}</dt>
       <dd>
         {#each status.outputs.outputs.filter((o) => o.state !== 'disabled') as output (output.id)}
           <div>
-            {output.device ?? 'Waiting for a device'}{#if output.state === 'waiting'}
-              <span class="muted"> (waiting)</span>{/if}
+            {output.device ?? t('ss.waiting_device')}{#if output.state === 'waiting'}
+              <span class="muted">{t('ss.waiting')}</span>{/if}
             {#if output.error}<span class="bad"> {output.error}</span>{/if}
           </div>
         {:else}
-          <span class="muted">None on</span>
+          <span class="muted">{t('ss.none_on')}</span>
         {/each}
         {#if status.outputs.error}<div class="bad">{status.outputs.error}</div>{/if}
       </dd>
 
-      <dt>Casting to</dt>
+      <dt>{t('ss.casting_to')}</dt>
       <dd>
         {#each status.casts as cast (cast.name)}
           <div>
             {cast.name}{#if cast.error}<span class="bad"> {cast.error}</span>{:else if !cast.playing}<span class="muted">
-                (connecting)</span
+                {t('ss.connecting')}</span
               >{/if}
           </div>
         {:else}
-          <span class="muted">Nothing</span>
+          <span class="muted">{t('ss.nothing')}</span>
         {/each}
       </dd>
 
       <dt>AI</dt>
       <dd>
-        Listening {status.ai_listening ? 'loaded' : 'off'}, reader {status.ai_reader ? 'loaded' : 'off'}
+        {t('ss.ai_line', {
+          listening: status.ai_listening ? t('ss.loaded') : t('common.off'),
+          reader: status.ai_reader ? t('ss.loaded') : t('common.off'),
+        })}
       </dd>
 
-      <dt>Storage</dt>
+      <dt>{t('ss.storage')}</dt>
       <dd>
-        Database {size(status.database_bytes)}, artwork {size(status.art_bytes)}, AI models
-        {size(status.models_bytes)}
+        {t('ss.storage_line', { db: size(status.database_bytes), art: size(status.art_bytes), models: size(status.models_bytes) })}
         {#if status.data_dir}<div class="muted path">{status.data_dir}</div>{/if}
       </dd>
 
       {#if status.log_file}
-        <dt>Log file</dt>
+        <dt>{t('ss.log_file')}</dt>
         <dd class="muted path">{status.log_file}</dd>
       {/if}
     </dl>
 
     {#if ports}
       <div class="port-settings">
-        <h3>Server ports</h3>
+        <h3>{t('ss.ports')}</h3>
         <div class="port-fields">
-          <label>Party
+          <label>{t('ss.party')}
             <input type="number" min="1" max="65535" step="1" bind:value={portForm.party_port} />
           </label>
           <label>DJINN GO
             <input type="number" min="1" max="65535" step="1" bind:value={portForm.go_port} />
           </label>
-          <button onclick={savePorts} disabled={savingPorts || !Number.isInteger(portForm.party_port) || !Number.isInteger(portForm.go_port) || portForm.party_port < 1 || portForm.go_port < 1 || portForm.party_port > 65535 || portForm.go_port > 65535 || portForm.party_port === portForm.go_port}>Save ports</button>
+          <button onclick={savePorts} disabled={savingPorts || !Number.isInteger(portForm.party_port) || !Number.isInteger(portForm.go_port) || portForm.party_port < 1 || portForm.go_port < 1 || portForm.party_port > 65535 || portForm.go_port > 65535 || portForm.party_port === portForm.go_port}>{t('ss.save_ports')}</button>
         </div>
-        <p class="small muted">Current: party {ports.party_port}, GO {ports.go_port}. Saved changes take effect after a restart. Update any router forwarding or reverse proxy to use the new ports.</p>
+        <p class="small muted">{t('ss.ports_note', { party: ports.party_port, go: ports.go_port })}</p>
       </div>
     {/if}
 
     <div class="actions">
-      <button onclick={restart}>Restart DJINN</button>
-      <button class="danger" onclick={quit}>Quit DJINN</button>
+      <button onclick={restart}>{t('ss.restart')}</button>
+      <button class="danger" onclick={quit}>{t('ss.quit_button')}</button>
     </div>
     <p class="small muted">
-      Restarting picks the music up where it was. After quitting, DJINN has to be started again on its computer.
+      {t('ss.restart_note')}
     </p>
   {:else}
-    <p class="small muted">Loading...</p>
+    <p class="small muted">{t('common.loading')}</p>
   {/if}
 </section>
 

@@ -3,6 +3,7 @@
   // found, to read in the morning.
   import { api } from './api'
   import { toast } from './state.svelte'
+  import { locale, t } from './i18n.svelte'
   import type { CheckSummary, ScheduledCheck } from './types'
 
   let check = $state<ScheduledCheck | null>(null)
@@ -19,54 +20,50 @@
     try {
       check = await api.saveScheduledCheck(check.on, check.hour)
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not save that', true)
+      toast(e instanceof Error ? e.message : t('sc.save_failed'), true)
     }
   }
 
-  const hourLabel = (h: number) => new Date(2000, 0, 1, h).toLocaleTimeString([], { hour: 'numeric' })
-  const n = (x: number) => x.toLocaleString()
-  const plural = (x: number, one: string, many: string) => `${n(x)} ${x === 1 ? one : many}`
+  const hourLabel = (h: number) => new Date(2000, 0, 1, h).toLocaleTimeString(locale.code, { hour: 'numeric' })
+  const n = (x: number) => x.toLocaleString(locale.code)
   const when = (ms: number) =>
-    new Date(ms).toLocaleString([], { weekday: 'long', hour: 'numeric', minute: '2-digit' })
-
+    new Date(ms).toLocaleString(locale.code, { weekday: 'long', hour: 'numeric', minute: '2-digit' })
   /** "3 new" or "2 fewer" after a count, when it changed. */
-  const change = (x: number) => (x > 0 ? ` (${n(x)} new)` : x < 0 ? ` (${n(-x)} fewer)` : '')
-
+  const change = (x: number) =>
+    x > 0 ? t('sc.change_new', { n: n(x) }) : x < 0 ? t('sc.change_fewer', { n: n(-x) }) : ''
   function lines(s: CheckSummary): string[] {
     return [
       s.added || s.removed
-        ? `${plural(s.added, 'song', 'songs')} added, ${plural(s.removed, 'song', 'songs')} gone`
-        : 'No songs added or gone',
-      `${plural(s.trouble, 'problem', 'problems')} needing a look${change(s.trouble_change)}`,
-      `${plural(s.duplicates, 'song', 'songs')} with copies${change(s.duplicates_change)}`,
-      `${plural(s.reports, 'song', 'songs')} listeners reported${change(s.reports_change)}`,
+        ? t('sc.added_gone', { added: t('sc.n_songs', { n: s.added }), removed: t('sc.n_songs', { n: s.removed }) })
+        : t('sc.no_change'),
+      t('sc.problems', { n: s.trouble, change: change(s.trouble_change) }),
+      t('sc.copies', { n: s.duplicates, change: change(s.duplicates_change) }),
+      t('sc.reported', { n: s.reports, change: change(s.reports_change) }),
     ]
   }
 </script>
 
 <section class="card">
-  <h2>Nightly check</h2>
+  <h2>{t('sc.title')}</h2>
   {#if check}
     <label class="switch big">
       <input type="checkbox" bind:checked={check.on} onchange={save} />
-      Check the library every night
+      {t('sc.on')}
     </label>
     <label>
-      At
+      {t('sc.at')}
       <select bind:value={check.hour} onchange={save} disabled={!check.on}>
         {#each Array.from({ length: 24 }, (_, h) => h) as h (h)}
           <option value={h}>{hourLabel(h)}</option>
         {/each}
       </select>
       <span class="small muted">
-        This computer's time. DJINN notices most changes to your folders right away; a nightly check also catches
-        network folders and drives that don't say when they change. If DJINN is off at that hour, the check runs when
-        it starts.
+        {t('sc.note')}
       </span>
     </label>
     {#if check.last}
       <div>
-        <p class="small muted">Last check, {when(check.last.at)}:</p>
+        <p class="small muted">{t('sc.last', { when: when(check.last.at) })}</p>
         <ul class="small">
           {#each lines(check.last) as line, i (i)}<li>{line}</li>{/each}
         </ul>

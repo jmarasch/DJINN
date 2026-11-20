@@ -11,11 +11,13 @@ it safer to reach from away from home.
 
 ## Turning it on
 
-Admin > **GO**, switch **DJINN GO is on**. The tab then shows the
+**Admin > DJINN GO**, switch **DJINN GO is on**. The tab then shows the
 addresses to open on your home network, such as `http://192.168.1.20:8067`,
 and your Tailscale address if this computer runs Tailscale.
 
-Who can use it is set per role under Admin > **Users** (see
+![Admin > DJINN GO](images/admin-go.webp)
+
+Who can use it is set per role under **Admin > Users and Roles** (see
 [Accounts and roles](accounts-and-roles.md)):
 
 - **Use DJINN GO:** on for Listener when you start.
@@ -25,7 +27,7 @@ Who can use it is set per role under Admin > **Users** (see
 - **Download songs:** off unless you turn it on.
 - **Must use two-step sign-in for GO:** see below.
 
-Admins can always use GO. Admin > GO > Safety also has a server-wide
+Admins can always use GO. Admin > DJINN GO > Safety also has a server-wide
 **Allow connections from outside the home network** switch. It is off by
 default. Both this switch and the role permission must be on for internet
 listeners. Tailscale addresses count as home.
@@ -68,6 +70,25 @@ listeners. Tailscale addresses count as home.
   party learns.
 - **Even volume:** when ReplayGain is on for the party (Admin > Audio), GO
   applies the same levels on your device.
+- **Lyrics:** when a song has lyrics, Now Playing shows them, and timed
+  lyrics light up line by line. The **Lyrics** button fills the screen with
+  them.
+- **Your Year:** under Library, **Your Year** sums up your listening on GO
+  this year: hours listened, plays, different songs, songs you asked for at
+  the party, your top songs and artists, your busiest month and your first
+  song of the year. The Android app has it on Home.
+- **Equalizer:** **Account > This Device > Equalizer** shapes the sound for
+  your own listening on that device, with presets (Flat, Bass Boost, Vocals,
+  Rock, Electronic, Bright) or your own settings on 12 bands. It doesn't
+  change what the party hears. On iPhones and iPads, music may stop when the
+  screen locks while the equalizer is on. The Android app has it under
+  **Settings > Equalizer**, saved per phone.
+- **Save data:** **Account > This Device** can play smaller MP3 copies on
+  that device, when converting is on (see [Converting](#converting)).
+
+![DJINN GO's home on a phone](images/go-home.webp)
+
+![Your Year in DJINN GO](images/go-year.webp)
 
 ## On your phone
 
@@ -76,6 +97,8 @@ sorted, including by **Recently added**, in the app, in GO on a computer (under
 Search) and on the party page. Scroll down and the options move out of the way;
 start scrolling back up and they return, with a button to jump to the top.
 
+![Your liked songs in DJINN GO](images/go-library.webp)
+
 **Getting there:** in GO on a computer, **Account > Open on your phone**
 shows a QR code for GO's address; scan it with the phone's camera. If
 Chrome on Android won't open it (ERR_TOO_MANY_RETRIES), allow Chrome's
@@ -83,10 +106,10 @@ Chrome on Android won't open it (ERR_TOO_MANY_RETRIES), allow Chrome's
 
 **Getting the Android app:** your server carries it. Open GO on an Android phone
 and choose **Get the Android app** (on the sign-in page, or under Account), or scan
-the QR code in Admin > GO with the phone's camera. Android asks you to allow the
+the QR code in Admin > DJINN GO with the phone's camera. Android asks you to allow the
 install and may warn about where it came from. After that, the app offers new
 versions itself when your server has one, and Android checks each is signed by the
-same people. Admin > GO and the download show a SHA-256 checksum, worth comparing
+same people. Admin > DJINN GO and the download show a SHA-256 checksum, worth comparing
 on a network you don't trust, since that first download can't check itself. It's
 also on each release on GitHub.
 
@@ -108,7 +131,8 @@ what the web player does, it can:
   listed among the music services inside Google's Clock; those are Google's
   partners only.
 - **Show visuals.** Tap the cover on Now Playing to move through the styles:
-  bars, ring, wave, mirror, warp, tunnel, plasma, kaleidoscope, nebula and
+  bars, ring, wave, mirror, spectrogram, scope, mountain, VU meters, circle,
+  particles, terrain, flyover, warp, tunnel, plasma, kaleidoscope, nebula and
   stars. **Visuals** or **full screen** fills the screen and keeps it on, in
   either direction; tap for controls, or let the styles change by themselves.
   They react to the song's bass, mids, treble and beats. If they seem early or
@@ -118,9 +142,9 @@ what the web player does, it can:
   Google TV.
 
 To sign in, choose your server from the list the app finds on your network.
-On a network with several, go by the name set under Admin > GO (**Server name**).
-If yours isn't listed (some networks block this, and Admin > GO can turn it off),
-scan the QR code above or type the address from Admin > GO. Anyone on a network
+On a network with several, go by the name set under Admin > DJINN GO (**Server name**).
+If yours isn't listed (some networks block this, and Admin > DJINN GO can turn it off),
+scan the QR code above or type the address from Admin > DJINN GO. Anyone on a network
 can give a computer any name, so only sign in to a server you recognize.
 Android may ask about **nearby devices**; that's how newer Android lets an app
 reach a computer on your home network. 
@@ -141,11 +165,10 @@ Sign in on the phone first; the car uses whichever server the phone is on. Andro
 Auto draws the screen itself, so the app's full screen view and visuals don't appear
 in the car.
 
-**Encryption** is on unless an admin turns it off (Admin > GO > **Safety**), with
+**Encryption** is on unless an admin turns it off (Admin > DJINN GO > **Safety**), with
 nothing to set up: the server makes its own certificate. The app uses it for
 everything, remembers it, and warns if it ever changes. To check you've reached
-the right server the first time, compare the security code in the app with Admin >
-GO, or scan the QR code, which checks for you. Browsers can use it too by opening
+the right server the first time, compare the security code in the app with Admin > DJINN GO, or scan the QR code, which checks for you. Browsers can use it too by opening
 an address with `https://`, but they warn that no authority vouches for it, so
 they keep working with `http://` as well. Cast devices still get songs
 unencrypted, since they won't accept this kind of certificate, and so do other
@@ -153,7 +176,7 @@ phone apps unless they're told to use `https://` and accept it. If the server is
 moved to another computer, copy the `tls` folder beside its database, or the app
 will warn that the certificate changed.
 
-**What happens to kept songs** is the admin's choice, under Admin > GO > **Songs
+**What happens to kept songs** is the admin's choice, under Admin > DJINN GO > **Songs
 kept on devices**:
 
 - **Signing out** deletes them, or keeps them locked until you sign back in.
@@ -212,7 +235,7 @@ song files (MP3, FLAC, M4A with AAC, Ogg Vorbis or WAV: the formats DJINN plays)
   and length) is marked as a likely duplicate.
 - With **Submitted music goes straight in**, songs join the library at once,
   except likely duplicates, which wait for you. Otherwise each one waits.
-- **Reviewing:** Admin > GO > **Submitted music** lists what's waiting, with
+- **Reviewing:** Admin > DJINN GO > **Submitted music** lists what's waiting, with
   its tags and a player. **Add to library** or **Turn down** (with a note
   for the sender; the file is deleted). Senders see what happened to each
   song under Submit music, and can take back one still waiting.
@@ -232,7 +255,7 @@ only on Apple devices. GO tells you when your device can't play a song.
 
 ## Converting
 
-Off unless you turn it on, under Admin > GO > **Converting**. Then DJINN
+Off unless you turn it on, under Admin > DJINN GO > **Converting**. Then DJINN
 makes MP3 copies:
 
 - for a device that can't play a song's format (GO asks for one by itself);
@@ -252,17 +275,18 @@ With two-step sign-in, signing in asks for a 6-digit code from an
 authenticator app on your phone after the password, so a stolen password
 isn't enough.
 
-- **Turn it on for yourself:** in the party app, **Your account** (on the
-  Playing tab or at the bottom of Admin), or in GO under **Account**. Scan
+![DJINN GO's Account page](images/go-account.webp)
+
+- **Turn it on for yourself:** in the party app, **Menu > Your Account**, or in GO under **Account**. Scan
   the QR code with an authenticator app (Google Authenticator, Microsoft
   Authenticator, 1Password, Bitwarden and others), type the code, and save
   the recovery codes somewhere safe. Each recovery code works once if you
   lose your phone.
 - **Require it:** per role with **Must use two-step sign-in for GO**, and
-  for admins under Admin > GO > Safety. People who need it set it up the
+  for admins under Admin > DJINN GO > Safety. People who need it set it up the
   first time they open GO.
 - **Lost phone and codes:** an admin can **Turn off two-step** for that
-  account under Admin > Users.
+  account under **Admin > Users and Roles**.
 
 Once it's on for an account, every sign-in asks for a code, on the party
 address too.
@@ -271,10 +295,10 @@ address too.
 
 - **Lockouts:** five wrong passwords for an account lock it for 15
   minutes; twenty from one address lock that address.
-- **Sign-in log:** Admin > GO lists every sign-in and failed try, with the
-  address and device, for 90 days.
+- **Sign-in log:** **Admin > Sign-In Log** lists every sign-in and failed
+  try, with the address and device, for 90 days.
 - **Devices:** everyone can see where they're signed in and sign devices
-  out under **Your account**. Sessions end after 30 days unused.
+  out under **Your Account**. Sessions end after 30 days unused.
 - **Song links** are private and expire after a few hours.
 - **Passwords** need at least 8 characters and can't be common ones.
 
@@ -294,7 +318,7 @@ connections.
 2. Install it on your phone (and each listener's) and sign in to the same
    Tailscale network. To add other people, invite them from the Tailscale
    admin console, or share the DJINN computer with them.
-3. Admin > GO shows the Tailscale address, like `http://100.101.102.103:8067`.
+3. Admin > DJINN GO shows the Tailscale address, like `http://100.101.102.103:8067`.
    Open it on the phone.
 
 Tailscale addresses count as home, so roles without **Use GO away from
@@ -311,7 +335,7 @@ account and a domain on Cloudflare.
 1. Install `cloudflared` on the DJINN computer and create a tunnel, with a
    public hostname (like `music.example.com`) pointing to
    `http://localhost:8067`.
-2. In Admin > GO > Safety, set **Trusted proxies** to `127.0.0.1` and save.
+2. In Admin > DJINN GO > Safety, set **Trusted proxies** to `127.0.0.1` and save.
    DJINN then sees each visitor's real address, so lockouts and the
    home-network check work. Without it, every visitor through the tunnel
    counts as away from home.
@@ -330,7 +354,7 @@ open the address with `https://` and accept the warning.
 
 Away from home, signing in over plain HTTP is refused, because passwords, app
 passwords, and music would travel without encryption. If you need it anyway,
-for example for a Subsonic app that can't accept the certificate, Admin > GO
+for example for a Subsonic app that can't accept the certificate, Admin > DJINN GO
 has **Also allow unencrypted connections from outside**. A trusted HTTPS proxy,
 below, is the better answer.
 
@@ -354,7 +378,7 @@ music.example.com {
 
 Caddy obtains and renews the HTTPS certificate using the TLS challenge on
 port 443. If your public IP changes, keep the DNS record updated with a
-dynamic DNS service. In Admin > GO > Safety,
+dynamic DNS service. In Admin > DJINN GO > Safety,
 enter the public hostname, set **Trusted proxies** to `127.0.0.1`, and turn
 on **Allow connections from outside the home network**. Give the relevant
 roles **Use GO away from home**. Caddy must be running on this computer and

@@ -1,19 +1,25 @@
 //! DJINN music library: scanner, tags, cover art, and search.
 
 pub mod art;
+pub mod compare;
 pub mod credits;
 pub mod duplicates;
+pub mod genre_groups;
 pub mod genres;
 pub mod identify;
 pub mod lyrics;
+pub mod lyrics_import;
+pub mod mpeg;
 pub mod online;
 pub mod playlist_file;
 pub mod playlist_match;
 pub mod radio;
+pub mod releases;
 pub mod sound;
 mod tags;
 pub use tags::{basics, Basics};
 pub mod vibe;
+pub mod write;
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -25,7 +31,7 @@ use serde::Serialize;
 use walkdir::WalkDir;
 
 /// File extensions the engine can decode.
-const AUDIO_EXTENSIONS: &[&str] = &["mp3", "flac", "m4a", "mp4", "aac", "ogg", "oga", "wav"];
+pub const AUDIO_EXTENSIONS: &[&str] = &["mp3", "flac", "m4a", "mp4", "aac", "ogg", "oga", "wav"];
 /// Audio formats DJINN doesn't play, reported on the Problems page instead
 /// of skipped without a word.
 const OTHER_AUDIO: &[&str] = &[
@@ -39,14 +45,20 @@ const READERS: usize = 4;
 /// Bumped when the scanner starts extracting something new, so the next
 /// scan re-reads every file once. 2: artwork sources, " - Topic" cleanup.
 /// 3: separate artists for collaborations and features. 4: ReplayGain tags.
-/// 6: original release years. 7: notes on unreadable tags.
-const SCAN_VERSION: i64 = 7;
+/// 6: original release years. 7: notes on unreadable tags. 8: the real length
+/// of MP3s with no length header (`mpeg`).
+const SCAN_VERSION: i64 = 8;
 /// Set to anything else to make the next scan re-read every file.
 pub const SCAN_VERSION_KEY: &str = "scan_version";
 /// Artist names never split (one per line); unset means the defaults.
 pub const KEEP_WHOLE_KEY: &str = "artist_keep_whole";
 /// Whether a file's original release date wins over its own date.
 pub const ORIGINAL_YEARS_KEY: &str = "original_years";
+
+/// The library editor's trash: a hidden folder in each library folder where
+/// deleted songs wait (keeping their place under it) until the trash is
+/// emptied. Library checks skip it.
+pub const TRASH: &str = ".djinn-trash";
 
 /// Whether years come from the original release, on unless turned off.
 pub async fn original_years(store: &Store) -> Result<bool, LibraryError> {
@@ -273,7 +285,11 @@ fn walk(roots: &[PathBuf]) -> (Vec<FoundFile>, Vec<PathBuf>, Vec<ScanProblem>) {
             continue;
         }
         available.push(root.clone());
-        for entry in WalkDir::new(root).follow_links(true) {
+        let walk = WalkDir::new(root)
+            .follow_links(true)
+            .into_iter()
+            .filter_entry(|e| e.file_name() != TRASH);
+        for entry in walk {
             let entry = match entry {
                 Ok(entry) => entry,
                 Err(e) => {

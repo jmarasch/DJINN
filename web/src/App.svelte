@@ -14,6 +14,7 @@
   import Toasts from './lib/Toasts.svelte'
   import Admin from './screens/Admin.svelte'
   import { adminTabFor } from './lib/adminTabs'
+  import EditorWindow from './screens/EditorWindow.svelte'
   import { cycleTheme, theme } from './lib/theme.svelte'
   import BackgroundArt from './lib/BackgroundArt.svelte'
   import { appearance, loadAppearance } from './lib/appearance.svelte'
@@ -101,7 +102,9 @@
     query.addEventListener('change', update)
     return () => query.removeEventListener('change', update)
   })
-  const themeLabel = $derived({ auto: 'Auto', light: 'Light', dark: 'Dark' }[theme.mode])
+  const themeLabel = $derived(
+    { auto: t('nav.theme_auto'), light: t('nav.theme_light'), dark: t('nav.theme_dark') }[theme.mode],
+  )
   const tab = $derived(
     route.path.startsWith('/search') || albumId || artistId || artistSongsId || similarId || genreName
       ? 'search'
@@ -136,7 +139,7 @@
 {:else if onJoinPage}
   <Join />
 {:else if !app.ready}
-  <div class="center-screen muted">Loading...</div>
+  <div class="center-screen muted">{t('common.loading')}</div>
 {:else if app.me && app.setupLibrary}
   <main class="narrow"><SetupLibrary /></main>
 {:else if !app.me}
@@ -152,13 +155,15 @@
     {:else}
       <Login />
       {#if app.mode && app.mode.signup !== 'closed'}
-        <button class="back-to-guest" onclick={() => (signingUp = true)}>New here? Create an account</button>
+        <button class="back-to-guest" onclick={() => (signingUp = true)}>{t('app.new_here')}</button>
       {/if}
       {#if app.mode?.guest_mode}
-        <button class="back-to-guest" onclick={() => (app.hostLogin = false)}>Not the host? Join with a name</button>
+        <button class="back-to-guest" onclick={() => (app.hostLogin = false)}>{t('app.not_host')}</button>
       {/if}
     {/if}
   </main>
+{:else if route.path.split('?')[0] === '/editor' && isAdmin()}
+  <EditorWindow />
 {:else}
   <!-- The frame: on phones a header (logo, room) with tabs along the bottom;
        on wide screens a side menu with the same tabs and the rest below. -->
@@ -187,8 +192,13 @@
       {/if}
     </div>
   </header>
+  {#if app.me.must_change_password}
+    <div class="must-change" role="alert">
+      {t('app.temp_password')} <a href="#/account">{t('app.change_now')}</a>.
+    </div>
+  {/if}
 
-  <nav class="side" class:rail={tab === 'admin'} aria-label="Main navigation">
+  <nav class="side" class:rail={tab === 'admin'} aria-label={t('goa.main_nav')}>
     <a class="brand side-brand" href="#/" aria-label="DJINN">
       <Logo size={48} />
       <span class="brand-text">
@@ -213,12 +223,12 @@
         <a href="#/playlists" class:active={tab === 'playlists'}><Icon name="playlist" /><span>{t('nav.playlists')}</span></a>
       {/if}
       {#if app.me.role !== 'guest'}
-        <a href="#/account" class:active={route.path === '/account'}><Icon name="person" /><span>{t('playing.your_account')}</span></a>
+        <a href="#/account" class:active={route.path === '/account'}><Icon name="person" /><span>{t('nav.your_account')}</span></a>
       {/if}
       {#if isAdmin()}
-        <a href="#/admin" class:active={tab === 'admin'}><Icon name="settings" /><span>Admin</span></a>
+        <a href="#/admin" class:active={tab === 'admin'}><Icon name="settings" /><span>{t('nav.admin')}</span></a>
       {/if}
-      <button class="theme-toggle" onclick={cycleTheme} aria-label="Theme: {themeLabel}" title="Theme: {themeLabel}">
+      <button class="theme-toggle" onclick={cycleTheme} aria-label={t('nav.theme', { name: themeLabel })} title={t('nav.theme', { name: themeLabel })}>
         <Icon name="theme" /><span>{themeLabel}</span>
       </button>
       {#if tab !== 'admin'}<div class="side-room"><RoomPicker up /></div>{/if}
@@ -281,12 +291,12 @@
           <a href="#/playlists"><Icon name="playlist" /><span>{t('nav.playlists')}</span></a>
         {/if}
         {#if app.me.role !== 'guest'}
-          <a href="#/account"><Icon name="person" /><span>{t('playing.your_account')}</span></a>
+          <a href="#/account"><Icon name="person" /><span>{t('nav.your_account')}</span></a>
         {/if}
         {#if isAdmin()}
-          <a href="#/admin"><Icon name="settings" /><span>Admin</span></a>
+          <a href="#/admin"><Icon name="settings" /><span>{t('nav.admin')}</span></a>
         {/if}
-        <button class="theme-toggle sheet-theme" onclick={cycleTheme}><Icon name="theme" /><span>Theme: {themeLabel}</span></button>
+        <button class="theme-toggle sheet-theme" onclick={cycleTheme}><Icon name="theme" /><span>{t('nav.theme', { name: themeLabel })}</span></button>
       </div>
     </Sheet>
   {/if}
@@ -304,6 +314,19 @@
 <Toasts />
 
 <style>
+  .must-change {
+    padding: 8px 16px;
+    text-align: center;
+    background: var(--accent);
+    color: var(--on-accent, #000);
+    font-weight: 600;
+  }
+
+  .must-change a {
+    color: inherit;
+    text-decoration: underline;
+  }
+
   .join-language {
     display: flex;
     justify-content: center;

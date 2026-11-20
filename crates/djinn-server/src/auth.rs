@@ -295,6 +295,8 @@ pub struct Me {
     /// DJINN GO asks this account for two-step sign-in (see `user.two_step`
     /// for whether it's on).
     pub two_step_required: bool,
+    /// The password was set by the host's recovery command: change it now.
+    pub must_change_password: bool,
 }
 
 pub async fn me_for(state: &AppState, user: User) -> ApiResult<Me> {
@@ -304,11 +306,13 @@ pub async fn me_for(state: &AppState, user: User) -> ApiResult<Me> {
         Role::Admin | Role::Guest => None,
     };
     let two_step_required = two_step::required(state, &user).await?;
+    let must_change_password = state.store.must_change_password(user.id).await?;
     Ok(Me {
         user,
         role_name,
         permissions,
         two_step_required,
+        must_change_password,
     })
 }
 
@@ -365,7 +369,7 @@ pub async fn check_own_password(
     Ok(ok)
 }
 
-fn too_many_tries(wait: std::time::Duration) -> ApiError {
+pub(crate) fn too_many_tries(wait: std::time::Duration) -> ApiError {
     let minutes = wait.as_secs().div_ceil(60).max(1);
     ApiError::new(
         StatusCode::TOO_MANY_REQUESTS,
@@ -469,8 +473,13 @@ async fn login(
         )),
         AccountStatus::Disabled => Some(("turned_off", "this account has been turned off")),
     };
+    let locked = state.store.is_locked(user.id).await?;
     let refused = match refused {
         Some(r) => Some(r),
+        None if locked => Some((
+            "account_locked",
+            "this account is locked after too many wrong codes; another admin can unlock it, or on the host run `djinn recover`",
+        )),
         None if device.go => go_refusal(&state, &user, &device).await?,
         None => None,
     };
@@ -566,6 +575,9 @@ async fn finish_two_step(
     }
     if !two_step::verify(&state, ticket.user_id, &body.code).await? {
         state.tickets.wrong(&body.ticket);
+        if state.store.note_code_failure(ticket.user_id).await? {
+            tracing::warn!(username = %ticket.username, "account locked after too many wrong codes");
+        }
         log_sign_in(
             &state,
             &device,
@@ -580,6 +592,7 @@ async fn finish_two_step(
         ));
     }
     state.limiter.code_ok(&ticket.username, device.addr);
+    state.store.clear_code_failures(ticket.user_id).await?;
     state.tickets.used(&body.ticket);
     let user = state
         .store
@@ -617,6 +630,10 @@ async fn change_password(
     validate_password(&body.new, &me.user.username)?;
     let hash = hash_password(body.new).await?;
     state.store.set_password(me.user.id, &hash).await?;
+    state
+        .store
+        .set_must_change_password(me.user.id, false)
+        .await?;
     tracing::info!(username = %me.user.username, "password changed");
     let cookie = start_session(&state, me.user.id, SESSION_DAYS, &device).await?;
     Ok((
@@ -1411,7 +1428,7 @@ fn too_busy() -> ApiError {
     )
 }
 
-async fn hash_password(password: String) -> ApiResult<String> {
+pub(crate) async fn hash_password(password: String) -> ApiResult<String> {
     let _turn = hash_gate().enter().await.ok_or_else(too_busy)?;
     let hash = tokio::task::spawn_blocking(move || {
         Argon2::default()

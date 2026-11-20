@@ -1,5 +1,6 @@
 <script lang="ts">
   // Admin: queue every song on an album or by an artist, in order.
+  import { t } from './i18n.svelte'
   import { api } from './api'
   import Icon from './Icon.svelte'
   import { isAdmin, toast } from './state.svelte'
@@ -12,9 +13,9 @@
     busy = true
     try {
       const { added } = await api.queueAll(kind, refId)
-      toast(added ? `Queued ${added} ${added === 1 ? 'song' : 'songs'}` : 'Those songs are already in the queue')
+      toast(added ? t('qa.queued', { n: added }) : t('qa.already'))
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not queue them', true)
+      toast(e instanceof Error ? e.message : t('qa.failed'), true)
     } finally {
       busy = false
     }
@@ -22,5 +23,5 @@
 </script>
 
 {#if isAdmin()}
-  <button class="pill" disabled={busy} onclick={queueAll}><Icon name="queue" size={18} /> Queue all</button>
+  <button class="pill" disabled={busy} onclick={queueAll}><Icon name="queue" size={18} /> {t('qa.button')}</button>
 {/if}

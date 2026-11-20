@@ -2,6 +2,7 @@
   import { onMount } from 'svelte'
   import { api } from '../lib/api'
   import { app, connect } from '../lib/state.svelte'
+  import { t } from '../lib/i18n.svelte'
 
   const token = new URLSearchParams(location.search).get('token') ?? ''
   let needed = $state<boolean | null>(null)
@@ -44,7 +45,7 @@
       }
       setTimeout(wait, 2000)
     } catch (err) {
-      error = err instanceof Error ? err.message : 'Setup failed'
+      error = err instanceof Error ? err.message : t('setup.failed')
       busy = false
     }
   }
@@ -83,7 +84,7 @@
   async function submit(e: SubmitEvent) {
     e.preventDefault()
     if (password !== confirm) {
-      error = 'Passwords do not match'
+      error = t('setup.no_match')
       return
     }
     busy = true
@@ -93,7 +94,7 @@
       app.setupLibrary = true
       connect()
     } catch (err) {
-      error = err instanceof Error ? err.message : 'Setup failed'
+      error = err instanceof Error ? err.message : t('setup.failed')
     } finally {
       busy = false
     }
@@ -102,87 +103,84 @@
 
 {#if needed === false}
   <div class="card">
-    <h1>Already set up</h1>
-    <p class="muted">An admin account exists. Sign in instead.</p>
-    <a class="button primary" href="/" onclick={finish}>Go to sign in</a>
+    <h1>{t('setup.done')}</h1>
+    <p class="muted">{t('setup.done_note')}</p>
+    <a class="button primary" href="/" onclick={finish}>{t('setup.to_sign_in')}</a>
   </div>
 {:else if becomingNode}
   <div class="card">
-    <h1>Starting as a node</h1>
+    <h1>{t('setup.starting_node')}</h1>
     <p class="muted">
-      <span class="spinner" aria-hidden="true"></span> DJINN is starting again as a node. This page moves on by itself.
-      If it doesn't within a minute, start DJINN again and open this address.
+      <span class="spinner" aria-hidden="true"></span> {t('setup.starting_node_note')}
     </p>
   </div>
 {:else if needed && kind === 'node'}
   <div class="card">
-    <h1>Set up as a node</h1>
+    <h1>{t('setup.as_node')}</h1>
     <p class="muted">
-      A node plays one room's music on this computer's speakers, in step with your main DJINN, and takes everything
-      from it: no library here, and phones keep using the main DJINN. Next you'll enter the main DJINN's address and
-      accept this node there with your password.
+      {t('setup.as_node_note')}
     </p>
     {#if !token && !open}
-      <p class="error">This page needs the setup link from the server log.</p>
+      <p class="error">{t('setup.needs_link')}</p>
     {/if}
     {#if error}<p class="error">{error}</p>{/if}
     <div class="choices">
-      <button class="primary" disabled={busy || (!token && !open)} onclick={becomeNode}>Make this a node</button>
-      <button disabled={busy} onclick={() => (kind = null)}>Back</button>
+      <button class="primary" disabled={busy || (!token && !open)} onclick={becomeNode}>{t('setup.make_node')}</button>
+      <button disabled={busy} onclick={() => (kind = null)}>{t('setup.back')}</button>
     </div>
   </div>
 {:else if needed && kind === null && mains.length && !notNode}
   <div class="card">
-    <h1>Is this box a node?</h1>
+    <h1>{t('setup.is_node')}</h1>
     <p>
-      Found {mains.length === 1 ? 'a main DJINN' : 'main DJINNs'} on this network:
+      {mains.length === 1 ? t('setup.found_one') : t('setup.found_many')}
       <b>{mains.map((m) => m.name).join(', ')}</b>.
     </p>
-    <p class="muted">A node plays a room for a main DJINN, and takes its music and settings from it.</p>
+    <p class="muted">{t('setup.node_is')}</p>
     <div class="kinds">
-      <button class="primary" onclick={() => (kind = 'node')}>Yes, set this up as a node</button>
-      <button onclick={() => (notNode = true)}>No, this is a separate main DJINN</button>
+      <button class="primary" onclick={() => (kind = 'node')}>{t('setup.yes_node')}</button>
+      <button onclick={() => (notNode = true)}>{t('setup.no_main')}</button>
     </div>
   </div>
 {:else if needed && kind === null}
   <div class="card">
     <img class="shiny" src="/images/logo.webp" alt="" />
-    <h1>Welcome to DJINN</h1>
-    <p class="muted">What will this computer be?</p>
+    <h1>{t('setup.welcome')}</h1>
+    <p class="muted">{t('setup.what')}</p>
     <div class="kinds">
       <button class="primary" onclick={() => (kind = 'main')}>
-        <b>Main DJINN</b><br /><span class="small">Holds the music library and runs the party.</span>
+        <b>{t('setup.main')}</b><br /><span class="small">{t('setup.main_note')}</span>
       </button>
       <button class="primary" onclick={() => (kind = 'node')}>
-        <b>Node</b><br /><span class="small">Plays a room for a main DJINN you already have.</span>
+        <b>{t('setup.node')}</b><br /><span class="small">{t('setup.node_note')}</span>
       </button>
     </div>
     {#if onScreen && address}
-      <p class="muted">No keyboard here? Open <b>{address}/setup</b> on a phone or computer on this network.</p>
+      <p class="muted">{t('setup.no_keyboard', { address: `${address}/setup` })}</p>
     {/if}
   </div>
 {:else if needed}
   <form class="card" onsubmit={submit}>
-    <h1>Welcome to DJINN</h1>
-    <p class="muted">Create the admin account. You can add guests afterwards.</p>
+    <h1>{t('setup.welcome')}</h1>
+    <p class="muted">{t('setup.create_note')}</p>
     {#if !token && !open}
-      <p class="error">This page needs the setup link from the server log.</p>
+      <p class="error">{t('setup.needs_link')}</p>
     {/if}
     <label>
-      Username
+      {t('setup.username')}
       <input bind:value={username} autocomplete="username" autocapitalize="none" required />
     </label>
     <label>
-      Password
+      {t('setup.password')}
       <input type="password" bind:value={password} autocomplete="new-password" minlength="8" required />
     </label>
     <label>
-      Confirm password
+      {t('setup.confirm')}
       <input type="password" bind:value={confirm} autocomplete="new-password" required />
     </label>
     {#if error}<p class="error">{error}</p>{/if}
-    <button class="primary" disabled={busy || (!token && !open)}>{busy ? 'Creating...' : 'Create admin'}</button>
-    <button type="button" class="link" onclick={() => (kind = null)}>Back</button>
+    <button class="primary" disabled={busy || (!token && !open)}>{busy ? t('setup.creating') : t('setup.create')}</button>
+    <button type="button" class="link" onclick={() => (kind = null)}>{t('setup.back')}</button>
   </form>
 {/if}
 

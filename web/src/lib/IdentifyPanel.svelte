@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from './i18n.svelte'
   import { api } from './api'
   import { app, toast } from './state.svelte'
   import type { IdentificationRow } from './types'
@@ -30,64 +31,65 @@
       if (done) toast(done)
       await load()
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'That did not work', true)
+      toast(e instanceof Error ? e.message : t('common.failed'), true)
     }
   }
 
   const status = $derived(app.identify)
   const fillIn = (row: IdentificationRow) =>
     [
-      !row.current_album && row.album ? `album ${row.album}` : null,
-      !row.current_year && row.year ? `year ${row.year}` : null,
-      !row.current_artist && row.artist ? `artist ${row.artist}` : null,
-      row.genres ? `genres ${row.genres}` : null,
+      !row.current_album && row.album ? t('ident.album', { v: row.album }) : null,
+      !row.current_year && row.year ? t('ident.year', { v: row.year }) : null,
+      !row.current_artist && row.artist ? t('ident.artist', { v: row.artist }) : null,
+      row.genres ? t('ident.genres', { v: row.genres }) : null,
     ].filter(Boolean)
 </script>
 
 <section class="card">
-  <h2>Identify songs</h2>
+  <h2>{t('ident.title')}</h2>
   <p class="small muted">
-    Finds the album, year, and genres for songs whose tags are missing them, by their sound (AcoustID and MusicBrainz).
-    You choose what to use; DJINN keeps it in its own database and your files aren't changed.
+    {t('ident.intro')}
   </p>
   {#if status}
     {#if status.needs_key || status.needs_contact}
       <p class="small muted">
-        Add {status.needs_key ? 'an AcoustID key' : ''}{status.needs_key && status.needs_contact ? ' and ' : ''}{status.needs_contact
-          ? 'a MusicBrainz contact'
-          : ''} above first.
+        {status.needs_key && status.needs_contact
+          ? t('ident.need_both')
+          : status.needs_key
+            ? t('ident.need_key')
+            : t('ident.need_contact')}
       </p>
     {:else}
       <p class="small">
-        {#if status.running}<span class="spinner" aria-hidden="true"></span> Listening for matches...{/if}
-        {status.waiting} {status.waiting === 1 ? 'song' : 'songs'} to check, {status.applied} filled in so far.
+        {#if status.running}<span class="spinner" aria-hidden="true"></span> {t('ident.listening')}{/if}
+        {t('ident.waiting', { n: status.waiting, applied: status.applied })}
       </p>
       {#if status.running}
-        <button onclick={() => attempt(() => api.stopIdentify(), 'Stopping after this song')}>Stop</button>
+        <button onclick={() => attempt(() => api.stopIdentify(), t('ident.stopping'))}>{t('common.stop')}</button>
       {:else}
-        <button disabled={!status.waiting} onclick={() => attempt(() => api.startIdentify())}>Identify songs</button>
+        <button disabled={!status.waiting} onclick={() => attempt(() => api.startIdentify())}>{t('ident.start')}</button>
       {/if}
     {/if}
   {/if}
 
   {#if found.length}
     <div class="review-head">
-      <h3>Found {found.length}</h3>
+      <h3>{t('ident.found', { n: found.length })}</h3>
       <button
         class="small-button primary"
-        onclick={() => attempt(() => api.applyIdentified(found.map((f) => f.track_id)), 'Filled in')}>Use all</button
+        onclick={() => attempt(() => api.applyIdentified(found.map((f) => f.track_id)), t('ident.filled'))}>{t('ident.use_all')}</button
       >
     </div>
     {#each found as row (row.track_id)}
       <div class="row">
         <div class="grow">
           <div class="ellipsis">{row.current_title} <span class="muted small">{row.current_artist ?? ''}</span></div>
-          <div class="small accent">{fillIn(row).join(' · ') || 'Nothing new'}</div>
-          {#if row.score}<div class="small muted">{Math.round(row.score * 100)}% match: {row.title} by {row.artist}</div>{/if}
+          <div class="small accent">{fillIn(row).join(' · ') || t('ident.nothing_new')}</div>
+          {#if row.score}<div class="small muted">{t('ident.match', { pct: Math.round(row.score * 100), title: row.title ?? '', artist: row.artist ?? '' })}</div>{/if}
         </div>
         <div class="actions">
-          <button class="small-button" onclick={() => attempt(() => api.applyIdentified([row.track_id]))}>Use</button>
-          <button class="small-button" onclick={() => attempt(() => api.dismissIdentified([row.track_id]))}>Skip</button>
+          <button class="small-button" onclick={() => attempt(() => api.applyIdentified([row.track_id]))}>{t('ident.use')}</button>
+          <button class="small-button" onclick={() => attempt(() => api.dismissIdentified([row.track_id]))}>{t('common.skip')}</button>
         </div>
       </div>
     {/each}

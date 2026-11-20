@@ -84,3 +84,9 @@ pub async fn session(state: &AppState, username: &str, role: Role) -> String {
         .unwrap();
     format!("djinn_session={token}")
 }
+
+/// A path as a JSON string, escaped: Windows paths have backslashes, which
+/// pasted between quotes make a request body the server rightly refuses.
+pub fn json_text(path: &std::path::Path) -> String {
+    serde_json::Value::from(path.to_string_lossy()).to_string()
+}

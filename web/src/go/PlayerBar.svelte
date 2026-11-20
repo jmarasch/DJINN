@@ -1,5 +1,6 @@
 <script lang="ts">
   // Compact controls stay available on every page except Now Playing.
+  import { t } from '../lib/i18n.svelte'
   import Art from '../lib/Art.svelte'
   import Icon from '../lib/Icon.svelte'
   import { route } from '../lib/router.svelte'
@@ -11,18 +12,18 @@
 {#if song && route.path !== '/playing'}
   <div class="bar">
     <div class="progress" style:width="{player.duration ? (player.position / player.duration) * 100 : 0}%"></div>
-    <a class="info" href="#/playing" aria-label="Open Now Playing">
+    <a class="info" href="#/playing" aria-label={t('pb.open')}>
       <Art hash={song.art_hash} size={44} />
       <span class="text">
         <span class="title">{song.title}</span>
         <span class="muted small">{song.artist ?? ''}</span>
       </span>
     </a>
-    <button class="icon" aria-label="Previous" onclick={previous}><Icon name="previous" /></button>
-    <button class="icon big" aria-label={player.playing ? 'Pause' : 'Play'} onclick={toggle}>
+    <button class="icon" aria-label={t('player.previous')} onclick={previous}><Icon name="previous" /></button>
+    <button class="icon big" aria-label={player.playing ? t('player.pause') : t('player.play')} onclick={toggle}>
       <Icon name={player.playing ? 'pause' : 'play'} size={28} />
     </button>
-    <button class="icon" aria-label="Next" onclick={next}><Icon name="skip" /></button>
+    <button class="icon" aria-label={t('player.next')} onclick={next}><Icon name="skip" /></button>
   </div>
 {/if}
 

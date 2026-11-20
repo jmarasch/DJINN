@@ -2,6 +2,7 @@
   // Corrects songs' tags. DJINN keeps the corrections itself and never
   // changes the music files. Only changed fields are sent; an emptied one
   // goes back to what the file says.
+  import { t } from './i18n.svelte'
   import { untrack } from 'svelte'
   import { api } from './api'
   import Sheet from './Sheet.svelte'
@@ -34,14 +35,14 @@
     onsaved: () => void
   } = $props()
 
-  const labels: Record<TagField, string> = {
-    title: 'Title',
-    artist: 'Artist',
-    album: 'Album',
-    album_artist: 'Album artist',
-    year: 'Year',
-    genre: 'Genres',
-  }
+  const labels: Record<TagField, string> = $derived({
+    title: t('ed.title'),
+    artist: t('ed.artist'),
+    album: t('ed.album'),
+    album_artist: t('ed.album_artist'),
+    year: t('ed.year'),
+    genre: t('te.genres'),
+  })
   const start = untrack(() => Object.fromEntries(fields.map((f) => [f, initial[f] ?? ''])))
   let values = $state<Record<string, string>>({ ...start })
   let saving = $state(false)
@@ -50,10 +51,10 @@
     saving = true
     try {
       await (store ? store(change) : api.editTracks({ track_ids: trackIds, ...change }))
-      toast('Saved')
+      toast(t('common.saved'))
       onsaved()
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not save', true)
+      toast(e instanceof Error ? e.message : t('common.save_failed_short'), true)
     } finally {
       saving = false
     }
@@ -66,7 +67,7 @@
       const value = values[f].trim()
       if (value === start[f].trim()) continue
       if (f === 'year' && value && !/^\d{1,4}$/.test(value)) {
-        toast('The year should be a number, like 1997', true)
+        toast(t('te.year_number'), true)
         return
       }
       change[f] = value === '' ? null : f === 'year' ? Number(value) : value
@@ -94,26 +95,25 @@
           {labels[field]}
           {#if edited.includes(field)}
             <button type="button" class="link" disabled={saving} onclick={() => useFile(field)}>
-              Corrected · use the file's
+              {t('te.corrected')}
             </button>
           {/if}
         </span>
         <input
           bind:value={values[field]}
           inputmode={field === 'year' ? 'numeric' : undefined}
-          placeholder={field === 'genre' ? 'Like synth-pop, industrial' : undefined}
+          placeholder={field === 'genre' ? t('te.genre_hint') : undefined}
           maxlength={field === 'year' ? 4 : 300}
         />
       </label>
     {/each}
     <p class="small muted">
-      {applies ?? (trackIds.length > 1 ? `Applies to all ${trackIds.length} songs.` : '')}
-      DJINN keeps corrections itself; your music files aren't changed. Empty a field to go back to what
-      the files say.
+      {applies ?? (trackIds.length > 1 ? t('te.applies_all', { n: trackIds.length }) : '')}
+      {t('te.note')}
     </p>
     <div class="actions">
-      <button class="primary" disabled={saving}>Save</button>
-      <button type="button" disabled={saving} onclick={() => useFile()}>Use the file's tags</button>
+      <button class="primary" disabled={saving}>{t('common.save')}</button>
+      <button type="button" disabled={saving} onclick={() => useFile()}>{t('te.use_file')}</button>
     </div>
   </form>
 </Sheet>

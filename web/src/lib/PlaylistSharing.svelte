@@ -1,5 +1,6 @@
 <script lang="ts">
   // Who can see one of your playlists: only you, everyone, or particular people.
+  import { t } from './i18n.svelte'
   import { api } from './api'
   import { app, toast } from './state.svelte'
   import type { ShareTarget } from './types'
@@ -40,14 +41,18 @@
         chosen = chosen.filter((other) => other !== person.id)
       }
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not change that', true)
+      toast(e instanceof Error ? e.message : t('ps.failed'), true)
     }
   }
 </script>
 
 {#if canShare || shared || chosen.length}
   <details class="sharing">
-    <summary>Sharing: {shared ? 'everyone' : chosen.length ? `${chosen.length} ${chosen.length === 1 ? 'person' : 'people'}` : 'only you'}</summary>
+    <summary>
+      {t('ps.sharing', {
+        who: shared ? t('ps.everyone') : chosen.length ? t('ps.people', { n: chosen.length }) : t('ps.only_you'),
+      })}
+    </summary>
     <label>
       <input
         type="checkbox"
@@ -55,7 +60,7 @@
         disabled={!canShare && !shared}
         onchange={(e) => setShared(e.currentTarget.checked)}
       />
-      Everyone on this server
+      {t('ps.everyone_here')}
     </label>
     {#each people as person (person.id)}
       <label>
@@ -68,7 +73,7 @@
         {person.name}
       </label>
     {/each}
-    <p class="muted small">They can see and play it. Only you can change it.</p>
+    <p class="muted small">{t('ps.note')}</p>
   </details>
 {/if}
 

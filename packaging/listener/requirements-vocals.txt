@@ -1,0 +1,5 @@
+# Optional: isolate the vocals with Demucs before listening, which helps on
+# loud mixes. Large (PyTorch).
+torch>=2.0.0
+torchaudio>=2.0.0
+demucs>=4.0.0

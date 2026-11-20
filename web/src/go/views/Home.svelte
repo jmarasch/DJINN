@@ -23,7 +23,7 @@
     try {
       home = await api.goHome()
     } catch (e) {
-      error = e instanceof Error ? e.message : 'Could not load'
+      error = e instanceof Error ? e.message : t('ed.load_failed')
     }
   })
 
@@ -40,9 +40,9 @@
     <button class="carry-on card" onclick={() => carryOn(r.songs, r.queue, r.position, r.position_ms)}>
       <Art hash={resumeSong.art_hash} size={56} />
       <span class="text">
-        <span class="muted small">Carry on where you left off</span>
+        <span class="muted small">{t('gh.carry_on')}</span>
         <b>{resumeSong.title}</b>
-        <span class="muted small">{resumeSong.artist ?? ''} · {duration(r.position_ms)} in</span>
+        <span class="muted small">{resumeSong.artist ?? ''} · {t('gh.in', { time: duration(r.position_ms) })}</span>
       </span>
     </button>
   {/if}
@@ -68,7 +68,7 @@
     {/snippet}
   </Discover>
 {:else if !error}
-  <p class="muted">Loading...</p>
+  <p class="muted">{t('common.loading')}</p>
 {/if}
 
 <style>

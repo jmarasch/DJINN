@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '../lib/i18n.svelte'
   import { onMount } from 'svelte'
   import { api } from '../lib/api'
   import Icon from '../lib/Icon.svelte'
@@ -30,7 +31,7 @@
       name = ''
       location.hash = `/playlist/${playlist.id}`
     } catch (err) {
-      toast(err instanceof Error ? err.message : 'Could not create the playlist', true)
+      toast(err instanceof Error ? err.message : t('pls.create_failed'), true)
     }
   }
 
@@ -40,14 +41,14 @@
 
   async function playWild() {
     if (wild) {
-      toast('Wild play is already on')
+      toast(t('pls.wild_on'))
       return
     }
     try {
       await api.playWild()
-      toast('Wild play: random songs from the whole library')
+      toast(t('pls.wild_started'))
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not start wild play', true)
+      toast(e instanceof Error ? e.message : t('pls.wild_failed'), true)
     }
   }
 
@@ -55,23 +56,22 @@
   const wild = $derived((app.player.playlist?.id ?? 0) < 0)
 </script>
 
-<h1>Playlists</h1>
+<h1>{t('nav.playlists')}</h1>
 <p class="muted small">
-  Your playlists are yours, here and on DJINN GO, and private until you share them. Add songs, albums, or artists from
-  the Library with the <Icon name="playlist" size={14} /> button.
+  {t('pls.intro_1')} <Icon name="playlist" size={14} /> {t('pls.intro_2')}
   {#if canStartAutoMix()}The playing playlist fills in whenever nobody has requested anything.{/if}
 </p>
 
 <a class="favorites card" href="#/favorites">
   <Icon name="heart" />
-  <span class="grow">Favorites</span>
-  <span class="small muted">Songs, albums and artists you've hearted</span>
+  <span class="grow">{t('pls.favorites')}</span>
+  <span class="small muted">{t('pls.favorites_note')}</span>
 </a>
 
 {#if app.player.playlist}
   <div class="playing card">
-    <span>Playing from <b>{app.player.playlist.name}</b></span>
-    {#if canStartAutoMix()}<button onclick={stop}>Stop</button>{/if}
+    <span>{t('pls.playing_from')} <b>{app.player.playlist.name}</b></span>
+    {#if canStartAutoMix()}<button onclick={stop}>{t('pls.stop')}</button>{/if}
   </div>
 {/if}
 
@@ -79,20 +79,20 @@
 <button class="row wild" class:active={wild} onclick={playWild}>
   <span class="icon"><Icon name="shuffle" /></span>
   <span class="text">
-    <span class="ellipsis block">Wild play</span>
-    <span class="muted small">Random songs from your whole library, no repeats until it runs out</span>
+    <span class="ellipsis block">{t('pls.wild')}</span>
+    <span class="muted small">{t('pls.wild_note')}</span>
   </span>
   {#if wild}
-    <span class="badge">Playing</span>
+    <span class="badge">{t('pls.playing')}</span>
   {:else}
-    <span class="play">Play</span>
+    <span class="play">{t('pls.play')}</span>
   {/if}
 </button>
 {/if}
 
 <form class="new" onsubmit={create}>
-  <input placeholder="New playlist, e.g. Chill or Dance" bind:value={name} maxlength="60" />
-  <button class="primary" disabled={!name.trim()}>Create</button>
+  <input placeholder={t('pls.new')} bind:value={name} maxlength="60" />
+  <button class="primary" disabled={!name.trim()}>{t('pls.create')}</button>
 </form>
 <ImportPlaylist onimported={() => load().catch(() => {})} />
 
@@ -102,18 +102,18 @@
     <span class="text">
       <span class="ellipsis block">{playlist.name}</span>
       <span class="muted small">
-        {playlist.entry_count} {playlist.entry_count === 1 ? 'item' : 'items'} ·
-        {playlist.shuffle ? 'shuffle' : 'in order'}
-        {#if playlist.owner_id !== app.me?.id}· from {playlist.owner}{:else if playlist.shared}· shared{/if}
+        {t('pls.items', { n: playlist.entry_count })} ·
+        {playlist.shuffle ? t('pls.shuffle') : t('pls.in_order')}
+        {#if playlist.owner_id !== app.me?.id}{t('pl.from', { owner: playlist.owner })}{:else if playlist.shared}{t('pls.shared')}{/if}
         {#if playlist.problem_songs}
-          · <span class="flag"><Icon name="warning" size={13} /> {playlist.problem_songs} can't play</span>
+          · <span class="flag"><Icon name="warning" size={13} /> {t('pls.cant_play', { n: playlist.problem_songs })}</span>
         {/if}
       </span>
     </span>
-    {#if playlist.active}<span class="badge">Playing</span>{/if}
+    {#if playlist.active}<span class="badge">{t('pls.playing')}</span>{/if}
   </a>
 {:else}
-  <p class="muted">No playlists yet. Create or import one above.</p>
+  <p class="muted">{t('pls.none')}</p>
 {/each}
 
 <style>

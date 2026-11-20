@@ -1,8 +1,10 @@
 <script lang="ts">
   // Full-screen now playing for a TV or spare tablet: no sign-in, read only.
+  import ScaleWarning from '../lib/ScaleWarning.svelte'
   import { onMount } from 'svelte'
+  import { houseLanguageIs, t } from '../lib/i18n.svelte'
   import { followNodeScreen } from '../lib/screenFollow'
-  import { announce, choose, order, pageUrl, toggleFullscreen } from '../lib/screenOrder.svelte'
+  import { announce, choose, onNodeScreen, order, pageUrl, toggleFullscreen } from '../lib/screenOrder.svelte'
   import ArtistSlideshow from '../lib/ArtistSlideshow.svelte'
   import { duration } from '../lib/format'
   import { reloadIfUpdated } from '../lib/state.svelte'
@@ -18,6 +20,10 @@
   /** Which room this screen shows (Main when missing). */
   const room = params.get('room')
   const roomQuery = room ? `room=${encodeURIComponent(room)}` : ''
+  /** The join address for this screen's room (Main's needs none). */
+  const inRoom = (url: string) => (room && room !== '1' ? `${url.replace(/\/$/, '')}/?room=${encodeURIComponent(room)}` : url)
+  /** The QR code for it. */
+  const qrQuery = room && room !== '1' ? `&room=${encodeURIComponent(room)}` : ''
 
   let nowPlaying = $state<NowPlaying>({ current: null, position_ms: 0, up_next: null })
   let player = $state<PlayerState | null>(null)
@@ -42,13 +48,13 @@
 
   const art = (hash: string | null, size?: number) =>
     hash ? `/api/tv/art/${hash}${size ? `?size=${size}` : ''}` : null
-  const artist = (t: Track) => {
-    if (!t.credits.length) return t.artist ?? ''
-    const main = t.credits.filter((c) => !c.featured).map((c) => c.name)
-    const feat = t.credits.filter((c) => c.featured).map((c) => c.name)
+  const artist = (track: Track) => {
+    if (!track.credits.length) return track.artist ?? ''
+    const main = track.credits.filter((c) => !c.featured).map((c) => c.name)
+    const feat = track.credits.filter((c) => c.featured).map((c) => c.name)
     const list = (names: string[]) =>
-      names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} & ${names[names.length - 1]}`
-    return feat.length ? `${list(main)} feat. ${list(feat)}` : list(main)
+      names.length < 2 ? names.join('') : t('tv.and', { list: names.slice(0, -1).join(', '), last: names[names.length - 1] })
+    return feat.length ? t('tv.feat', { main: list(main), feat: list(feat) }) : list(main)
   }
 
   let events: EventSource | null = null
@@ -58,7 +64,7 @@
       const query = [castKey ? `key=${encodeURIComponent(castKey)}` : '', roomQuery].filter(Boolean).join('&')
       const res = await fetch(query ? `/api/tv?${query}` : '/api/tv')
       if (!res.ok) {
-        error = (await res.json().catch(() => null))?.error ?? 'The TV page is not available.'
+        error = (await res.json().catch(() => null))?.error ?? t('tv.unavailable')
         void becameNode()
         setTimeout(load, 10_000)
         return
@@ -76,7 +82,7 @@
       setTimeout(() => (settled = true), 2500)
       if (casting && !soundOn) setTimeout(toggleSound, 0)
     } catch {
-      error = 'Cannot reach the jukebox. Retrying...'
+      error = t('viz.unreachable')
       void becameNode()
       setTimeout(load, 5_000)
     }
@@ -105,7 +111,8 @@
     })
     on<{ position_ms: number }>('position', (data) => setPosition(data.position_ms))
     on<QueueItem[]>('queue_changed', (data) => (queue = data))
-    on<{ url: string }>('address', (data) => (joinUrl = data.url))
+    on<{ url: string }>('address', (data) => (joinUrl = inRoom(data.url)))
+    on<{ default: string }>('language', (data) => houseLanguageIs(data.default))
     on<PlayerState>('player_state', (data) => {
       setPosition(position)
       player = data
@@ -230,7 +237,7 @@
   )
 </script>
 
-<svelte:head><title>DJINN TV</title></svelte:head>
+<svelte:head><title>{t('tv.title')}</title></svelte:head>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="tv" class:idle-cursor={idleCursor} onmousemove={showCursor}>
@@ -265,7 +272,7 @@
           {/if}
         </div>
         <div class="info">
-          <div class="label">{player?.state === 'paused' ? 'Paused' : 'Now playing'}</div>
+          <div class="label">{player?.state === 'paused' ? t('playing.paused') : t('playing.now_playing')}</div>
           <h1>{current.track.title}</h1>
           <p class="artist">{artist(current.track)}</p>
           {#if current.track.album}<p class="album">{current.track.album}</p>{/if}
@@ -277,29 +284,31 @@
           {/if}
           <p class="by">
             {#if current.requested_by}
-              Requested by <strong>{current.requested_by}</strong>{#if current.backers.length}
-                and {current.backers.length === 1 ? current.backers[0] : `${current.backers.length} others`}{/if}
+              {t('tv.requested_by')} <strong>{current.requested_by}</strong>{#if current.backers.length}
+                {current.backers.length === 1
+                  ? t('tv.and_one', { name: current.backers[0] })
+                  : t('tv.and_others', { n: current.backers.length })}{/if}
             {:else if player?.playlist}
-              From the playlist <strong>{player.playlist.name}</strong>
+              {t('tv.from_playlist')} <strong>{player.playlist.name}</strong>
             {:else}
-              From the party mix
+              {t('tv.from_mix')}
             {/if}
           </p>
         </div>
       {:else}
         <div class="message">
           <h1>DJINN</h1>
-          <p>Scan the code to start the music.</p>
+          <p>{t('tv.scan_start')}</p>
         </div>
       {/if}
     </main>
 
       <div class="join">
-        <img src="/api/join/qr.svg?v={encodeURIComponent(joinUrl)}" alt="QR code to join" />
+        <img src="/api/join/qr.svg?v={encodeURIComponent(joinUrl)}{qrQuery}" alt={t('tv.qr')} />
         <div>
-          <div class="join-title">Add a song</div>
+          <div class="join-title">{t('playing.add_a_song')}</div>
           <div class="join-steps">
-            Scan with your phone camera{guestMode ? ', type your name,' : ' and sign in,'} then pick a song.
+            {guestMode ? t('tv.steps_guest') : t('tv.steps')}
           </div>
           {#if joinUrl}<div class="url">{joinUrl.replace(/^https?:\/\//, '')}</div>{/if}
         </div>
@@ -308,7 +317,7 @@
 
     <aside class="side">
       {#if upNext.length}
-        <h2>Requests</h2>
+        <h2>{t('playing.requests')}</h2>
         <ol class="queue">
           {#each upNext as item (item.id)}
             <li>
@@ -327,14 +336,14 @@
             </li>
           {/each}
         </ol>
-        {#if more}<p class="more">and {more} more</p>{/if}
+        {#if more}<p class="more">{t('playing.and_more', { n: more })}</p>{/if}
       {:else}
-        <h2>Requests</h2>
-        <p class="more">No requests yet. Yours could be next.</p>
+        <h2>{t('playing.requests')}</h2>
+        <p class="more">{t('playing.no_requests')}</p>
       {/if}
 
       {#if autoNext.length}
-        <h2 class="coming">Coming up</h2>
+        <h2 class="coming">{t('playing.coming_up')}</h2>
         <ol class="queue">
           {#each autoNext as entry, i (`${entry.track.id}-${i}`)}
             <li>
@@ -357,11 +366,15 @@
   {/if}
 
   <div class="corner" class:hidden={casting}>
-    <a href="/#/" target="_top" class="regular-display">Regular display</a>
-    {#if streamUrl}
-      <button class:on={soundOn} onclick={toggleSound}>{soundOn ? 'Sound on' : 'Play sound here'}</button>
+    <!-- A node's screen plays through the node's own speakers and has no
+         regular display to go to; only Full screen is any use there. -->
+    {#if !onNodeScreen}
+      <a href="/#/" target="_top" class="regular-display">{t('tv.regular')}</a>
     {/if}
-    <button onclick={goFullscreen}>Full screen</button>
+    {#if streamUrl && !onNodeScreen}
+      <button class:on={soundOn} onclick={toggleSound}>{soundOn ? t('tv.sound_on') : t('tv.play_here')}</button>
+    {/if}
+    <button onclick={goFullscreen}>{t('tv.full')}</button>
   </div>
   <!-- svelte-ignore a11y_media_has_caption -->
   <audio
@@ -374,6 +387,8 @@
     }}
   ></audio>
 </div>
+
+<ScaleWarning />
 
 <style>
   .tv {

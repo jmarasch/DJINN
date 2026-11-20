@@ -244,6 +244,8 @@ pub struct Jukebox {
     /// The song (by `songs_started`) each person last voted to skip. They
     /// sit out the next one, so one guest can't vote down every song.
     skip_voted_on: HashMap<i64, u64>,
+    /// Songs End party sent away: they end as played, not as skips.
+    ended_quietly: u8,
     output: OutputStatus,
     last_position_second: Option<u64>,
     /// The playlist feeding the music, if any.
@@ -385,6 +387,7 @@ impl Jukebox {
             songs_started: 0,
             room,
             skip_voted_on: HashMap::new(),
+            ended_quietly: 0,
             output: OutputStatus::default(),
             last_position_second: None,
             active: None,
@@ -667,6 +670,31 @@ impl Jukebox {
 
     pub fn play(&self) {
         (self.engine)(Command::Play);
+    }
+
+    /// Ends the party in this room: the auto mix switches off, the song
+    /// stops and the room is left idle, not paused, so background work can
+    /// run. The caller empties the request queue first. Nothing counts as a
+    /// skip.
+    pub async fn end_party(&mut self) -> anyhow::Result<()> {
+        // Not even the song a restart cut off carries on.
+        self.resuming = None;
+        self.clear_next()?;
+        self.store
+            .set_setting(&room_key(self.room, ACTIVE_PLAYLIST), "0")
+            .await?;
+        self.load_active().await?;
+        self.queue_changed().await?;
+        // With nothing lined up, a skip ends the song at once (no fade).
+        let going = usize::from(self.playing.is_some()) + self.in_flight.len();
+        self.ended_quietly = u8::try_from(going).unwrap_or(u8::MAX);
+        for _ in 0..going {
+            (self.engine)(Command::Skip);
+        }
+        (self.engine)(Command::Play);
+        self.skip_votes.clear();
+        self.send(ServerEvent::PlayerState(self.player_state()));
+        Ok(())
     }
 
     /// Plays the speaker sync tone (a file of evenly spaced clicks) while
@@ -967,7 +995,12 @@ impl Jukebox {
         played_ms: u64,
         reason: EndReason,
     ) -> anyhow::Result<()> {
-        let skipped = reason == EndReason::Skipped;
+        let mut skipped = reason == EndReason::Skipped;
+        if skipped && self.ended_quietly > 0 {
+            self.ended_quietly -= 1;
+            skipped = false;
+            self.skip_requested_by = None;
+        }
         let skipped_by = if skipped {
             self.skip_requested_by.take()
         } else {

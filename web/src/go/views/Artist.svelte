@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '../../lib/i18n.svelte'
   import { api } from '../../lib/api'
   import Art from '../../lib/Art.svelte'
   import ScrollRow from '../../lib/ScrollRow.svelte'
@@ -31,7 +32,7 @@
       const page = await api.artistSongs(id, 0, 5000)
       if (page.tracks.length) playList(page.tracks)
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not play them', true)
+      toast(e instanceof Error ? e.message : t('gar.play_failed'), true)
     }
   }
 
@@ -58,13 +59,13 @@
     <h1>{artist.name}</h1>
   </header>
   <div class="buttons">
-    <button class="primary" onclick={playAll} disabled={!songTotal}><Icon name="play" /> Play all</button>
-    {#if songs[0]}<button onclick={() => startRadio(songs[0])}><Icon name="radio" /> Radio</button>{/if}
+    <button class="primary" onclick={playAll} disabled={!songTotal}><Icon name="play" /> {t('go.play_all')}</button>
+    {#if songs[0]}<button onclick={() => startRadio(songs[0])}><Icon name="radio" /> {t('go.radio')}</button>{/if}
     <button
       class="icon"
       class:liked={likes.artist.has(artist.id)}
       aria-pressed={likes.artist.has(artist.id)}
-      aria-label="Like this artist"
+      aria-label={t('gar.like_artist')}
       onclick={() => artist && toggleLike('artist', artist.id)}
     >
       <Icon name={likes.artist.has(artist.id) ? 'heart' : 'heart-outline'} />
@@ -78,7 +79,7 @@
     {/if}
   {/if}
   {#if artist.albums.length}
-    <h2>Albums</h2>
+    <h2>{t('library.albums')}</h2>
     <ScrollRow gap={12}>
       {#each artist.albums as album (album.id)}
         <div class="tile-wrap">
@@ -93,7 +94,7 @@
     </ScrollRow>
   {/if}
   {#if artist.appears_on.length}
-    <h2>Appears on</h2>
+    <h2>{t('go.appears_on')}</h2>
     <ScrollRow gap={12}>
       {#each artist.appears_on as album (album.id)}
         <div class="tile-wrap">
@@ -107,7 +108,7 @@
     </ScrollRow>
   {/if}
   {#if similar.length}
-    <h2>Similar artists</h2>
+    <h2>{t('artist.similar')}</h2>
     <ScrollRow>
       {#each similar as other (other.id)}
         <div class="tile-wrap">

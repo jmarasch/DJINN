@@ -13,10 +13,12 @@ use crate::error::ApiResult;
 
 use crate::state::AppState;
 use crate::{
-    accounts, ai, audio_api, auth, backup, cast_api, convert, duplicates, folders, go, go_library,
-    identify_api, library_api, likes_api, lyrics, mood_api, nodes, party_api, player_api,
-    playlist_api, playlist_import, problems_api, rooms_api, scheduled_check, smart, sse, stats_api,
-    submissions, system_api, tv_api, two_step, update, wishes_api,
+    accounts, ai, ai_listener, ai_work, audio_api, auth, backup, cast_api, compare, convert,
+    duplicates, editable, editor_api, editor_files, editor_import, editor_lookup, editor_lyrics,
+    folders, go, go_library, identify_api, library_api, likes_api, lyrics, lyrics_import, mood_api,
+    nodes, party_api, player_api, playlist_api, playlist_import, problems_api, protected,
+    rooms_api, scheduled_check, smart, sse, stats_api, submissions, system_api, tv_api, two_step,
+    update, wishes_api,
 };
 
 pub fn router() -> Router<AppState> {
@@ -34,14 +36,28 @@ pub fn router() -> Router<AppState> {
         .merge(convert::router())
         .merge(library_api::router())
         .merge(likes_api::router())
+        .merge(ai_listener::router())
+        .merge(ai_work::router())
+        .merge(compare::router())
+        .merge(editable::router())
+        .merge(editor_api::router())
+        .merge(editor_files::router())
+        .merge(editor_import::router())
+        .merge(editor_lyrics::router())
+        .merge(editor_lookup::router())
         .merge(lyrics::router())
+        .merge(lyrics_import::router())
         .merge(nodes::router())
         .merge(crate::visuals::router())
         .merge(crate::language::router())
+        .merge(crate::content::router())
         .merge(crate::appearance::router())
         .merge(crate::discover::router())
         .merge(rooms_api::router())
         .merge(problems_api::router())
+        .merge(crate::mp3_check::router())
+        .merge(crate::genre_groups::router())
+        .merge(protected::router())
         .merge(duplicates::router())
         .merge(scheduled_check::router())
         .merge(stats_api::router())
@@ -94,7 +110,8 @@ struct JoinQuery {
     room: Option<i64>,
 }
 
-fn join_url_for(state: &AppState, room: Option<i64>) -> String {
+/// The address guests open, walking them into `room` (Main's needs none).
+pub(crate) fn join_url_for(state: &AppState, room: Option<i64>) -> String {
     match room.filter(|r| *r != djinn_store::MAIN_ROOM) {
         Some(room) => format!("{}/?room={room}", state.join_url.base()),
         None => state.join_url.get(),

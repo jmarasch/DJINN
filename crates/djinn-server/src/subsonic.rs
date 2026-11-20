@@ -835,12 +835,14 @@ async fn artist(state: &AppState, user: &User, params: &Params) -> Answer {
         .await?
         .ok_or_else(|| Failure::not_found("artist"))?;
     let liked = state.store.liked_ids(user.id).await?;
-    let mut albums = Vec::new();
-    for al in &detail.albums {
-        if let Some(a) = state.store.ss_album(al.id).await? {
-            albums.push(album_node("album", &a, &liked));
-        }
-    }
+    let ids: Vec<i64> = detail.albums.iter().map(|al| al.id).collect();
+    let albums: Vec<Node> = state
+        .store
+        .ss_albums_by_ids(&ids)
+        .await?
+        .iter()
+        .map(|a| album_node("album", a, &liked))
+        .collect();
     reply(
         Node::new("artist")
             .a("id", id.to_string())
@@ -1070,12 +1072,14 @@ async fn starred(state: &AppState, user: &User, method: &str) -> Answer {
         .filter(|a| ids.artists.contains(&a.id))
         .map(|a| artist_node(a, &ids))
         .collect();
-    let mut albums = Vec::new();
-    for al in &liked.albums {
-        if let Some(a) = state.store.ss_album(al.id).await? {
-            albums.push(album_node("album", &a, &ids));
-        }
-    }
+    let album_ids: Vec<i64> = liked.albums.iter().map(|al| al.id).collect();
+    let albums: Vec<Node> = state
+        .store
+        .ss_albums_by_ids(&album_ids)
+        .await?
+        .iter()
+        .map(|a| album_node("album", a, &ids))
+        .collect();
     let songs = Songs::load(state, user, &liked.tracks).await?;
     let name = if method == "getstarred" {
         "starred"

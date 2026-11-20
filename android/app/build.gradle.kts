@@ -65,9 +65,24 @@ android {
         compose = true
     }
 
+    // The Android plugin's Compose Preview task needs the app's resources
+    // in unit tests; without them, listing every task (as an editor's Gradle
+    // panel does) fails to configure.
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+    }
+}
+
+// The same task also wants unit tests set up for release builds (they're
+// only made, never run unless asked for).
+androidComponents {
+    beforeVariants(selector().withBuildType("release")) {
+        it.hostTests[com.android.build.api.variant.HostTestBuilder.UNIT_TEST_TYPE]?.enable = true
     }
 }
 

@@ -1,5 +1,6 @@
 <script lang="ts">
   // Picks one of your playlists (or makes a new one) for songs.
+  import { t } from '../lib/i18n.svelte'
   import { api } from '../lib/api'
   import Sheet from '../lib/Sheet.svelte'
   import { app, toast } from '../lib/state.svelte'
@@ -19,17 +20,18 @@
   })
 
   const count = () => ui.adding?.length ?? 0
-  const songs = () => (ui.adding ?? []).map((t) => t.id)
-  const what = () => (count() === 1 ? `"${ui.adding![0].title}"` : `${count()} songs`)
+  const songs = () => (ui.adding ?? []).map((track) => track.id)
+  const what = () =>
+    count() === 1 ? t('gp2.song_q', { title: ui.adding![0].title }) : t('count.songs', { n: count() })
 
   async function add(list: GoPlaylist) {
     const label = what()
     try {
       await api.goAddToPlaylist(list.id, songs())
-      toast(`Added ${label} to ${list.name}`)
+      toast(t('gat.added', { what: label, name: list.name }))
       ui.adding = null
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not add them', true)
+      toast(e instanceof Error ? e.message : t('gat.add_failed'), true)
     }
   }
 
@@ -38,20 +40,20 @@
     const label = what()
     try {
       const list = await api.goCreatePlaylist(name, songs())
-      toast(`Made ${list.name} with ${label}`)
+      toast(t('gat.made', { name: list.name, what: label }))
       name = ''
       ui.adding = null
     } catch (err) {
-      toast(err instanceof Error ? err.message : 'Could not make it', true)
+      toast(err instanceof Error ? err.message : t('gl.make_failed'), true)
     }
   }
 </script>
 
 {#if ui.adding}
-  <Sheet title="Add to a playlist" onclose={() => (ui.adding = null)}>
+  <Sheet title={t('gat.title')} onclose={() => (ui.adding = null)}>
     <form class="new" onsubmit={create}>
-      <input bind:value={name} placeholder="New playlist" maxlength="100" required aria-label="New playlist name" />
-      <button class="primary">Make</button>
+      <input bind:value={name} placeholder={t('gl.new')} maxlength="100" required aria-label={t('atp.new')} />
+      <button class="primary">{t('gl.make')}</button>
     </form>
     {#each lists as list (list.id)}
       <button class="list" onclick={() => add(list)}>

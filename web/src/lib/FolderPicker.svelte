@@ -1,5 +1,6 @@
 <script lang="ts">
   // Browse the server's folders and pick one (admin).
+  import { t } from './i18n.svelte'
   import { onMount } from 'svelte'
   import { api } from './api'
   import Icon from './Icon.svelte'
@@ -14,7 +15,7 @@
     try {
       listing = await api.browseFolders(path)
     } catch (e) {
-      error = e instanceof Error ? e.message : 'Could not open that folder'
+      error = e instanceof Error ? e.message : t('folders.open_failed')
     }
   }
 
@@ -29,14 +30,14 @@
   </div>
   <div class="current">
     <Icon name="folder" size={18} />
-    <span class="ellipsis">{listing.path ?? 'This computer'}</span>
+    <span class="ellipsis">{listing.path ?? t('folders.computer')}</span>
   </div>
   {#if error}<p class="error">{error}</p>{/if}
   <div class="dirs">
     {#if listing.parent !== null}
       <!-- An empty parent is the top level (the drives on Windows). -->
       <button class="dir" onclick={() => open(listing?.parent ?? undefined)}>
-        <Icon name="back" size={18} /> Up
+        <Icon name="back" size={18} /> {t('folders.up')}
       </button>
     {/if}
     {#each listing.dirs as dir (dir.path)}
@@ -45,18 +46,18 @@
         <span class="ellipsis">{dir.name}</span>
       </button>
     {:else}
-      <p class="muted small">No folders inside.</p>
+      <p class="muted small">{t('folders.none')}</p>
     {/each}
   </div>
   {#if listing.path}
     <button class="primary use" onclick={() => listing?.path && onpick(listing.path)}>
-      Use this folder
+      {t('folders.use')}
     </button>
   {/if}
 {:else if error}
   <p class="error">{error}</p>
 {:else}
-  <p class="muted">Loading folders...</p>
+  <p class="muted">{t('folders.loading')}</p>
 {/if}
 
 <style>

@@ -64,7 +64,7 @@
         const read = await api.ask(q)
         if (id === latest && read && results) results = { ...results, described: read }
       } catch (e) {
-        if (id === latest && !results) error = e instanceof Error ? e.message : 'Search failed'
+        if (id === latest && !results) error = e instanceof Error ? e.message : t('gsr.failed')
       } finally {
         if (id === latest) thinking = false
       }
@@ -105,9 +105,9 @@
       </h2>
       {#if described.tracks.length}
         <p class="small muted">
-          {described.total} {described.total === 1 ? 'song fits' : 'songs fit'}{described.total > described.tracks.length
-            ? `, showing ${described.tracks.length}`
-            : ''}.{described.unknown.length ? ` Not sure about "${described.unknown.join(' ')}".` : ''}
+          {t('search.fit', { n: described.total })}{described.total > described.tracks.length
+            ? t('search.showing', { n: described.tracks.length })
+            : ''}.{described.unknown.length ? ` ${t('search.not_sure', { words: described.unknown.join(' ') })}` : ''}
         </p>
         <div class="actions">
           <button onclick={() => playList(described.tracks)}>{t('go.play_all')}</button>
@@ -134,7 +134,7 @@
     type="search"
     placeholder={t('search.placeholder')}
     bind:value={query}
-    aria-label="Search"
+    aria-label={t('gsr.search')}
     autocomplete="off"
     autocapitalize="none"
     enterkeyhint="search"

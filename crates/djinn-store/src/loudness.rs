@@ -43,8 +43,15 @@ pub struct TrackFacts {
     /// Genre words from the file's tag, its album, and its artists
     /// (MusicBrainz), comma separated, lowercase.
     pub genres: String,
+    /// The file's own genre tag (or the one set in the app), the same way.
+    pub own_genres: String,
+    /// The album's genres (MusicBrainz), most voted first.
+    pub album_genres: String,
     /// Times requested plus times played, anywhere.
     pub popularity: i64,
+    pub album_id: Option<i64>,
+    /// The album's title, to tell a greatest hits or a reissue.
+    pub album: Option<String>,
 }
 
 /// An artist's genres, for similar artists.
@@ -266,6 +273,11 @@ impl Store {
                                   JOIN artists ar ON ar.id = ta.artist_id \
                                   WHERE ta.track_id = t.id AND ar.genres IS NOT NULL), '') \
                       END) AS genres, \
+                    lower(coalesce(t.genre, '')) AS own_genres, \
+                    lower(CASE WHEN EXISTS (SELECT 1 FROM tag_edits e \
+                                            WHERE e.track_id = t.id AND e.genre IS NOT NULL) \
+                      THEN '' ELSE coalesce(al.genres, '') END) AS album_genres, \
+                    t.album_id, al.title AS album, \
                     (SELECT count(*) FROM request_events r WHERE r.track_id = t.id) + \
                     (SELECT count(*) FROM play_events p WHERE p.track_id = t.id) + \
                     (SELECT count(*) FROM go_plays g WHERE g.track_id = t.id AND g.skipped = 0) AS popularity \
