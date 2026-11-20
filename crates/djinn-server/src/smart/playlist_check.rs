@@ -14,7 +14,9 @@
 //! DJINN's models folder; without it the AI match and the AI reader are left
 //! out. `DJINN_CHECK_COUNT` is how many songs to list (30). Checks are
 //! separated by `;`: a description, or `song:`, `artist:` (found by name, the
-//! first hit) or `genre:` for a radio.
+//! first hit) or `genre:` for a radio. `ai genres` shows how often the
+//! AI's best genre for a song agrees with the song's own, album's and
+//! artist's genres, by how sure the AI was.
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
@@ -66,6 +68,7 @@ async fn playlist_check() {
                 };
                 radio(&state, &format!("genre {}", name.trim()), &seed, count).await
             }
+            _ if check == "ai genres" => ai_genres(&state),
             _ => description(&state, check, count).await,
         };
         println!("{report}");
@@ -267,6 +270,90 @@ async fn rows(state: &AppState, songs: &[(i64, String)]) -> String {
                 .map(|g| g.as_str())
                 .collect::<Vec<_>>()
                 .join(", "),
+        );
+    }
+    out
+}
+
+/// How often the AI's best genre for a song agrees with the genres the song
+/// has from tags and MusicBrainz, grouped by its score and by how far
+/// ahead of the next genre it was.
+fn ai_genres(state: &AppState) -> String {
+    let genres = state.ai.genre_embeddings();
+    let Ok(catalog) = state.catalog.read() else {
+        return String::new();
+    };
+    if genres.is_empty() {
+        return "== ai genres: the AI model isn't loaded\n".into();
+    }
+    let names: Vec<String> = genres
+        .iter()
+        .map(|(n, _)| djinn_library::vibe::normalize(n))
+        .collect();
+    // (score, lead over the next, agrees)
+    let mut rows: Vec<(f32, f32, bool)> = Vec::new();
+    for song in &catalog.songs {
+        let Some(v) = catalog.heard.get(&song.id) else {
+            continue;
+        };
+        let known: Vec<&String> = song
+            .own_genres
+            .iter()
+            .chain(&song.album_genres)
+            .chain(&song.artist_genres)
+            .collect();
+        if known.is_empty() {
+            continue;
+        }
+        let mut scored: Vec<(f32, usize)> = genres
+            .iter()
+            .enumerate()
+            .map(|(i, (_, g))| (djinn_ai::similarity(v, g), i))
+            .collect();
+        scored.sort_by(|a, b| b.0.total_cmp(&a.0));
+        let (best, i) = scored[0];
+        let lead = best - scored[1].0;
+        let name = &names[i];
+        let agrees = known.iter().any(|g| {
+            djinn_library::vibe::genre_fits(g, name) || djinn_library::vibe::genre_fits(name, g)
+        });
+        rows.push((best, lead, agrees));
+    }
+    let mut out = format!(
+        "== ai genres: {} songs with genres of their own\n",
+        rows.len()
+    );
+    let share = |pick: &dyn Fn(&(f32, f32, bool)) -> bool| {
+        let chosen: Vec<&(f32, f32, bool)> = rows.iter().filter(|r| pick(r)).collect();
+        let right = chosen.iter().filter(|r| r.2).count();
+        (
+            chosen.len(),
+            right as f32 * 100.0 / chosen.len().max(1) as f32,
+        )
+    };
+    out.push_str("-- by score: songs, % agreeing\n");
+    for low in [0.30, 0.35, 0.40, 0.45, 0.50, 0.55, 0.60] {
+        let (n, pct) = share(&|r| r.0 >= low && r.0 < low + 0.05);
+        let _ = writeln!(out, "   {low:.2}..{:.2}  {n:>6}  {pct:5.1}%", low + 0.05);
+    }
+    out.push_str("-- by lead over the next genre\n");
+    for low in [0.0, 0.01, 0.02, 0.03, 0.04, 0.05, 0.07, 0.10] {
+        let (n, pct) = share(&|r| r.1 >= low);
+        let _ = writeln!(out, "   lead >= {low:.2}  {n:>6}  {pct:5.1}%");
+    }
+    out.push_str("-- both\n");
+    for (s, l) in [
+        (0.40, 0.03),
+        (0.45, 0.03),
+        (0.45, 0.05),
+        (0.50, 0.03),
+        (0.50, 0.05),
+        (0.40, 0.07),
+    ] {
+        let (n, pct) = share(&|r| r.0 >= s && r.1 >= l);
+        let _ = writeln!(
+            out,
+            "   score >= {s:.2}, lead >= {l:.2}  {n:>6}  {pct:5.1}%"
         );
     }
     out
