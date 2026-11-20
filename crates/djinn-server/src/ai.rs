@@ -140,6 +140,8 @@ pub struct AiState {
     model: RwLock<Option<Arc<Clap>>>,
     /// Each genre's text embedding, made once the model loads.
     genres: RwLock<Vec<(String, Vec<f32>)>>,
+    /// How a happy and a sad song sound in words, the same way.
+    moods: RwLock<Option<Moods>>,
     fetch: Fetch,
     loading: AtomicBool,
     listening: AtomicBool,
@@ -156,6 +158,7 @@ impl AiState {
             dir: models_dir.join(models::CLAP.folder),
             model: RwLock::new(None),
             genres: RwLock::new(Vec::new()),
+            moods: RwLock::new(None),
             fetch: Fetch::default(),
             loading: AtomicBool::new(false),
             listening: AtomicBool::new(false),
@@ -174,6 +177,23 @@ impl AiState {
     /// Each genre's embedding, for tagging songs.
     pub fn genre_embeddings(&self) -> Vec<(String, Vec<f32>)> {
         self.genres.read().map(|g| g.clone()).unwrap_or_default()
+    }
+
+    /// A happy and a sad song in words, for telling songs' moods.
+    pub fn mood_embeddings(&self) -> Option<Moods> {
+        self.moods.read().ok().and_then(|m| m.clone())
+    }
+
+    fn set_loaded(&self, (clap, genres, moods): Loaded) {
+        if let Ok(mut g) = self.genres.write() {
+            *g = genres;
+        }
+        if let Ok(mut m) = self.moods.write() {
+            *m = moods;
+        }
+        if let Ok(mut m) = self.model.write() {
+            *m = Some(Arc::new(clap));
+        }
     }
 }
 
@@ -379,14 +399,9 @@ pub fn start(state: &AppState) {
             let loaded = tokio::task::spawn_blocking(move || load_model(&dir)).await;
             state.ai.loading.store(false, Ordering::Release);
             match loaded {
-                Ok(Ok((clap, genres))) => {
+                Ok(Ok(loaded)) => {
                     tracing::info!("AI model loaded");
-                    if let Ok(mut g) = state.ai.genres.write() {
-                        *g = genres;
-                    }
-                    if let Ok(mut m) = state.ai.model.write() {
-                        *m = Some(Arc::new(clap));
-                    }
+                    state.ai.set_loaded(loaded);
                     state.ai.fetch.set_error(None);
                     // Heard genres and the description search use it.
                     crate::smart::refresh(&state).await;
@@ -403,11 +418,25 @@ pub fn start(state: &AppState) {
     });
 }
 
-/// The model, and each genre's text embedding for tagging songs.
-type Loaded = (Clap, Vec<(String, Vec<f32>)>);
+/// A happy song and a sad song, as the model reads the words.
+#[derive(Clone)]
+pub struct Moods {
+    pub happy: Vec<f32>,
+    pub sad: Vec<f32>,
+}
+
+const HAPPY_SONG: &str = "A happy, cheerful, bright and uplifting song.";
+const SAD_SONG: &str = "A sad, dark, gloomy and melancholy song.";
+
+/// The model, each genre's text embedding for tagging songs, and the moods.
+type Loaded = (Clap, Vec<(String, Vec<f32>)>, Option<Moods>);
 
 fn load_model(dir: &Path) -> Result<Loaded, djinn_ai::AiError> {
     let clap = Clap::load(dir)?;
+    let moods = match (clap.embed_text(HAPPY_SONG), clap.embed_text(SAD_SONG)) {
+        (Ok(happy), Ok(sad)) => Some(Moods { happy, sad }),
+        _ => None,
+    };
     let genres: Vec<(String, Vec<f32>)> = GENRES
         .iter()
         .filter_map(|g| {
@@ -416,20 +445,14 @@ fn load_model(dir: &Path) -> Result<Loaded, djinn_ai::AiError> {
                 .map(|v| ((*g).to_owned(), v))
         })
         .collect();
-    Ok((clap, genres))
+    Ok((clap, genres, moods))
 }
 
 #[cfg(test)]
 impl AiState {
     /// Loads the model now, whatever the settings say (the playlist check).
     pub(crate) fn load_now(&self) -> Result<(), djinn_ai::AiError> {
-        let (clap, genres) = load_model(&self.dir)?;
-        if let Ok(mut g) = self.genres.write() {
-            *g = genres;
-        }
-        if let Ok(mut m) = self.model.write() {
-            *m = Some(Arc::new(clap));
-        }
+        self.set_loaded(load_model(&self.dir)?);
         Ok(())
     }
 }

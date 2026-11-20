@@ -249,9 +249,14 @@ async fn rows(state: &AppState, songs: &[(i64, String)]) -> String {
         let bpm = fact
             .and_then(|f| f.bpm)
             .map_or_else(String::new, |b| format!(" {b:.0} bpm"));
+        let feel = fact.map_or_else(String::new, |f| {
+            let energy = f.energy.map_or_else(|| "-".into(), |e| format!("{e:+.2}"));
+            let mood = f.mood.map_or_else(|| "-".into(), |m| format!("{m:+.3}"));
+            format!(" energy {energy} mood {mood}")
+        });
         let _ = writeln!(
             out,
-            "{:>3} {score:>9}  {} - {}  ({})  [{genres}] ai [{styles}] artist [{}]{bpm}",
+            "{:>3} {score:>9}  {} - {}  ({})  [{genres}] ai [{styles}] artist [{}]{bpm}{feel}",
             n + 1,
             t.artist.as_deref().unwrap_or("?"),
             t.title,

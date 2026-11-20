@@ -636,6 +636,7 @@ pub async fn refresh(state: &AppState) {
     }
     .await;
     let genre_vectors = state.ai.genre_embeddings();
+    let moods = state.ai.mood_embeddings();
     let tag_untagged = settings::flag(&state.store, crate::ai::GENRE_TAGS, true)
         .await
         .unwrap_or(false);
@@ -704,6 +705,32 @@ pub async fn refresh(state: &AppState) {
             .collect();
         let lead = leads(&led);
         let eras = eras(&facts, &lead);
+        let index = SoundIndex::build(rows);
+        let feelings = moods.map(|m| song_moods(&heard, &m)).unwrap_or_default();
+        // Each artist's own genres, most voted first; for artists
+        // MusicBrainz has none for, the ones most of their songs are tagged.
+        let mut tagged: HashMap<i64, Vec<Vec<String>>> = HashMap::new();
+        for f in &facts {
+            if let Some(artist) = lead.get(&f.id) {
+                let mut genres = split(&f.own_genres);
+                genres.extend(split(&f.album_genres));
+                genres.sort();
+                genres.dedup();
+                tagged.entry(*artist).or_default().push(genres);
+            }
+        }
+        let ordered: HashMap<i64, Vec<String>> = artists
+            .iter()
+            .map(|a| {
+                let mut genres = split(&a.genres);
+                if genres.is_empty() {
+                    let songs: Vec<&Vec<String>> =
+                        tagged.get(&a.id).into_iter().flatten().collect();
+                    genres = genres_from_songs(&songs);
+                }
+                (a.id, genres)
+            })
+            .collect();
         let songs: Vec<SongFacts> = facts
             .into_iter()
             .map(|f| {
@@ -730,8 +757,16 @@ pub async fn refresh(state: &AppState) {
                     era: eras.get(&f.id).copied(),
                     genres,
                     own_genres: split(&f.own_genres),
+                    album_genres: split(&f.album_genres),
                     styles: styles.get(&f.id).cloned().unwrap_or_default(),
                     artist: lead.get(&f.id).copied(),
+                    artist_genres: lead
+                        .get(&f.id)
+                        .and_then(|a| ordered.get(a))
+                        .cloned()
+                        .unwrap_or_default(),
+                    energy: index.energy().get(&f.id).copied(),
+                    mood: feelings.get(&f.id).copied(),
                     popularity: f.popularity,
                     bpm: sounded.map(|h| h.0),
                     punch: sounded.map(|h| h.1),
@@ -803,7 +838,6 @@ pub async fn refresh(state: &AppState) {
             .map(|song| (song.id, song.genres.clone()))
             .collect();
         let genre_weight = djinn_library::radio::genre_weights(&genres);
-        let index = SoundIndex::build(rows);
         let links = std::sync::Arc::new(SongLinks {
             artists: song_artists,
             genres: tags.clone(),
@@ -959,7 +993,9 @@ pub async fn describe(
                     } else if soft_only(&intent) {
                         // Only mood words ("dark", "sad"): they don't narrow
                         // anything, so keep what sounds like the description.
-                        ids = by_sound(&ids, sound, &catalog);
+                        let close: HashSet<i64> =
+                            by_sound(&ids, sound, &catalog).into_iter().collect();
+                        ids.retain(|id| close.contains(id));
                         total = ids.len();
                     }
                 }
@@ -1074,6 +1110,28 @@ fn by_sound(candidates: &[i64], sound: &[f32], catalog: &Catalog) -> Vec<i64> {
     let best = scored.first().map_or(0.0, |s| s.1);
     scored.retain(|(_, score)| *score >= SOUND_MIN && *score >= best - SOUND_MARGIN);
     catalog.spread(scored, usize::MAX)
+}
+
+/// How happy (above 0) or sad (below) each song the AI heard sounds: how
+/// much closer it is to a happy song than a sad one, around the library's
+/// middle.
+fn song_moods(heard: &HashMap<i64, Vec<f32>>, moods: &crate::ai::Moods) -> HashMap<i64, f32> {
+    let leaning: Vec<(i64, f32)> = heard
+        .iter()
+        .map(|(id, v)| {
+            (
+                *id,
+                djinn_ai::similarity(v, &moods.happy) - djinn_ai::similarity(v, &moods.sad),
+            )
+        })
+        .collect();
+    let mut values: Vec<f32> = leaning.iter().map(|(_, l)| *l).collect();
+    values.sort_by(f32::total_cmp);
+    let middle = values.get(values.len() / 2).copied().unwrap_or(0.0);
+    leaning
+        .into_iter()
+        .map(|(id, l)| (id, l - middle))
+        .collect()
 }
 
 /// The middle of what the AI heard in `artists`' songs, if it heard any.
@@ -1356,6 +1414,7 @@ mod tests {
             year: Some(year),
             genres: String::new(),
             own_genres: String::new(),
+            album_genres: String::new(),
             popularity: 0,
             album_id: Some(album_id),
             album: Some(album.to_owned()),
