@@ -9,6 +9,8 @@
   import { likes, playList, startRadio, toggleLike } from '../player.svelte'
   import SongList from '../SongList.svelte'
   import LikeButton from '../LikeButton.svelte'
+  import SortChoice from '../../lib/SortChoice.svelte'
+  import { albumOrders, sortAlbums, type AlbumSort } from '../../lib/albumSort'
 
   let { id }: { id: number } = $props()
   let artist = $state<ArtistDetail | null>(null)
@@ -50,6 +52,7 @@
   })
 
   const songs = $derived(artist ? artist.top_tracks : [])
+  let albumSort = $state<AlbumSort>('year')
 </script>
 
 {#if error}<p class="error">{error}</p>{/if}
@@ -79,9 +82,14 @@
     {/if}
   {/if}
   {#if artist.albums.length}
-    <h2>{t('library.albums')}</h2>
+    <div class="section-head">
+      <h2>{t('library.albums')}</h2>
+      {#if artist.albums.length > 1}
+        <SortChoice options={albumOrders()} bind:value={albumSort} storageKey="djinn-go-artist-album-sort" label={t('av.sort_albums')} />
+      {/if}
+    </div>
     <ScrollRow gap={12}>
-      {#each artist.albums as album (album.id)}
+      {#each sortAlbums(artist.albums, albumSort) as album (album.id)}
         <div class="tile-wrap">
           <a class="tile" href="#/album/{album.id}">
             <Art hash={album.art_hash} size={120} />
@@ -125,6 +133,13 @@
 {/if}
 
 <style>
+  .section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
   .more {
     display: flex;
     justify-content: center;

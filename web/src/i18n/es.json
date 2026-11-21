@@ -3262,6 +3262,7 @@
   "fmt.iphone": "iPhone o iPad",
   "fmt.on": "{browser} en {system}",
   "av.newest": "Más recientes",
+  "av.oldest": "Más antiguos",
   "av.az": "De la A a la Z",
   "av.edit": "Editar artista",
   "av.manage": "Gestionar imágenes",

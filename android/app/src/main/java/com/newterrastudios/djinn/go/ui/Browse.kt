@@ -1052,6 +1052,23 @@ val ALBUM_SORTS = listOf(
     "year" to "library.newest",
     "oldest" to "library.oldest",
 )
+/** How an artist's albums are ordered on the artist screen, as on the web. */
+val ARTIST_ALBUM_SORTS = listOf("year" to "av.newest", "oldest" to "av.oldest", "name" to "av.az")
+
+/** An artist's albums by release year, newest ("year") or oldest ("oldest")
+ * first, or A to Z ("name"). Albums with no year go last either way, and
+ * albums of one year go A to Z. */
+fun sortArtistAlbums(albums: List<Album>, sort: String): List<Album> {
+    val az = compareBy<Album, String>(String.CASE_INSENSITIVE_ORDER) { it.title }
+    if (sort == "name") return albums.sortedWith(az)
+    val byYear = if (sort == "oldest") {
+        compareBy<Album, Int?>(nullsLast()) { it.year }
+    } else {
+        compareBy<Album, Int?>(nullsLast(reverseOrder())) { it.year }
+    }
+    return albums.sortedWith(byYear.then(az))
+}
+
 val ALBUM_FILTERS = listOf("all" to "library.all_albums", "various" to "library.various", "soundtracks" to "library.soundtracks")
 val SONG_SORTS = listOf(
     "title" to "library.sort_title",
@@ -1258,7 +1275,10 @@ fun ArtistScreen(id: Long, nav: Nav) {
             }
             if (artist.albums.isNotEmpty()) {
                 item { Heading(t("library.albums")) }
-                items(artist.albums) { AlbumRow(it, nav) }
+                if (artist.albums.size > 1) {
+                    item { Choices(ARTIST_ALBUM_SORTS, nav.artistAlbumSort) { nav.artistAlbumSort = it } }
+                }
+                items(sortArtistAlbums(artist.albums, nav.artistAlbumSort), key = { "album-${it.id}" }) { AlbumRow(it, nav) }
             }
             if (artist.appearsOn.isNotEmpty()) {
                 item { Heading(t("go.appears_on")) }
