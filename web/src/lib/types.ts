@@ -384,6 +384,9 @@ export interface Album {
   songs?: number
   /** On the artist page: when its newest song was added (ms). */
   added?: number | null
+  /** On the artist page: the year it first came out, from MusicBrainz
+   * (the tags often give a reissue's year). */
+  first_year?: number | null
 }
 
 export interface Artist {

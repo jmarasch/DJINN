@@ -29,14 +29,20 @@ export function albumOrders(): SortOption<AlbumSort>[] {
   ]
 }
 
+/** The year an album came out: MusicBrainz's first release when it knows
+ * it (tags often give a reissue's year), else the tags'. */
+export function releaseYear(album: Pick<Album, 'year' | 'first_year'>): number | null {
+  return album.first_year ?? album.year ?? null
+}
+
 /** The albums in the order chosen. Albums with no year (or no added time)
  * go last either way, and ties go A to Z. */
-export function sortAlbums<A extends Pick<Album, 'title' | 'year' | 'added'>>(albums: A[], sort: AlbumSort): A[] {
+export function sortAlbums<A extends Pick<Album, 'title' | 'year' | 'added' | 'first_year'>>(albums: A[], sort: AlbumSort): A[] {
   const list = [...albums]
   const az = byName<A>((x) => x.title)
   if (sort === 'name') return list.sort(az)
   if (sort === 'name_rev') return list.sort((a, b) => az(b, a))
-  const key = (a: A) => (sort === 'added' || sort === 'added_old' ? a.added : a.year) ?? null
+  const key = (a: A) => (sort === 'added' || sort === 'added_old' ? a.added : releaseYear(a)) ?? null
   const later = sort === 'release' || sort === 'added' ? -1 : 1
   return list.sort((a, b) => {
     const x = key(a)

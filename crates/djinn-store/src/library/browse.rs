@@ -333,6 +333,7 @@ impl Store {
                         genres,
                         label,
                         added: None,
+                        first_year: None,
                     };
                     (album, key)
                 },

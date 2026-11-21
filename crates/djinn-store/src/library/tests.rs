@@ -425,7 +425,7 @@ async fn songs_without_art_show_the_album_cover() {
         .items[0]
         .id;
     store
-        .save_album_info(album, Some("onlinecover"), None, None, true)
+        .save_album_info(album, Some("onlinecover"), None, None, None, true)
         .await
         .unwrap();
     store.refresh_artwork().await.unwrap();
@@ -759,6 +759,21 @@ async fn collaborations_count_for_every_artist() {
     // The artist page says when each album came in, for its Added order.
     assert!(detail.albums[0].added.is_some());
     assert!(detail.appears_on[0].added.is_some());
+    // And the year it first came out, once MusicBrainz says.
+    assert_eq!(detail.albums[0].first_year, None);
+    store
+        .save_album_info(
+            detail.albums[0].id,
+            None,
+            Some("rg"),
+            None,
+            Some(1997),
+            true,
+        )
+        .await
+        .unwrap();
+    let detail = store.artist(guetta).await.unwrap().unwrap();
+    assert_eq!(detail.albums[0].first_year, Some(1997));
 }
 
 #[tokio::test]

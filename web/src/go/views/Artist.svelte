@@ -10,7 +10,7 @@
   import SongList from '../SongList.svelte'
   import LikeButton from '../LikeButton.svelte'
   import SortChoice from '../../lib/SortChoice.svelte'
-  import { albumOrders, sortAlbums, type AlbumSort } from '../../lib/albumSort'
+  import { albumOrders, releaseYear, sortAlbums, type AlbumSort } from '../../lib/albumSort'
 
   let { id }: { id: number } = $props()
   let artist = $state<ArtistDetail | null>(null)
@@ -94,7 +94,7 @@
           <a class="tile" href="#/album/{album.id}">
             <Art hash={album.art_hash} size={120} />
             <span class="small">{album.title}</span>
-            {#if album.year}<span class="muted small">{album.year}</span>{/if}
+            {#if releaseYear(album)}<span class="muted small">{releaseYear(album)}</span>{/if}
           </a>
           <div class="corner"><LikeButton kind="album" id={album.id} name={album.title} size={18} /></div>
         </div>

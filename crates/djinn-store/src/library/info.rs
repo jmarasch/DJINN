@@ -259,17 +259,20 @@ impl Store {
         cover: Option<&str>,
         mbid: Option<&str>,
         genres: Option<&str>,
+        first_year: Option<i64>,
         checked: bool,
     ) -> Result<()> {
         sqlx::query(
             "UPDATE albums SET online_art_hash = coalesce(?, online_art_hash),
                                mbid = coalesce(?, mbid), genres = coalesce(?, genres),
+                               first_year = coalesce(?, first_year),
                                info_checked_at = CASE WHEN ? THEN ? ELSE info_checked_at END
              WHERE id = ?",
         )
         .bind(cover)
         .bind(mbid)
         .bind(genres)
+        .bind(first_year)
         .bind(checked)
         .bind(now_ms())
         .bind(id)

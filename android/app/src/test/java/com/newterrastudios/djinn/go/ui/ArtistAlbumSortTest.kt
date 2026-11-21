@@ -35,6 +35,13 @@ class ArtistAlbumSortTest {
     }
 
     @Test
+    fun `release goes by the first release year when MusicBrainz knows it`() {
+        val reissue = Album(id = 6, title = "Reissue", artistId = 1, artist = "Kitchen", year = 2020, firstYear = 1990)
+        assertEquals(listOf("Garden Party", "Attic", "Porch Songs", "Kitchen Lights", "Reissue", "basement tapes"),
+            sortArtistAlbums(albums + reissue, "release").map { it.title })
+    }
+
+    @Test
     fun `A to Z ignores capitals, and reversed`() {
         assertEquals(listOf("Attic", "basement tapes", "Garden Party", "Kitchen Lights", "Porch Songs"), titles("name"))
         assertEquals(listOf("Porch Songs", "Kitchen Lights", "Garden Party", "basement tapes", "Attic"), titles("name_rev"))

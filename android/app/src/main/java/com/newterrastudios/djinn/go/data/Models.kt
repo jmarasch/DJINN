@@ -79,6 +79,8 @@ data class Album(
     val likes: Long = 0,
     /** On the artist screen: when its newest song was added (ms). */
     val added: Long? = null,
+    /** On the artist screen: the year it first came out, from MusicBrainz (tags often give a reissue's year). */
+    @SerialName("first_year") val firstYear: Int? = null,
     /** In the album list: how many songs it has, and its genres, comma separated. */
     val songs: Long = 0,
     val genres: String? = null,

@@ -1066,7 +1066,8 @@ val ARTIST_ALBUM_SORTS = listOf(
 )
 
 /**
- * An artist's albums by release year ("release" newest first,
+ * An artist's albums by release year (MusicBrainz's first release when
+ * it knows it, else the tags'; "release" newest first,
  * "release_old" oldest first), by when they were added ("added",
  * "added_old"), or by title ("name", "name_rev" Z to A). Albums with no
  * year or added time go last either way, and ties go A to Z.
@@ -1078,7 +1079,7 @@ fun sortArtistAlbums(albums: List<Album>, sort: String): List<Album> {
     val key: (Album) -> Long? = if (sort.startsWith("added")) {
         { it.added }
     } else {
-        { it.year?.toLong() }
+        { (it.firstYear ?: it.year)?.toLong() }
     }
     val order = if (sort.endsWith("_old")) nullsLast<Long>() else nullsLast(reverseOrder())
     return albums.sortedWith(compareBy(order, key).then(az))
@@ -1320,7 +1321,10 @@ fun ArtistScreen(id: Long, nav: Nav) {
                 if (artist.albums.size > 1) {
                     item { AlbumSortChoices(nav.artistAlbumSort) { nav.artistAlbumSort = it } }
                 }
-                items(sortArtistAlbums(artist.albums, nav.artistAlbumSort), key = { "album-${it.id}" }) { AlbumRow(it, nav) }
+                items(sortArtistAlbums(artist.albums, nav.artistAlbumSort), key = { "album-${it.id}" }) {
+                    // The year it came out, as the order goes.
+                    AlbumRow(it.copy(year = it.firstYear ?: it.year), nav)
+                }
             }
             if (artist.appearsOn.isNotEmpty()) {
                 item { Heading(t("go.appears_on")) }

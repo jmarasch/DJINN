@@ -81,6 +81,11 @@ pub struct Album {
     #[sqlx(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub added: Option<i64>,
+    /// The year it first came out, as MusicBrainz knows it (the tags often
+    /// give a reissue's year), on the artist page only.
+    #[sqlx(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub first_year: Option<i64>,
 }
 
 macro_rules! album_columns {
@@ -90,13 +95,14 @@ macro_rules! album_columns {
 }
 pub(crate) use album_columns;
 
-/// When an album's newest playable song was added, as `added`.
+/// When an album's newest playable song was added, as `added`, and the
+/// year it first came out, as `first_year`.
 macro_rules! album_added {
     () => {
         concat!(
             "(SELECT max(t.added_at) FROM tracks t WHERE t.album_id = al.id AND ",
             available!(),
-            ") AS added"
+            ") AS added, al.first_year"
         )
     };
 }

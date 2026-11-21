@@ -256,6 +256,7 @@ pub async fn lookup_artists(
                     cover.as_deref(),
                     mb.as_ref().map(|m| m.mbid.as_str()),
                     mb.as_ref().and_then(|m| m.genres.as_deref()),
+                    mb.as_ref().and_then(|m| m.first_year),
                     !failed,
                 )
                 .await?;
@@ -660,13 +661,14 @@ impl Services {
         let mbid = group.id.clone();
         let path = format!("release-group/{mbid}");
         let Some(detail) = self
-            .musicbrainz_get::<MbGenres>(&path, &[("inc", "genres")])
+            .musicbrainz_get::<MbGroupDetail>(&path, &[("inc", "genres")])
             .await
         else {
             return Fetch::Failed;
         };
         Fetch::Found(MbAlbum {
             genres: top_genres(&detail.genres),
+            first_year: first_year(detail.first_release_date.as_deref()),
             mbid,
         })
     }
@@ -1155,9 +1157,19 @@ struct MbArtistDetail {
 }
 
 #[derive(Deserialize)]
-struct MbGenres {
+struct MbGroupDetail {
     #[serde(default)]
     genres: Vec<MbGenre>,
+    /// "1997-02-03", "1997" or empty.
+    #[serde(rename = "first-release-date", default)]
+    first_release_date: Option<String>,
+}
+
+/// The year from a MusicBrainz date ("1997-02-03", "1997"), if it has one.
+fn first_year(date: Option<&str>) -> Option<i64> {
+    date.and_then(|d| d.get(..4))
+        .and_then(|y| y.parse().ok())
+        .filter(|y| *y > 0)
 }
 
 #[derive(Deserialize)]
@@ -1208,6 +1220,8 @@ struct MbArtist {
 struct MbAlbum {
     mbid: String,
     genres: Option<String>,
+    /// The year the release group first came out.
+    first_year: Option<i64>,
 }
 
 /// Search hits whose name matches exactly (ignoring case and punctuation),
@@ -1588,6 +1602,17 @@ mod tests {
             ["no", "kr"],
             "exact names only, best first, weak scores dropped"
         );
+    }
+
+    #[test]
+    fn first_years_come_from_musicbrainz_dates() {
+        let detail: MbGroupDetail =
+            serde_json::from_str(r#"{"first-release-date":"1997-02-03","genres":[]}"#).unwrap();
+        assert_eq!(first_year(detail.first_release_date.as_deref()), Some(1997));
+        assert_eq!(first_year(Some("2013")), Some(2013));
+        assert_eq!(first_year(Some("")), None);
+        let none: MbGroupDetail = serde_json::from_str(r#"{"genres":[]}"#).unwrap();
+        assert_eq!(first_year(none.first_release_date.as_deref()), None);
     }
 
     #[test]
