@@ -3508,6 +3508,28 @@
   "ed.auto_found": "Coincide con \"{album}\" de {artist} en Deezer, cada canción en su pista. Las etiquetas que cambia están resaltadas abajo.",
   "ed.auto_same": "Coincide con \"{album}\" de {artist} en Deezer; las etiquetas ya coinciden.",
   "ed.auto_none": "No hay coincidencia exacta en Deezer. Usa Buscar datos del álbum... para elegir el álbum tú mismo.",
+  "ed.pick_matched": "Elegir coincidencias",
+  "ed.pick_matched_title": "Elige todas las importaciones que Deezer encontró exactamente (en verde)",
+  "ed.approve_picked": {
+    "one": "Aprobar {n} importación",
+    "other": "Aprobar {n} importaciones"
+  },
+  "ed.approve_picked_title": "Escribe los cambios pendientes de cada importación elegida y la mueve a la carpeta elegida en Añadir a la biblioteca",
+  "ed.approve_picked_no_folder": "Primero elige una carpeta de la biblioteca en Añadir a la biblioteca",
+  "ed.approve_picked_q": {
+    "one": "¿Añadir {n} importación a la biblioteca, con sus cambios pendientes?",
+    "other": "¿Añadir {n} importaciones a la biblioteca, con sus cambios pendientes?"
+  },
+  "ed.approve_unmatched": {
+    "one": " {n} de ellas no tuvo coincidencia exacta en Deezer y entra con sus etiquetas tal como están.",
+    "other": " {n} de ellas no tuvieron coincidencia exacta en Deezer y entran con sus etiquetas tal como están."
+  },
+  "ed.approved_picked": {
+    "one": "{n} álbum añadido a la biblioteca ({songs} canciones)",
+    "other": "{n} álbumes añadidos a la biblioteca ({songs} canciones)"
+  },
+  "ed.import_matched": "Encontrado en Deezer, cada canción en su pista",
+  "ed.import_unmatched": "Sin coincidencia exacta en Deezer",
   "ed.dismiss": "Descartar",
   "ed.preview_wait": "Calculando adónde van...",
   "toast.dismiss": "Haz clic para cerrar",

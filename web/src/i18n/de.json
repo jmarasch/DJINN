@@ -3508,6 +3508,28 @@
   "ed.auto_found": "\"{album}\" von {artist} bei Deezer gefunden, jeder Song auf seinem Titel. Die geänderten Tags sind unten markiert.",
   "ed.auto_same": "\"{album}\" von {artist} bei Deezer gefunden; die Tags stimmen schon.",
   "ed.auto_none": "Kein genauer Treffer bei Deezer. Nutze Albuminfos suchen..., um das Album selbst zu wählen.",
+  "ed.pick_matched": "Treffer auswählen",
+  "ed.pick_matched_title": "Wählt alle Importe, die Deezer genau gefunden hat (grün)",
+  "ed.approve_picked": {
+    "one": "{n} Import freigeben",
+    "other": "{n} Importe freigeben"
+  },
+  "ed.approve_picked_title": "Schreibt die wartenden Änderungen jedes gewählten Imports und verschiebt ihn in den Ordner unter Zur Bibliothek hinzufügen",
+  "ed.approve_picked_no_folder": "Wähle zuerst einen Bibliotheksordner unter Zur Bibliothek hinzufügen",
+  "ed.approve_picked_q": {
+    "one": "{n} Import mit seinen wartenden Änderungen zur Bibliothek hinzufügen?",
+    "other": "{n} Importe mit ihren wartenden Änderungen zur Bibliothek hinzufügen?"
+  },
+  "ed.approve_unmatched": {
+    "one": " {n} davon hatte keinen genauen Treffer bei Deezer und kommt mit seinen Tags, wie sie sind.",
+    "other": " {n} davon hatten keinen genauen Treffer bei Deezer und kommen mit ihren Tags, wie sie sind."
+  },
+  "ed.approved_picked": {
+    "one": "{n} Album zur Bibliothek hinzugefügt ({songs} Songs)",
+    "other": "{n} Alben zur Bibliothek hinzugefügt ({songs} Songs)"
+  },
+  "ed.import_matched": "Bei Deezer gefunden, jeder Song auf seinem Titel",
+  "ed.import_unmatched": "Kein genauer Treffer bei Deezer",
   "ed.dismiss": "Ausblenden",
   "ed.preview_wait": "Es wird berechnet, wohin sie kommen...",
   "toast.dismiss": "Zum Schließen klicken",

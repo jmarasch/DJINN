@@ -3508,6 +3508,28 @@
   "ed.auto_found": "Matched \"{album}\" by {artist} on Deezer, every song on its track. The tags it changes are highlighted below.",
   "ed.auto_same": "Matched \"{album}\" by {artist} on Deezer; the tags already agree.",
   "ed.auto_none": "No exact match on Deezer. Use Find album info... to pick the album yourself.",
+  "ed.pick_matched": "Pick Matches",
+  "ed.pick_matched_title": "Picks every import Deezer matched exactly (in green)",
+  "ed.approve_picked": {
+    "one": "Approve {n} Import",
+    "other": "Approve {n} Imports"
+  },
+  "ed.approve_picked_title": "Writes each picked import's waiting changes and moves it into the folder chosen under Add to the Library",
+  "ed.approve_picked_no_folder": "Choose a library folder under Add to the Library first",
+  "ed.approve_picked_q": {
+    "one": "Add {n} import to the library, with its waiting changes?",
+    "other": "Add {n} imports to the library, with their waiting changes?"
+  },
+  "ed.approve_unmatched": {
+    "one": " {n} of them had no exact match on Deezer and goes in with its tags as they are.",
+    "other": " {n} of them had no exact match on Deezer and go in with their tags as they are."
+  },
+  "ed.approved_picked": {
+    "one": "{n} album added to the library ({songs} songs)",
+    "other": "{n} albums added to the library ({songs} songs)"
+  },
+  "ed.import_matched": "Matched on Deezer, every song on its track",
+  "ed.import_unmatched": "No exact match on Deezer",
   "ed.dismiss": "Dismiss",
   "ed.preview_wait": "Working out where they go...",
   "toast.dismiss": "Click to close",
