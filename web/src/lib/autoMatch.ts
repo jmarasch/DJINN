@@ -2,6 +2,7 @@
 // Album Layout window's Use this layout), and the import's automatic look-up,
 // which takes a Deezer release only when it matches the album completely.
 import { api } from './api'
+import { albumBase } from './importLayout'
 import { unlocked } from './protected.svelte'
 import type { EditorField, EditorSong, Release, ReleaseHit } from './types'
 
@@ -72,7 +73,7 @@ export interface AutoMatch {
  * the tags. Anything less is left to the Album Layout window. */
 export async function autoMatch(songs: EditorSong[]): Promise<AutoMatch | null> {
   if (!songs.length) return null
-  const album = mostCommon(songs, (s) => s.album)
+  const album = albumBase(mostCommon(songs, (s) => s.album))
   const artist = mostCommon(songs, (s) => s.album_artist || s.artist)
   if (!album || !artist) return null
   const hits = await unlocked(() => api.editorReleaseSearch('deezer', artist, album))

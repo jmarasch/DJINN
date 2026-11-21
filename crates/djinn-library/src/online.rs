@@ -1053,16 +1053,47 @@ pub async fn album_tracklist(
     }))
 }
 
+/// How far a song's length may be from a track's for a near title to count.
+const NEAR_TITLE_LENGTH_MS: i64 = 5_000;
+
+/// Titles that are nearly the same: the same with the spaces taken out
+/// ("All The Mad Men", "All The Madmen"), or one holding the other as whole
+/// words ("Intro/Up The Hill Backwards", "Up The Hill Backwards").
+fn near_title(a: &str, b: &str) -> bool {
+    let joined = |s: &str| s.replace(' ', "");
+    if joined(a) == joined(b) {
+        return true;
+    }
+    let (short, long) = if a.len() <= b.len() { (a, b) } else { (b, a) };
+    // A word or two ("Intro", "Time") is too little to go on.
+    if short.split(' ').count() < 3 {
+        return false;
+    }
+    format!(" {long} ").contains(&format!(" {short} "))
+}
+
 /// Matches songs (id, title, length) to a track list by title (as
 /// playlists match them: case, punctuation and version notes aside), the
-/// closest length deciding between tracks of one title. Each track goes to
-/// one song. Returns (song id, disc, track number).
+/// closest length deciding between tracks of one title. Songs left over
+/// then take a track whose title is nearly theirs (`near_title`) when the
+/// lengths agree within `NEAR_TITLE_LENGTH_MS`. Each track goes to one
+/// song. Returns (song id, disc, track number).
 pub fn match_tracks(
     list: &TrackList,
     songs: &[(i64, String, Option<i64>)],
 ) -> Vec<(i64, i64, i64)> {
+    let cores: Vec<String> = list
+        .tracks
+        .iter()
+        .map(|t| crate::playlist_match::core_title(&t.title))
+        .collect();
+    let gap = |track: &ListedTrack, length: &Option<i64>| match (track.length_ms, length) {
+        (Some(a), Some(b)) => Some((a - b).abs()),
+        _ => None,
+    };
     let mut used = vec![false; list.tracks.len()];
     let mut out = Vec::new();
+    let mut left = Vec::new();
     for (id, title, length) in songs {
         let core = crate::playlist_match::core_title(title);
         if core.is_empty() {
@@ -1072,14 +1103,27 @@ pub fn match_tracks(
             .tracks
             .iter()
             .enumerate()
-            .filter(|(i, t)| !used[*i] && crate::playlist_match::core_title(&t.title) == core)
-            .min_by_key(|(_, t)| match (t.length_ms, length) {
-                (Some(a), Some(b)) => (a - b).abs(),
-                _ => i64::MAX,
-            });
+            .filter(|(i, _)| !used[*i] && cores[*i] == core)
+            .min_by_key(|(_, t)| gap(t, length).unwrap_or(i64::MAX));
         if let Some((i, track)) = best {
             used[i] = true;
             out.push((*id, track.disc, track.number));
+        } else {
+            left.push((*id, core, *length));
+        }
+    }
+    for (id, core, length) in left {
+        let best = list
+            .tracks
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| !used[*i] && near_title(&cores[*i], &core))
+            .filter_map(|(i, t)| gap(t, &length).map(|g| (i, t, g)))
+            .filter(|(_, _, g)| *g <= NEAR_TITLE_LENGTH_MS)
+            .min_by_key(|(_, _, g)| *g);
+        if let Some((i, track, _)) = best {
+            used[i] = true;
+            out.push((id, track.disc, track.number));
         }
     }
     out
@@ -1581,6 +1625,34 @@ mod tests {
             match_tracks(&list, &songs),
             [(10, 1, 2), (11, 2, 1), (12, 1, 1)]
         );
+    }
+
+    #[test]
+    fn near_titles_match_when_the_lengths_agree() {
+        let track = |number, title: &str, length_ms| ListedTrack {
+            disc: 1,
+            number,
+            title: title.into(),
+            length_ms: Some(length_ms),
+        };
+        let list = TrackList {
+            release: "Album".into(),
+            tracks: vec![
+                track(1, "Up The Hill Backwards (2018 Remaster)", 231_000),
+                track(2, "All The Madmen (2018 Remaster)", 399_000),
+                track(3, "Time", 311_000),
+                track(4, "Never Let Me Down", 236_000),
+            ],
+        };
+        let songs = vec![
+            (10, "Intro/Up The Hill Backwards".to_owned(), Some(232_000)),
+            (11, "All The Mad Men".to_owned(), Some(398_000)),
+            // Near the title but far from the length.
+            (12, "Never Let Me Down Again".to_owned(), Some(290_000)),
+            // A short title is too little to go on.
+            (13, "Time Again".to_owned(), Some(311_000)),
+        ];
+        assert_eq!(match_tracks(&list, &songs), [(10, 1, 1), (11, 1, 2)]);
     }
 
     #[test]

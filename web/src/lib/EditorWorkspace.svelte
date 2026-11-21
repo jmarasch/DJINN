@@ -18,7 +18,7 @@
   import CoverWindow from './CoverWindow.svelte'
   import { COMMON_TAGS, MORE_TAGS, NUMBER_TAGS, tagLabel } from './editorTags'
   import { autoMatch } from './autoMatch'
-  import { FOLDER_LAYOUTS, folderInfo, fromFileName, type FolderInfo, type FolderLayout } from './importLayout'
+  import { FOLDER_LAYOUTS, albumBase, folderInfo, fromFileName, type FolderInfo, type FolderLayout } from './importLayout'
   import { clearListCache } from './listCache'
   import { askToUnlock, unlocked } from './protected.svelte'
   import { toast } from './state.svelte'
@@ -1175,8 +1175,9 @@
   function albumMates(song: EditorSong | null): EditorSong[] {
     if (!song) return []
     if (song.album_id != null) return songs.filter((s) => s.album_id === song.album_id)
-    const album = original(song, 'album')
-    if (album) return songs.filter((s) => s.album_id == null && original(s, 'album') === album)
+    // "Album CD 1" and "Album CD 2" are one album's discs.
+    const album = albumBase(original(song, 'album'))
+    if (album) return songs.filter((s) => s.album_id == null && albumBase(original(s, 'album')) === album)
     const folder = folderOf(song)
     return songs.filter((s) => s.album_id == null && !original(s, 'album') && folderOf(s) === folder)
   }
