@@ -77,7 +77,7 @@
       .catch(() => {})
   })
 
-  let albumSort = $state<AlbumSort>('year')
+  let albumSort = $state<AlbumSort>('release')
   const sorted = (albums: Album[]) => sortAlbums(albums, albumSort)
 </script>
 

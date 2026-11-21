@@ -77,6 +77,8 @@ data class Album(
     /** In the library lists: plays (party and GO) and how many people favorited it. */
     val plays: Long = 0,
     val likes: Long = 0,
+    /** On the artist screen: when its newest song was added (ms). */
+    val added: Long? = null,
     /** In the album list: how many songs it has, and its genres, comma separated. */
     val songs: Long = 0,
     val genres: String? = null,

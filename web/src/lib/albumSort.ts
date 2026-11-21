@@ -1,32 +1,50 @@
 // How an artist's albums are ordered on the artist page (the party app and
-// web GO alike): by release year, newest or oldest first, or A to Z.
+// web GO alike): by release year, by when they were added, or by title.
+// Each has a reverse, chosen by tapping its button again.
 import { byName } from './format'
 import { t } from './i18n.svelte'
 import type { Album } from './types'
+import type { SortOption } from './SortChoice.svelte'
 
-export type AlbumSort = 'year' | 'oldest' | 'name'
+export type AlbumSort = 'release' | 'release_old' | 'added' | 'added_old' | 'name' | 'name_rev'
 
-/** The choices, for SortChoice. */
-export function albumOrders(): { value: AlbumSort; label: string }[] {
+/** The buttons, for SortChoice. */
+export function albumOrders(): SortOption<AlbumSort>[] {
   return [
-    { value: 'year', label: t('av.newest') },
-    { value: 'oldest', label: t('av.oldest') },
-    { value: 'name', label: t('av.az') },
+    {
+      value: 'release',
+      label: t('av.sort_release'),
+      hint: t('av.newest_first'),
+      reverse: 'release_old',
+      reverseHint: t('av.oldest_first'),
+    },
+    {
+      value: 'added',
+      label: t('av.sort_added'),
+      hint: t('av.newest_first'),
+      reverse: 'added_old',
+      reverseHint: t('av.oldest_first'),
+    },
+    { value: 'name', label: t('av.az'), hint: t('av.a_to_z'), reverse: 'name_rev', reverseHint: t('av.z_to_a') },
   ]
 }
 
-/** The albums in the order chosen. Albums with no year go last either way,
- * and albums of one year go A to Z. */
-export function sortAlbums<A extends Pick<Album, 'title' | 'year'>>(albums: A[], sort: AlbumSort): A[] {
+/** The albums in the order chosen. Albums with no year (or no added time)
+ * go last either way, and ties go A to Z. */
+export function sortAlbums<A extends Pick<Album, 'title' | 'year' | 'added'>>(albums: A[], sort: AlbumSort): A[] {
   const list = [...albums]
   const az = byName<A>((x) => x.title)
   if (sort === 'name') return list.sort(az)
-  const later = sort === 'year' ? -1 : 1
+  if (sort === 'name_rev') return list.sort((a, b) => az(b, a))
+  const key = (a: A) => (sort === 'added' || sort === 'added_old' ? a.added : a.year) ?? null
+  const later = sort === 'release' || sort === 'added' ? -1 : 1
   return list.sort((a, b) => {
-    if (a.year == null || b.year == null) {
-      if (a.year != null) return -1
-      if (b.year != null) return 1
-    } else if (a.year !== b.year) return (a.year - b.year) * later
+    const x = key(a)
+    const y = key(b)
+    if (x == null || y == null) {
+      if (x != null) return -1
+      if (y != null) return 1
+    } else if (x !== y) return (x - y) * later
     return az(a, b)
   })
 }

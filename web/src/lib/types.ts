@@ -382,6 +382,8 @@ export interface Album {
   likes?: number
   /** In the album list: how many songs it has. */
   songs?: number
+  /** On the artist page: when its newest song was added (ms). */
+  added?: number | null
 }
 
 export interface Artist {

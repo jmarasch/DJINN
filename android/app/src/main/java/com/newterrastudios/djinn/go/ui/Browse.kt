@@ -81,6 +81,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.media3.common.util.UnstableApi
 import com.newterrastudios.djinn.go.data.Album
 import androidx.compose.ui.draw.clip
@@ -1052,21 +1054,61 @@ val ALBUM_SORTS = listOf(
     "year" to "library.newest",
     "oldest" to "library.oldest",
 )
-/** How an artist's albums are ordered on the artist screen, as on the web. */
-val ARTIST_ALBUM_SORTS = listOf("year" to "av.newest", "oldest" to "av.oldest", "name" to "av.az")
+/**
+ * How an artist's albums are ordered on the artist screen, as on the web:
+ * a button per order (value, its reverse, translation key of the label);
+ * tapping the chosen one again reverses it.
+ */
+val ARTIST_ALBUM_SORTS = listOf(
+    Triple("release", "release_old", "av.sort_release"),
+    Triple("added", "added_old", "av.sort_added"),
+    Triple("name", "name_rev", "av.az"),
+)
 
-/** An artist's albums by release year, newest ("year") or oldest ("oldest")
- * first, or A to Z ("name"). Albums with no year go last either way, and
- * albums of one year go A to Z. */
+/**
+ * An artist's albums by release year ("release" newest first,
+ * "release_old" oldest first), by when they were added ("added",
+ * "added_old"), or by title ("name", "name_rev" Z to A). Albums with no
+ * year or added time go last either way, and ties go A to Z.
+ */
 fun sortArtistAlbums(albums: List<Album>, sort: String): List<Album> {
     val az = compareBy<Album, String>(String.CASE_INSENSITIVE_ORDER) { it.title }
     if (sort == "name") return albums.sortedWith(az)
-    val byYear = if (sort == "oldest") {
-        compareBy<Album, Int?>(nullsLast()) { it.year }
+    if (sort == "name_rev") return albums.sortedWith(az.reversed())
+    val key: (Album) -> Long? = if (sort.startsWith("added")) {
+        { it.added }
     } else {
-        compareBy<Album, Int?>(nullsLast(reverseOrder())) { it.year }
+        { it.year?.toLong() }
     }
-    return albums.sortedWith(byYear.then(az))
+    val order = if (sort.endsWith("_old")) nullsLast<Long>() else nullsLast(reverseOrder())
+    return albums.sortedWith(compareBy(order, key).then(az))
+}
+
+/** The sort buttons above an artist's albums; the chosen one shows which way it runs. */
+@Composable
+private fun AlbumSortChoices(chosen: String, choose: (String) -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        ARTIST_ALBUM_SORTS.forEach { (value, reverse, label) ->
+            val on = chosen == value || chosen == reverse
+            val hint = when {
+                !on -> null
+                value == "name" -> t(if (chosen == reverse) "av.z_to_a" else "av.a_to_z")
+                else -> t(if (chosen == reverse) "av.oldest_first" else "av.newest_first")
+            }
+            FilterChip(
+                selected = on,
+                onClick = { choose(if (chosen == value) reverse else value) },
+                label = { Text(if (on) "${t(label)} ${if (chosen == reverse) "↑" else "↓"}" else t(label)) },
+                modifier = if (hint != null) Modifier.semantics { stateDescription = hint } else Modifier,
+            )
+        }
+    }
 }
 
 val ALBUM_FILTERS = listOf("all" to "library.all_albums", "various" to "library.various", "soundtracks" to "library.soundtracks")
@@ -1276,7 +1318,7 @@ fun ArtistScreen(id: Long, nav: Nav) {
             if (artist.albums.isNotEmpty()) {
                 item { Heading(t("library.albums")) }
                 if (artist.albums.size > 1) {
-                    item { Choices(ARTIST_ALBUM_SORTS, nav.artistAlbumSort) { nav.artistAlbumSort = it } }
+                    item { AlbumSortChoices(nav.artistAlbumSort) { nav.artistAlbumSort = it } }
                 }
                 items(sortArtistAlbums(artist.albums, nav.artistAlbumSort), key = { "album-${it.id}" }) { AlbumRow(it, nav) }
             }

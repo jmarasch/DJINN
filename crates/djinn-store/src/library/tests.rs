@@ -756,6 +756,9 @@ async fn collaborations_count_for_every_artist() {
     assert_eq!(detail.albums.len(), 1, "his own album");
     assert_eq!(detail.appears_on.len(), 1, "Zara's single");
     assert_eq!(detail.top_tracks.len(), 2);
+    // The artist page says when each album came in, for its Added order.
+    assert!(detail.albums[0].added.is_some());
+    assert!(detail.appears_on[0].added.is_some());
 }
 
 #[tokio::test]

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { t } from '../../lib/i18n.svelte'
+  import { locale, t } from '../../lib/i18n.svelte'
   import { api } from '../../lib/api'
   import Art from '../../lib/Art.svelte'
   import ScrollRow from '../../lib/ScrollRow.svelte'
@@ -52,7 +52,7 @@
   })
 
   const songs = $derived(artist ? artist.top_tracks : [])
-  let albumSort = $state<AlbumSort>('year')
+  let albumSort = $state<AlbumSort>('release')
 </script>
 
 {#if error}<p class="error">{error}</p>{/if}
@@ -75,10 +75,10 @@
     </button>
   </div>
   {#if songs.length}
-    <h2>Songs{#if songTotal}<span class="muted small">{` (${songTotal.toLocaleString()})`}</span>{/if}</h2>
+    <h2>{t('library.songs')}{#if songTotal}<span class="muted small">{` (${songTotal.toLocaleString(locale.code)})`}</span>{/if}</h2>
     <SongList tracks={songs} />
     {#if songs.length < songTotal}
-      <a class="more button" href="#/artist/{artist.id}/songs">Show all {songTotal.toLocaleString()} songs</a>
+      <a class="more button" href="#/artist/{artist.id}/songs">{t('go.show_all_songs', { n: songTotal })}</a>
     {/if}
   {/if}
   {#if artist.albums.length}

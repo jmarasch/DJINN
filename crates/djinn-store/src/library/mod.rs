@@ -76,6 +76,11 @@ pub struct Album {
     pub genres: Option<String>,
     /// Its folder's name, when another album has the same name and artist.
     pub label: Option<String>,
+    /// When its newest song was added (ms), on the artist page only, so its
+    /// albums can be ordered by when they came in.
+    #[sqlx(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub added: Option<i64>,
 }
 
 macro_rules! album_columns {
@@ -84,6 +89,17 @@ macro_rules! album_columns {
     };
 }
 pub(crate) use album_columns;
+
+/// When an album's newest playable song was added, as `added`.
+macro_rules! album_added {
+    () => {
+        concat!(
+            "(SELECT max(t.added_at) FROM tracks t WHERE t.album_id = al.id AND ",
+            available!(),
+            ") AS added"
+        )
+    };
+}
 
 #[derive(Clone, Debug, PartialEq, Serialize, FromRow)]
 pub struct Artist {
@@ -780,6 +796,8 @@ impl Store {
         let albums = sqlx::query_as(concat!(
             "SELECT ",
             album_columns!(),
+            ", ",
+            album_added!(),
             " FROM albums al JOIN artists ar ON ar.id = al.artist_id
              WHERE al.artist_id = ?
                AND EXISTS (SELECT 1 FROM tracks t WHERE t.album_id = al.id AND ",
@@ -808,6 +826,8 @@ impl Store {
         let appears_on = sqlx::query_as(concat!(
             "SELECT ",
             album_columns!(),
+            ", ",
+            album_added!(),
             " FROM albums al JOIN artists ar ON ar.id = al.artist_id
              WHERE al.artist_id != ?
                AND EXISTS (SELECT 1 FROM tracks t JOIN track_artists ta ON ta.track_id = t.id
