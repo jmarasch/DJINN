@@ -96,6 +96,19 @@ impl AppState {
         self.jukebox_for(self.rooms.audio_leader(room))
     }
 
+    /// The player state `room`'s pages show: what it hears (Main's while it
+    /// follows Main) at the room's own volume, which is what its slider sets
+    /// and its nodes play at.
+    pub async fn heard_player_state(&self, room: i64) -> crate::events::PlayerState {
+        let sound = self.sound_jukebox_for(room);
+        let mut heard = sound.lock().await.player_state();
+        let own = self.jukebox_for(room);
+        if !Arc::ptr_eq(&own, &sound) {
+            heard.volume = own.lock().await.volume();
+        }
+        heard
+    }
+
     /// True while `room` (not Main) is quiet and playing Main's music.
     pub fn follows_main(&self, room: i64) -> bool {
         let leader = self.rooms.leader(room);

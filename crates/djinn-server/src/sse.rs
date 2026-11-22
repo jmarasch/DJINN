@@ -162,6 +162,13 @@ async fn live(
                         // room hears now.
                         return snapshot(&state, room).await.unwrap_or_default();
                     }
+                    if follows && matches!(event, ServerEvent::PlayerState(_)) {
+                        // Main's playback (or the room's own volume) changed:
+                        // Main's state at the room's own volume.
+                        return vec![ServerEvent::PlayerState(
+                            state.heard_player_state(room).await,
+                        )];
+                    }
                     if wanted(&event, has_own, from_own, follows) {
                         vec![event]
                     } else {
@@ -197,13 +204,13 @@ async fn snapshot(state: &AppState, room: i64) -> anyhow::Result<Vec<ServerEvent
         // The song from whichever jukebox the room hears; the speakers are
         // the room's own.
         let sound = state.sound_jukebox_for(room);
-        let sound = sound.lock().await;
+        let now_playing = sound.lock().await.now_playing();
         vec![
             ServerEvent::Hello {
                 web_build: crate::web::build_id(),
             },
-            ServerEvent::NowPlaying(Box::new(sound.now_playing())),
-            ServerEvent::PlayerState(sound.player_state()),
+            ServerEvent::NowPlaying(Box::new(now_playing)),
+            ServerEvent::PlayerState(state.heard_player_state(room).await),
         ]
     };
     let (output, mood) = {

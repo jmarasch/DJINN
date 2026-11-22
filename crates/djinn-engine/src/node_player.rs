@@ -42,7 +42,7 @@ const TICK: Duration = Duration::from_millis(5);
 pub struct NodeSettings {
     /// Extra delay for this box's speakers (Bluetooth lag and such).
     pub delay_ms: u32,
-    /// Volume trim, 0 to 1, on top of Main's volume.
+    /// Volume trim, 0 to 1, on top of its room's volume.
     pub trim: f32,
     pub equalizer: EqualizerConfig,
     /// Line up once when music starts, then play straight through: no speed

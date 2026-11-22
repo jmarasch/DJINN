@@ -1,7 +1,8 @@
 //! A timed copy of the master stream, for nodes: other boxes that play the
 //! same audio in step with this one's speakers.
 //!
-//! Every chunk the engine sends to its outputs is copied here with the time
+//! Every chunk the engine sends to its outputs, before its equalizer (a node
+//! has its own), is copied here with the time
 //! its first frame will be heard on this computer's clock output (its own
 //! delay aside), on the shared [`clock`](crate::clock). Pausing, resuming,
 //! flushing (a skip or seek) and volume changes go along as marks. A node

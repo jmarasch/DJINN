@@ -594,6 +594,11 @@ impl Sink for Outputs {
             None
         };
         self.frames_in += (samples.len() / 2) as u64;
+        // Nodes get the mix as it is: each applies its own equalizer and its
+        // room's volume.
+        if let (Some(timed), Some(at)) = (self.timed.as_mut(), timed_at) {
+            timed.write(samples, at);
+        }
         let samples = if self.equalizer.active() {
             self.equalized.clear();
             self.equalized.extend_from_slice(samples);
@@ -604,9 +609,6 @@ impl Sink for Outputs {
         };
         if let Some(tap) = self.tap.as_mut() {
             tap.write(samples);
-        }
-        if let (Some(timed), Some(at)) = (self.timed.as_mut(), timed_at) {
-            timed.write(samples, at);
         }
         for output in self.slots.iter_mut().filter_map(|s| s.output.as_mut()) {
             output.write(samples);
@@ -652,6 +654,33 @@ impl Sink for Outputs {
 mod tests {
     use super::*;
     use crate::tap::stream_tap;
+
+    #[test]
+    fn nodes_get_the_mix_before_the_equalizer() {
+        let rate = 48_000;
+        let (timed, mut reader) = crate::timed::timed_tap(5.0, rate);
+        let (tap, mut cast) = stream_tap(5.0, rate);
+        let mut outputs = Outputs::new(rate, Vec::new(), Some(tap));
+        outputs.set_timed(Some(timed));
+        reader.set_active(true);
+        cast.set_active(true);
+        outputs.set_equalizer(EqualizerConfig {
+            enabled: true,
+            bands_db: [0.0; 12],
+            output_gain_db: -12.0,
+        });
+        let chunk = vec![0.5; 4800 * 2];
+        for _ in 0..4 {
+            outputs.write(&chunk);
+        }
+        let heard: Vec<f32> = reader.read().into_iter().flat_map(|p| p.samples).collect();
+        assert_eq!(heard.len(), chunk.len() * 4);
+        assert!(heard.iter().all(|s| *s == 0.5), "nodes get it untouched");
+        let mut cast_samples = Vec::new();
+        cast.read(&mut cast_samples);
+        let last = cast_samples.last().copied().unwrap_or(1.0);
+        assert!(last < 0.4, "casts get the equalizer: {last}");
+    }
 
     #[test]
     fn nodes_get_chunks_stamped_with_when_they_are_heard() {

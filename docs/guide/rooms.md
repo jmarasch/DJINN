@@ -41,7 +41,8 @@ A room with its own music can also follow Main while it's quiet: **When
 nothing's queued here, play along with Main**. The room then plays Main's
 music until someone asks for a song there, and **A request here takes over**
 either **Right away** or **When Main's song ends**. Meanwhile the room's
-screens show Main's song. These save as you change them.
+screens show Main's song, and its nodes keep the room's own volume, so
+turning Main up or down doesn't change them. These save as you change them.
 
 ## Queue rules
 
