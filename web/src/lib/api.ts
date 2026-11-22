@@ -247,6 +247,7 @@ export const api = {
   goSetPlaylistSongs: (id: number, songs: number[]) => put<void>(`/go/playlists/${id}/songs`, { songs }),
   goRadio: (trackId: number, exclude: number[] = []) =>
     get<Track[]>(`/go/radio/${trackId}${exclude.length ? `?exclude=${exclude.join(',')}` : ''}`),
+  goWild: (exclude: number[] = []) => get<Track[]>(`/go/wild${exclude.length ? `?exclude=${exclude.join(',')}` : ''}`),
   mySubmissions: () => get<Submission[]>('/go/submissions'),
   withdrawSubmission: (id: number) => del<void>(`/go/submissions/${id}`),
   waitingSubmissions: () => get<Submission[]>('/submissions'),

@@ -241,6 +241,9 @@ class GoApi(private val account: Account) {
     /** Songs like this one, leaving out any already lined up. */
     suspend fun radio(id: Long, exclude: Collection<Long> = emptyList()): List<Track> =
         get("/api/go/radio/$id" + if (exclude.isEmpty()) "" else "?exclude=" + exclude.joinToString(","))
+    /** Wild play: songs at random from the whole library, leaving out `exclude`. */
+    suspend fun wild(exclude: Collection<Long> = emptyList()): List<Track> =
+        get("/api/go/wild" + if (exclude.isEmpty()) "" else "?exclude=" + exclude.joinToString(","))
     suspend fun resume(): GoResume? = home().resume
     suspend fun search(query: String): SearchResults =
         get("/api/search?q=${URLEncoder.encode(query, "UTF-8")}")

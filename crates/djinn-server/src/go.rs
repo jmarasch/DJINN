@@ -489,6 +489,7 @@ const ROUTES: &[(Method, &str, Access)] = &[
         Access::Listener,
     ),
     (Method::GET, "/api/go/radio/*", Access::Listener),
+    (Method::GET, "/api/go/wild", Access::Listener),
     (Method::POST, "/api/go/party/*", Access::Listener),
     (Method::GET, "/api/go/submissions", Access::Listener),
     (Method::POST, "/api/go/submissions", Access::Listener),
@@ -2698,6 +2699,24 @@ mod tests {
         assert_eq!(radio[0], ids[3]);
         assert!(!radio.contains(&ids[0]), "heard just now");
         assert!(radio.contains(&ids[1]));
+
+        // Wild play: anything in the library but what was just heard or is
+        // lined up.
+        let (status, text, _) = call(
+            Method::GET,
+            format!("/api/go/wild?exclude={}", ids[1]),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{text}");
+        let wild: Vec<i64> = serde_json::from_str::<Vec<serde_json::Value>>(&text)
+            .unwrap()
+            .iter()
+            .map(|t| t["id"].as_i64().unwrap())
+            .collect();
+        assert!(!wild.is_empty());
+        assert!(!wild.contains(&ids[0]), "heard just now");
+        assert!(!wild.contains(&ids[1]), "lined up");
 
         // Away from home (tests have no address), the party is out of reach.
         let (status, _, _) = call(Method::POST, format!("/api/go/party/{}", ids[1]), None).await;

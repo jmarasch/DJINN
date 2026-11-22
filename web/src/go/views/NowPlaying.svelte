@@ -211,7 +211,7 @@
 
     <section class="queue">
       <div class="queue-head">
-        <h2>{t('player.up_next')}{#if player.radio}{' '}<span class="muted small">{t('gnp.radio')}</span>{/if}</h2>
+        <h2>{t('player.up_next')}{#if player.radio}{' '}<span class="muted small">{player.wild ? t('gnp.wild') : t('gnp.radio')}</span>{/if}</h2>
         {#if upNext.length}
           <button class="small-button" onclick={() => clear(clearUpcoming)}>{t('player.clear_upcoming')}</button>
           <button class="small-button" onclick={() => clear(clearAll)}>{t('player.clear_all')}</button>

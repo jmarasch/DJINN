@@ -26,8 +26,10 @@ export const player = $state({
   duration: 0,
   shuffle: false,
   repeat: 'off' as Repeat,
-  /** The queue is personal radio: more songs come as it runs low. */
+  /** The queue is personal radio or wild play: more songs come as it runs low. */
   radio: false,
+  /** The queue is wild play: random songs from the whole library. */
+  wild: false,
   downloadUrl: null as string | null,
   loading: false,
   /** Converting is on for this account (learned from play links). */
@@ -294,12 +296,17 @@ function skipAhead() {
 }
 
 /** Plays `tracks` from `from`, replacing the queue. */
-export function playList(tracks: Track[], from = 0, options: { radio?: boolean; seed?: number } = {}) {
+export function playList(
+  tracks: Track[],
+  from = 0,
+  options: { radio?: boolean; seed?: number; wild?: boolean } = {},
+) {
   if (!tracks.length) return
   report()
   preloaded = null
   added.clear()
-  player.radio = options.radio ?? false
+  player.wild = options.wild ?? false
+  player.radio = (options.radio ?? false) || player.wild
   radioSeed = options.seed ?? null
   addedToEnd.clear()
   unshuffled = [...tracks]
@@ -491,6 +498,7 @@ export async function startRadio(track: Track) {
     player.queue = [...keep, ...songs]
     unshuffled = [...keep.filter((t) => !added.has(t)), ...songs]
     player.radio = true
+    player.wild = false
     radioSeed = track.id
     preloaded = null
     preloadNext()
@@ -509,6 +517,19 @@ export async function playRadio(track: Track) {
   }
 }
 
+/** Wild play: songs at random from your whole library, more often ones you
+ * like or play through, and more as it runs low. */
+export async function playWild() {
+  try {
+    const songs = await api.goWild()
+    if (!songs.length) return toast(t('gh.wild_failed'), true)
+    playList(songs, 0, { wild: true })
+    toast(t('pls.wild_started'))
+  } catch (e) {
+    toast(e instanceof Error ? e.message : t('gh.wild_failed'), true)
+  }
+}
+
 let extending = false
 /** How many songs already lined up a request for more radio can name. */
 const RADIO_EXCLUDE = 400
@@ -524,6 +545,13 @@ async function extendRadio() {
     const known = new Set(player.queue.map((t) => t.id))
     // The newest are what matter if the queue has grown very long.
     const lined = [...known].slice(-RADIO_EXCLUDE)
+    if (player.wild) {
+      // The server leaves out what's lined up, and starts over in a small library.
+      const more = await api.goWild(lined)
+      player.queue.push(...more)
+      unshuffled.push(...more)
+      return
+    }
     // From the song it started with, so it stays around that artist. Only when
     // that has nothing left does it wander on from the last song.
     let more = (await api.goRadio(radioSeed ?? last.id, lined)).filter((t) => !known.has(t.id))
@@ -550,6 +578,7 @@ export function carryOn(songs: Track[], order: number[], position: number, posit
   addedToEnd.clear()
   radioSeed = null
   player.radio = false
+  player.wild = false
   player.shuffle = false
   unshuffled = [...queue]
   player.queue = queue
@@ -594,6 +623,7 @@ export function clearUpcoming(): () => void {
   const before = [...unshuffled]
   const seed = radioSeed
   const radio = player.radio
+  const wild = player.wild
   player.queue.splice(player.index + 1)
   if (playing) unshuffled = unshuffled.filter((t) => t.id === playing.id)
   else unshuffled = []
@@ -604,6 +634,7 @@ export function clearUpcoming(): () => void {
   // Radio would only fill it up again.
   radioSeed = null
   player.radio = false
+  player.wild = false
   preloaded = null
   return () => {
     if (player.index < 0) return
@@ -611,6 +642,7 @@ export function clearUpcoming(): () => void {
     unshuffled = before
     radioSeed = seed
     player.radio = radio
+    player.wild = wild
     preloadNext()
   }
 }
@@ -623,9 +655,11 @@ export function clearAll(): () => void {
   const before = [...unshuffled]
   const seed = radioSeed
   const radio = player.radio
+  const wild = player.wild
   stop()
   radioSeed = null
   player.radio = false
+  player.wild = false
   unshuffled = []
   return () => {
     if (player.index >= 0 || index < 0) return
@@ -633,6 +667,7 @@ export function clearAll(): () => void {
     unshuffled = before
     radioSeed = seed
     player.radio = radio
+    player.wild = wild
     startAt = at
     start(index)
   }

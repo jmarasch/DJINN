@@ -363,13 +363,14 @@ fun HomeScreen(nav: Nav) {
             Column(Modifier.fillMaxSize()) {
                 HomeBar(nav)
                 Note("$reason Here's what's on this phone.")
-                KeptSongs(nav)
+                KeptSongs(nav, wild = true)
             }
         },
     ) { home: GoHome ->
         LazyColumn(Modifier.fillMaxSize()) {
             item { HomeBar(nav) }
             item { UpdateOffer(nav) }
+            item { WildPlayRow(nav) }
             home.resume?.let { resume ->
                 resume.songs.getOrNull(resume.position)?.let { song ->
                     item {
@@ -412,10 +413,34 @@ private fun HomeBar(nav: Nav) {
     PageTitle(t("go.your_music"), t("go.home_hint"))
 }
 
-/** Everything on the phone, which needs no server. */
+/** Wild play: songs at random from the whole library, more as it runs low. */
 @UnstableApi
 @Composable
-private fun KeptSongs(nav: Nav) {
+private fun WildPlayRow(nav: Nav) {
+    val scope = rememberCoroutineScope()
+    Row2(
+        title = t("pls.wild"),
+        subtitle = t("gh.wild_note"),
+        art = { Icon(Icons.Default.Shuffle, null, Modifier.size(44.dp), tint = MaterialTheme.colorScheme.primary) },
+        onClick = {
+            scope.launch {
+                try {
+                    val songs = nav.api.wild()
+                    if (songs.isEmpty()) nav.message = t("gh.wild_failed") else nav.player.playWild(songs)
+                } catch (_: IOException) {
+                    nav.message = t("gh.wild_failed")
+                }
+            }
+        },
+        end = { Icon(Icons.Default.PlayArrow, contentDescription = t("pls.wild")) },
+    )
+}
+
+/** Everything on the phone, which needs no server. With `wild`, a Wild play
+ * row first shuffles them. */
+@UnstableApi
+@Composable
+private fun KeptSongs(nav: Nav, wild: Boolean = false) {
     val flow = remember(nav.server) { nav.offline.dao.songsFlow(nav.server) }
     val kept by flow.collectAsState(emptyList())
     val locked = nav.offline.isLocked()
@@ -427,6 +452,17 @@ private fun KeptSongs(nav: Nav) {
             }
         } else if (songs.isEmpty()) {
             item { Note(t("kept.nothing")) }
+        }
+        if (wild && songs.isNotEmpty()) {
+            item {
+                Row2(
+                    title = t("pls.wild"),
+                    subtitle = t("gh.wild_note_kept"),
+                    art = { Icon(Icons.Default.Shuffle, null, Modifier.size(44.dp), tint = MaterialTheme.colorScheme.primary) },
+                    onClick = { nav.player.playShuffled(songs) },
+                    end = { Icon(Icons.Default.PlayArrow, contentDescription = t("pls.wild")) },
+                )
+            }
         }
         itemsIndexed(songs) { index, song ->
             SongRow(song, nav) { nav.player.play(songs, index) }
