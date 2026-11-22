@@ -33,6 +33,11 @@ static TRACE_UNTIL: AtomicI64 = AtomicI64::new(0);
 const KEPT: usize = 3000;
 
 static RECENT: Mutex<VecDeque<String>> = Mutex::new(VecDeque::new());
+/// The latest info, warning and error lines, so full tracing's flood of
+/// library lines can't push them out of [`RECENT`] before anyone sees them.
+static NOTABLE: Mutex<VecDeque<String>> = Mutex::new(VecDeque::new());
+/// The level of the last line written, for the lines that carry on its message.
+static LAST_LEVEL: AtomicU8 = AtomicU8::new(0);
 static FILE: OnceLock<Mutex<DailyWriter>> = OnceLock::new();
 
 pub fn valid_level(level: &str) -> bool {
@@ -339,17 +344,27 @@ impl Write for FileWriter {
 /// write, already formatted.
 pub struct Recent;
 
+fn keep(kept: &Mutex<VecDeque<String>>, line: &str) {
+    if let Ok(mut lines) = kept.lock() {
+        if lines.len() == KEPT {
+            lines.pop_front();
+        }
+        lines.push_back(line.to_owned());
+    }
+}
+
 impl Write for Recent {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let text = String::from_utf8_lossy(buf);
-        if let Ok(mut lines) = RECENT.lock() {
-            for line in text.lines().filter(|l| !l.trim().is_empty()) {
-                if lines.len() == KEPT {
-                    lines.pop_front();
-                }
-                lines.push_back(line.to_owned());
+        let mut level = LAST_LEVEL.load(Ordering::Relaxed) as usize;
+        for line in text.lines().filter(|l| !l.trim().is_empty()) {
+            level = level_of(line).unwrap_or(level);
+            keep(&RECENT, line);
+            if level >= INFO {
+                keep(&NOTABLE, line);
             }
         }
+        LAST_LEVEL.store(level as u8, Ordering::Relaxed);
         Ok(buf.len())
     }
 
@@ -399,6 +414,8 @@ pub fn file_for_day(day: &str) -> Option<PathBuf> {
 
 /// Log levels, least to most serious, as they're written.
 const LEVELS: [&str; 5] = ["TRACE", "DEBUG", "INFO", "WARN", "ERROR"];
+/// Where INFO is in [`LEVELS`].
+const INFO: usize = 2;
 
 /// A line's level: the word after the time. Lines that carry on a message
 /// (no time of their own) have none.
@@ -415,7 +432,8 @@ pub fn recent(min: Option<&str>, search: Option<&str>, limit: usize) -> Vec<Stri
         .and_then(|m| LEVELS.iter().position(|l| l.eq_ignore_ascii_case(m)))
         .unwrap_or(0);
     let search = search.map(str::to_lowercase).filter(|s| !s.is_empty());
-    let Ok(lines) = RECENT.lock() else {
+    let kept = if min >= INFO { &NOTABLE } else { &RECENT };
+    let Ok(lines) = kept.lock() else {
         return Vec::new();
     };
     let mut level = 0;
@@ -568,5 +586,20 @@ mod tests {
         );
         assert_eq!(ours(recent(None, Some("LISTENING"), 100)).len(), 1);
         assert_eq!(recent(Some("error"), Some("track failed"), 1).len(), 1);
+    }
+
+    #[test]
+    fn tracing_floods_dont_hide_warnings() {
+        let mut w = Recent;
+        w.write_all(
+            b"2026-10-31T00:00:01Z  WARN djinn: flood-test warning\n  because: flood-test cause\n",
+        )
+        .unwrap();
+        for _ in 0..KEPT + 10 {
+            w.write_all(b"2026-10-31T00:00:02Z TRACE pulseaudio: writing bytes\n")
+                .unwrap();
+        }
+        assert_eq!(recent(Some("info"), Some("flood-test"), 100).len(), 2);
+        assert!(recent(Some("trace"), Some("flood-test"), 100).is_empty());
     }
 }

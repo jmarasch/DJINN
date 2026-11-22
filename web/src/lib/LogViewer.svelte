@@ -10,7 +10,7 @@
   const levels = $derived([
     { value: 'error', label: t('lv.errors') },
     { value: 'warn', label: t('lv.warnings') },
-    { value: 'info', label: t('lv.everything') },
+    { value: 'trace', label: t('lv.everything') },
   ])
   let level = $state('warn')
   let search = $state('')
@@ -138,7 +138,7 @@
   </div>
   <pre bind:this={box} class="lines">{#if lines === null}{t('common.loading')}{:else if lines.length}{lines.map(short).join(
         '\n',
-      )}{:else}{search.trim() ? t('lv.no_match') : level === 'info' ? t('lv.nothing_yet') : t('lv.nothing_worry')}{/if}</pre>
+      )}{:else}{search.trim() ? t('lv.no_match') : level === 'trace' ? t('lv.nothing_yet') : t('lv.nothing_worry')}{/if}</pre>
   <div class="actions">
     <label class="switch small">
       <input type="checkbox" bind:checked={follow} />
