@@ -5,7 +5,7 @@ use std::collections::VecDeque;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicU8, Ordering};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use chrono::{Duration as Days, Local, NaiveDate};
@@ -16,9 +16,18 @@ pub const LEVEL_SETTING: &str = "log_level";
 pub const DAYS_SETTING: &str = "log_keep_days";
 pub const DEFAULT_DAYS: u16 = 7;
 pub const MAX_DAYS: u16 = 365;
+/// When full tracing ends (ms since 1970), so it carries on over a restart.
+pub const TRACE_UNTIL_SETTING: &str = "log_trace_until";
+/// How long full tracing may be switched on for, in minutes. It writes every
+/// library's lines (audio buffers, folder events, queries), gigabytes a day,
+/// so it always ends on its own.
+pub const TRACE_MINUTES: [u32; 4] = [15, 60, 240, 1440];
+pub const DEFAULT_TRACE_MINUTES: u32 = 60;
 
 // ERROR=1, WARN=2, TRACE=5. The default records warnings and errors.
 static RECORD_LEVEL: AtomicU8 = AtomicU8::new(2);
+/// When full tracing ends, 0 while it's off.
+static TRACE_UNTIL: AtomicI64 = AtomicI64::new(0);
 
 /// Lines kept in memory.
 const KEPT: usize = 3000;
@@ -49,7 +58,19 @@ pub fn set_record_level(level: &str) {
 
 pub async fn apply(store: &Store) -> anyhow::Result<()> {
     let level = store.get_setting(LEVEL_SETTING).await?.unwrap_or_default();
-    set_record_level(&level);
+    let until = store
+        .get_setting(TRACE_UNTIL_SETTING)
+        .await?
+        .and_then(|v| v.parse::<i64>().ok())
+        .unwrap_or(0);
+    if level == "trace" && !still_tracing(until, now_ms()) {
+        // Tracing with no end (set before it was timed) or one that passed
+        // while DJINN was off.
+        stop_tracing(store).await?;
+    } else {
+        set_record_level(&level);
+        TRACE_UNTIL.store(if level == "trace" { until } else { 0 }, Ordering::Relaxed);
+    }
     let days = store
         .get_setting(DAYS_SETTING)
         .await?
@@ -58,6 +79,56 @@ pub async fn apply(store: &Store) -> anyhow::Result<()> {
         .clamp(1, MAX_DAYS);
     set_keep_days(days)?;
     Ok(())
+}
+
+pub fn now_ms() -> i64 {
+    Local::now().timestamp_millis()
+}
+
+fn still_tracing(until: i64, now: i64) -> bool {
+    until > now
+}
+
+/// When full tracing ends, if it's on.
+pub fn trace_until() -> Option<i64> {
+    let until = TRACE_UNTIL.load(Ordering::Relaxed);
+    (record_level() == "trace" && until > 0).then_some(until)
+}
+
+/// Records `level`; full tracing for `minutes`, then back to warnings and errors.
+pub async fn set_level(store: &Store, level: &str, minutes: u32) -> anyhow::Result<()> {
+    let until = if level == "trace" {
+        now_ms() + i64::from(minutes) * 60_000
+    } else {
+        0
+    };
+    store.set_setting(LEVEL_SETTING, level).await?;
+    store
+        .set_setting(TRACE_UNTIL_SETTING, &until.to_string())
+        .await?;
+    TRACE_UNTIL.store(until, Ordering::Relaxed);
+    set_record_level(level);
+    Ok(())
+}
+
+async fn stop_tracing(store: &Store) -> anyhow::Result<()> {
+    set_level(store, "warn", 0).await?;
+    tracing::warn!("full tracing ended, recording warnings and errors again");
+    Ok(())
+}
+
+/// Ends full tracing when its time is up.
+pub async fn watch_tracing(store: Store) {
+    let mut every = tokio::time::interval(std::time::Duration::from_secs(20));
+    loop {
+        every.tick().await;
+        let Some(until) = trace_until() else { continue };
+        if !still_tracing(until, now_ms()) {
+            if let Err(error) = stop_tracing(&store).await {
+                tracing::error!(%error, "couldn't end full tracing");
+            }
+        }
+    }
 }
 
 /// The decoder's notes on harmless oddities in song files, which were almost all
@@ -373,6 +444,34 @@ pub fn all() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn full_tracing_always_ends() {
+        let store = Store::open_in_memory().await.unwrap();
+        let before = record_level().to_owned();
+        // Tracing left on with no end, as before it was timed.
+        store.set_setting(LEVEL_SETTING, "trace").await.unwrap();
+        apply(&store).await.unwrap();
+        assert_eq!(record_level(), "warn");
+        assert_eq!(
+            store.get_setting(LEVEL_SETTING).await.unwrap().as_deref(),
+            Some("warn")
+        );
+        // A time still to come carries on over a restart.
+        set_level(&store, "trace", 15).await.unwrap();
+        apply(&store).await.unwrap();
+        let until = trace_until().unwrap();
+        assert!(until > now_ms() + 14 * 60_000);
+        // One that passed while DJINN was off doesn't.
+        store
+            .set_setting(TRACE_UNTIL_SETTING, &(now_ms() - 1).to_string())
+            .await
+            .unwrap();
+        apply(&store).await.unwrap();
+        assert_eq!(record_level(), "warn");
+        assert_eq!(trace_until(), None);
+        set_record_level(&before);
+    }
 
     #[test]
     fn decoder_noise_stays_out_of_the_log() {

@@ -59,7 +59,10 @@ Saving everything DJINN knows to one file; see
 **Admin > Server Log** shows the latest lines DJINN has written since it started, newest at the bottom,
 with times as the DJINN computer's clock shows them. Set **Record in the
 log** to full tracing, warnings and errors, or errors only. This changes
-what DJINN records immediately. **Show lines** filters what you see without
+what DJINN records immediately. Full tracing records everything DJINN and the
+libraries it uses do, which can be gigabytes a day, so it runs only for the
+time you pick under **Trace for** (15 minutes to a day) and then goes back to
+warnings and errors on its own, even across a restart. **Show lines** filters what you see without
 changing what is recorded. Search for a word in the recent lines.
 
 ![Admin > Server Log](images/admin-server-log.webp)

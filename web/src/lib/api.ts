@@ -88,6 +88,7 @@ import type {
   LibraryStatus,
   LibraryRoot,
   LogSettings,
+  SaveLogSettings,
   Mode,
   NowPlaying,
   OutputConfig,
@@ -726,7 +727,7 @@ export const api = {
   systemLog: (level: string, q: string) =>
     get<{ lines: string[] }>(`/system/log?level=${level}&q=${encodeURIComponent(q)}`),
   logSettings: () => get<LogSettings>('/system/log/settings'),
-  saveLogSettings: (settings: LogSettings) => put<LogSettings>('/system/log/settings', settings),
+  saveLogSettings: (settings: SaveLogSettings) => put<LogSettings>('/system/log/settings', settings),
   logFiles: () => get<string[]>('/system/log/files'),
   restart: () => post<void>('/system/restart'),
   quit: () => post<void>('/system/quit'),

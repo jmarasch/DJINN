@@ -225,6 +225,7 @@ async fn run() -> anyhow::Result<()> {
     }
     tracing::info!(path = %config.database.path.display(), "database ready");
     logs::apply(&store).await?;
+    tokio::spawn(logs::watch_tracing(store.clone()));
     system_api::apply_ports(&store, &mut config).await?;
     // A node plays a room for a main DJINN: no library, no party app.
     if node_mode::is_node(&store).await? {

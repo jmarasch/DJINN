@@ -1403,6 +1403,15 @@ export interface ServerPorts {
 export interface LogSettings {
   level: 'trace' | 'warn' | 'error'
   keep_days: number
+  /** When full tracing goes back to warnings and errors (ms since 1970). */
+  trace_until?: number | null
+}
+
+export interface SaveLogSettings {
+  level: 'trace' | 'warn' | 'error'
+  keep_days: number
+  /** How long full tracing runs for; left out keeps the time it ends. */
+  trace_minutes?: number
 }
 
 /** What Admin > System can clear out. */
