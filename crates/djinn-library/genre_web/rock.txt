@@ -128,6 +128,7 @@ Rock = rock music, general rock [1950-]
       Dark cabaret = punk cabaret [1990-] ~ cabaret
     Post punk revival = new wave revival [2000-] ~ indie rock
   New wave = new wave music [1977-1988] < punk rock ~ synth pop, power pop
+    Zolo [1977-1990] ~ art rock
     New romantic = new romanticism [1979-1984] ~ synth pop
     Neue deutsche welle = ndw [1976-1985]
   Alternative rock = alternative, alt rock, modern rock, college rock [1980-]
@@ -158,4 +159,5 @@ Rock = rock music, general rock [1950-]
       Grebo [1986-1993]
     Geek rock = nerd rock [1995-]
   Industrial rock [1980-] < industrial ~ industrial metal
+  Steampunk [2000-] ~ dark cabaret, industrial
   Electronic rock [1970-] ~ synth pop

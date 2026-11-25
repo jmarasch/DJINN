@@ -4,7 +4,7 @@
 //! Reads lines of `count<TAB>tag` on stdin, for example from a COPY of a
 //! database: `sqlite3 copy.db "select count(*), genre from tracks group by genre"
 //! -separator $'\t' | cargo run -p djinn-library --example genre_web`.
-//! With `--tree` it prints the whole web instead.
+//! With `--tree` it prints the whole web instead, with `--all` every unknown tag.
 
 use std::io::BufRead;
 
@@ -39,7 +39,12 @@ fn main() {
         }
     }
     unknown.sort_by_key(|a| std::cmp::Reverse(a.0));
-    for (count, tag) in unknown.iter().take(60) {
+    let shown = if std::env::args().any(|a| a == "--all") {
+        usize::MAX
+    } else {
+        60
+    };
+    for (count, tag) in unknown.iter().take(shown) {
         println!("{count:>7}  {tag}");
     }
     let share = if total == 0 {

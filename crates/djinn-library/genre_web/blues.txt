@@ -1,15 +1,23 @@
-# Blues. First pass: the main branches; to be filled out.
+# Blues. See README.md for how these files are written.
 
 Blues = blues music [1900-]
-  Country blues = acoustic blues, folk blues [1900-] ~ folk
+  Country blues = acoustic blues, folk blues, pre war blues [1900-] ~ folk
     Delta blues [1920-]
     Piedmont blues [1920-]
+    Hill country blues [1950-]
+    Talking blues [1920-]
+  Classic female blues = classic blues, vaudeville blues [1920-1930] ~ jazz
   Electric blues [1940-]
-    Chicago blues [1945-]
+    Chicago blues = acoustic chicago blues [1945-]
     Texas blues = electric texas blues [1940-]
+    Memphis blues [1920-]
+    West coast blues [1940-]
+    New Orleans blues [1940-]
     Swamp blues [1950-]
   Jump blues [1940-1955] ~ swing, rhythm and blues
   Boogie woogie [1920-] ~ swing
   Piano blues [1920-]
+  Gospel blues [1920-] ~ gospel
   Soul blues [1960-] ~ soul
+  Jazz blues [1930-] ~ jazz
   Modern blues = contemporary blues [1970-] ~ blues rock

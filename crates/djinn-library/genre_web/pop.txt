@@ -1,28 +1,51 @@
-# Pop. First pass: the main branches; to be filled out.
+# Pop. See README.md for how these files are written.
 
 Pop = pop music [1950-]
   Traditional pop = trad pop [1940-1960] ~ easy listening
+    Tin Pan Alley [1885-1950]
+    Vocal pop = vocal, vocals, pop vocals, crooner [1930-] ~ vocal jazz
+  Brill Building [1958-1966] ~ doo wop
   Teen pop [1955-]
   Bubblegum pop = bubblegum [1967-1972]
+  Ye ye = yé yé [1959-1970]
   Psychedelic pop = psych pop [1965-1970] ~ psychedelic rock
     Sunshine pop [1965-1970]
   Baroque pop [1965-] ~ chamber pop
     Chamber pop [1990-]
   Art pop = avant garde pop, experimental pop [1965-] ~ art rock
+    Progressive pop [1966-] ~ progressive rock
+    Hypnagogic pop [2000-] ~ chillwave
+  Sophisti pop [1982-1992] ~ smooth jazz
   Adult contemporary = ac, adult pop [1970-] ~ soft rock
   Synth pop = synthpop, technopop, techno pop [1979-] < new wave ~ electronic
   Dance pop [1980-] ~ disco, electronic dance music
     Electropop [2000-] ~ synth pop
+      Glitch pop [2000-] ~ glitch
+      Electro hop [2007-]
     Europop = euro pop, european pop [1975-] ~ eurodance
+    Disco polo [1988-] ~ eurodance
   Alternative pop = alt pop [1985-] ~ indie pop
   Bedroom pop [2010-] ~ indie pop
   Hyperpop [2015-] ~ electropop
     Bubblegum bass [2013-]
+  Shibuya kei [1993-2002] ~ city pop, lounge
   K pop = kpop, korean pop [1992-]
+    Korean ballad [1990-]
   J pop = jpop, japanese pop [1990-]
     City pop [1976-1990] ~ soft rock
+    Kayokyoku [1950-1990]
+  C pop = chinese pop [1980-]
+    Mandopop [1980-]
+    Cantopop [1970-]
+  Arabic pop = al jeel [1980-] ~ middle eastern
+  Turkish pop [1960-]
+  Persian pop = iranian pop [1950-]
+  Indian pop = indipop [1980-] ~ bollywood
+  Italian pop = italo pop, canzone [1950-]
+  French pop = variete francaise, variete [1950-] ~ chanson
+  Nederpop [1963-]
   Schlager [1950-]
+    Partyschlager [1990-]
+    Dansband [1960-] ~ country
   Oldies [1950-1975] ~ rock and roll, doo wop
   Pop soul ~ soul
-  Progressive pop [1966-] ~ progressive rock
-  Sophisti pop [1982-1992] ~ smooth jazz

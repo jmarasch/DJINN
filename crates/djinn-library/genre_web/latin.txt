@@ -1,22 +1,33 @@
-# Latin. First pass: the main branches; to be filled out.
+# Latin. See README.md for how these files are written.
 
 Latin = latin music, latin american music [1900-]
-  Salsa [1960-]
+  Son cubano = son [1900-]
+  Salsa [1960-] < son cubano
   Mambo [1940-]
   Cha cha cha = cha cha [1950-]
   Bolero [1900-]
+  Latin boogaloo = boogaloo [1963-1970] ~ rhythm and blues
   Merengue [1900-]
   Bachata [1960-]
   Cumbia [1940-]
+    Digital cumbia [2000-] ~ electronic
   Tango [1880-]
-  Bossa nova [1958-] ~ cool jazz
-  MPB = musica popular brasileira [1965-]
+    Nuevo tango [1955-] ~ jazz
   Samba [1910-]
+  Bossa nova [1958-] < samba ~ cool jazz
+  MPB = musica popular brasileira [1965-]
+  Forro [1940-]
+  Sertanejo [1920-] ~ country
+  Baile funk = funk carioca, brazilian funk [1989-] ~ miami bass
   Latin pop [1980-] ~ pop
+    Latin ballad [1960-]
   Reggaeton [1995-] ~ dancehall, hip hop
+  Nueva cancion [1960-] ~ protest song
   Regional Mexican = musica mexicana [1900-]
     Mariachi [1900-]
     Ranchera [1900-]
     Norteno [1920-]
     Banda [1950-]
+    Corrido = corridos [1900-]
+      Corridos tumbados [2016-] ~ trap
     Tejano = tex mex [1945-] ~ country

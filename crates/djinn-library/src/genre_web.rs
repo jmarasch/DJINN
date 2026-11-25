@@ -315,10 +315,17 @@ impl Web {
                 Some(id) => vec![id],
                 // "&" is part of names like "Rock & Roll", so it only
                 // splits a part that isn't a name.
-                None => part
-                    .split(['&', '+'])
-                    .filter_map(|p| self.find(p))
-                    .collect(),
+                None => {
+                    let pieces: Vec<usize> = part
+                        .split(['&', '+'])
+                        .filter_map(|p| self.find(p))
+                        .collect();
+                    if pieces.is_empty() {
+                        self.run_together(part)
+                    } else {
+                        pieces
+                    }
+                }
             };
             for id in found {
                 if !ids.contains(&id) {
@@ -327,6 +334,46 @@ impl Web {
             }
         }
         ids
+    }
+
+    /// Genres run together with nothing between them, as tags read after
+    /// their slashes became spaces ("hard rock heavy metal"): the fewest
+    /// names that use every word, or nothing if some word is left over.
+    fn run_together(&self, text: &str) -> Vec<usize> {
+        /// The longest name, in words, worth trying.
+        const LONGEST: usize = 5;
+        let k = key(text);
+        let words: Vec<&str> = k.split(' ').filter(|w| !w.is_empty()).collect();
+        if words.len() < 2 || words.len() > 12 {
+            return Vec::new();
+        }
+        // best[i]: the fewest names covering the first i words.
+        let mut best: Vec<Option<Vec<usize>>> = vec![None; words.len() + 1];
+        best[0] = Some(Vec::new());
+        for end in 1..=words.len() {
+            for start in end.saturating_sub(LONGEST)..end {
+                let (Some(before), Some(&id)) = (
+                    best[start].as_ref(),
+                    self.by_key.get(&words[start..end].join(" ")),
+                ) else {
+                    continue;
+                };
+                if best[end]
+                    .as_ref()
+                    .is_none_or(|b| before.len() + 1 < b.len())
+                {
+                    let mut found = before.clone();
+                    found.push(id);
+                    best[end] = Some(found);
+                }
+            }
+        }
+        let mut found = best[words.len()].take().unwrap_or_default();
+        if found.len() < 2 {
+            return Vec::new();
+        }
+        found.dedup();
+        found
     }
 
     /// The genre and every genre above it, up to its family.
@@ -561,6 +608,17 @@ Metal = heavy metal
             vec![id("blues rock"), id("hard rock")]
         );
         assert!(web.find_all("Unknown Genre").is_empty());
+        // Slashes already turned into spaces.
+        assert_eq!(
+            web.find_all("hard rock heavy metal"),
+            vec![id("hard rock"), id("metal")]
+        );
+        assert_eq!(
+            web.find_all("blues rock hard rock arena rock"),
+            vec![id("blues rock"), id("hard rock"), id("arena rock")]
+        );
+        // Every word must belong to a genre.
+        assert!(web.find_all("hard rock opera").is_empty());
     }
 
     #[test]

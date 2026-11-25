@@ -1,20 +1,23 @@
-# Country. First pass: the main branches; to be filled out.
+# Country. See README.md for how these files are written.
 
-Country = country music, country and western [1920-]
+Country = country music, country and western [1920-] < folk, blues
   Traditional country = classic country, old time country [1920-]
+    Old time = old time music, old timey [1920-] ~ appalachian folk
+  Western = western music, cowboy music [1930-]
+    Cowboy poetry [1930-]
   Western swing [1930-1950] ~ swing
   Honky tonk [1945-]
   Bluegrass [1945-] ~ folk
     Progressive bluegrass = newgrass [1965-]
   Nashville sound [1955-1970]
     Countrypolitan [1965-1980]
-  Bakersfield sound [1955-]
+  Bakersfield sound [1955-] ! nashville sound
   Country pop [1960-] ~ pop
-  Outlaw country [1970-]
-  Neotraditional country [1980-]
+  Truck driving country [1960-]
+  Outlaw country [1970-] ! nashville sound
+  Neotraditional country = neo traditional country [1980-]
   Contemporary country = modern country, new country [1990-]
     Bro country [2010-]
   Texas country [1980-]
   Alternative country = alt country, insurgent country [1990-]
     Americana [1995-] ~ folk rock
-  Western = western music, cowboy music [1930-]
