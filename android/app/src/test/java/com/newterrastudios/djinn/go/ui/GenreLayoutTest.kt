@@ -1,56 +1,75 @@
 package com.newterrastudios.djinn.go.ui
 
-import com.newterrastudios.djinn.go.data.GenreLink
-import com.newterrastudios.djinn.go.data.GenreList
-import com.newterrastudios.djinn.go.data.GenreSummary
+import com.newterrastudios.djinn.go.data.GenreWeb
+import com.newterrastudios.djinn.go.data.WebGenre
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class GenreLayoutTest {
-    private val list = GenreList(
+    // Two families: Rock (hard rock, glam rock under it) and Metal (glam
+    // metal), with glam metal grown out of glam rock and grunge reacting
+    // against it; jazz has no songs.
+    private val web = GenreWeb(
         genres = listOf(
-            GenreSummary("a", 100),
-            GenreSummary("b", 50),
-            GenreSummary("c", 20),
-            GenreSummary("d", 10),
-            GenreSummary("e", 5),
+            WebGenre("Rock", songsBelow = 100),
+            WebGenre("Hard rock", parent = 0, songsBelow = 60),
+            WebGenre("Glam rock", parent = 1, songsBelow = 20),
+            WebGenre("Metal", from = listOf(1), songsBelow = 50),
+            WebGenre("Glam metal", parent = 3, from = listOf(2), songsBelow = 30),
+            WebGenre("Grunge", parent = 0, against = listOf(4), songsBelow = 10),
+            WebGenre("Jazz", songsBelow = 0),
         ),
-        // a-b-c-d in a chain; e on its own.
-        links = listOf(GenreLink(0, 1, 0.9f), GenreLink(1, 2, 0.8f), GenreLink(2, 3, 0.7f)),
-        topLinks = listOf(GenreLink(0, 1, 0.9f)),
     )
 
     @Test
-    fun zoomingShowsNeighboursAndTheirNeighboursButNoFurther() {
-        assertEquals(listOf(0, 1, 2), around(list.links, 0))
-        assertEquals(listOf(4), around(list.links, 4))
-    }
-
-    @Test
-    fun theTopLevelIsTheBiggestWithTheirOwnLinks() {
-        val top = layOutGenres(list, null, 2)
-        assertEquals(setOf("a", "b"), top.dots.map { it.name }.toSet())
+    fun theTopLevelIsTheFamiliesWithTheirTies() {
+        val top = layOutWeb(web, null, every = false)
+        assertEquals(listOf("Rock", "Metal"), top.dots.map { it.name })
+        // Rock and Metal are tied by several links, drawn as one line.
         assertEquals(1, top.lines.size)
+        assertEquals(3, layOutWeb(web, null, every = true).dots.size)
     }
 
     @Test
-    fun aZoomedViewUsesEveryLinkAmongWhatItShows() {
-        val zoomed = layOutGenres(list, "b", 2)
-        assertEquals(setOf("a", "b", "c", "d"), zoomed.dots.map { it.name }.toSet())
-        assertEquals(3, zoomed.lines.size)
-        assertEquals("b", zoomed.dots.first().name)
+    fun aGenreHasItsParentKindsAndLinksAroundIt() {
+        val view = layOutWeb(web, "Glam metal", every = false)
+        assertEquals("Glam metal", view.dots.first().name)
+        assertEquals(setOf("Glam metal", "Metal", "Glam rock", "Grunge"), view.dots.map { it.name }.toSet())
+        val kinds = view.lines.map { view.dots[it.a].name to view.dots[it.b].name to it.kind }.toSet()
+        assertTrue(("Metal" to "Glam metal" to LineKind.TREE) in kinds)
+        // Arrows run from the older genre to the newer one...
+        assertTrue(("Glam rock" to "Glam metal" to LineKind.FROM) in kinds)
+        // ...and from a reaction to what it reacted against.
+        assertTrue(("Grunge" to "Glam metal" to LineKind.AGAINST) in kinds)
+        // Genres from another family are told apart.
+        assertEquals(false, view.dots.single { it.name == "Glam rock" }.home)
+    }
+
+    @Test
+    fun onlyTheCentersLinesAreDrawn() {
+        val view = layOutWeb(web, "Hard rock", every = false)
+        assertTrue(view.lines.all { it.a == 0 || it.b == 0 })
+        assertEquals(listOf("Rock", "Hard rock", "Glam rock"), lineage(web, "Glam rock"))
+    }
+
+    @Test
+    fun theMiddleGenreStaysInTheMiddle() {
+        val view = layOutWeb(web, "Rock", every = false)
+        assertEquals(0f, view.dots.first().x)
+        assertEquals(0f, view.dots.first().y)
     }
 
     @Test
     fun aGenreNoLongerThereFallsBackToTheTop() {
-        assertEquals(2, layOutGenres(list, "gone", 2).dots.size)
+        assertEquals(listOf("Rock", "Metal"), layOutWeb(web, "gone", every = false).dots.map { it.name })
     }
 
     @Test
     fun theSameLibraryAlwaysLooksTheSame() {
-        val (one, two) = layOutGenres(list, null, 5) to layOutGenres(list, null, 5)
+        val (one, two) = layOutWeb(web, "Hard rock", false) to layOutWeb(web, "Hard rock", false)
         assertEquals(one.dots.map { it.x to it.y }, two.dots.map { it.x to it.y })
     }
 
@@ -62,10 +81,10 @@ class GenreLayoutTest {
 
     @Test
     fun aTapFindsTheDotOrItsLabel() {
-        val layout = layOutGenres(list, null, 1)
-        val dot = layout.dots.single()
+        val layout = layOutWeb(web, null, every = false)
+        val dot = layout.dots.first()
         assertNotNull(dotAt(layout, dot.x, dot.y))
         assertNotNull(dotAt(layout, dot.x, dot.y + dot.r + dot.font))
-        assertNull(dotAt(layout, dot.x + 500, dot.y))
+        assertNull(dotAt(layout, dot.x + 900, dot.y))
     }
 }

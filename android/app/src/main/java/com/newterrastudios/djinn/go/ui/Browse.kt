@@ -13,7 +13,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.BubbleChart
-import androidx.compose.runtime.mutableIntStateOf
 import kotlinx.coroutines.Dispatchers
 import com.newterrastudios.djinn.go.data.importText
 import com.newterrastudios.djinn.go.data.ShareTarget
@@ -102,6 +101,7 @@ import com.newterrastudios.djinn.go.data.Page
 import com.newterrastudios.djinn.go.data.SearchResults
 import com.newterrastudios.djinn.go.data.Track
 import com.newterrastudios.djinn.go.data.GenreList
+import com.newterrastudios.djinn.go.data.GenreWeb
 import com.newterrastudios.djinn.go.data.GenrePage
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -1456,48 +1456,49 @@ fun ArtistSongsScreen(id: Long, nav: Nav) {
 /** Genre names are stored in lower case. */
 private fun genreTitle(name: String) = name.replaceFirstChar { it.uppercase() }
 
+/** The genre list's request: the list itself is every genre either way. */
+private const val GENRE_LIST_TOP = 100
+private const val GENRE_LIST_LINES = 4
+
 /** Every genre in the library. */
 @UnstableApi
 @Composable
 private fun GenresTab(nav: Nav) {
     var cloud by remember { mutableStateOf(nav.prefs.genreCloud) }
-    var top by remember { mutableIntStateOf(nav.prefs.genreTop) }
-    var lines by remember { mutableIntStateOf(nav.prefs.genreLines) }
-    Loaded(key = "genres-$top-$lines", load = { nav.api.genres(top, lines) }) { list: GenreList ->
+    val toggle = {
+        cloud = !cloud
+        nav.prefs.genreCloud = cloud
+    }
+    if (cloud) {
+        // The map: DJINN's genre web.
+        var every by remember { mutableStateOf(nav.prefs.genreEvery) }
+        Loaded(key = "genre-web", load = { nav.api.genreWeb() }) { web: GenreWeb ->
+            Column(Modifier.fillMaxSize()) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    IconButton(onClick = toggle) { Icon(Icons.AutoMirrored.Filled.List, t("genres.as_list")) }
+                }
+                GenreCloud(
+                    web,
+                    nav,
+                    every,
+                    onEvery = {
+                        every = it
+                        nav.prefs.genreEvery = it
+                    },
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+        return
+    }
+    Loaded(key = "genres", load = { nav.api.genres(GENRE_LIST_TOP, GENRE_LIST_LINES) }) { list: GenreList ->
         val entries = remember(list) { jumpEntries(letterJumps(list.genres.map { it.name }), "name") }
         val state = rememberLazyListState()
         val scope = rememberCoroutineScope()
         var pressedLabel by remember { mutableStateOf<String?>(null) }
         Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-            IconButton(onClick = {
-                cloud = !cloud
-                nav.prefs.genreCloud = cloud
-            }) {
-                if (cloud) {
-                    Icon(Icons.AutoMirrored.Filled.List, t("genres.as_list"))
-                } else {
-                    Icon(Icons.Default.BubbleChart, t("genres.as_cloud"))
-                }
-            }
-        }
-        if (cloud && list.genres.isNotEmpty()) {
-            GenreCloud(
-                list,
-                nav,
-                top,
-                lines,
-                onTop = {
-                    top = it
-                    nav.prefs.genreTop = it
-                },
-                onLines = {
-                    lines = it
-                    nav.prefs.genreLines = it
-                },
-                modifier = Modifier.weight(1f),
-            )
-            return@Column
+            IconButton(onClick = toggle) { Icon(Icons.Default.BubbleChart, t("genres.as_cloud")) }
         }
         Box(
             Modifier

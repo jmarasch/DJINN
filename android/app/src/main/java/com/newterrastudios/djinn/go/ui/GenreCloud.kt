@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -49,34 +50,41 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.media3.common.util.UnstableApi
-import com.newterrastudios.djinn.go.data.GenreList
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
+import com.newterrastudios.djinn.go.data.GenreWeb
 import com.newterrastudios.djinn.go.i18n.t
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlin.math.max
 import kotlin.math.min
 
 private const val MAX_ZOOM = 3f
 private const val MOVE_MS = 350
-val GENRE_TOP_CHOICES = listOf(50, 100, 200, 300)
-/** Line choices: (translation key, links per genre). */
-val GENRE_LINE_CHOICES = listOf("genres.fewer" to 2, "genres.normal" to 4, "genres.more" to 8)
+/** A genre view opens no smaller than this, so names stay readable. */
+private const val READABLE = 0.75f
+/** "Reaction against" lines, as on the web. */
+private val AGAINST_RED = Color(0xFFFF5C7A)
 
 private data class Point(val x: Float, val y: Float)
 
 /**
- * The genres as a map you can move around. It opens on the biggest; tapping
- * one centers on it with what's near it and near those, tapping the center
- * opens its page, and the phone's back button goes back a step.
+ * DJINN's genre web as a map you can move around, the same as the web app's.
+ * It opens on the families; tapping one puts it in the middle with what it's
+ * a kind of above, its kinds below and its links around it, tapping the
+ * center opens its page, the trail leads back up, and the phone's back button
+ * goes back a step.
  */
 @UnstableApi
 @Composable
 fun GenreCloud(
-    list: GenreList,
+    web: GenreWeb,
     nav: Nav,
-    top: Int,
-    lines: Int,
-    onTop: (Int) -> Unit,
-    onLines: (Int) -> Unit,
+    every: Boolean,
+    onEvery: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val center = nav.genrePath.lastOrNull()
@@ -92,6 +100,18 @@ fun GenreCloud(
     val measurer = rememberTextMeasurer(cacheSize = 0)
     val textColor = MaterialTheme.colorScheme.onSurface
     val accent = MaterialTheme.colorScheme.primary
+    val teal = MaterialTheme.colorScheme.secondary
+    fun lineColor(kind: LineKind) = when (kind) {
+        LineKind.TREE -> textColor.copy(alpha = 0.4f)
+        LineKind.FROM -> teal
+        LineKind.NEAR -> accent
+        LineKind.AGAINST -> AGAINST_RED
+    }
+    fun dash(kind: LineKind, scale: Float) = when (kind) {
+        LineKind.NEAR -> PathEffect.dashPathEffect(floatArrayOf(2 * scale, 4 * scale))
+        LineKind.AGAINST -> PathEffect.dashPathEffect(floatArrayOf(7 * scale, 4 * scale))
+        else -> null
+    }
 
     fun fit(l: CloudLayout): Float =
         if (box.width == 0 || box.height == 0) {
@@ -118,15 +138,18 @@ fun GenreCloud(
         cy = (py - (atY - box.height / 2f) / (zoom * density)).coerceIn(l.top, l.top + l.height)
     }
 
-    LaunchedEffect(list, center, top) {
-        val next = withContext(Dispatchers.Default) { layOutGenres(list, center, top) }
+    LaunchedEffect(web, center, every) {
+        val next = withContext(Dispatchers.Default) { layOutWeb(web, center, every) }
         val previous = layout?.dots.orEmpty().associate { it.name to Point(it.x, it.y) }
         from = previous
         origin = center?.let(previous::get) ?: Point(0f, 0f)
         layout = next
-        cx = next.left + next.width / 2
-        cy = next.top + next.height / 2
-        zoom = if (center != null) fit(next) else 1f
+        val wide = fit(next)
+        // A genre view that doesn't fit opens on the genre in the middle.
+        val middle = next.dots.firstOrNull()?.takeIf { center != null && wide < READABLE }
+        cx = middle?.x ?: (next.left + next.width / 2)
+        cy = middle?.y ?: (next.top + next.height / 2)
+        zoom = if (center != null) max(wide, READABLE) else 1f
         if (previous.isNotEmpty()) {
             moved.snapTo(0f)
             moved.animateTo(1f, tween(MOVE_MS))
@@ -152,20 +175,22 @@ fun GenreCloud(
                 .padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (nav.genrePath.isEmpty()) {
+            if (center == null) {
                 Text(
-                    t("genres.top_of", "shown" to (current?.dots?.size ?: 0), "n" to list.genres.size),
+                    t("gcl.families", "n" to (current?.dots?.size ?: 0)),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(8.dp),
                 )
             } else {
-                TextButton(onClick = { nav.genrePath = emptyList() }) { Text("Top") }
-                nav.genrePath.forEachIndexed { i, name ->
-                    Text("/", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                // The center's place in the tree, so there's always a way back up.
+                TextButton(onClick = { nav.genrePath = emptyList() }) { Text(t("gcl.top")) }
+                val up = lineage(web, center)
+                up.forEachIndexed { i, name ->
+                    Text("›", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     TextButton(
-                        enabled = i != nav.genrePath.lastIndex,
-                        onClick = { nav.genrePath = nav.genrePath.take(i + 1) },
+                        enabled = i != up.lastIndex,
+                        onClick = { nav.genrePath = pathAfter(nav.genrePath, name) },
                     ) { Text(name) }
                 }
             }
@@ -214,23 +239,28 @@ fun GenreCloud(
                 translate(size.width / 2, size.height / 2) {
                     scale(zoom, Offset.Zero) {
                         for (line in l.lines) {
-                            drawLine(
-                                accent.copy(alpha = 0.15f + 0.5f * line.strength),
+                            drawMapLine(
                                 places[line.a],
                                 places[line.b],
-                                strokeWidth = (1 + 2.5f * line.strength) * density,
+                                l.dots[line.b].r * density,
+                                lineColor(line.kind).copy(
+                                    alpha = if (line.kind == LineKind.TREE) 0.4f else 0.4f + 0.5f * line.strength,
+                                ),
+                                (if (line.kind == LineKind.TREE) 1.5f else 1.4f + 2.4f * line.strength) * density,
+                                dash(line.kind, density),
+                                arrow = line.kind == LineKind.FROM || line.kind == LineKind.AGAINST,
                             )
                         }
                         l.dots.forEachIndexed { i, d ->
                             val at = places[i]
-                            drawCircle(accent.copy(alpha = if (d.name == center) 1f else 0.85f), d.r * density, at)
+                            val fill = if (d.home) accent else teal
+                            drawCircle(
+                                fill.copy(alpha = if (d.songs == 0L) 0.3f else if (d.name == center) 1f else 0.85f),
+                                d.r * density,
+                                at,
+                            )
                             if (d.name == center) {
-                                drawCircle(
-                                    textColor,
-                                    d.r * density,
-                                    at,
-                                    style = androidx.compose.ui.graphics.drawscope.Stroke(2 * density),
-                                )
+                                drawCircle(textColor, d.r * density, at, style = Stroke(2 * density))
                             }
                             labels.getOrNull(i)?.let { text ->
                                 drawText(
@@ -263,17 +293,59 @@ fun GenreCloud(
                 .fillMaxWidth()
                 .horizontalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(t("library.genres"), style = MaterialTheme.typography.bodySmall)
-            GENRE_TOP_CHOICES.forEach { choice ->
-                FilterChip(selected = top == choice, onClick = { onTop(choice) }, label = { Text("$choice") })
-            }
-            Text(t("genres.lines"), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(start = 8.dp))
-            GENRE_LINE_CHOICES.forEach { (label, links) ->
-                FilterChip(selected = lines == links, onClick = { onLines(links) }, label = { Text(t(label)) })
+            FilterChip(selected = every, onClick = { onEvery(!every) }, label = { Text(t("gcl.every")) })
+            listOf(
+                LineKind.TREE to "gcl.key_kind",
+                LineKind.FROM to "gw.grew_from",
+                LineKind.NEAR to "gw.close_to",
+                LineKind.AGAINST to "gw.against",
+            ).forEach { (kind, label) ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Canvas(Modifier.padding(end = 4.dp).size(22.dp, 10.dp)) {
+                        drawLine(
+                            lineColor(kind),
+                            Offset(0f, size.height / 2),
+                            Offset(size.width, size.height / 2),
+                            strokeWidth = 2 * density,
+                            pathEffect = dash(kind, density),
+                        )
+                    }
+                    Text(t(label), style = MaterialTheme.typography.bodySmall)
+                }
             }
         }
+    }
+}
+
+/** A line from [from] to [to], stopping at the edge of [to]'s dot, with an arrow there if wanted. */
+private fun DrawScope.drawMapLine(
+    from: Offset,
+    to: Offset,
+    toRadius: Float,
+    color: Color,
+    width: Float,
+    dash: PathEffect?,
+    arrow: Boolean,
+) {
+    val dx = to.x - from.x
+    val dy = to.y - from.y
+    val dist = kotlin.math.hypot(dx, dy).coerceAtLeast(0.01f)
+    val (ux, uy) = dx / dist to dy / dist
+    val cut = min(toRadius + 3 * density, dist / 2)
+    val end = Offset(to.x - ux * cut, to.y - uy * cut)
+    drawLine(color, from, end, strokeWidth = width, pathEffect = dash)
+    if (arrow) {
+        val size = 6 * density + width
+        val back = Offset(end.x - ux * size, end.y - uy * size)
+        val head = Path().apply {
+            moveTo(end.x, end.y)
+            lineTo(back.x - uy * size / 2, back.y + ux * size / 2)
+            lineTo(back.x + uy * size / 2, back.y - ux * size / 2)
+            close()
+        }
+        drawPath(head, color.copy(alpha = 1f))
     }
 }

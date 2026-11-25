@@ -10,6 +10,7 @@ use std::collections::{HashMap, HashSet};
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
+use axum::response::IntoResponse;
 use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use djinn_library::genre_groups as clusters;
@@ -112,9 +113,46 @@ struct WebTree {
     unplaced: Vec<(String, usize)>,
 }
 
+/// How long a worked-out genre web is served before it's counted again.
+const WEB_TREE_KEEP: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// The last genre web worked out, as JSON, and when.
+static WEB_TREE: std::sync::Mutex<Option<(std::time::Instant, axum::body::Bytes)>> =
+    std::sync::Mutex::new(None);
+
 /// The whole genre web, with how many of the library's songs land on each
-/// genre, for checking it by eye.
-async fn web_tree(_: AdminUser, State(state): State<AppState>) -> Json<WebTree> {
+/// genre: Admin > Genres, and the genre map in the party app, GO and the
+/// phone app. Counting takes a moment on a big library, so it's kept for a
+/// few minutes.
+async fn web_tree(_: CurrentUser, State(state): State<AppState>) -> ApiResult<impl IntoResponse> {
+    let kept = WEB_TREE.lock().ok().and_then(|k| {
+        k.as_ref()
+            .filter(|(at, _)| at.elapsed() < WEB_TREE_KEEP)
+            .map(|(_, json)| json.clone())
+    });
+    let json = match kept {
+        Some(json) => json,
+        None => {
+            let state = state.clone();
+            let (tree, counted) = tokio::task::spawn_blocking(move || count_web(&state)).await?;
+            let json = axum::body::Bytes::from(serde_json::to_vec(&tree)?);
+            // Not before the library is loaded, or the empty counts would stick.
+            if counted {
+                if let Ok(mut k) = WEB_TREE.lock() {
+                    *k = Some((std::time::Instant::now(), json.clone()));
+                }
+            }
+            json
+        }
+    };
+    Ok((
+        [(axum::http::header::CONTENT_TYPE, "application/json")],
+        json,
+    ))
+}
+
+/// Counts the library's songs on the genre web; false when no song landed.
+fn count_web(state: &AppState) -> (WebTree, bool) {
     let web = djinn_library::genre_web::Web::builtin();
     let mut songs = vec![0usize; web.genres().len()];
     let mut below = vec![0usize; web.genres().len()];
@@ -159,7 +197,9 @@ async fn web_tree(_: AdminUser, State(state): State<AppState>) -> Json<WebTree> 
         .collect();
     let mut unplaced: Vec<(String, usize)> = unplaced.into_iter().collect();
     unplaced.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-    Json(WebTree { genres, unplaced })
+    let tree = WebTree { genres, unplaced };
+    let counted = tree.genres.iter().any(|g| g.songs > 0);
+    (tree, counted)
 }
 
 #[derive(Serialize)]

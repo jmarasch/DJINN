@@ -198,18 +198,23 @@ the files themselves aren't changed.
 ## Genres
 
 The Library's **Genres** tab lists every genre with its number of songs, or
-shows them as a cloud, where bigger means more songs and lines join related
-genres.
+shows them as a map of DJINN's genre family tree, where bigger means more of
+your songs.
 
-![The genre cloud](images/genre-cloud.webp)
+![The genre map](images/genre-cloud.webp)
 
-The cloud opens on your 100 biggest genres. Tap one to center on it, with what's
-near it and what's near those; tap it again to open its page, or tap another to
-move there. That way every genre can be reached, however small. **Home** goes
-back to the top from anywhere, and your back button goes back a step. Drag to
-move around, and pinch, scroll or use the buttons to zoom. You can choose how
-many genres the top shows (**Fewer**, **Normal**, **More**), and how many
-**Lines** to draw.
+The map opens on the families (Rock, Metal, Electronic, Jazz and so on), with
+lines for how their genres link. Tap a family to put it in the middle: what
+it's a kind of sits above it, its kinds below, and the genres it's linked to
+around it. Green arrows run from a genre to what grew out of it, dotted purple
+lines join close genres, and dashed red arrows point from a genre to what it
+was a reaction against. Genres from another family are teal. Tap another genre
+to move there, or the one in the middle to open its page. That way you can
+cross from one family into another and find your way back: the trail above
+the map always shows where you are, from the top down, and each step in it
+takes you there. **Home** goes back to the top, and your back button goes
+back a step. Drag to move around, and pinch, scroll or use the buttons to
+zoom. **Show genres with none of your songs** adds the rest of the tree.
 
 Each genre's page shows related genres, a row of its artists, a radio button,
 and all its songs, loading more as you scroll. They come in a shuffled order

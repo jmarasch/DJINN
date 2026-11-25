@@ -143,5 +143,5 @@ genres from MusicBrainz.
 
 ## Genres
 
-Every genre has its own page with a radio button, and the genre cloud shows
+Every genre has its own page with a radio button, and the genre map shows
 how they relate. See [Your library](your-library.md#genres).

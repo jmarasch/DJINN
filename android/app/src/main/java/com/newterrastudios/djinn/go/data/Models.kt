@@ -174,6 +174,26 @@ data class GenreLink(val a: Int, val b: Int, val strength: Float)
 @Serializable
 data class GenreSummary(val name: String, val songs: Long = 0)
 
+/** DJINN's genre web: families, the genres in them, and how genres link across it. */
+@Serializable
+data class GenreWeb(val genres: List<WebGenre> = emptyList())
+
+/** One genre of the web; places are indexes in [GenreWeb.genres]. */
+@Serializable
+data class WebGenre(
+    val name: String,
+    /** The genre it's a kind of; none for a family. */
+    val parent: Int? = null,
+    /** What it grew out of besides its parent. */
+    val from: List<Int> = emptyList(),
+    /** Genres it's close to or crosses over with. */
+    val near: List<Int> = emptyList(),
+    /** What it was a reaction against. */
+    val against: List<Int> = emptyList(),
+    /** Songs in the library on it or any genre below it. */
+    @SerialName("songs_below") val songsBelow: Long = 0,
+)
+
 /** One genre: its most played songs, its artists, and the genres near it. */
 @Serializable
 data class GenrePage(
