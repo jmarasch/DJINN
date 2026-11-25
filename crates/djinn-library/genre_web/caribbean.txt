@@ -1,0 +1,17 @@
+# Caribbean: reggae, ska and their neighbors. First pass; to be filled out.
+
+Caribbean = caribbean music [1900-]
+  Mento [1940-]
+  Calypso [1900-]
+    Soca [1970-]
+  Ska [1959-] < rhythm and blues
+    2 tone = two tone, ska revival [1978-1985] ~ punk rock
+    Third wave ska [1985-] ~ ska punk
+  Rocksteady [1966-1968] < ska
+  Reggae [1968-] < rocksteady
+    Roots reggae [1968-]
+    Dub [1968-]
+    Lovers rock [1975-]
+    Reggae fusion = reggae pop [1995-] ~ pop
+  Dancehall [1979-] < reggae
+    Ragga = raggamuffin [1985-]

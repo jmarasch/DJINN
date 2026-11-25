@@ -14,3 +14,6 @@ generated_images/
 
 # Python caches (the lyrics listener)
 __pycache__/
+
+# Scraped music genre dataset
+/genera data/

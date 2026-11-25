@@ -1,0 +1,26 @@
+# Jazz. First pass: the main branches; to be filled out.
+
+Jazz = jazz music [1910-]
+  Ragtime [1895-1920]
+  New Orleans jazz = dixieland, trad jazz, traditional jazz [1910-]
+  Swing = swing music [1930-1950]
+    Big band [1930-]
+  Gypsy jazz = jazz manouche [1930-]
+  Bebop = bop [1940-]
+    Hard bop [1955-]
+      Post bop [1960-]
+  Cool jazz [1949-]
+    West coast jazz [1950-]
+  Modal jazz [1958-]
+  Free jazz = avant garde jazz [1958-] ~ free improvisation
+  Soul jazz [1958-] ~ soul
+  Latin jazz [1945-] ~ latin
+  Vocal jazz = jazz vocal [1930-]
+  Jazz fusion = fusion [1969-] ~ funk
+    Jazz funk [1970-] ~ funk
+  Smooth jazz [1980-] ~ adult contemporary
+  Acid jazz [1987-] ~ funk
+  Nu jazz [1995-] ~ downtempo
+  Jazz pop [1990-] ~ pop
+  Dark jazz = doom jazz, jazz noir [1990-] ~ dark ambient
+  Contemporary jazz [1980-]

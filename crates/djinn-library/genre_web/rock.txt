@@ -1,0 +1,161 @@
+# Rock. See README.md for how these files are written.
+
+Rock = rock music, general rock [1950-]
+  Rock and roll = rocknroll [1951-1963] < rhythm and blues, boogie woogie ~ country
+    Rockabilly [1952-1960] < country, rhythm and blues ~ western swing
+      Neo rockabilly [1978-]
+      Psychobilly [1978-] < punk rock ~ horror punk
+    Surf rock = surf, surf music [1958-1966]
+      Hot rod = drag rock, hot rod music
+    Instrumental rock = rock instrumental [1958-]
+    Beat = beat music, british beat [1960-1966] < skiffle
+      Merseybeat = mersey beat, mersey sound
+      Freakbeat [1965-1968] ~ psychedelic rock
+    Garage rock = 60s punk, sixties punk [1960-1968]
+      Frat rock
+      Garage punk [1977-] ~ punk rock
+      Garage rock revival = new rock revolution [2000-] ~ indie rock, post punk revival
+    Swamp rock [1966-1975] ~ country rock
+    Mod = mod revival [1964-]
+  Blues rock [1963-] < electric blues ~ hard rock
+    British blues = british blues boom [1963-1970]
+    Boogie rock [1968-] < boogie woogie
+    Southern rock [1969-] < country rock ~ hard rock
+      Red dirt ~ outlaw country
+  Psychedelic rock = psychedelic, psychedelia, psych rock, psych, acid rock [1965-1972] < folk rock ~ psychedelic pop
+    Space rock [1968-] ~ progressive rock
+    Raga rock [1965-1969]
+    Heavy psych ~ hard rock, stoner rock
+    Neo psychedelia = neo psych, neo psychedelic [1978-]
+      Paisley underground [1982-1989] ~ jangle pop
+      Baggy = madchester [1988-1992] ~ alternative dance
+      Space rock revival [1986-]
+    Krautrock = kraut rock, kosmische musik [1968-1980] ~ electronic, experimental rock
+  Progressive rock = prog, prog rock, progressive [1967-] < psychedelic rock ~ art rock, jazz rock, classical
+    Symphonic rock = symphonic prog, symphonic progressive rock [1968-] ~ classical
+    Canterbury scene [1966-1980] ~ jazz rock
+    Neo prog = neo progressive rock [1980-]
+    Avant prog = avant garde progressive rock [1975-] ~ experimental rock
+      Zeuhl [1970-]
+    Crossover prog
+    Rock opera [1967-] ~ rock musical
+    Rock musical ~ musical
+  Art rock [1966-] ~ glam rock
+    Experimental rock = avant rock, avant garde rock [1966-] ~ noise rock
+  Hard rock = heavy rock [1966-] < psychedelic rock ~ metal
+    Arena rock = stadium rock, pomp rock, anthem rock, aor, adult oriented rock [1975-1990] ~ glam metal
+    Glam rock = glitter rock, glam, shock rock [1970-1976] < art rock
+      Glam punk [1972-] ~ punk rock
+    Sleaze rock = sleaze, sleaze glam [1983-] ~ glam metal
+    Occult rock = doom rock ~ doom metal
+    Pub rock [1971-1978] ~ rock and roll
+  Classic rock = album rock, album oriented rock [1965-1990] ~ hard rock, arena rock, blues rock, southern rock
+  Mainstream rock [1980-] ~ hard rock, arena rock, post grunge
+  Folk rock [1965-] < folk ~ country rock
+    British folk rock = electric folk [1968-]
+    Celtic rock [1970-] ~ celtic
+    Medieval folk rock = medieval rock, mittelalter rock [1970-] ~ medieval metal
+  Country rock [1968-] < country
+    Heartland rock [1975-] ~ roots rock
+    Roots rock [1966-] ~ americana
+  Pop rock = rock pop, pop rock music, pop/rock [1960-] ~ pop
+    Soft rock = lite rock, mellow rock [1970-] ~ adult contemporary
+      Yacht rock [1976-1984] ~ smooth jazz
+      Power ballad = slow rock, rock ballad, ballad [1975-]
+    Power pop [1966-] ~ pop punk
+    Dance rock = disco rock [1978-] ~ new wave, dance punk
+    Acoustic rock ~ folk rock
+    Piano rock [1970-]
+  Jazz rock = rock jazz [1967-] ~ jazz fusion
+  Funk rock [1969-] < funk ~ funk metal
+  Latin rock [1960-] < latin
+  Reggae rock < reggae
+  Comedy rock = novelty rock ~ comedy
+  Jam band = jam rock, jam band music [1968-]
+  Christian rock = jesus rock [1968-] ~ contemporary christian
+  Japanese rock = j rock, jrock [1965-]
+    Visual kei = vk, v kei [1985-] ~ glam metal
+  Punk rock = punk, punk music [1974-] < garage rock, pub rock, glam rock ! progressive rock, arena rock
+    Proto punk = protopunk, pre punk [1964-1975] < garage rock
+    Oi [1978-]
+      Street punk = streetpunk [1980-]
+        UK82 = uk 82, punk 82, second wave punk
+    Anarcho punk = anarchist punk [1977-]
+      Crust punk = crust [1984-] ~ grindcore
+        D beat = discore, kangpunk [1980-]
+        Neocrust = neo crust, melodic crust
+        Stenchcore ~ death metal
+    Hardcore punk = hardcore, hxc, hc punk [1979-]
+      Melodic hardcore = melocore [1981-]
+      Beatdown hardcore = beatdown, moshcore, tough guy hardcore [1988-]
+      Powerviolence = power violence [1988-]
+      Thrashcore = fastcore [1982-] ~ crossover thrash
+      Christian hardcore = christcore [1992-]
+      Post hardcore [1985-]
+        Emo = emo rock, emocore, emotional hardcore [1985-]
+          Midwest emo = second wave emo, indie emo [1993-]
+          Screamo = skramz [1991-]
+            Emoviolence = emo violence
+          Emo pop = pop emo, emo pop punk [1995-] ~ pop punk
+        Swancore = progressive post hardcore
+    Pop punk = punk pop [1977-] ~ power pop
+      Skate punk = skatepunk, skate rock [1984-]
+      Easycore = popcore [2004-] < metalcore
+    Punk revival = neo punk, alternative punk [1990-] ~ pop punk
+    Ska punk = punk ska [1980-] < ska ~ third wave ska
+      Skacore = ska core
+    Celtic punk = jig punk [1984-] ~ celtic
+    Folk punk = rogue folk [1985-] ~ folk
+    Cowpunk = country punk [1982-] ~ country
+    Gypsy punk [1992-]
+    Horror punk = horror rock [1977-] ~ deathrock
+    Art punk [1977-]
+    Riot grrrl [1990-]
+    Queercore = homocore [1985-]
+    Punk blues = blues punk [1980-] ~ blues
+    Surf punk [1977-] ~ surf rock
+    Dance punk = disco punk [1978-] ~ post punk, new wave
+  Post punk = new musick [1977-] < punk rock ~ new wave
+    No wave [1976-1982] ~ noise rock
+    Gothic rock = goth rock, goth, gothic [1979-]
+      Deathrock = death rock [1979-]
+      Dark wave = darkwave [1980-] ~ synth pop
+        Coldwave = cold wave [1980-]
+        Ethereal wave = ethereal, ethereal goth, ethereal darkwave [1983-] ~ dream pop
+        Neoclassical darkwave = neoclassical dark wave [1986-] ~ classical
+        Minimal wave = minimal synth [1978-] ~ synth pop
+        Neue deutsche todeskunst
+      Dark cabaret = punk cabaret [1990-] ~ cabaret
+    Post punk revival = new wave revival [2000-] ~ indie rock
+  New wave = new wave music [1977-1988] < punk rock ~ synth pop, power pop
+    New romantic = new romanticism [1979-1984] ~ synth pop
+    Neue deutsche welle = ndw [1976-1985]
+  Alternative rock = alternative, alt rock, modern rock, college rock [1980-]
+    Indie rock = independent rock, indie [1985-]
+      Slacker rock = lo fi rock, lo fi indie [1985-]
+      Noise pop [1985-] ~ shoegaze
+      Slowcore = sadcore [1990-]
+      Dunedin sound [1981-1995]
+      Math rock [1987-] ~ progressive rock, mathcore
+        Math pop
+      Indie pop = indiepop [1985-] ~ jangle pop
+        Twee pop = twee [1986-]
+      Dream pop = dreampop [1983-]
+        Ambient pop [1990-] ~ ambient
+      Shoegaze = shoegazer, shoegazing [1988-] ~ dream pop
+      Indietronica = indie electronic [1995-] ~ electronic
+    Jangle pop [1982-1995] ~ folk rock
+    Grunge = seattle sound [1986-1997] < punk rock, metal ~ alternative metal ! glam metal
+      Post grunge = butt rock [1994-] ~ hard rock, alternative metal
+    Britpop = brit pop [1993-1999] < jangle pop, beat ! grunge
+      Post britpop [1997-]
+    Noise rock = noise punk [1980-] < no wave, hardcore punk
+      Pigfuck
+    Post rock [1991-] ~ experimental rock, ambient
+    Rap rock = hip hop rock [1986-] < hip hop ~ funk rock
+      Rapcore = rap core [1987-] ~ nu metal
+    Alternative dance = alt dance, indie dance [1985-] ~ new wave, dance punk
+      Grebo [1986-1993]
+    Geek rock = nerd rock [1995-]
+  Industrial rock [1980-] < industrial ~ industrial metal
+  Electronic rock [1970-] ~ synth pop

@@ -1,0 +1,83 @@
+# Electronic. First pass: the main branches; to be filled out.
+
+Electronic = electronic music, electronica, electronica and dance [1950-]
+  Electronic dance music = edm, dance, dance music, club, club music [1980-]
+    House = house music [1984-] < disco
+      Chicago house [1984-]
+      Deep house [1986-]
+      Acid house [1987-]
+      Progressive house [1992-] ~ progressive trance
+      Tech house [1995-] ~ techno
+      French house = filter house [1996-] ~ nu disco
+      Electro house [2000-] ~ electro
+        Big room = big room house [2012-]
+      Tropical house [2013-] ~ dance pop
+      Future house [2014-]
+      Euro house [1990-] ~ eurodance
+      Hard house [1995-]
+      Dutch house [2008-]
+      Afro house [2010-] ~ afrobeats
+      Vocal house [1988-]
+      Ambient house [1989-] ~ ambient
+      Hip house [1987-] ~ hip hop
+    Techno [1985-] < electro
+      Detroit techno [1985-]
+      Acid techno [1990-]
+      Minimal techno [1994-]
+      Hard techno [1995-]
+    Trance [1990-] < techno
+      Progressive trance [1993-]
+      Uplifting trance = epic trance [1997-]
+      Goa trance [1990-]
+        Psytrance = psychedelic trance, psy trance [1996-]
+      Hard trance [1993-]
+      Euro trance [1998-] ~ eurodance
+      Tech trance [1998-] ~ techno
+      Vocal trance [1995-]
+    Eurodance [1990-2000] ~ dance pop
+      Bubblegum dance [1995-2002]
+      Italo dance [1998-]
+    UK garage = 2 step, two step, speed garage [1994-] < house
+      Grime [2002-] ~ hip hop
+      Bassline = bassline house [2000-]
+    Breakbeat = breaks [1990-]
+      Big beat [1995-2002] ~ alternative dance
+    Drum and bass = dnb, drum n bass, d and b [1993-] < jungle
+      Liquid funk = liquid dnb, liquid drum and bass [2000-]
+      Neurofunk [1997-]
+    Jungle [1991-] < breakbeat
+    Dubstep [2002-] < uk garage ~ dub
+      Brostep [2008-]
+      Riddim [2012-]
+    Hardcore techno = hardcore rave, rave [1990-]
+      Gabber [1992-]
+      Happy hardcore [1993-]
+      Hardstyle [2000-]
+    Electro = electro funk [1982-] ~ hip hop
+      Electroclash [1998-2006] ~ synth pop
+    EDM trap = trap edm [2012-] ~ trap
+  Ambient = ambient music [1975-] ~ new age
+    Dark ambient [1984-] ~ industrial
+    Ambient techno ~ techno
+  Downtempo = chill out, chillout, chill [1990-]
+    Trip hop [1991-] ~ hip hop
+    Chillwave [2009-] ~ indietronica
+  IDM = intelligent dance music [1991-]
+    Glitch [1994-]
+  Synthwave = retrowave, outrun [2005-] ~ synth pop
+    Darksynth [2010-]
+  Vaporwave [2010-]
+  Chiptune = 8 bit, chip music [1985-] ~ video game music
+  Industrial = industrial music [1975-] ~ experimental
+    EBM = electronic body music [1981-]
+      Futurepop = future pop [1998-] ~ synth pop
+      New beat [1987-1990]
+    Electro industrial [1988-]
+      Aggrotech = harsh ebm, hellektro [1995-]
+      Dark electro [1989-]
+    Power electronics [1980-] ~ noise
+    Martial industrial [1985-]
+    Post industrial [1985-]
+  Progressive electronic = berlin school [1970-] ~ krautrock
+  Folktronica [2000-] ~ folk
+  Leftfield = leftfield electronic

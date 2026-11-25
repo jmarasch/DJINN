@@ -1,0 +1,65 @@
+# The smaller families. First pass; to be filled out.
+
+Soundtrack = soundtracks, ost, original soundtrack [1930-]
+  Film score = score, film scores, film music, movie soundtrack [1930-] ~ orchestral
+    Epic music = cinematic classical, trailer music [2000-] ~ orchestral
+  Video game music = game music, vgm, video game soundtrack [1980-]
+  Television music = tv soundtrack, tv music [1950-]
+  Musical = musical theatre, musical theater, show tunes, broadway [1900-]
+
+Easy listening = easy listening music [1950-]
+  Lounge [1950-]
+  Exotica [1955-1965]
+  Space age pop [1955-1965]
+  Beautiful music [1960-]
+  Cabaret [1880-]
+
+New age = new age music [1970-] ~ ambient
+  Relaxation = meditation, healing [1970-]
+  Celtic new age [1985-] ~ celtic
+
+Experimental = avant garde, avantgarde, experimental music [1910-]
+  Noise = noise music [1975-] ~ industrial
+    Harsh noise [1980-]
+    Japanoise [1980-]
+  Musique concrete [1948-]
+  Drone = drone music [1960-] ~ drone metal
+  Free improvisation = free improv [1960-]
+
+Religious = religious music [1000-]
+  Gospel = gospel music [1920-]
+    Southern gospel [1920-]
+    Urban contemporary gospel = contemporary gospel [1970-] ~ contemporary r and b
+    Country gospel [1930-] ~ country
+  Contemporary christian = ccm, christian, christian pop, christian music, contemporary christian music [1970-]
+    Praise and worship = worship, worship music [1970-]
+  Hymns = hymn [1500-]
+
+Holiday = holiday music, holidays
+  Christmas = christmas music, xmas
+  Halloween
+
+Comedy = comedy music, humor, humour [1900-]
+  Parody = parody music
+  Novelty = novelty song, novelty music
+  Stand up comedy = stand up, sketch comedy
+
+Spoken word = spoken
+  Audiobook = audio book
+  Poetry
+
+Children's music = childrens, children, kids, kids music
+
+World = world music [1980-]
+  Worldbeat [1985-] ~ pop
+  African = african music
+    Afrobeat [1970-] ~ funk, jazz
+    Afrobeats [2010-] ~ dancehall
+    Highlife [1920-]
+    Soukous [1960-]
+  Asian = asian music
+    Bollywood = filmi [1930-]
+  Middle Eastern = middle eastern music, arabic
+  Flamenco [1800-]
+  Chanson = french chanson [1900-]
+  Fado [1820-]

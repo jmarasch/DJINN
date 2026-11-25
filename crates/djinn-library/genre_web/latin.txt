@@ -1,0 +1,22 @@
+# Latin. First pass: the main branches; to be filled out.
+
+Latin = latin music, latin american music [1900-]
+  Salsa [1960-]
+  Mambo [1940-]
+  Cha cha cha = cha cha [1950-]
+  Bolero [1900-]
+  Merengue [1900-]
+  Bachata [1960-]
+  Cumbia [1940-]
+  Tango [1880-]
+  Bossa nova [1958-] ~ cool jazz
+  MPB = musica popular brasileira [1965-]
+  Samba [1910-]
+  Latin pop [1980-] ~ pop
+  Reggaeton [1995-] ~ dancehall, hip hop
+  Regional Mexican = musica mexicana [1900-]
+    Mariachi [1900-]
+    Ranchera [1900-]
+    Norteno [1920-]
+    Banda [1950-]
+    Tejano = tex mex [1945-] ~ country
