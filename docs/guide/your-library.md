@@ -228,6 +228,13 @@ what it was a reaction against, and how many of your songs land on it.
 **Only genres in my library** hides the rest. Under the tree are your
 library's genres the tree doesn't know yet.
 
+**Admin > Genres > Map** draws one family at a time. Each genre sits under the
+genre it's a kind of; green lines with arrows run from a genre to what grew out
+of it, dotted purple lines join close genres, and dashed red lines point from a
+genre to what it was a reaction against. Tags on the right lead into other
+families. Tap a circle to open or close a branch (a closed branch carries the
+lines of everything in it), and tap a name to light up its lines.
+
 ### Genre containers
 
 A big library can have hundreds of genres, many of them close cousins

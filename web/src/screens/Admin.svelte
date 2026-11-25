@@ -22,6 +22,7 @@
   import AiPanel from '../lib/AiPanel.svelte'
   import GenreGroupsPanel from '../lib/GenreGroupsPanel.svelte'
   import GenreWebPanel from '../lib/GenreWebPanel.svelte'
+  import GenreMapPanel from '../lib/GenreMapPanel.svelte'
   import CastPanel from '../lib/CastPanel.svelte'
   import CrossfadePanel from '../lib/CrossfadePanel.svelte'
   import EqualizerPanel from '../lib/EqualizerPanel.svelte'
@@ -214,7 +215,7 @@
 
   // Tabs inside the longest sections; the others stay in the page, hidden,
   // so Find a setting can still reach them.
-  let sub = $state<Record<string, string>>({ library: 'folders', genres: 'tree', smart: 'play', audio: 'sound', ai: 'search' })
+  let sub = $state<Record<string, string>>({ library: 'folders', genres: 'map', smart: 'play', audio: 'sound', ai: 'search' })
 
   function openSub(group: string, id: string) {
     sub[group] = id
@@ -447,6 +448,7 @@
   {/if}
 {:else if id === 'genres'}
   {@render subtabs('genres', adminSubtabs('genres'))}
+  <div data-subtab="map" hidden={sub.genres !== 'map'}><div class="cards-2"><GenreMapPanel /></div></div>
   <div data-subtab="tree" hidden={sub.genres !== 'tree'}><div class="cards-2"><GenreWebPanel /></div></div>
   <div data-subtab="containers" hidden={sub.genres !== 'containers'}>
     <div class="cards-2"><GenreGroupsPanel /></div>

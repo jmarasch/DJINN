@@ -218,6 +218,7 @@ export function adminSubtabs(group: 'library' | 'genres' | 'audio' | 'smart' | '
       ]
     case 'genres':
       return [
+        ['map', t('admin.sub.genre_map')],
         ['tree', t('admin.sub.genre_tree')],
         ['containers', t('admin.sub.genre_containers')],
       ]
