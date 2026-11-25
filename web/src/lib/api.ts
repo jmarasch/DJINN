@@ -141,6 +141,7 @@ import type {
   User,
   Mp3Check,
   GenreGroups,
+  WebTree,
   GenreGroupChoice,
 } from './types'
 
@@ -360,6 +361,7 @@ export const api = {
   mp3Check: () => get<Mp3Check>('/library/mp3-check'),
   genreFold: () => get<Record<string, string>>('/genre-groups/fold'),
   genreGroups: () => get<GenreGroups>('/genre-groups'),
+  genreWeb: () => get<WebTree>('/genre-web'),
   setGenreGroupsOn: (on: boolean) => put<void>('/genre-groups/enabled', { on }),
   genreGroupChoices: () => get<{ choices: GenreGroupChoice[] }>('/genre-groups/choices'),
   autoGenreGroups: (containers: number) =>

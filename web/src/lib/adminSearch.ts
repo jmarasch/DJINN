@@ -175,10 +175,11 @@ export const adminEntries: AdminEntry[] = [
   { label: 'MusicBrainz', tab: 'library', keywords: 'covers genres lookup contact' },
   {
     label: 'Show genres in their containers', text: 'gg.on',
-    tab: 'library',
+    tab: 'genres',
     keywords: 'genre containers group similar genres auto metal combine',
     key: 'genre_containers',
   },
+  { label: 'Genre family tree', text: 'gw.title', tab: 'genres', keywords: 'genre tree family web map relations parent subgenre related' },
   { label: 'Identify songs by sound', text: 'libx.identify', tab: 'library', keywords: 'acoustid fingerprint identify' },
   { label: 'YouTube playlist links', text: 'libx.youtube', tab: 'library', keywords: 'youtube import api key' },
   { label: 'Image cache', text: 'admin.image_cache', tab: 'library', keywords: 'art covers folder' },

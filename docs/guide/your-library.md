@@ -218,14 +218,24 @@ The same order stays for a while, so you can come back to it. **Admin > Library 
 Library Settings** sets how many load at a time (100 by default) and how many
 hours until it's shuffled again (24 by default; 0 shuffles on every visit).
 
+### The genre family tree
+
+**Admin > Genres > Family Tree** shows DJINN's own map of genres, the one it
+is learning to use for playing by description, radio and containers. Families
+(Rock, Metal, Electronic and so on) open into genres, and genres into styles.
+Pick a genre to see its other names, what it grew out of, what it's close to,
+what it was a reaction against, and how many of your songs land on it.
+**Only genres in my library** hides the rest. Under the tree are your
+library's genres the tree doesn't know yet.
+
 ### Genre containers
 
 A big library can have hundreds of genres, many of them close cousins
 ("black metal", "death metal", "speed metal"). **Genre containers** (off by
-default, **Admin > Library > Genres**) group similar genres under one name,
+default, **Admin > Genres > Containers**) group similar genres under one name,
 so they all show as "Metal", without changing anything in your library.
 
-![Admin > Library > Genres, with genre containers](images/admin-library-genres.webp)
+![Admin > Genres > Containers](images/admin-library-genres.webp)
 
 1. Tap **Auto-group**. DJINN works out how genres relate: songs they share,
    and how alike their songs sound (so it works better after

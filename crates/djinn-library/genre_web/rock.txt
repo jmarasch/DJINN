@@ -40,7 +40,7 @@ Rock = rock music, general rock [1950-]
     Crossover prog
     Rock opera [1967-] ~ rock musical
     Rock musical ~ musical
-  Art rock [1966-] ~ glam rock
+  Art rock [1966-]
     Experimental rock = avant rock, avant garde rock [1966-] ~ noise rock
   Hard rock = heavy rock [1966-] < psychedelic rock ~ metal
     Arena rock = stadium rock, pomp rock, anthem rock, aor, adult oriented rock [1975-1990] ~ glam metal

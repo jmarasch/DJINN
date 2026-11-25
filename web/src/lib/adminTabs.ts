@@ -39,6 +39,13 @@ export const adminGroups = [
         },
       },
       {
+        id: 'genres',
+        icon: 'disc',
+        get label() {
+          return t('admin.menu.genres')
+        },
+      },
+      {
         id: 'editor',
         icon: 'list',
         get label() {
@@ -201,14 +208,18 @@ export function adminTabFor(path: string): AdminTab {
 }
 
 /** The sub-tabs of the sections that have them, as [id, name]. */
-export function adminSubtabs(group: 'library' | 'audio' | 'smart' | 'ai'): [string, string][] {
+export function adminSubtabs(group: 'library' | 'genres' | 'audio' | 'smart' | 'ai'): [string, string][] {
   switch (group) {
     case 'library':
       return [
         ['folders', t('admin.sub.folders')],
         ['settings', t('admin.sub.library_settings')],
         ['online', t('admin.sub.online')],
-        ['genres', t('admin.sub.genres')],
+      ]
+    case 'genres':
+      return [
+        ['tree', t('admin.sub.genre_tree')],
+        ['containers', t('admin.sub.genre_containers')],
       ]
     case 'audio':
       return [

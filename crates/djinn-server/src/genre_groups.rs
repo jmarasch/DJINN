@@ -1,4 +1,4 @@
-//! Genre containers (Admin > Library > Genres): similar genres grouped under
+//! Genre containers (Admin > Genres > Containers): similar genres grouped under
 //! one name, so "black metal", "death metal" and "speed metal" show as
 //! "Metal". Off by default (`genre_containers`). While on, genre lists, the
 //! genre cloud and genre pages show containers in place of their genres, and
@@ -39,6 +39,7 @@ pub fn router() -> Router<AppState> {
         .route("/genre-groups/place", put(place))
         .route("/genre-groups/{id}", put(rename).delete(remove))
         .route("/genre-groups/free/{genre}", delete(free))
+        .route("/genre-web", get(web_tree))
 }
 
 /// Reads the containers into memory (empty while they're off), and drops
@@ -83,6 +84,82 @@ fn genre_counts(state: &AppState) -> Vec<(String, usize)> {
         .collect();
     out.sort_by(|a, b| a.0.cmp(&b.0));
     out
+}
+
+/// One genre of DJINN's genre web, for Admin > Genres > Family tree.
+#[derive(Serialize)]
+struct WebGenre {
+    name: String,
+    aliases: Vec<String>,
+    /// Places in `genres`.
+    parent: Option<usize>,
+    depth: u8,
+    from_year: Option<i32>,
+    until_year: Option<i32>,
+    from: Vec<usize>,
+    near: Vec<usize>,
+    against: Vec<usize>,
+    /// Songs in the library whose genres land here.
+    songs: usize,
+    /// Songs that land here or on any genre below it, each counted once.
+    songs_below: usize,
+}
+
+#[derive(Serialize)]
+struct WebTree {
+    genres: Vec<WebGenre>,
+    /// The library's genres the web doesn't know yet, most songs first.
+    unplaced: Vec<(String, usize)>,
+}
+
+/// The whole genre web, with how many of the library's songs land on each
+/// genre, for checking it by eye.
+async fn web_tree(_: AdminUser, State(state): State<AppState>) -> Json<WebTree> {
+    let web = djinn_library::genre_web::Web::builtin();
+    let mut songs = vec![0usize; web.genres().len()];
+    let mut below = vec![0usize; web.genres().len()];
+    let mut unplaced: HashMap<String, usize> = HashMap::new();
+    if let Ok(catalog) = state.catalog.read() {
+        for names in catalog.song_tags().values() {
+            let mut landed = HashSet::new();
+            for name in names {
+                let found = web.find_all(name);
+                if found.is_empty() {
+                    *unplaced.entry(name.clone()).or_default() += 1;
+                }
+                landed.extend(found);
+            }
+            let mut lines = HashSet::new();
+            for &id in &landed {
+                songs[id] += 1;
+                lines.extend(web.lineage(id));
+            }
+            for id in lines {
+                below[id] += 1;
+            }
+        }
+    }
+    let genres = web
+        .genres()
+        .iter()
+        .zip(songs.into_iter().zip(below))
+        .map(|(g, (songs, songs_below))| WebGenre {
+            name: g.name.clone(),
+            aliases: g.aliases.clone(),
+            parent: g.parent,
+            depth: g.depth,
+            from_year: g.years.map(|y| y.0),
+            until_year: g.years.and_then(|y| y.1),
+            from: g.from.clone(),
+            near: g.near.clone(),
+            against: g.against.clone(),
+            songs,
+            songs_below,
+        })
+        .collect();
+    let mut unplaced: Vec<(String, usize)> = unplaced.into_iter().collect();
+    unplaced.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    Json(WebTree { genres, unplaced })
 }
 
 #[derive(Serialize)]

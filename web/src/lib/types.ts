@@ -872,7 +872,7 @@ export type ProblemKind =
   | 'no_length_header'
   | 'messy_genres'
 
-/** A genre and how many songs have it (Admin > Library > Genres). */
+/** A genre and how many songs have it (Admin > Genres > Containers). */
 export interface GenreCountRow {
   genre: string
   songs: number
@@ -881,6 +881,33 @@ export interface GenreCountRow {
 }
 
 /** Genre containers: similar genres shown under one name. */
+/** One genre of DJINN's genre web (Admin > Genres > Family tree). */
+export interface WebGenre {
+  name: string
+  aliases: string[]
+  /** Places in the list. */
+  parent: number | null
+  depth: number
+  from_year: number | null
+  until_year: number | null
+  /** What it grew out of besides its parent. */
+  from: number[]
+  /** Genres it's close to or crosses over with. */
+  near: number[]
+  /** What it was a reaction against. */
+  against: number[]
+  /** Songs in the library that land here. */
+  songs: number
+  /** Songs that land here or below it, each counted once. */
+  songs_below: number
+}
+
+export interface WebTree {
+  genres: WebGenre[]
+  /** The library's genres the web doesn't know yet, with their songs. */
+  unplaced: [string, number][]
+}
+
 export interface GenreGroups {
   enabled: boolean
   containers: { id: number; name: string; auto: boolean; genres: GenreCountRow[] }[]
