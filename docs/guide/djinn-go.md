@@ -285,6 +285,9 @@ isn't enough.
 - **Require it:** per role with **Must use two-step sign-in for GO**, and
   for admins under Admin > DJINN GO > Safety. People who need it set it up the
   first time they open GO.
+- **New phone, or turning it off:** both ask for your password and a code
+  from the app (a recovery code works too), so a stolen password can't
+  take your second step over.
 - **Lost phone and codes:** an admin can **Turn off two-step** for that
   account under **Admin > Users and Roles**.
 

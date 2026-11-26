@@ -426,6 +426,11 @@ async fn sign_in(state: &AppState, params: &Params, device: &Device) -> Result<U
     let found = if let Some(key) = params.get("apiKey") {
         state.store.subsonic_key_account(key).await?
     } else {
+        // Before looking the account up, so a missing password says nothing
+        // about whether the name exists.
+        if params.get("p").is_none() && (params.get("t").is_none() || params.get("s").is_none()) {
+            return Err(Failure::missing("p or t and s"));
+        }
         let Some((user, secret)) = state.store.subsonic_account(&account).await? else {
             return Err(refuse(state, device, tries, &account, None).await);
         };
@@ -452,7 +457,13 @@ async fn sign_in(state: &AppState, params: &Params, device: &Device) -> Result<U
     let Some(user) = found else {
         return Err(refuse(state, device, tries, &account, None).await);
     };
-    if let Ok(Some((_, message))) = go_refusal(state, &user, device).await {
+    if state.store.is_locked(user.id).await? {
+        return Err(Failure::new(
+            50,
+            "this account is locked after too many wrong codes",
+        ));
+    }
+    if let Some((_, message)) = go_refusal(state, &user, device).await? {
         return Err(Failure::new(50, message));
     }
     if !user.two_step && two_step::required(state, &user).await? {

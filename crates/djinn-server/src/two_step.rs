@@ -18,8 +18,9 @@ use serde::{Deserialize, Serialize};
 use sha1::Sha1;
 use sha2::{Digest, Sha256};
 
-use crate::auth::{AdminUser, CurrentSession};
+use crate::auth::{CurrentSession, Device};
 use crate::error::{ApiError, ApiResult};
+use crate::protected::Elevated;
 use crate::settings;
 use crate::state::AppState;
 
@@ -101,6 +102,34 @@ pub async fn verify(state: &AppState, user_id: i64, code: &str) -> anyhow::Resul
             .await?);
     }
     Ok(false)
+}
+
+/// Checks a current code (or a recovery code) from someone already signed in,
+/// for changes that need more than their password. Wrong codes are counted
+/// toward the account's lock like the sign-in's, in a bucket of their own.
+pub async fn prove_code(
+    state: &AppState,
+    user: &User,
+    device: &Device,
+    bucket: &str,
+    code: &str,
+) -> ApiResult<()> {
+    let bucket = format!("{bucket}:{}", user.username);
+    if let Err(wait) = state.limiter.begin_code(&bucket, device.addr) {
+        return Err(crate::auth::too_many_tries(wait));
+    }
+    if !verify(state, user.id, code).await? {
+        if state.store.note_code_failure(user.id).await? {
+            tracing::warn!(username = %user.username, "account locked after too many wrong codes");
+        }
+        return Err(ApiError::new(
+            StatusCode::UNAUTHORIZED,
+            "that code didn't work; try the newest one",
+        ));
+    }
+    state.limiter.code_ok(&bucket, device.addr);
+    state.store.clear_code_failures(user.id).await?;
+    Ok(())
 }
 
 fn normalize_recovery(code: &str) -> String {
@@ -222,6 +251,7 @@ struct Setup {
 /// stolen session must not be enough for that.
 async fn start(
     me: CurrentSession,
+    device: Device,
     State(state): State<AppState>,
     Json(body): Json<Password>,
 ) -> ApiResult<Json<Setup>> {
@@ -230,6 +260,11 @@ async fn start(
     }
     if !crate::auth::check_own_password(&state, &me.user, body.password).await? {
         return Err(ApiError::new(StatusCode::FORBIDDEN, "wrong password"));
+    }
+    // Moving to a new phone needs a code from the old one (or a recovery
+    // code), or a stolen password could take the second step over.
+    if me.user.two_step {
+        prove_code(&state, &me.user, &device, "two-step", &body.code).await?;
     }
     let secret = new_secret()?;
     state.store.begin_two_step(me.user.id, &secret).await?;
@@ -304,16 +339,23 @@ async fn confirm(
 #[derive(Deserialize)]
 struct Password {
     password: String,
+    /// A current code (or a recovery code) when two-step is already on.
+    #[serde(default)]
+    code: String,
 }
 
-/// Turns two-step sign-in off, after the password.
+/// Turns two-step sign-in off, after the password and a current code.
 async fn turn_off(
     me: CurrentSession,
+    device: Device,
     State(state): State<AppState>,
     Json(body): Json<Password>,
 ) -> ApiResult<StatusCode> {
     if !crate::auth::check_own_password(&state, &me.user, body.password).await? {
         return Err(ApiError::new(StatusCode::FORBIDDEN, "wrong password"));
+    }
+    if me.user.two_step {
+        prove_code(&state, &me.user, &device, "two-step", &body.code).await?;
     }
     state.store.clear_two_step(me.user.id).await?;
     tracing::info!(username = %me.user.username, "two-step sign-in turned off");
@@ -321,14 +363,35 @@ async fn turn_off(
 }
 
 /// For someone who lost their phone and their recovery codes.
+/// Takes the protected areas unlocked, since with only a stolen session this
+/// would strip an admin's second step.
 async fn admin_turn_off(
-    AdminUser(admin): AdminUser,
+    Elevated(admin): Elevated,
+    device: Device,
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> ApiResult<StatusCode> {
+    let target = state
+        .store
+        .user(id)
+        .await?
+        .ok_or_else(ApiError::not_found)?;
+    if id == admin.id {
+        return Err(ApiError::bad_request(
+            "turn your own off on your Account page",
+        ));
+    }
     if !state.store.clear_two_step(id).await? {
         return Err(ApiError::not_found());
     }
+    crate::protected::audit(
+        &state,
+        &admin,
+        device.ip.as_deref(),
+        "two_step_removed",
+        &target.username,
+    )
+    .await;
     tracing::info!(admin = %admin.username, user = id, "two-step sign-in turned off by an admin");
     Ok(StatusCode::NO_CONTENT)
 }

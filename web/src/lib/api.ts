@@ -209,9 +209,10 @@ export const api = {
   changeUsername: (username: string, currentPassword: string) =>
     post<User>('/me/username', { username, current_password: currentPassword }),
   twoStep: () => get<TwoStepStatus>('/me/two-step'),
-  startTwoStep: (password: string) => post<TwoStepSetup>('/me/two-step/start', { password }),
+  /** `code` is a current (or recovery) code, needed when two-step is already on. */
+  startTwoStep: (password: string, code = '') => post<TwoStepSetup>('/me/two-step/start', { password, code }),
   confirmTwoStep: (code: string) => post<{ recovery_codes: string[] }>('/me/two-step/confirm', { code }),
-  turnOffTwoStep: (password: string) => post<void>('/me/two-step/off', { password }),
+  turnOffTwoStep: (password: string, code: string) => post<void>('/me/two-step/off', { password, code }),
   myDevices: () => get<Device[]>('/me/sessions'),
   appPassword: () => get<{ exists: boolean }>('/me/app-password'),
   newAppPassword: (password: string) => post<{ password: string }>('/me/app-password', { password }),

@@ -79,7 +79,8 @@ Each account has:
   lost phone.
 - **Reset password:** sets a new one and signs them out everywhere.
 - **Turn off two-step:** for someone who lost their phone and their
-  recovery codes.
+  recovery codes. It needs the protected areas unlocked, and your own is
+  turned off on **Your Account** instead.
 - **Turn off:** signs them out and stops them signing in, without deleting
   anything. **Turn on** undoes it.
 - **×** deletes the account (their queued songs go too).
@@ -92,8 +93,12 @@ keeps at least one admin.
 Anything that changes your music library, meaning the folders and the files
 in them, sits behind a lock: the [Library Editor](library-editor.md) (writing
 tags and covers, renaming, moving, replacing and importing files), choosing
-which folders may be changed, and approving a submitted song. DJINN's own
-database (tag corrections kept in DJINN, history, lyrics) is not behind it.
+which folders may be changed, and approving a submitted song. So is what
+could be used to get around the lock: making an admin, changing another
+admin's name, password or status, turning off someone's two-step, backing up
+and restoring, and the resets in Admin > System (except emptying the queue).
+DJINN's own database (tag corrections kept in DJINN, history, lyrics) is not
+otherwise behind it.
 
 ![Admin > Protected Areas](images/admin-protected.webp)
 
@@ -111,8 +116,9 @@ An unlock belongs to your session. It ends when you leave Admin, when you
 choose **Lock now**, after ten minutes without use, or after an hour at
 most. The Library Editor asks every time it opens, and locks again when its
 window closes. Changing the level needs your password, and leaving Max needs
-a code too, so a stolen password alone can't loosen the lock. The server
-enforces the lock, not just the screen.
+a code too, so a stolen password alone can't loosen the lock (an admin
+without two-step can't leave Max at all). The server enforces the lock, not
+just the screen.
 
 **Audit trail.** **Keep an audit trail** (on by default) records each
 unlock, failed try, change of level and library change made through a

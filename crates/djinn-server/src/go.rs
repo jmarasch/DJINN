@@ -2159,8 +2159,17 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         let (status, _, _) = go(&state, Method::POST, start, Some("{}"), Some(&sam)).await;
         assert!(status.is_client_error());
+        // Now the password alone isn't enough: a code from the old phone too.
         let (status, _, _) = go(&state, Method::POST, start, Some(right), Some(&sam)).await;
+        assert!(status.is_client_error(), "{status}");
+        let next = format!("{:06}", two_step::code_at(&key, step + 1).unwrap());
+        let with_code = format!(r#"{{"password":"correct horse","code":"{next}"}}"#);
+        let (status, _, _) = go(&state, Method::POST, start, Some(&with_code), Some(&sam)).await;
         assert_eq!(status, StatusCode::OK);
+        // Turning it off takes a code as well.
+        let off = "/api/me/two-step/off";
+        let (status, _, _) = go(&state, Method::POST, off, Some(right), Some(&sam)).await;
+        assert!(status.is_client_error(), "{status}");
     }
 
     #[tokio::test]

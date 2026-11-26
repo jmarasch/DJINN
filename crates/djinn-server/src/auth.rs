@@ -600,6 +600,22 @@ async fn finish_two_step(
         .await?
         .filter(|u| u.status == AccountStatus::Active)
         .ok_or_else(ApiError::unauthorized)?;
+    // Checked again here: the account may have been locked since the ticket
+    // was given, and a ticket from the party's port may be used on GO's.
+    let refused = if state.store.is_locked(user.id).await? {
+        Some((
+            "account_locked",
+            "this account is locked after too many wrong codes; another admin can unlock it, or on the host run `djinn recover`",
+        ))
+    } else if device.go {
+        go_refusal(&state, &user, &device).await?
+    } else {
+        None
+    };
+    if let Some((outcome, message)) = refused {
+        log_sign_in(&state, &device, &user.username, Some(user.id), outcome).await?;
+        return Err(ApiError::new(StatusCode::FORBIDDEN, message));
+    }
     log_sign_in(&state, &device, &user.username, Some(user.id), "ok").await?;
     signed_in(&state, user, &device, body.device_token).await
 }
@@ -1084,14 +1100,23 @@ fn default_role_id() -> i64 {
 }
 
 async fn create_user(
-    _: AdminUser,
+    session: CurrentSession,
+    device: Device,
     State(state): State<AppState>,
     Json(body): Json<NewUser>,
 ) -> ApiResult<impl IntoResponse> {
+    if !session.user.is_admin() {
+        return Err(ApiError::forbidden());
+    }
     if body.role == Role::Guest {
         return Err(ApiError::bad_request(
             "guest accounts are not available yet",
         ));
+    }
+    // Another admin could loosen the protected areas, so making one takes
+    // them unlocked.
+    if body.role == Role::Admin {
+        crate::protected::require_open(&state, &session).await?;
     }
     if state.store.role(body.role_id).await?.is_none() {
         return Err(ApiError::bad_request("that role doesn't exist"));
@@ -1104,6 +1129,16 @@ async fn create_user(
         body.role_id,
     )
     .await?;
+    if body.role == Role::Admin {
+        crate::protected::audit(
+            &state,
+            &session.user,
+            device.ip.as_deref(),
+            "admin_created",
+            &user.username,
+        )
+        .await;
+    }
     Ok((StatusCode::CREATED, Json(user)))
 }
 
@@ -1145,16 +1180,48 @@ struct UserUpdate {
 /// Edits a user: request limit exemption, admin or not, role, approval,
 /// turning off, username, or password. Guests only have the exemption.
 async fn update_user(
-    AdminUser(admin): AdminUser,
+    session: CurrentSession,
+    device: Device,
     State(state): State<AppState>,
     Path(id): Path<i64>,
     Json(body): Json<UserUpdate>,
 ) -> ApiResult<StatusCode> {
+    let admin = session.user.clone();
+    if !admin.is_admin() {
+        return Err(ApiError::forbidden());
+    }
     let mut user = state
         .store
         .user(id)
         .await?
         .ok_or_else(ApiError::not_found)?;
+    // An admin's name, password, kind or status, or making someone an admin:
+    // with a stolen session those would be a way around the protected areas.
+    let to_admin = body.role == Some(Role::Admin) && user.role != Role::Admin;
+    // Your own name, kind and status are refused below anyway; a password
+    // set here isn't, yours included.
+    let others = id != admin.id;
+    let admins_account = user.role == Role::Admin
+        && (body.password.is_some()
+            || others
+                && (body.username.is_some()
+                    || body.role.is_some_and(|r| r != user.role)
+                    || body.status.is_some_and(|s| s != user.status)));
+    if to_admin || admins_account {
+        crate::protected::require_open(&state, &session).await?;
+        crate::protected::audit(
+            &state,
+            &admin,
+            device.ip.as_deref(),
+            if to_admin {
+                "admin_made"
+            } else {
+                "admin_changed"
+            },
+            &user.username,
+        )
+        .await;
+    }
     if let Some(name) = body.username {
         if user.role == Role::Guest {
             return Err(ApiError::bad_request("guests don't have usernames"));
@@ -1660,6 +1727,12 @@ mod tests {
         use crate::test_util::session;
         let state = AppState::for_tests().await;
         let admin = session(&state, "boss", Role::Admin).await;
+        // The lock on admins' accounts is `a_session_alone_cant_get_around_the_lock`'s.
+        state
+            .store
+            .set_setting(crate::protected::LEVEL, "off")
+            .await
+            .unwrap();
         let me = state
             .store
             .user_credentials("boss")

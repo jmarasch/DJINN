@@ -14,7 +14,7 @@ use djinn_library::ScanProgress;
 use djinn_store::Store;
 use serde::{Deserialize, Serialize};
 
-use crate::auth::AdminUser;
+use crate::auth::{AdminUser, CurrentSession, Device};
 use crate::config::Config;
 use crate::error::{ApiError, ApiResult};
 use crate::events::{OutputStatus, PlayState};
@@ -651,10 +651,27 @@ struct ResetDone {
 }
 
 async fn reset(
-    _: AdminUser,
+    session: CurrentSession,
+    device: Device,
     State(state): State<AppState>,
     Json(body): Json<ResetRequest>,
 ) -> ApiResult<Json<ResetDone>> {
+    // Emptying the queue is everyday; the rest take the protected areas
+    // unlocked (starting over would even let a stranger set DJINN up anew).
+    if !session.user.is_admin() {
+        return Err(ApiError::forbidden());
+    }
+    if !matches!(body.what, Reset::Queue) {
+        crate::protected::require_open(&state, &session).await?;
+        crate::protected::audit(
+            &state,
+            &session.user,
+            device.ip.as_deref(),
+            "reset",
+            &format!("{:?}", body.what),
+        )
+        .await;
+    }
     tracing::info!(what = ?body.what, "reset from Admin > System");
     let restarting = match body.what {
         Reset::Queue => {

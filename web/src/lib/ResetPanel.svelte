@@ -3,6 +3,7 @@
   // says to back up before going ahead, since none can be undone.
   import { t } from './i18n.svelte'
   import { api } from './api'
+  import { downloadUnlocked, unlocked } from './protected.svelte'
   import { reloadAfterRestart } from './restart'
   import { toast } from './state.svelte'
   import type { SystemReset } from './types'
@@ -50,7 +51,7 @@
     }
     busy = item.what
     try {
-      const done = await api.systemReset(item.what)
+      const done = await unlocked(() => api.systemReset(item.what))
       wiped = item.what === 'everything'
       if (done.restarting) restarting = true
       else toast(t('common.done'))
@@ -76,7 +77,7 @@
         <p class="small">{reset.about}</p>
         <button class="danger" disabled={busy !== null} onclick={() => run(reset)}>{reset.label}</button>
         <p class="small muted note">
-          {t('rs.note')} <a href="/api/backup" download>{t('rs.download')}</a>.
+          {t('rs.note')} <a href="/api/backup" download onclick={(e) => { e.preventDefault(); downloadUnlocked('/api/backup') }}>{t('rs.download')}</a>.
         </p>
       </div>
     {/each}

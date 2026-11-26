@@ -184,22 +184,30 @@ impl FromRequestParts<AppState> for Elevated {
 
     async fn from_request_parts(parts: &mut Parts, state: &AppState) -> ApiResult<Self> {
         let session = CurrentSession::from_request_parts(parts, state).await?;
-        if !session.user.is_admin() {
-            return Err(ApiError::forbidden());
-        }
-        let wanted = level(state).await?;
-        if wanted == Level::Off
-            || state
-                .elevations
-                .check(session.session_id, session.user.id, wanted)
-        {
-            return Ok(Self(session.user));
-        }
-        Err(ApiError::new(
-            StatusCode::LOCKED,
-            "this changes your library: unlock the protected area first",
-        ))
+        require_open(state, &session).await?;
+        Ok(Self(session.user))
     }
+}
+
+/// What `Elevated` checks, for routes where only some requests need it (a
+/// change to an admin's account, say): an admin with the protected areas
+/// open, or the lock off. 423 otherwise.
+pub async fn require_open(state: &AppState, session: &CurrentSession) -> ApiResult<()> {
+    if !session.user.is_admin() {
+        return Err(ApiError::forbidden());
+    }
+    let wanted = level(state).await?;
+    if wanted == Level::Off
+        || state
+            .elevations
+            .check(session.session_id, session.user.id, wanted)
+    {
+        return Ok(());
+    }
+    Err(ApiError::new(
+        StatusCode::LOCKED,
+        "this needs the protected area unlocked first",
+    ))
 }
 
 // --- The audit trail ---
@@ -343,22 +351,7 @@ async fn prove(
             "set up two-step sign-in on your account first (Account page); the strictest level needs it",
         ));
     }
-    let bucket = format!("area:{}", user.username);
-    if let Err(wait) = state.limiter.begin_code(&bucket, device.addr) {
-        return Err(crate::auth::too_many_tries(wait));
-    }
-    if !two_step::verify(state, user.id, &proof.code).await? {
-        if state.store.note_code_failure(user.id).await? {
-            tracing::warn!(username = %user.username, "account locked after too many wrong codes");
-        }
-        return Err(ApiError::new(
-            StatusCode::UNAUTHORIZED,
-            "that code didn't work; try the newest one",
-        ));
-    }
-    state.limiter.code_ok(&bucket, device.addr);
-    state.store.clear_code_failures(user.id).await?;
-    Ok(())
+    two_step::prove_code(state, user, device, "area", &proof.code).await
 }
 
 /// Opens the protected areas for this session.
@@ -420,9 +413,10 @@ struct NewLevel {
 }
 
 /// Changes how strict the lock is. Needs the password; leaving the
-/// strictest level needs a two-step code too (when the account has two-step),
-/// so a stolen password can't loosen the lock; turning it off needs the
-/// confirmation word.
+/// strictest level needs a two-step code too, so a stolen password can't
+/// loosen the lock (an admin without two-step can't leave it at all, or a
+/// second admin made without two-step would be a way around it); turning it
+/// off needs the confirmation word.
 async fn set_level(
     AdminUser(user): AdminUser,
     device: Device,
@@ -445,7 +439,7 @@ async fn set_level(
             "type {OFF_WORD} to turn the protection off"
         )));
     }
-    let need_code = now == Level::Max && two_step;
+    let need_code = now == Level::Max;
     prove(&state, &user, &device, body.proof, need_code).await?;
     state.store.set_setting(LEVEL, to.as_str()).await?;
     // Everyone unlocks again under the new level.
@@ -655,6 +649,73 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    /// What a stolen admin session (and even its password) can't do while the
+    /// areas are locked: loosen the lock, make or change admins, strip
+    /// two-step, or reset DJINN.
+    #[tokio::test]
+    async fn a_session_alone_cant_get_around_the_lock() {
+        let state = AppState::for_tests().await;
+        let admin = session(&state, "admin", Role::Admin).await;
+        let (me, _) = state
+            .store
+            .user_credentials("admin")
+            .await
+            .unwrap()
+            .unwrap();
+        let hash = crate::auth::hash_password("right".into()).await.unwrap();
+        state.store.set_password(me.id, &hash).await.unwrap();
+        {
+            use sha2::{Digest, Sha256};
+            state
+                .store
+                .create_session(
+                    me.id,
+                    &Sha256::digest(b"token-admin"),
+                    djinn_store::now_ms() + 60_000,
+                )
+                .await
+                .unwrap();
+        }
+        let other = state
+            .store
+            .create_user("other", "x", Role::Admin)
+            .await
+            .unwrap();
+        let send = |method: Method, uri: String, body: String| {
+            let state = state.clone();
+            let who = admin.clone();
+            async move { call(&state, method, &uri, Some(&body), Some(&who)).await.0 }
+        };
+
+        // An admin without two-step can't take the lock down from the top.
+        let off = format!(r#"{{"level":"off","password":"right","confirm":"{OFF_WORD}"}}"#);
+        let status = send(Method::PUT, "/api/protected/level".into(), off).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(level(&state).await.unwrap(), Level::Max);
+
+        let new_admin =
+            r#"{"username":"sneaky","password":"three words here","role":"admin","role_id":1}"#;
+        let status = send(Method::POST, "/api/users".into(), new_admin.into()).await;
+        assert_eq!(status, StatusCode::LOCKED);
+        let new_user =
+            r#"{"username":"friend","password":"three words here","role":"user","role_id":1}"#;
+        let status = send(Method::POST, "/api/users".into(), new_user.into()).await;
+        assert_eq!(status, StatusCode::CREATED);
+
+        let users = format!("/api/users/{}", other.id);
+        let new_password = r#"{"password":"three words here"}"#;
+        let status = send(Method::PATCH, users.clone(), new_password.into()).await;
+        assert_eq!(status, StatusCode::LOCKED);
+        let status = send(Method::DELETE, format!("{users}/two-step"), String::new()).await;
+        assert_eq!(status, StatusCode::LOCKED);
+
+        let reset = |what: &str| format!(r#"{{"what":"{what}"}}"#);
+        let status = send(Method::POST, "/api/system/reset".into(), reset("settings")).await;
+        assert_eq!(status, StatusCode::LOCKED);
+        let status = send(Method::POST, "/api/system/reset".into(), reset("queue")).await;
+        assert_eq!(status, StatusCode::OK);
     }
 
     #[tokio::test]
