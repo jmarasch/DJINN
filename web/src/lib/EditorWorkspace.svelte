@@ -1,5 +1,5 @@
 <script lang="ts" module>
-  type MoveKind = 'rename' | 'move' | 'copy' | 'delete' | 'mp3'
+  type MoveKind = 'rename' | 'move' | 'copy' | 'delete'
 </script>
 
 <script lang="ts">
@@ -16,6 +16,7 @@
   import AlbumLayout from './AlbumLayout.svelte'
   import Art from './Art.svelte'
   import CoverWindow from './CoverWindow.svelte'
+  import Mp3FixWindow from './Mp3FixWindow.svelte'
   import { COMMON_TAGS, MORE_TAGS, NUMBER_TAGS, tagLabel } from './editorTags'
   import { autoMatch } from './autoMatch'
   import { FOLDER_LAYOUTS, albumBase, folderInfo, fromFileName, type FolderInfo, type FolderLayout } from './importLayout'
@@ -75,6 +76,8 @@
   let searchText = $state('')
   let songs = $state<EditorSong[]>([])
   let total = $state(0)
+  /** The Fix MP3 Lengths window is open. */
+  let fixingMp3 = $state(false)
   let locked = $state(false)
   let loading = $state(false)
   let busy = $state(false)
@@ -1394,7 +1397,6 @@
   function relocation(kind: MoveKind, ids: number[], preview: boolean) {
     const after = { remove_empty: removeEmpty, folder_art: folderArt }
     if (kind === 'rename') return api.editorRename(ids, pattern, preview, after)
-    if (kind === 'mp3') return api.editorMp3Length(ids, preview)
     if (kind === 'copy') return api.editorCopy(ids, moveTo, preview)
     if (kind === 'move') return api.editorMove(ids, { folder: moveTo }, preview, after)
     return api.editorMove(ids, { delete: true }, preview, { remove_empty: removeEmpty })
@@ -1440,13 +1442,7 @@
     if ((kind === 'move' || kind === 'copy') && !moveTo.trim()) return
     try {
       moveKind = kind
-      const found = (await unlocked(() => relocation(kind, changeable.map((s) => s.id), true))).files
-      // Only the MP3s that need it are worth listing.
-      renames = kind === 'mp3' ? found.filter((f) => !f.problem) : found
-      if (kind === 'mp3' && !renames.length) {
-        renames = null
-        toast(t('ed.mp3_ok'))
-      }
+      renames = (await unlocked(() => relocation(kind, changeable.map((s) => s.id), true))).files
     } catch (e) {
       toast(e instanceof Error ? e.message : t('ed.where_failed'), true)
     }
@@ -1992,7 +1988,7 @@
                   </button>
                   <button
                     class="small-button"
-                    onclick={() => previewMove('mp3')}
+                    onclick={() => (fixingMp3 = true)}
                     title={t('ed.mp3_title')}
                   >
                     {t('ed.fix_mp3')}
@@ -2018,12 +2014,7 @@
               <ul>
                 {#each renames as r (r.id)}
                   <li class="small" class:bad={!!r.problem}>
-                    {#if moveKind === 'mp3'}
-                      <span class="mono">{fileName(r.from)}</span>
-                    {:else}
-                      {@const [from, to] = afterShared(r.from, r.to)}
-                      <span class="mono">{from}</span> → <span class="mono">{to}</span>
-                    {/if}
+                    <span class="mono">{afterShared(r.from, r.to)[0]}</span> → <span class="mono">{afterShared(r.from, r.to)[1]}</span>
                     {#if r.problem}<em>({r.problem})</em>{/if}
                   </li>
                 {/each}
@@ -2218,6 +2209,19 @@
           {t('ed.approve_import', { n: going })}
         </button>
       </div>
+    {/if}
+    {#if fixingMp3}
+      <Mp3FixWindow
+        ids={pickedSongs.filter(rowEditable).map((s) => s.id)}
+        folder={selected}
+        search={searching}
+        onclose={() => (fixingMp3 = false)}
+        ondone={async () => {
+          clearListCache()
+          await loadSongs(0)
+          await loadHistory()
+        }}
+      />
     {/if}
     {#if coverOpen && chosen}
       <CoverWindow

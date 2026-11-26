@@ -1312,6 +1312,10 @@ struct Mp3Length {
     ids: Vec<i64>,
     #[serde(default)]
     preview: bool,
+    /// The approval an earlier part of the same fix made, so a fix sent in
+    /// parts (for a progress bar) is undone as one.
+    #[serde(default)]
+    batch: Option<i64>,
 }
 
 /// Writes a length header into variable bit rate MP3s that have none, so
@@ -1357,7 +1361,17 @@ async fn mp3_length(
             .collect::<Vec<_>>(),
     )
     .await?;
-    let batch = state.store.next_file_batch().await?;
+    let batch = match body.batch {
+        Some(batch)
+            if state
+                .store
+                .can_add_to_batch(batch, "mp3-length", user.id)
+                .await? =>
+        {
+            batch
+        }
+        _ => state.store.next_file_batch().await?,
+    };
     let mut written = Vec::new();
     for file in &mut files {
         if file.problem.is_some() {
@@ -1394,6 +1408,9 @@ async fn mp3_length(
     }
     if !written.is_empty() {
         crate::library_api::reread(&state, &written).await?;
+        // The thorough check reads the changed files again, so they leave
+        // Library Problems.
+        crate::mp3_check::start(&state);
     }
     audit(
         &state,

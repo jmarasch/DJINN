@@ -268,13 +268,15 @@ To fix them:
    holds the songs **Read and Write**. Every folder is read only until you do.
 3. Back on the **Editor** tab, choose **Library** at the top (the files, not
    only DJINN's database).
-4. Pick the MP3s in the grid, or pick none to fix every song shown.
-5. Select **Fix MP3 Lengths...** under the grid. It lists the files that need
-   a header; select **Fix**, then **OK**.
+4. Pick the MP3s in the grid, or pick none to fix every song in the folder
+   (all of them, not only the ones loaded in the grid).
+5. Select **Fix MP3 Lengths...** under the grid. A window checks the files
+   and says how many need a header; select **Continue**. A progress bar shows
+   the files being fixed, and **Stop** keeps what's done so far.
 
 To fix a whole artist at once, open a folder higher up in the tree on the
-left: the grid shows every song under it, 200 at a time (**Show more** loads
-the next 200, and only songs loaded in the grid are fixed).
+left. The whole fix is one entry in the history, so one **Undo** takes it
+back.
 
 ## Compare
 

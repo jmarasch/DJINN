@@ -61,6 +61,25 @@ impl Store {
         )
     }
 
+    /// Whether `batch` is the newest approval and holds only `kind` changes by
+    /// `user`, none undone: a change sent in parts may join it.
+    pub async fn can_add_to_batch(&self, batch: i64, kind: &str, user: i64) -> Result<bool> {
+        let ok: bool = sqlx::query_scalar(
+            "SELECT ? = (SELECT max(batch) FROM file_edits)
+                AND EXISTS (SELECT 1 FROM file_edits WHERE batch = ?)
+                AND NOT EXISTS (SELECT 1 FROM file_edits WHERE batch = ?
+                    AND (kind != ? OR made_by IS NOT ? OR undone_at IS NOT NULL))",
+        )
+        .bind(batch)
+        .bind(batch)
+        .bind(batch)
+        .bind(kind)
+        .bind(user)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(ok)
+    }
+
     pub async fn record_file_edit(&self, edit: &NewFileEdit<'_>) -> Result<()> {
         sqlx::query(
             "INSERT INTO file_edits (batch, track_id, path, kind, before, after, size, mtime, made_at, made_by)
@@ -286,5 +305,41 @@ mod tests {
                 .unwrap();
         assert_ne!(path, "/b/x.mp3");
         assert!(removed.is_some());
+    }
+
+    #[tokio::test]
+    async fn only_the_newest_batch_of_the_same_change_can_be_added_to() {
+        let store = Store::open_in_memory().await.unwrap();
+        let sam = store
+            .create_user("sam", "h", crate::Role::User)
+            .await
+            .unwrap()
+            .id;
+        let kim = store
+            .create_user("kim", "h", crate::Role::User)
+            .await
+            .unwrap()
+            .id;
+        let edit = |batch, kind| NewFileEdit {
+            batch,
+            track_id: None,
+            path: "/m/a.mp3",
+            kind,
+            before: "{}",
+            after: "{}",
+            size: 1,
+            mtime: 1,
+            made_by: Some(sam),
+        };
+        store.record_file_edit(&edit(1, "tags")).await.unwrap();
+        store
+            .record_file_edit(&edit(2, "mp3-length"))
+            .await
+            .unwrap();
+        assert!(store.can_add_to_batch(2, "mp3-length", sam).await.unwrap());
+        assert!(!store.can_add_to_batch(2, "mp3-length", kim).await.unwrap());
+        assert!(!store.can_add_to_batch(1, "tags", sam).await.unwrap());
+        assert!(!store.can_add_to_batch(2, "tags", sam).await.unwrap());
+        assert!(!store.can_add_to_batch(3, "mp3-length", sam).await.unwrap());
     }
 }
