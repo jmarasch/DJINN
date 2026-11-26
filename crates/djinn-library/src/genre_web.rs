@@ -464,6 +464,141 @@ impl Web {
     }
 }
 
+/// A library's genres grouped by the web, for genre containers: at first
+/// one container per family, then, step by step, the container with the
+/// most songs split into its branches. A branch only becomes a container of
+/// its own when it holds two or more of the library's genres; the rest (and
+/// the genre's own tag) stay in the container it came from. Every step is a
+/// choice for the slider.
+#[derive(Debug, Default)]
+pub struct Containers {
+    /// Each library genre's name and songs, and the web genre it lands on.
+    members: Vec<(String, usize, usize)>,
+    /// The web genres that are containers after each step.
+    cuts: Vec<Vec<usize>>,
+}
+
+impl Web {
+    /// Groups a library's genres (name, songs); ones the web doesn't know
+    /// are left out. A tag naming several genres goes with the first.
+    pub fn containers(&self, genres: &[(String, usize)]) -> Containers {
+        let members: Vec<(String, usize, usize)> = genres
+            .iter()
+            .filter_map(|(name, songs)| {
+                let id = *self.find_all(name).first()?;
+                Some((name.clone(), *songs, id))
+            })
+            .collect();
+        let n = self.genres.len();
+        // Songs and genres under each web genre, and the genres right on it.
+        let (mut songs, mut under, mut on) = (vec![0usize; n], vec![0usize; n], vec![0usize; n]);
+        for &(_, s, id) in &members {
+            on[id] += 1;
+            for g in self.lineage(id) {
+                songs[g] += s;
+                under[g] += 1;
+            }
+        }
+        // What splitting a container makes: the branches big enough to be
+        // containers of their own, and whether any genres stay behind.
+        let parts = |g: usize| -> (Vec<usize>, bool) {
+            let kids: Vec<usize> = self.genres[g]
+                .children
+                .iter()
+                .copied()
+                .filter(|&c| under[c] > 1)
+                .collect();
+            let moved: usize = kids.iter().map(|&c| under[c]).sum();
+            (kids, under[g] > moved)
+        };
+        let splits = |g: usize| {
+            let (kids, stays) = parts(g);
+            !kids.is_empty() && kids.len() + usize::from(stays) > 1
+        };
+        let mut cut: Vec<usize> = self.families().filter(|&f| under[f] > 0).collect();
+        // A container that split keeps what stayed behind, and can't split again.
+        let mut split = vec![false; n];
+        let mut cuts = vec![cut.clone()];
+        loop {
+            let next = cut
+                .iter()
+                .copied()
+                .filter(|&g| !split[g] && splits(g))
+                .max_by_key(|&g| (songs[g], std::cmp::Reverse(g)));
+            let Some(g) = next else { break };
+            split[g] = true;
+            let (kids, stays) = parts(g);
+            if !stays {
+                cut.retain(|&c| c != g);
+            }
+            cut.extend(kids);
+            cuts.push(cut.clone());
+        }
+        Containers { members, cuts }
+    }
+}
+
+impl Containers {
+    /// The containers at `step` (web genre, its library genres, its songs),
+    /// leaving out ones that would hold a single genre.
+    fn groups(&self, web: &Web, step: usize) -> Vec<(usize, Vec<String>, usize)> {
+        let Some(cut) = self.cuts.get(step) else {
+            return Vec::new();
+        };
+        let mut groups: HashMap<usize, (Vec<String>, usize)> = HashMap::new();
+        for (name, songs, id) in &self.members {
+            if let Some(holder) = web.lineage(*id).find(|g| cut.contains(g)) {
+                let group = groups.entry(holder).or_default();
+                group.0.push(name.clone());
+                group.1 += songs;
+            }
+        }
+        let mut out: Vec<(usize, Vec<String>, usize)> = groups
+            .into_iter()
+            .filter(|(_, (names, _))| names.len() > 1)
+            .map(|(g, (names, songs))| (g, names, songs))
+            .collect();
+        out.sort_by(|a, b| b.2.cmp(&a.2).then(a.0.cmp(&b.0)));
+        out
+    }
+
+    /// The slider's stops, broadest first: every step that groups the
+    /// genres differently from the one before.
+    pub fn choices(&self, web: &Web) -> Vec<crate::genre_groups::Choice> {
+        let mut out: Vec<crate::genre_groups::Choice> = Vec::new();
+        let mut last: Vec<(usize, Vec<String>, usize)> = Vec::new();
+        for step in 0..self.cuts.len() {
+            let groups = self.groups(web, step);
+            let containers = groups.len();
+            if containers == 0 || groups == last {
+                continue;
+            }
+            last = groups.clone();
+            out.push(crate::genre_groups::Choice {
+                containers,
+                grouped: groups.iter().map(|g| g.1.len()).sum(),
+                step,
+            });
+        }
+        out
+    }
+
+    /// The stop nearest to about `containers` containers.
+    pub fn nearest(&self, web: &Web, containers: usize) -> Option<crate::genre_groups::Choice> {
+        self.choices(web)
+            .into_iter()
+            .min_by_key(|c| (c.containers.abs_diff(containers), c.containers))
+    }
+
+    /// The containers at `step`, each named after its web genre.
+    pub fn named(&self, web: &Web, step: usize) -> Vec<(String, Vec<String>)> {
+        self.groups(web, step)
+            .into_iter()
+            .map(|(g, names, _)| (web.genre(g).name.clone(), names))
+            .collect()
+    }
+}
+
 /// One line of a file, read.
 struct Line {
     name: String,
@@ -619,6 +754,50 @@ Metal = heavy metal
         );
         // Every word must belong to a genre.
         assert!(web.find_all("hard rock opera").is_empty());
+    }
+
+    #[test]
+    fn containers_start_with_families_and_split_the_biggest() {
+        let web = small();
+        let library: Vec<(String, usize)> = [
+            ("rock", 50),
+            ("hard rock", 40),
+            ("stadium rock", 30),
+            ("blues rock", 20),
+            ("hair metal", 10),
+            ("alternative metal", 5),
+            ("polka", 99),
+        ]
+        .iter()
+        .map(|(n, s)| (n.to_string(), *s))
+        .collect();
+        let groups = web.containers(&library);
+        let choices = groups.choices(&web);
+        // Families first: Rock holds four genres, Metal two; polka isn't in the web.
+        assert_eq!(choices[0].containers, 2);
+        assert_eq!(choices[0].grouped, 6);
+        let first = groups.named(&web, choices[0].step);
+        assert_eq!(first[0].0, "Rock");
+        assert_eq!(first[0].1.len(), 4);
+        assert_eq!(first[1].0, "Metal");
+        // Rock (the most songs) splits: hard rock takes arena rock with it;
+        // blues rock, alone on its branch, stays in Rock with Rock's own tag.
+        let second = groups.named(&web, choices[1].step);
+        assert_eq!((choices[1].containers, choices[1].grouped), (3, 6));
+        assert!(second.contains(&(
+            "Rock".to_string(),
+            vec!["rock".to_string(), "blues rock".to_string()]
+        )));
+        // Nothing else splits into two containers.
+        assert_eq!(choices.len(), 2);
+        assert!(second.contains(&(
+            "Hard rock".to_string(),
+            vec!["hard rock".to_string(), "stadium rock".to_string()]
+        )));
+        assert_eq!(
+            groups.nearest(&web, 2).map(|c| c.step),
+            Some(choices[0].step)
+        );
     }
 
     #[test]

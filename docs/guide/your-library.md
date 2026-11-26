@@ -249,11 +249,13 @@ so they all show as "Metal", without changing anything in your library.
 
 ![Admin > Genres > Containers](images/admin-library-genres.webp)
 
-1. Tap **Auto-group**. DJINN works out how genres relate: songs they share,
-   and how alike their songs sound (so it works better after
-   [sound analysis](your-library.md#sound-analysis)).
-2. Slide **How many containers** toward **Broader** for fewer, bigger
-   containers, or **Closer** for more, smaller ones.
+1. Tap **Auto-group**. DJINN groups your genres by its
+   [genre family tree](#the-genre-family-tree): all the way to **Broader**,
+   each family is one container (Rock, Metal, Electronic...), and each step
+   toward **Closer** splits the container with the most songs into its
+   branches, so Rock becomes Hard rock, Punk rock, Alternative rock and so on.
+   Genres the tree doesn't know stay loose for you to place.
+2. Slide **How many containers** to the grouping you like.
 3. Rename a container, drag genres between containers (or tap one and
    choose **Move Here**), or make your own with **Make It**. Genres you
    place by hand stay put when you Auto-group again.

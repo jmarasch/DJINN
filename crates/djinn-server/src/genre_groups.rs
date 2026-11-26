@@ -299,7 +299,9 @@ async fn set_enabled(
 
 /// The genres Auto-group sorts: all but the ones placed by hand or in a
 /// container someone made or changed.
-async fn clustered(state: &AppState) -> anyhow::Result<clusters::Tree> {
+/// The library's genres grouped by DJINN's genre web, leaving out the ones
+/// placed by hand and those in containers made or changed by hand.
+async fn grouped(state: &AppState) -> anyhow::Result<djinn_library::genre_web::Containers> {
     let (groups, members) = state.store.genre_groups().await?;
     let kept: HashSet<i64> = groups.iter().filter(|g| !g.auto).map(|g| g.id).collect();
     let skip: HashSet<String> = members
@@ -307,11 +309,11 @@ async fn clustered(state: &AppState) -> anyhow::Result<clusters::Tree> {
         .filter(|m| m.pinned || m.group_id.is_some_and(|id| kept.contains(&id)))
         .map(|m| m.genre)
         .collect();
-    let (Ok(catalog), Ok(index)) = (state.catalog.read(), state.sound.read()) else {
-        return Ok(clusters::Tree::default());
-    };
-    let map = clusters::full_map(catalog.song_tags(), &index);
-    Ok(clusters::tree(&map, &skip))
+    let genres: Vec<(String, usize)> = genre_counts(state)
+        .into_iter()
+        .filter(|(name, _)| !skip.contains(name))
+        .collect();
+    Ok(djinn_library::genre_web::Web::builtin().containers(&genres))
 }
 
 #[derive(Serialize)]
@@ -323,9 +325,9 @@ struct Choices {
 /// The ways Auto-group can sort the genres, for the slider: worked out once
 /// when the page opens.
 async fn choices(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json<Choices>> {
-    let tree = clustered(&state).await?;
+    let groups = grouped(&state).await?;
     Ok(Json(Choices {
-        choices: tree.choices(),
+        choices: groups.choices(djinn_library::genre_web::Web::builtin()),
     }))
 }
 
@@ -348,13 +350,14 @@ async fn auto(
     State(state): State<AppState>,
     Json(body): Json<Auto>,
 ) -> ApiResult<Json<Made>> {
-    let tree = clustered(&state).await?;
-    let Some(choice) = tree.nearest(body.containers) else {
+    let web = djinn_library::genre_web::Web::builtin();
+    let grouping = grouped(&state).await?;
+    let Some(choice) = grouping.nearest(web, body.containers) else {
         return Err(ApiError::bad_request(
             "There aren't enough related genres to group yet",
         ));
     };
-    let groups = tree.named(choice.step);
+    let groups = grouping.named(web, choice.step);
     state.store.replace_auto_genre_groups(&groups).await?;
     reload(&state).await;
     Ok(Json(Made {
@@ -517,6 +520,82 @@ mod tests {
             .iter()
             .map(|g| g["name"].as_str().unwrap_or_default().to_owned())
             .collect()
+    }
+
+    #[tokio::test]
+    async fn auto_group_follows_the_genre_web() {
+        let state = AppState::for_tests().await;
+        let song = |n: &str, genre: &str| ScannedTrack {
+            path: format!("/m/{n}.flac"),
+            title: n.into(),
+            artist: Some(format!("Band {n}")),
+            genre: Some(genre.into()),
+            duration_ms: Some(200_000),
+            ..Default::default()
+        };
+        state
+            .store
+            .save_scanned(&[
+                song("a", "Black Metal"),
+                song("b", "Death Metal"),
+                song("c", "Hair Metal"),
+                song("d", "Deep House"),
+                song("e", "Acid House"),
+                song("f", "Not A Genre At All"),
+            ])
+            .await
+            .unwrap();
+        crate::smart::refresh(&state).await;
+        let admin = session(&state, "ana", Role::Admin).await;
+        let (_, body) = get_body(&state, "/api/genre-groups/choices", &admin).await;
+        let choices: serde_json::Value = serde_json::from_str(&body).unwrap();
+        // The broadest choice is the families.
+        assert_eq!(choices["choices"][0]["containers"], 2, "{body}");
+        assert_eq!(choices["choices"][0]["grouped"], 5, "{body}");
+        let (status, _) = call(
+            &state,
+            Method::POST,
+            "/api/genre-groups/auto",
+            Some(r#"{"containers":2}"#),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let (_, body) = get_body(&state, "/api/genre-groups", &admin).await;
+        let overview: serde_json::Value = serde_json::from_str(&body).unwrap();
+        let mut found: Vec<(String, Vec<String>)> = overview["containers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| {
+                let mut genres: Vec<String> = c["genres"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|g| g["genre"].as_str().unwrap().to_owned())
+                    .collect();
+                genres.sort();
+                (c["name"].as_str().unwrap().to_owned(), genres)
+            })
+            .collect();
+        found.sort();
+        assert_eq!(
+            found,
+            vec![
+                (
+                    "Electronic".to_owned(),
+                    vec!["acid house".to_owned(), "deep house".to_owned()]
+                ),
+                (
+                    "Metal".to_owned(),
+                    vec![
+                        "black metal".to_owned(),
+                        "death metal".to_owned(),
+                        "hair metal".to_owned()
+                    ]
+                ),
+            ]
+        );
     }
 
     #[tokio::test]
