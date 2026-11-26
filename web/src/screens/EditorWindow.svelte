@@ -133,7 +133,14 @@
   }
 
   header :global(.subtabs) {
-    flex: 0 1 520px;
+    flex: 0 1 auto;
+    flex-wrap: nowrap;
+    min-width: 0;
+  }
+
+  /* Each tab's name on one line; the bar grows to fit them. */
+  header :global(.subtabs button) {
+    white-space: nowrap;
   }
 
   .spacer {
