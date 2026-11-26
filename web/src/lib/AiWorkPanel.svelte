@@ -172,48 +172,6 @@
       {t('aw.on_note')}
       {#if work.on && held}<strong>{t('aw.paused', { why: held })}</strong>{/if}
     </p>
-    <label class="switch">
-      <input type="checkbox" bind:checked={work.new_songs} onchange={saveWork} />
-      {t('aw.new_songs')}
-    </label>
-    <label class="switch">
-      <input type="checkbox" bind:checked={work.sync_plain} onchange={saveWork} />
-      {t('aw.sync_plain')}
-    </label>
-    <label class="range">
-      <span>{t('aw.min', { pct: minMatch ?? work.min_match })}</span>
-      <input type="range" min="0" max="100" step="1" bind:value={minMatch} onchange={saveWork} />
-    </label>
-    <p class="small muted sub">
-      {t('aw.min_note')}
-    </p>
-    <h4>{t('aw.skip')}</h4>
-    <p class="small muted sub">
-      {t('aw.skip_note')}
-    </p>
-    {#if skipGenres?.length}
-      <div class="chips">
-        {#each skipGenres as genre (genre)}
-          <span class="chip">
-            {genre}
-            <button class="icon-only" aria-label={t('aw.unskip', { genre })} onclick={() => removeGenre(genre)}>×</button>
-          </span>
-        {/each}
-      </div>
-    {/if}
-    <form
-      class="add-genre"
-      onsubmit={(e) => {
-        e.preventDefault()
-        addGenre()
-      }}
-    >
-      <input list="ai-skip-genres" bind:value={genreText} placeholder={t('aw.genre_hint')} aria-label={t('aw.genre_label')} />
-      <datalist id="ai-skip-genres">
-        {#each known as g (g)}<option value={g}></option>{/each}
-      </datalist>
-      <button class="small-button" type="submit" disabled={!genreText.trim()}>{t('aw.leave_out')}</button>
-    </form>
     <ul class="counts small">
       <li>{t('aw.waiting', { listen: n(work.counts.waiting_listen), sync: n(work.counts.waiting_sync) })}</li>
       <li>{t('aw.working', { n: n(work.counts.working) })}</li>
@@ -223,97 +181,15 @@
       <li>{t('aw.low_score', { n: n(work.counts.low_score) })}</li>
       <li>
         {t('aw.failed', { n: n(work.counts.failed) })}
-        {#if work.counts.failed || work.counts.low_score}<button class="link" onclick={() => act(api.retryAiWork, t('aw.retry'))}
+        {#if work.counts.failed || work.counts.low_score}<button class="small-button" onclick={() => act(api.retryAiWork, t('aw.retry'))}
             >{t('common.try_again')}</button
           >{/if}
       </li>
     </ul>
-    {#if work.lined_up.length}
-      <details class="lined-up">
-        <summary class="small">{t('aw.lined_up', { count: n(work.lined_up.length) })}</summary>
-        <ol class="small">
-          {#each work.lined_up as song (song.track_id)}
-            <li>
-              {song.artist ? `${song.artist} - ${song.title}` : song.title}
-              <span class="muted">{song.second ? t('aw.lined_second') : t('aw.lined_vocals')}</span>
-            </li>
-          {/each}
-        </ol>
-      </details>
-    {/if}
   {/if}
 
   <h4>{t('aw.computer')}</h4>
   {#if listener}
-    <p class="small">
-      {t('aw.facts', {
-        python: listener.python ?? t('aw.not_found'),
-        ffmpeg: listener.ffmpeg ? t('aw.found') : t('aw.not_found'),
-        gpu: listener.nvidia ? t('aw.nvidia') : t('aw.no_gpu'),
-      })}
-    </p>
-    <label>
-      {t('aw.model')}
-      <select bind:value={listener.model} onchange={saveListener} disabled={listener.installing}>
-        {#each models as m (m)}<option value={m}>{m}</option>{/each}
-      </select>
-    </label>
-    <p class="small muted sub">
-      {t('aw.model_note')}
-    </p>
-    <label class="switch">
-      <input type="checkbox" bind:checked={listener.vocals} onchange={saveListener} disabled={listener.installing} />
-      {t('aw.vocals')}
-    </label>
-    {#if listener.vocals && listener.nvidia}
-      <label class="sub-choice">
-        {t('aw.listen_on')}
-        <select bind:value={listener.listen_on} onchange={saveListener} disabled={listener.installing}>
-          <option value="gpu">{t('aw.listen_on_gpu')}</option>
-          <option value="cpu">{t('aw.listen_on_cpu')}</option>
-        </select>
-      </label>
-      <p class="small muted sub">{t('aw.listen_on_note')}</p>
-      <label class="sub-choice">
-        {t('aw.strippers')}
-        <select bind:value={listener.strippers} onchange={saveListener} disabled={listener.installing}>
-          {#each [1, 2, 3] as count (count)}<option value={count}>{count}</option>{/each}
-        </select>
-      </label>
-      <p class="small muted sub">{t('aw.strippers_note')}</p>
-    {/if}
-    <label class="switch">
-      <input type="checkbox" bind:checked={listener.auto_start} onchange={saveListener} />
-      {t('aw.auto_start')}
-    </label>
-    {#if work}
-      <label class="switch">
-        <input
-          type="checkbox"
-          bind:checked={work.vocals_for_nodes}
-          onchange={saveWork}
-          disabled={!listener.can_isolate}
-        />
-        {t('aw.vocals_nodes')}
-      </label>
-      <p class="small muted sub">
-        {#if listener.can_isolate}
-          {t('aw.vocals_nodes_note')}
-        {:else}
-          {t('aw.vocals_needs')}
-        {/if}
-      </p>
-      <label class="switch">
-        <input type="checkbox" bind:checked={work.second_opinion} onchange={saveWork} />
-        {t('aw.second_opinion')}
-      </label>
-      <p class="small muted sub">{t('aw.second_opinion_note')}</p>
-      <label class="switch">
-        <input type="checkbox" bind:checked={work.nodes_first} onchange={saveWork} />
-        {t('aw.nodes_first')}
-      </label>
-      <p class="small muted sub">{t('aw.nodes_first_note')}</p>
-    {/if}
     <div class="actions">
       <button onclick={() => act(api.installAiListener)} disabled={listener.installing}>
         {listener.installed ? t('aw.reinstall') : t('aw.install')}
@@ -385,6 +261,134 @@
         </li>
       {/each}
     </ul>
+  {/if}
+  {#if work?.lined_up.length}
+    <h4>{t('aw.lined_up', { count: n(work.lined_up.length) })}</h4>
+    <ol class="lined-up small">
+      {#each work.lined_up as song (song.track_id)}
+        <li>
+          {song.artist ? `${song.artist} - ${song.title}` : song.title}
+          <span class="muted">{song.second ? t('aw.lined_second') : t('aw.lined_vocals')}</span>
+        </li>
+      {/each}
+    </ol>
+  {/if}
+
+  <h4>{t('aw.options')}</h4>
+  {#if work}
+  <label class="switch">
+    <input type="checkbox" bind:checked={work.new_songs} onchange={saveWork} />
+    {t('aw.new_songs')}
+  </label>
+  <label class="switch">
+    <input type="checkbox" bind:checked={work.sync_plain} onchange={saveWork} />
+    {t('aw.sync_plain')}
+  </label>
+  <label class="range">
+    <span>{t('aw.min', { pct: minMatch ?? work.min_match })}</span>
+    <input type="range" min="0" max="100" step="1" bind:value={minMatch} onchange={saveWork} />
+  </label>
+  <p class="small muted sub">
+    {t('aw.min_note')}
+  </p>
+  <h4>{t('aw.skip')}</h4>
+  <p class="small muted sub">
+    {t('aw.skip_note')}
+  </p>
+  {#if skipGenres?.length}
+    <div class="chips">
+      {#each skipGenres as genre (genre)}
+        <span class="chip">
+          {genre}
+          <button class="icon-only" aria-label={t('aw.unskip', { genre })} onclick={() => removeGenre(genre)}>×</button>
+        </span>
+      {/each}
+    </div>
+  {/if}
+  <form
+    class="add-genre"
+    onsubmit={(e) => {
+      e.preventDefault()
+      addGenre()
+    }}
+  >
+    <input list="ai-skip-genres" bind:value={genreText} placeholder={t('aw.genre_hint')} aria-label={t('aw.genre_label')} />
+    <datalist id="ai-skip-genres">
+      {#each known as g (g)}<option value={g}></option>{/each}
+    </datalist>
+    <button class="small-button" type="submit" disabled={!genreText.trim()}>{t('aw.leave_out')}</button>
+  </form>
+  {/if}
+  {#if listener}
+    <p class="small">
+      {t('aw.facts', {
+        python: listener.python ?? t('aw.not_found'),
+        ffmpeg: listener.ffmpeg ? t('aw.found') : t('aw.not_found'),
+        gpu: listener.nvidia ? t('aw.nvidia') : t('aw.no_gpu'),
+      })}
+    </p>
+    <label>
+      {t('aw.model')}
+      <select bind:value={listener.model} onchange={saveListener} disabled={listener.installing}>
+        {#each models as m (m)}<option value={m}>{m}</option>{/each}
+      </select>
+    </label>
+    <p class="small muted sub">
+      {t('aw.model_note')}
+    </p>
+    <label class="switch">
+      <input type="checkbox" bind:checked={listener.vocals} onchange={saveListener} disabled={listener.installing} />
+      {t('aw.vocals')}
+    </label>
+    {#if listener.vocals && listener.nvidia}
+      <label class="sub-choice">
+        {t('aw.listen_on')}
+        <select bind:value={listener.listen_on} onchange={saveListener} disabled={listener.installing}>
+          <option value="gpu">{t('aw.listen_on_gpu')}</option>
+          <option value="cpu">{t('aw.listen_on_cpu')}</option>
+        </select>
+      </label>
+      <p class="small muted sub">{t('aw.listen_on_note')}</p>
+      <label class="sub-choice">
+        {t('aw.strippers')}
+        <select bind:value={listener.strippers} onchange={saveListener} disabled={listener.installing}>
+          {#each [1, 2, 3] as count (count)}<option value={count}>{count}</option>{/each}
+        </select>
+      </label>
+      <p class="small muted sub">{t('aw.strippers_note')}</p>
+    {/if}
+    <label class="switch">
+      <input type="checkbox" bind:checked={listener.auto_start} onchange={saveListener} />
+      {t('aw.auto_start')}
+    </label>
+    {#if work}
+      <label class="switch">
+        <input
+          type="checkbox"
+          bind:checked={work.vocals_for_nodes}
+          onchange={saveWork}
+          disabled={!listener.can_isolate}
+        />
+        {t('aw.vocals_nodes')}
+      </label>
+      <p class="small muted sub">
+        {#if listener.can_isolate}
+          {t('aw.vocals_nodes_note')}
+        {:else}
+          {t('aw.vocals_needs')}
+        {/if}
+      </p>
+      <label class="switch">
+        <input type="checkbox" bind:checked={work.second_opinion} onchange={saveWork} />
+        {t('aw.second_opinion')}
+      </label>
+      <p class="small muted sub">{t('aw.second_opinion_note')}</p>
+      <label class="switch">
+        <input type="checkbox" bind:checked={work.nodes_first} onchange={saveWork} />
+        {t('aw.nodes_first')}
+      </label>
+      <p class="small muted sub">{t('aw.nodes_first_note')}</p>
+    {/if}
   {/if}
   <p class="small muted">
     {t('aw.nodes_note')} <a href="#/admin/nodes">{t('admin.menu.nodes')}</a>.
@@ -532,16 +536,17 @@
     margin-top: 1rem;
   }
 
-  .log-box summary,
-  .lined-up summary {
+  .log-box summary {
     cursor: pointer;
   }
 
-  .counts button {
-    min-height: 0;
+  /* A list row would make it a flat icon button; it stays a button. */
+  .counts li button.small-button {
+    padding: 0 12px;
+    background: var(--surface-2);
   }
 
-  .lined-up ol {
+  ol.lined-up {
     margin: 0.4rem 0;
     padding-left: 1.6rem;
     max-height: 16rem;
