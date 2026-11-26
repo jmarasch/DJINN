@@ -72,7 +72,7 @@ export const adminEntries: AdminEntry[] = [
     key: 'wishlist_everyone',
   },
   // Request Log
-  { label: 'Request Log', text: 'admin.menu.log', tab: 'log', keywords: 'requests history who asked' },
+  { label: 'Request Log', text: 'admin.menu.log', tab: 'stats', keywords: 'requests history who asked' },
   // Users
   { label: 'Accounts', text: 'up.accounts', tab: 'users', keywords: 'users people add password' },
   { label: 'Roles', text: 'up.roles', tab: 'users', keywords: 'permissions listener downloads' },

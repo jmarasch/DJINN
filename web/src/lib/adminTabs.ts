@@ -18,6 +18,13 @@ export const adminGroups = [
         },
       },
       {
+        id: 'stats',
+        icon: 'list',
+        get label() {
+          return t('admin.menu.stats')
+        },
+      },
+      {
         id: 'guide',
         icon: 'book',
         get label() {
@@ -158,20 +165,6 @@ export const adminGroups = [
     },
     tabs: [
       {
-        id: 'stats',
-        icon: 'list',
-        get label() {
-          return t('admin.menu.stats')
-        },
-      },
-      {
-        id: 'log',
-        icon: 'clock',
-        get label() {
-          return t('admin.menu.log')
-        },
-      },
-      {
         id: 'serverlog',
         icon: 'book',
         get label() {
@@ -197,12 +190,19 @@ const ids: readonly string[] = adminGroups.flatMap((g) => g.tabs.map((t) => t.id
  * (old links to /admin/about land there too, where About now is). */
 export function adminTabFor(path: string): AdminTab {
   const id = path.match(/^\/admin\/([a-z]+)$/)?.[1] ?? ''
+  // The request log is a tab of Stats now.
+  if (id === 'log') return 'stats'
   return (ids.includes(id) ? id : 'home') as AdminTab
 }
 
 /** The sub-tabs of the sections that have them, as [id, name]. */
-export function adminSubtabs(group: 'library' | 'genres' | 'audio' | 'smart' | 'ai'): [string, string][] {
+export function adminSubtabs(group: 'stats' | 'library' | 'genres' | 'audio' | 'smart' | 'ai'): [string, string][] {
   switch (group) {
+    case 'stats':
+      return [
+        ['stats', t('admin.menu.stats')],
+        ['log', t('admin.menu.log')],
+      ]
     case 'library':
       return [
         ['folders', t('admin.sub.folders')],

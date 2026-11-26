@@ -149,19 +149,19 @@ items form a menu down the left side.
 
 **Admin** has a menu down the left side, grouped into:
 
-- **Overview:** the health dashboard: what's playing, library and background
-  work, warnings, and all-time listening.
+- **Overview:** the health dashboard (what's playing, library and background
+  work, warnings, and all-time listening), Stats (with the Request Log as its
+  second tab) and the User Guide.
 - **Music and Playback:** Library, Library Editor, Party and Queue, Smart Play,
   Audio.
 - **House and Devices:** Rooms, Nodes, DJINN GO, Visualizers.
 - **Access:** Users and Roles, Protected Areas.
 - **System:** AI, System.
-- **Activity and Logs:** Stats, Request Log, Server Log, Sign-In Log, Library
-  Problems.
+- **Activity and Logs:** Server Log, Sign-In Log.
 
 ![Admin's Overview page, with the side menu](images/admin-overview.webp)
 
-Some sections have tabs along the top (Library, Audio, Smart Play and AI).
+Some sections have tabs along the top (Stats, Library, Audio, Smart Play and AI).
 **Find a setting** at the top of the menu searches every setting by its
 wording and jumps to it. A dot next to a section means something there has
 been changed from its default. On a phone, Admin starts with the list of

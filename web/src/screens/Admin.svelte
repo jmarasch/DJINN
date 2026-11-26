@@ -148,7 +148,7 @@
   })
 
   async function loadAll() {
-    await Promise.all([load('library'), load('log')]).catch((e) => toast(e.message, true))
+    await Promise.all([load('library'), load('stats')]).catch((e) => toast(e.message, true))
   }
 
   // Finding a setting: what's typed, the setting to highlight once its
@@ -213,7 +213,7 @@
 
   // Tabs inside the longest sections; the others stay in the page, hidden,
   // so Find a setting can still reach them.
-  let sub = $state<Record<string, string>>({ library: 'folders', genres: 'map', smart: 'play', audio: 'sound', ai: 'search' })
+  let sub = $state<Record<string, string>>({ stats: 'stats', library: 'folders', genres: 'map', smart: 'play', audio: 'sound', ai: 'search' })
 
   function openSub(group: string, id: string) {
     sub[group] = id
@@ -232,8 +232,11 @@
   })
 
   async function load(which: AdminTab) {
-    if (which === 'home' || which === 'stats') {
-      // These load their own data.
+    if (which === 'home') {
+      // It loads its own data.
+    } else if (which === 'stats') {
+      // The panels load their own; the request log is here.
+      log = await api.requestLog(200)
     } else if (which === 'library') {
       const [r, status, s, rg] = await Promise.all([
         api.libraryRoots(),
@@ -249,8 +252,6 @@
       if (status.last_scan) app.scan = status.last_scan
     } else if (which === 'audio' || which === 'smart' || which === 'users' || which === 'go') {
       // These panels load their own data.
-    } else if (which === 'log') {
-      log = await api.requestLog(200)
     } else {
       settings = await api.settings()
     }
@@ -321,8 +322,32 @@
 {:else if id === 'guide'}
   <GuidePanel />
 {:else if id === 'stats'}
-  <StatsPanel />
-  <SearchesWishes />
+  {@render subtabs('stats', adminSubtabs('stats'))}
+  <div data-subtab="stats" hidden={sub.stats !== 'stats'}>
+    <StatsPanel />
+    <SearchesWishes />
+  </div>
+  <div data-subtab="log" hidden={sub.stats !== 'log'}>
+  <section class="card">
+    <div class="log-head">
+      <h2>{t('admin.request_log')}</h2>
+      <button class="small-button" disabled={!log.length} onclick={clearLog}>{t('common.clear')}</button>
+    </div>
+    {#each log as entry, i (i)}
+      <div class="log">
+        <span class="muted small at">{time(entry.at)}</span>
+        <div class="grow">
+          <div class="ellipsis">{entry.title ?? t('admin.removed_song')}{entry.artist ? ` · ${entry.artist}` : ''}</div>
+          <div class="muted small ellipsis">
+            {entry.name ?? t('admin.unknown')} · <span class="mono">{entry.mac ?? entry.ip ?? t('admin.no_address')}</span>
+          </div>
+        </div>
+      </div>
+    {:else}
+      <p class="muted">{t('admin.no_requests')}</p>
+    {/each}
+  </section>
+  </div>
 {:else if id === 'library'}
   {@render subtabs('library', adminSubtabs('library'))}
   <div data-subtab="folders" hidden={sub.library !== 'folders'}>
@@ -488,26 +513,6 @@
   <VisualsPanel />
 {:else if id === 'rooms'}
   <div class="cards-2"><RoomsPanel /></div>
-{:else if id === 'log'}
-  <section class="card">
-    <div class="log-head">
-      <h2>{t('admin.request_log')}</h2>
-      <button class="small-button" disabled={!log.length} onclick={clearLog}>{t('common.clear')}</button>
-    </div>
-    {#each log as entry, i (i)}
-      <div class="log">
-        <span class="muted small at">{time(entry.at)}</span>
-        <div class="grow">
-          <div class="ellipsis">{entry.title ?? t('admin.removed_song')}{entry.artist ? ` · ${entry.artist}` : ''}</div>
-          <div class="muted small ellipsis">
-            {entry.name ?? t('admin.unknown')} · <span class="mono">{entry.mac ?? entry.ip ?? t('admin.no_address')}</span>
-          </div>
-        </div>
-      </div>
-    {:else}
-      <p class="muted">{t('admin.no_requests')}</p>
-    {/each}
-  </section>
 {:else if id === 'rules' && settings}
   <section class="card">
     <h2>{t('admin.rules')}</h2>
@@ -1038,7 +1043,13 @@
     }
   }
 
-  .item,
+  .item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--line);
+  }
 
   .grow {
     flex: 1;

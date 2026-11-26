@@ -1,7 +1,7 @@
 # Stats and history
 
 **Admin > Stats** shows what got played, asked for and skipped, and what
-people searched for. The **Request Log** lists every request.
+people searched for. Its **Request Log** tab lists every request.
 
 ## Stats
 
@@ -66,7 +66,7 @@ listeners ask too. The Android app has it under search results as well.
 
 ## The request log
 
-**Admin > Request Log** lists every request with who made it, when and from
+**Admin > Stats > Request Log** lists every request with who made it, when and from
 which device. **Clear** empties the log; artist pages keep counting their top
 songs.
 

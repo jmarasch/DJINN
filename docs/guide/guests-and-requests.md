@@ -145,7 +145,7 @@ On the Queue tab admins can remove any request and move songs up or down.
 Songs that the same number of people asked for can be reordered; a song more
 people asked for stays ahead.
 
-**Admin > Request Log** lists every request with who made it and from which
+**Admin > Stats > Request Log** lists every request with who made it and from which
 device. **Clear** empties the log; artist pages keep counting their top songs.
 
 ## Guests and accounts
