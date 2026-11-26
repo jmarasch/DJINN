@@ -258,6 +258,23 @@ other players and phones (DJINN works out their real length already).
 isn't touched, and it can be undone from the history. If every MP3 shown
 already has one, it says so.
 
+To fix them:
+
+1. In **Admin > Library Problems**, open **MP3s with no length header** and
+   select **Fix in the Editor** beside a song. The editor opens on its folder
+   and asks for your password.
+2. The first time, go to the **Library Folders** tab and make the folder that
+   holds the songs **Read and Write**. Every folder is read only until you do.
+3. Back on the **Editor** tab, choose **Library** at the top (the files, not
+   only DJINN's database).
+4. Pick the MP3s in the grid, or pick none to fix every song shown.
+5. Select **Fix MP3 Lengths...** under the grid. It lists the files that need
+   a header; select **Fix**, then **OK**.
+
+To fix a whole artist at once, open a folder higher up in the tree on the
+left: the grid shows every song under it, 200 at a time (**Show more** loads
+the next 200, and only songs loaded in the grid are fixed).
+
 ## Compare
 
 The **Compare** tab sets DJINN's database against what each file's tags say,
