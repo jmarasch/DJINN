@@ -255,6 +255,29 @@ async fn scan_save_builds_albums_and_artists() {
 }
 
 #[tokio::test]
+async fn a_song_with_no_disc_number_counts_as_disc_one() {
+    let store = Store::open_in_memory().await.unwrap();
+    let song = |path: &str, title: &str, disc: Option<i64>, track: i64| ScannedTrack {
+        disc_no: disc,
+        track_no: Some(track),
+        ..scanned(path, title, "Band", "Graves")
+    };
+    store
+        .save_scanned(&[
+            song("/m/9.mp3", "Ninth", None, 9),
+            song("/m/1.mp3", "First", Some(1), 1),
+            song("/m/10.mp3", "Tenth", Some(1), 10),
+            song("/m/2-1.mp3", "Second disc", Some(2), 1),
+        ])
+        .await
+        .unwrap();
+    let id = store.search("graves", 10).await.unwrap().albums[0].id;
+    let album = store.album(id).await.unwrap().unwrap();
+    let titles: Vec<&str> = album.tracks.iter().map(|t| t.title.as_str()).collect();
+    assert_eq!(titles, ["First", "Ninth", "Tenth", "Second disc"]);
+}
+
+#[tokio::test]
 async fn rescanning_updates_in_place_and_removal_hides() {
     let store = Store::open_in_memory().await.unwrap();
     store

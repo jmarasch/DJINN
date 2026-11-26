@@ -202,7 +202,7 @@ impl Store {
     ) -> Result<Vec<(i64, String, Option<i64>)>> {
         Ok(sqlx::query_as(
             "SELECT id, title, duration_ms FROM tracks
-             WHERE album_id = ? AND removed_at IS NULL ORDER BY disc_no, track_no, path",
+             WHERE album_id = ? AND removed_at IS NULL ORDER BY coalesce(disc_no, 1), track_no, path",
         )
         .bind(album_id)
         .fetch_all(&self.pool)

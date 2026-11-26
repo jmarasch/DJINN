@@ -560,7 +560,7 @@ macro_rules! track_order {
             sort_key!("coalesce(t.album_artist, t.artist)"),
             ", ",
             sort_key!("t.album"),
-            ", t.disc_no, t.track_no, t.title COLLATE NOCASE"
+            ", coalesce(t.disc_no, 1), t.track_no, t.title COLLATE NOCASE"
         )
     };
     (newest) => {
@@ -732,7 +732,7 @@ impl Store {
             " FROM tracks t WHERE t.album_id = ? AND ",
             available!(),
             "
-             ORDER BY t.disc_no, t.track_no, t.title"
+             ORDER BY coalesce(t.disc_no, 1), t.track_no, t.title"
         ))
         .bind(id)
         .fetch_all(&self.pool)
@@ -827,7 +827,7 @@ impl Store {
             available!(),
             "
                AND (al.id IS NULL OR al.artist_id != ?)
-             ORDER BY t.album, t.disc_no, t.track_no, t.title"
+             ORDER BY t.album, coalesce(t.disc_no, 1), t.track_no, t.title"
         ))
         .bind(id)
         .bind(id)
@@ -890,7 +890,7 @@ impl Store {
              WHERE EXISTS (SELECT 1 FROM track_artists ta WHERE ta.track_id = t.id AND ta.artist_id = ?)
                AND ",
             available!(),
-            " ORDER BY al.id IS NULL, al.year, al.title, al.id, t.disc_no, t.track_no, t.title, t.id
+            " ORDER BY al.id IS NULL, al.year, al.title, al.id, coalesce(t.disc_no, 1), t.track_no, t.title, t.id
              LIMIT ? OFFSET ?"
         ))
         .bind(id)
