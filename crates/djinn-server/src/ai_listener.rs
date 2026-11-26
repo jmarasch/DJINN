@@ -139,6 +139,12 @@ pub fn stripper_running() -> bool {
     with(stripper_alive)
 }
 
+/// Adds a line to the listener's log on the Lyrics tab (what helping
+/// nodes did shows there beside this computer's own work).
+pub fn log_line(line: impl Into<String>) {
+    note(line);
+}
+
 fn note(line: impl Into<String>) {
     with(|i| {
         i.log.push(line.into());

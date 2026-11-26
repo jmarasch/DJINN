@@ -560,6 +560,41 @@ fn too_unsure(text: &str, min: i64) -> Option<String> {
     (pct < min).then(|| format!("{LOW_SCORE} ({pct}%, under {min}%)"))
 }
 
+/// A helping node's result, as a line for the listener's log.
+fn node_outcome(
+    who: &str,
+    song: &str,
+    kind: &str,
+    body: &Outcome,
+    failure: Option<&str>,
+    second: bool,
+) -> String {
+    match failure {
+        Some(why) if why.starts_with(LOW_SCORE) && second => {
+            format!("{who}: {song} {why}; passed to this computer for a second opinion")
+        }
+        Some(why) if why.starts_with(LOW_SCORE) => format!("{who}: {song} {why}; given up"),
+        Some(why) => format!("{who}: {song} failed: {why}"),
+        None => match &body.lrc {
+            None => format!("{who}: {song} is an instrumental"),
+            Some(text) => {
+                let made = if kind == "sync" {
+                    "lyrics timed"
+                } else {
+                    "lyrics made"
+                };
+                match djinn_library::lyrics_import::header(text)
+                    .ai_info()
+                    .and_then(|i| i.match_pct)
+                {
+                    Some(pct) => format!("{who}: {song}, {made} ({pct}% sure)"),
+                    None => format!("{who}: {song}, {made}"),
+                }
+            }
+        },
+    }
+}
+
 /// The start of the reason a result scored too low (also the worker's skip).
 const LOW_SCORE: &str = "scored too low";
 
@@ -1124,12 +1159,32 @@ async fn finish_track_result(
     if !second {
         let _ = tokio::fs::remove_file(vocals_file(state, id)).await;
     }
-    let audio_ms = state
-        .store
-        .track(id)
-        .await
-        .ok()
-        .flatten()
+    let track = state.store.track(id).await.ok().flatten();
+    if name.starts_with("node:") {
+        // What a helping node did, in the listener's log beside this
+        // computer's own work.
+        let who = WORKERS
+            .lock()
+            .ok()
+            .and_then(|g| g.as_ref()?.get(name).map(|s| s.label.clone()))
+            .unwrap_or_else(|| name.to_owned());
+        let song = track.as_ref().map_or_else(
+            || format!("song {id}"),
+            |t| match &t.artist {
+                Some(artist) => format!("{artist} - {}", t.title),
+                None => t.title.clone(),
+            },
+        );
+        crate::ai_listener::log_line(node_outcome(
+            &who,
+            &song,
+            kind,
+            body,
+            failure.as_deref(),
+            second,
+        ));
+    }
+    let audio_ms = track
         .and_then(|t| t.duration_ms)
         .and_then(|d| u64::try_from(d).ok());
     record_seen(name, failure.is_some(), body.elapsed_ms, audio_ms);
@@ -1466,6 +1521,65 @@ mod tests {
     use super::*;
     use crate::test_util::session;
     use tower::ServiceExt;
+
+    #[test]
+    fn a_nodes_results_read_plainly_in_the_log() {
+        let outcome = |lrc: Option<&str>, error: Option<&str>| Outcome {
+            lrc: lrc.map(str::to_owned),
+            error: error.map(str::to_owned),
+            elapsed_ms: None,
+        };
+        let made = "[ar:A]\n[ti:T]\n[by:lyrics-listener (AI-generated; model=base; match=96%)]\n[00:01.00]la\n";
+        assert_eq!(
+            node_outcome(
+                "Kitchen",
+                "A - T",
+                "listen",
+                &outcome(Some(made), None),
+                None,
+                false
+            ),
+            "Kitchen: A - T, lyrics made (96% sure)"
+        );
+        assert_eq!(
+            node_outcome(
+                "Kitchen",
+                "A - T",
+                "listen",
+                &outcome(None, Some("instrumental")),
+                None,
+                false
+            ),
+            "Kitchen: A - T is an instrumental"
+        );
+        let low = "scored too low (72%, under 85%)";
+        assert_eq!(
+            node_outcome("Kitchen", "A - T", "listen", &outcome(Some(made), None), Some(low), true),
+            "Kitchen: A - T scored too low (72%, under 85%); passed to this computer for a second opinion"
+        );
+        assert_eq!(
+            node_outcome(
+                "Kitchen",
+                "A - T",
+                "listen",
+                &outcome(Some(made), None),
+                Some(low),
+                false
+            ),
+            "Kitchen: A - T scored too low (72%, under 85%); given up"
+        );
+        assert_eq!(
+            node_outcome(
+                "Kitchen",
+                "A - T",
+                "listen",
+                &outcome(None, Some("boom")),
+                Some("boom"),
+                false
+            ),
+            "Kitchen: A - T failed: boom"
+        );
+    }
 
     #[test]
     fn lyrics_scoring_under_the_minimum_are_refused() {
