@@ -69,6 +69,7 @@ mod playlist_import;
 mod presence;
 mod problems_api;
 mod protected;
+mod quarantine;
 mod reader;
 mod recover_cmd;
 mod rooms_api;

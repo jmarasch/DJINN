@@ -941,6 +941,8 @@ export interface ProblemCount {
   /** Rows are albums. */
   per_album: boolean
   hidden: boolean
+  /** Its songs can be quarantined (moved or copied to another library folder). */
+  songs: boolean
 }
 
 export interface ProblemSummary {
@@ -1686,6 +1688,16 @@ export interface CompareDiff {
   /** What the file says. */
   file: string | null
   why: CompareWhy
+}
+
+/** What a quarantine would do (or did): each file from and to, why some can't go. */
+export interface QuarantinePlan {
+  files: EditorRenamed[]
+  /** The size of the files that go. */
+  bytes: number
+  /** Space free in the library folder they go to, when the system says. */
+  free: number | null
+  batch: number | null
 }
 
 export interface EditableFolder {

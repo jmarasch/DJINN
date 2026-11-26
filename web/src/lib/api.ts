@@ -21,6 +21,7 @@ import type {
   EditorApplied,
   EditorBatch,
   EditorRenamed,
+  QuarantinePlan,
   EditorAfterMove,
   Release,
   ReleaseHit,
@@ -786,6 +787,9 @@ export const api = {
   /** `cached`: counts a few minutes old will do (badges), so it rarely counts. */
   libraryProblems: (cached = false) =>
     get<ProblemSummary>(cached ? '/library/problems?cached=true' : '/library/problems'),
+  /** Moves or copies every song of a problem kind into a library folder, keeping their places. */
+  quarantine: (kind: ProblemKind, to: string, copy: boolean, preview: boolean) =>
+    post<QuarantinePlan>(`/library/problems/${kind}/quarantine`, { to, copy, preview }),
   libraryProblemList: (kind: ProblemKind, offset = 0) =>
     get<ProblemItem[]>(`/library/problems/${kind}?offset=${offset}&limit=100`),
   setDuplicatesAcrossAlbums: (acrossAlbums: boolean) =>

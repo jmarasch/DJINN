@@ -209,6 +209,17 @@ impl Store {
         .await?)
     }
 
+    /// Every song of these albums.
+    pub async fn album_song_ids(&self, albums: &[i64]) -> Result<Vec<i64>> {
+        Ok(sqlx::query_scalar(
+            "SELECT id FROM tracks WHERE removed_at IS NULL
+               AND album_id IN (SELECT value FROM json_each(?1))",
+        )
+        .bind(crate::library::json_ids(albums))
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
     /// These songs as the editor's grid shows them, by path.
     pub async fn editor_songs_by_id(&self, ids: &[i64]) -> Result<Vec<EditorSong>> {
         let list = crate::library::json_ids(ids);

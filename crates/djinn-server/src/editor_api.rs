@@ -1115,7 +1115,7 @@ async fn rename(
 /// its song at the new place and records it as one approval of `kind`
 /// ("rename" or "delete", which also takes the song out of the
 /// library). Returns the approval and how many moved.
-async fn relocate(
+pub(crate) async fn relocate(
     state: &AppState,
     user: &djinn_store::User,
     files: &mut [Renamed],

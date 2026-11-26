@@ -95,14 +95,37 @@ async fn copy(
     if body.preview {
         return Ok(Json(RenameResult { files, batch: None }));
     }
-    all_editable(
+    let (batch, copied) = copy_files(&state, &user, &mut files).await?;
+    audit(
         &state,
+        &user,
+        device.ip.as_deref(),
+        "editor_copy",
+        &format!("{copied} files, approval {batch}"),
+    )
+    .await;
+    Ok(Json(RenameResult {
+        files,
+        batch: (copied > 0).then_some(batch),
+    }))
+}
+
+/// Copies each file without a problem (with the `.lrc` beside it, unless
+/// one is there already), reads the copies in as songs of their own and
+/// records them as one approval. Returns the approval and how many copied.
+pub(crate) async fn copy_files(
+    state: &AppState,
+    user: &User,
+    files: &mut [Renamed],
+) -> ApiResult<(i64, usize)> {
+    all_editable(
+        state,
         &files.iter().map(|f| f.to.as_str()).collect::<Vec<_>>(),
     )
     .await?;
     let batch = state.store.next_file_batch().await?;
     let mut copied = Vec::new();
-    for file in &mut files {
+    for file in files.iter_mut() {
         if file.problem.is_some() {
             continue;
         }
@@ -126,7 +149,7 @@ async fn copy(
         }
     }
     if !copied.is_empty() {
-        crate::library_api::reread(&state, &copied).await?;
+        crate::library_api::reread(state, &copied).await?;
     }
     for file in files.iter().filter(|f| f.problem.is_none()) {
         let (size, mtime) = stat(Path::new(&file.to)).unwrap_or((0, 0));
@@ -146,18 +169,7 @@ async fn copy(
             })
             .await?;
     }
-    audit(
-        &state,
-        &user,
-        device.ip.as_deref(),
-        "editor_copy",
-        &format!("{} files, approval {batch}", copied.len()),
-    )
-    .await;
-    Ok(Json(RenameResult {
-        files,
-        batch: (!copied.is_empty()).then_some(batch),
-    }))
+    Ok((batch, copied.len()))
 }
 
 // --- The trash ---

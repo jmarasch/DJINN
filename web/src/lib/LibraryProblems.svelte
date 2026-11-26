@@ -8,6 +8,7 @@
   import { app, toast } from './state.svelte'
   import { locale, t } from './i18n.svelte'
   import { parseReports, reportShort } from './reports'
+  import QuarantineWindow from './QuarantineWindow.svelte'
   import type { Mp3Check, ProblemCount, ProblemItem, ProblemKind, ProblemSummary } from './types'
 
   /** A problem kind's name and what to do about it (`prob.<kind>`, `prob.<kind>_hint`). */
@@ -17,6 +18,8 @@
   let open = $state<ProblemKind | null>(null)
   let items = $state<ProblemItem[]>([])
   let loading = $state(false)
+  /** The kind whose songs the Quarantine window is open for. */
+  let quarantining = $state<ProblemKind | null>(null)
 
   const shown = (k: ProblemCount) => k.count > 0 && !k.hidden
   const trouble = $derived(summary?.kinds.filter((k) => k.trouble && shown(k)) ?? [])
@@ -276,12 +279,30 @@
           {#if k.kind === 'no_length_header'}
             <button class="small-button" onclick={mp3Again}>{t('prob.read_again')}</button>
           {/if}
+          {#if k.songs}
+            <button class="small-button" title={t('prob.quarantine_title')} onclick={() => (quarantining = k.kind)}
+              >{t('prob.quarantine')}</button
+            >
+          {/if}
           <button class="small-button" onclick={() => setHidden(k.kind, true)}>{t('prob.hide')}</button>
         </div>
       </div>
     {/if}
   </div>
 {/snippet}
+
+{#if quarantining}
+  {@const kind = quarantining}
+  <QuarantineWindow
+    {kind}
+    label={about(kind).label}
+    onclose={() => (quarantining = null)}
+    ondone={() => {
+      load()
+      if (open) show(open, true)
+    }}
+  />
+{/if}
 
 <section class="card">
   <h2>

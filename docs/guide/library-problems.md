@@ -141,6 +141,31 @@ After each nightly check, the card compares with the one before: songs
 added and gone, problems needing a look, songs with copies, and songs
 listeners reported, each with how it changed.
 
+## Quarantine
+
+**Quarantine...** under a problem's list moves or copies every song it lists
+into another library folder, for example a folder where you fix songs before
+they go back. Each keeps its place under its own library folder, so
+`Artist/Album/song.mp3` in one library folder becomes `Artist/Album/song.mp3`
+in the other. A problem that lists albums takes every song of each album.
+
+The window asks:
+
+- **Move them** or **Copy them.** Moving takes them out of where they are, so
+  it only works from library folders that are **Read and Write** (in the
+  Library Editor's **Library Folders** tab); folders left with no songs go to
+  the trash. Copying leaves the originals in place, so it works from a read
+  only folder too, and the copies become songs of their own.
+- **Library folder to put them in:** only Read and Write folders can be
+  picked.
+
+Before anything happens it shows how many files would go, how much space
+they take, how much is free there, and an example of where one lands. Songs
+that can't go (already in that folder, a file of that name there already, or
+a read only folder when moving) stay where they are and are counted. Like
+the editor's own moves and copies, it asks for your password and can be
+undone from the editor's history.
+
 ## MP3 lengths
 
 Many MP3s have no length header, so a tag reader can only guess their length, and it guesses wrong (often several times too long) for variable bit rate files that open with a quiet stretch. DJINN looks at such files: if the bit rate is the same wherever it samples, the guess stands, otherwise it counts every frame, which is exact. The figure is kept in DJINN's database; your files are never changed. The first library check after an update re-reads every file once to correct existing songs.
