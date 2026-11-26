@@ -122,10 +122,12 @@ impl NewLyrics<'_> {
 pub const LYRICS_RECHECK_MS: i64 = 90 * 24 * 60 * 60 * 1000;
 
 impl Store {
+    /// A song's lyrics, or that it's an instrumental (even one the AI heard
+    /// no singing in, which has no source); none for a song with neither.
     pub async fn lyrics(&self, track_id: i64) -> Result<Option<StoredLyrics>> {
         Ok(sqlx::query_as(
             "SELECT synced, plain, instrumental, source, ai, ai_model, ai_match, import_name FROM lyrics
-             WHERE track_id = ? AND source != 'none'",
+             WHERE track_id = ? AND (source != 'none' OR instrumental = 1)",
         )
         .bind(track_id)
         .fetch_optional(&self.pool)

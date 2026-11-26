@@ -32,6 +32,11 @@ const AUTO: &str = "ai_listener_auto";
 /// graphics card: "gpu" (beside the stripper) or "cpu" (the processor,
 /// leaving the card to the stripper).
 const LISTEN_ON: &str = "ai_listener_listen_on";
+/// How many songs' vocals are separated at once (each a stripper of its
+/// own, about 1.2 GB on a graphics card), so nodes always have songs ready.
+pub const STRIPPERS: &str = "ai_listener_strippers";
+pub const STRIPPERS_DEFAULT: i64 = 2;
+const STRIPPERS_MOST: i64 = 3;
 pub const LOCAL_KEY_NAME: &str = "this computer";
 /// The pack's version: a new one is written over the old on install.
 const PACK_VERSION: &str = "1";
@@ -102,9 +107,9 @@ struct Inner {
     installing: bool,
     log: Vec<String>,
     child: Option<Child>,
-    /// The vocal stripper, running beside the listener while vocals are
+    /// The vocal strippers, running beside the listener while vocals are
     /// stripped ahead.
-    stripper: Option<Child>,
+    strippers: Vec<Child>,
     error: Option<String>,
 }
 
@@ -129,9 +134,9 @@ pub fn is_running() -> bool {
 
 fn stripper_alive(inner: &mut Inner) -> bool {
     inner
-        .stripper
-        .as_mut()
-        .is_some_and(|c| matches!(c.try_wait(), Ok(None)))
+        .strippers
+        .iter_mut()
+        .any(|c| matches!(c.try_wait(), Ok(None)))
 }
 
 /// Whether this computer strips vocals ahead for the listeners.
@@ -266,6 +271,8 @@ struct Status {
     auto_start: bool,
     /// "gpu" or "cpu".
     listen_on: String,
+    /// Songs whose vocals are separated at once.
+    strippers: i64,
     /// The vocal stripper is running beside the listener.
     stripping: bool,
     error: Option<String>,
@@ -301,6 +308,7 @@ async fn status(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json<S
         vocals: crate::settings::flag(&state.store, VOCALS, false).await?,
         auto_start: crate::settings::flag(&state.store, AUTO, true).await?,
         listen_on: listen_on(&state).await?,
+        strippers: strippers(&state).await?,
         stripping,
         error,
         log: lines,
@@ -314,6 +322,16 @@ struct Choices {
     auto_start: bool,
     #[serde(default)]
     listen_on: Option<String>,
+    #[serde(default)]
+    strippers: Option<i64>,
+}
+
+async fn strippers(state: &AppState) -> anyhow::Result<i64> {
+    Ok(
+        crate::settings::number(&state.store, STRIPPERS, STRIPPERS_DEFAULT)
+            .await?
+            .clamp(1, STRIPPERS_MOST),
+    )
 }
 
 async fn listen_on(state: &AppState) -> anyhow::Result<String> {
@@ -346,6 +364,7 @@ async fn put_settings(
         state.store.get_setting(MODEL).await?,
         crate::settings::flag(&state.store, VOCALS, false).await?,
         listen_on(&state).await?,
+        strippers(&state).await?,
     );
     state.store.set_setting(MODEL, &body.model).await?;
     crate::settings::set_flag(&state.store, VOCALS, body.vocals).await?;
@@ -356,10 +375,17 @@ async fn put_settings(
         }
         state.store.set_setting(LISTEN_ON, on).await?;
     }
+    if let Some(n) = body.strippers {
+        state
+            .store
+            .set_setting(STRIPPERS, &n.clamp(1, STRIPPERS_MOST).to_string())
+            .await?;
+    }
     let after = (
         Some(body.model.clone()),
         body.vocals,
         listen_on(&state).await?,
+        strippers(&state).await?,
     );
     // A running listener takes changes that shape how it runs at once.
     if before != after && is_running() {
@@ -693,15 +719,16 @@ pub async fn start_worker(state: &AppState) -> anyhow::Result<()> {
         }
         Ok(child)
     };
-    let stripper = if strip {
-        Some(spawn("prepare", "auto")?)
-    } else {
-        None
-    };
+    let mut strip_children = Vec::new();
+    if strip {
+        for _ in 0..strippers(state).await? {
+            strip_children.push(spawn("prepare", "auto")?);
+        }
+    }
     let child = spawn(if strip { "listen" } else { "all" }, device)?;
     with(|i| {
         i.child = Some(child);
-        i.stripper = stripper;
+        i.strippers = strip_children;
     });
     tracing::info!("lyrics listener started");
     Ok(())
@@ -713,9 +740,9 @@ async fn stop(_: AdminUser) -> StatusCode {
 }
 
 pub async fn stop_worker() {
-    let (child, stripper) = with(|i| (i.child.take(), i.stripper.take()));
-    let stopped = child.is_some() || stripper.is_some();
-    for mut c in child.into_iter().chain(stripper) {
+    let (child, strippers) = with(|i| (i.child.take(), std::mem::take(&mut i.strippers)));
+    let stopped = child.is_some() || !strippers.is_empty();
+    for mut c in child.into_iter().chain(strippers) {
         let _ = c.kill().await;
     }
     if stopped {

@@ -297,6 +297,7 @@ export const api = {
     sync_plain: boolean
     vocals_for_nodes: boolean
     second_opinion: boolean
+    nodes_first: boolean
     min_match?: number
     skip_genres?: string[]
   }) =>
@@ -305,7 +306,13 @@ export const api = {
   removeAiWorkerKey: (name: string) => del<void>(`/ai-work/keys/${encodeURIComponent(name)}`),
   retryAiWork: () => post<void>('/ai-work/retry'),
   aiListener: () => get<AiListenerStatus>('/ai-listener'),
-  setAiListener: (s: { model: string; vocals: boolean; auto_start: boolean; listen_on: 'gpu' | 'cpu' }) =>
+  setAiListener: (s: {
+    model: string
+    vocals: boolean
+    auto_start: boolean
+    listen_on: 'gpu' | 'cpu'
+    strippers: number
+  }) =>
     put<void>('/ai-listener/settings', s),
   installAiListener: () => post<void>('/ai-listener/install'),
   startAiListener: () => post<void>('/ai-listener/start'),

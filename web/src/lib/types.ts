@@ -1756,6 +1756,8 @@ export interface AiWorkStatus {
   second_opinion: boolean
   /** Songs waiting for that second opinion. */
   waiting_second: number
+  /** While nodes wait for work, this computer's listener leaves new songs to them. */
+  nodes_first: boolean
   /** The least an AI's lyrics must score to be kept, in percent. */
   min_match: number
   /** Genres whose songs get no AI lyrics. */
@@ -1828,6 +1830,8 @@ export interface AiListenerStatus {
   auto_start: boolean
   /** Where the listener runs while vocals are stripped: beside the stripper on the graphics card, or on the processor. */
   listen_on: 'gpu' | 'cpu'
+  /** Songs whose vocals are separated at once (1 to 3). */
+  strippers: number
   /** The vocal stripper is running beside the listener. */
   stripping: boolean
   error: string | null

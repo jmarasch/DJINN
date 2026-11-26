@@ -88,6 +88,7 @@
         sync_plain: work.sync_plain,
         vocals_for_nodes: work.vocals_for_nodes,
         second_opinion: work.second_opinion,
+        nodes_first: work.nodes_first,
         min_match: minMatch ?? work.min_match,
         skip_genres: skipGenres ?? work.skip_genres,
       })
@@ -120,6 +121,7 @@
         vocals: listener.vocals,
         auto_start: listener.auto_start,
         listen_on: listener.listen_on,
+        strippers: listener.strippers,
       })
     } catch (e) {
       toast(e instanceof Error ? e.message : t('common.save_failed_short'), true)
@@ -255,6 +257,13 @@
         </select>
       </label>
       <p class="small muted sub">{t('aw.listen_on_note')}</p>
+      <label class="sub-choice">
+        {t('aw.strippers')}
+        <select bind:value={listener.strippers} onchange={saveListener} disabled={listener.installing}>
+          {#each [1, 2, 3] as count (count)}<option value={count}>{count}</option>{/each}
+        </select>
+      </label>
+      <p class="small muted sub">{t('aw.strippers_note')}</p>
     {/if}
     <label class="switch">
       <input type="checkbox" bind:checked={listener.auto_start} onchange={saveListener} />
@@ -282,6 +291,11 @@
         {t('aw.second_opinion')}
       </label>
       <p class="small muted sub">{t('aw.second_opinion_note')}</p>
+      <label class="switch">
+        <input type="checkbox" bind:checked={work.nodes_first} onchange={saveWork} />
+        {t('aw.nodes_first')}
+      </label>
+      <p class="small muted sub">{t('aw.nodes_first_note')}</p>
     {/if}
     <div class="actions">
       <button onclick={() => act(api.installAiListener)} disabled={listener.installing}>

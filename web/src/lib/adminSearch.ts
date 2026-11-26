@@ -210,6 +210,18 @@ export const adminEntries: AdminEntry[] = [
     keywords: 'ai lyrics nodes second opinion low score bigger model retry',
     key: 'ai_second_opinion',
   },
+  {
+    label: 'Let nodes go first', text: 'aw.nodes_first',
+    tab: 'ai',
+    keywords: 'ai lyrics nodes priority first share work',
+    key: 'ai_nodes_first',
+  },
+  {
+    label: 'Songs to separate at once', text: 'aw.strippers',
+    tab: 'ai',
+    keywords: 'ai lyrics vocals strippers demucs separate parallel',
+    key: 'ai_listener_strippers',
+  },
   { label: 'Spotify account for album lookups', text: 'libx.spotify', tab: 'library', keywords: 'spotify client id secret album lookup' },
   { label: 'Help with AI lyrics', text: 'nai.help', tab: 'nodes', keywords: 'ai lyrics node whisper helper' },
   // System

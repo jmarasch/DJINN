@@ -230,6 +230,40 @@ async fn vocals_wanted(state: &AppState) -> anyhow::Result<i64> {
 /// How soon this computer's stripper and listener ask again when there's
 /// nothing to do (the other one may make or take a song any moment).
 const STRIPPING_WAIT_SECS: u64 = 5;
+/// Nodes waiting for work right now: free to help, holding no song, and
+/// asking lately (a node free on paper that stopped asking doesn't count).
+/// While any wait, this computer's listener leaves new songs to them
+/// (`NODES_FIRST`), doing second opinions only.
+async fn nodes_waiting(state: &AppState) -> anyhow::Result<usize> {
+    let now = djinn_store::now_ms();
+    let held = state.store.ai_held(now - LEASE_MS).await?;
+    let asked: HashMap<String, i64> = WORKERS
+        .lock()
+        .ok()
+        .and_then(|g| {
+            g.as_ref()
+                .map(|m| m.iter().map(|(k, v)| (k.clone(), v.asked_at)).collect())
+        })
+        .unwrap_or_default();
+    Ok(state
+        .store
+        .nodes()
+        .await?
+        .iter()
+        .filter(|n| {
+            let worker = node_worker(n);
+            n.status == "approved"
+                && n.ai_help
+                && n.last_seen.is_some_and(|s| s > now - NODE_QUIET_MS)
+                && matches!(NodeAiReport::of(n).phase.as_str(), "working" | "ready")
+                && asked.get(&worker).is_some_and(|&a| a > now - NODE_ASKED_MS)
+                && !held.iter().any(|h| h.worker == worker)
+        })
+        .count())
+}
+
+/// A node that asked for work within this long is still asking.
+const NODE_ASKED_MS: i64 = 60 * 1000;
 /// A node that hasn't checked in for this long isn't free to help.
 const NODE_QUIET_MS: i64 = 30 * 1000;
 /// How soon a node that got nothing asks again, so a song made ready for
@@ -239,9 +273,20 @@ const NODE_WAIT_SECS: u64 = 15;
 const VOCALS_MAX_BYTES: usize = 40 << 20;
 /// Setting key: Main isolates vocals for nodes when it can.
 pub const VOCALS_FOR_NODES: &str = "ai_vocals_for_nodes";
+/// Setting key: while nodes wait for work, this computer's listener leaves
+/// new songs to them (doing second opinions only).
+pub const NODES_FIRST: &str = "ai_nodes_first";
 /// Setting key: a song a node's model wasn't sure enough of goes to this
 /// computer's listener (a bigger model) for a second opinion.
 pub const SECOND_OPINION: &str = "ai_second_opinion";
+
+/// Whether this computer's listener leaves new songs to nodes waiting for
+/// work right now (the setting is on and at least one waits).
+async fn leaves_to_nodes(state: &AppState, name: &str) -> anyhow::Result<bool> {
+    Ok(name == crate::ai_listener::LOCAL_KEY_NAME
+        && settings::flag(&state.store, NODES_FIRST, true).await?
+        && nodes_waiting(state).await? > 0)
+}
 
 /// Whether songs a node wasn't sure of go to this computer's listener: the
 /// setting is on and the listener is installed here to take them.
@@ -259,6 +304,7 @@ struct Status {
     sync_plain: bool,
     vocals_for_nodes: bool,
     second_opinion: bool,
+    nodes_first: bool,
     min_match: i64,
     skip_genres: Vec<String>,
     counts: AiCounts,
@@ -348,6 +394,7 @@ async fn status(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json<S
         sync_plain: settings::flag(&state.store, WORK_SYNC, false).await?,
         vocals_for_nodes: settings::flag(&state.store, VOCALS_FOR_NODES, true).await?,
         second_opinion: settings::flag(&state.store, SECOND_OPINION, true).await?,
+        nodes_first: settings::flag(&state.store, NODES_FIRST, true).await?,
         waiting_second: state.store.ai_second_count().await?,
         min_match: min_match(&state).await?,
         skip_genres: skip_genres(&state).await?,
@@ -375,6 +422,8 @@ struct Settings {
     vocals_for_nodes: bool,
     #[serde(default = "yes")]
     second_opinion: bool,
+    #[serde(default = "yes")]
+    nodes_first: bool,
     #[serde(default)]
     min_match: Option<i64>,
     #[serde(default)]
@@ -395,6 +444,7 @@ async fn put_settings(
     settings::set_flag(&state.store, WORK_SYNC, body.sync_plain).await?;
     settings::set_flag(&state.store, VOCALS_FOR_NODES, body.vocals_for_nodes).await?;
     settings::set_flag(&state.store, SECOND_OPINION, body.second_opinion).await?;
+    settings::set_flag(&state.store, NODES_FIRST, body.nodes_first).await?;
     if let Some(pct) = body.min_match {
         state
             .store
@@ -870,7 +920,7 @@ async fn hand_out(state: &AppState, name: &str, asker: Asker, body: Next) -> Api
         jobs: Vec::new(),
         wait_secs: Some(if asker == Asker::Node {
             NODE_WAIT_SECS
-        } else if body.role == Role::All {
+        } else if body.role == Role::All && name != crate::ai_listener::LOCAL_KEY_NAME {
             WAIT_SECS
         } else {
             STRIPPING_WAIT_SECS
@@ -931,12 +981,14 @@ async fn hand_out(state: &AppState, name: &str, asker: Asker, body: Next) -> Api
             if background && left > 0 && name == crate::ai_listener::LOCAL_KEY_NAME {
                 jobs.extend(state.store.ai_claim_second(name, left).await?);
             }
+            // Second opinions first; new songs only when no node waits.
+            let step_back = jobs.is_empty() && leaves_to_nodes(state, name).await?;
             let left = max - i64::try_from(jobs.len()).unwrap_or(max);
-            if background && left > 0 && shares_vocals {
+            if background && left > 0 && shares_vocals && !step_back {
                 jobs.extend(state.store.ai_claim_prepared(name, left).await?);
             }
             let left = max - i64::try_from(jobs.len()).unwrap_or(max);
-            if left > 0 && !stripping {
+            if left > 0 && !stripping && !step_back {
                 jobs.extend(
                     state
                         .store
@@ -952,8 +1004,9 @@ async fn hand_out(state: &AppState, name: &str, asker: Asker, body: Next) -> Api
             if background && left > 0 && name == crate::ai_listener::LOCAL_KEY_NAME {
                 jobs.extend(state.store.ai_claim_second(name, left).await?);
             }
+            let step_back = jobs.is_empty() && leaves_to_nodes(state, name).await?;
             let left = max - i64::try_from(jobs.len()).unwrap_or(max);
-            if left > 0 {
+            if left > 0 && !step_back {
                 jobs.extend(
                     state
                         .store

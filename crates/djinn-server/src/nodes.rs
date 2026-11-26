@@ -2450,5 +2450,52 @@ mod tests {
             .join(format!("{two}.flac"))
             .exists());
         assert_eq!(crate::ai_work::speed_of("node:kitchen-0001"), Some(30.0));
+
+        // The first song it took was an instrumental: marked as one.
+        let one = first["jobs"][0]["track_id"].as_i64().unwrap();
+        let (status, text) = send(
+            &state,
+            Method::POST,
+            &format!("/api/nodes/ai/result/{one}"),
+            Some(r#"{"error":"instrumental"}"#),
+            node,
+            true,
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT, "{text}");
+        assert!(state.store.lyrics(one).await.unwrap().unwrap().instrumental);
+        // The node is free again and asking: this computer's listener leaves
+        // a new song to it (second opinions only)...
+        state.store.save_scanned(&[song("Three")]).await.unwrap();
+        let three = state
+            .store
+            .compare_rows()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|r| r.title == "Three")
+            .unwrap()
+            .id;
+        state
+            .store
+            .save_read_lyrics(three, 1, &NewLyrics::NONE)
+            .await
+            .unwrap();
+        state
+            .store
+            .save_looked_up_lyrics(three, None)
+            .await
+            .unwrap();
+        let listen = Some(r#"{"max":1,"role":"listen"}"#);
+        let (_, body) = from_home(&state, Method::POST, "/api/ai-work/next", listen, local).await;
+        let batch: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(batch["jobs"].as_array().unwrap().len(), 0, "{body}");
+        // ...unless nodes don't go first.
+        settings::set_flag(&state.store, crate::ai_work::NODES_FIRST, false)
+            .await
+            .unwrap();
+        let (_, body) = from_home(&state, Method::POST, "/api/ai-work/next", listen, local).await;
+        let batch: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(batch["jobs"][0]["track_id"], three, "{body}");
     }
 }

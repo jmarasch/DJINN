@@ -172,7 +172,9 @@ vocals are ready. It keeps one song ready for each listener that's free (each
 node free to help, and its own) and one spare, and every listener takes from
 those, so every song gets the cleaner listen. **Listen on** chooses where its
 own listening runs: the graphics card beside the vocal separation (faster),
-or the processor, leaving the card to the separation.
+or the processor, leaving the card to the separation. **Songs to separate at
+once** (2 by default) runs that many separations side by side, each using
+about 1.2 GB of the graphics card, so nodes always have songs ready.
 
 **Give songs a node wasn't sure of to this computer's model** (on by
 default): nodes run smaller models, which are less sure of what they hear.
@@ -180,6 +182,12 @@ When a node's lyrics score under the minimum, this computer's listener tries
 the song with its bigger model before giving up, using the vocals already
 separated. Songs a listener hears no singing in are marked as instrumentals,
 so they no longer count as missing lyrics.
+
+**Let nodes go first** (on by default): this computer's listener always
+does second opinions first, and takes a new song only while no node is
+waiting for work, so the nodes stay busy and this computer keeps separating
+vocals. Switch it off to have everyone take songs, which finishes the most
+songs.
 
 **Nodes Helping** lists every node switched on to help, with a light:
 
