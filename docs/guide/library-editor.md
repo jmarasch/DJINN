@@ -20,7 +20,8 @@ window, press **Lock and Close**, or leave it ten minutes.
 [Library problems](library-problems.md) open the editor straight on the songs
 involved with **Fix in the Editor**.
 
-The window has three tabs: **Editor**, **Library Folders** and **Compare**.
+The window has four tabs: **Editor**, **Library Folders**, **Compare** and
+**[Library Problems](library-problems.md)**.
 
 ## Library folders: what may be changed
 
@@ -260,9 +261,9 @@ already has one, it says so.
 
 To fix them:
 
-1. In **Admin > Library Problems**, open **MP3s with no length header** and
-   select **Fix in the Editor** beside a song. The editor opens on its folder
-   and asks for your password.
+1. On the **Library Problems** tab, open **MP3s with no length header** and
+   select **Fix in the Editor** beside a song. The Editor tab opens on its
+   folder.
 2. The first time, go to the **Library Folders** tab and make the folder that
    holds the songs **Read and Write**. Every folder is read only until you do.
 3. Back on the **Editor** tab, choose **Library** at the top (the files, not

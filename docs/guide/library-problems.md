@@ -1,9 +1,13 @@
 # Library problems
 
-**Admin > Library Problems** shows what the last library check couldn't add or
-found broken, and gaps in your tags, so you can tidy your library. Only music
-files are checked; pictures, playlists and other files in your folders are
-left alone. The menu shows a count when something needs a look.
+**Library Problems** is the last tab of the Library Editor's window
+(**Admin > Library Editor > Open the Library Editor**), so it's behind the
+same lock as the tools that fix what it finds. It shows what the last library
+check couldn't add or found broken, and gaps in your tags, so you can tidy
+your library. Only music files are checked; pictures, playlists and other
+files in your folders are left alone. **Library Editor** in the Admin menu
+shows a count when something needs a look, and Admin's Overview links
+straight to the tab.
 
 DJINN never deletes or changes anything from here by itself. Each kind of
 problem has a way to fix it: a button that opens the
@@ -21,7 +25,7 @@ Problems come in two groups:
 - **Worth a Look:** things that work but could be better, like gaps in tags,
   messy titles or missing lyrics.
 
-![Admin > Library Problems](images/admin-problems.webp)
+![Library Problems](images/admin-problems.webp)
 
 Open a kind to see its songs. **Hide This Kind** tucks away a kind you know
 about and don't care to fix; hidden kinds are listed at the bottom, and

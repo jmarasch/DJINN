@@ -185,13 +185,6 @@ export const adminGroups = [
           return t('admin.menu.signins')
         },
       },
-      {
-        id: 'problems',
-        icon: 'warning',
-        get label() {
-          return t('admin.menu.problems')
-        },
-      },
     ],
   },
 ] as const

@@ -95,7 +95,7 @@ The **...** button next to a song opens its menu:
 - **Add to Playlist** (accounts, not guests).
 - **Report a Problem:** tell the host the title, artist or album is wrong, the
   cover is wrong, it sounds bad or cuts off, or it plays a different song.
-  Reports land in **Admin > Library Problems**.
+  Reports land on the Library Editor's **Library Problems** tab.
 
 ![A song's menu, with its genres, More Like This and Report a Problem](images/phone-song-menu.webp)
 

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { openProblems } from '../lib/editorJump.svelte'
   import { api } from '../lib/api'
   import FolderPicker from '../lib/FolderPicker.svelte'
   import Icon from '../lib/Icon.svelte'
@@ -6,9 +7,6 @@
   import BackupPanel from '../lib/BackupPanel.svelte'
   import LibraryExtras from '../lib/LibraryExtras.svelte'
   import LibraryProgress from '../lib/LibraryProgress.svelte'
-  import LibraryProblems from '../lib/LibraryProblems.svelte'
-  import LibraryDuplicates from '../lib/LibraryDuplicates.svelte'
-  import ScheduledCheck from '../lib/ScheduledCheck.svelte'
   import { clearListCache } from '../lib/listCache'
   import LogViewer from '../lib/LogViewer.svelte'
   import SignInLog from '../lib/SignInLog.svelte'
@@ -234,7 +232,7 @@
   })
 
   async function load(which: AdminTab) {
-    if (which === 'home' || which === 'problems' || which === 'stats') {
+    if (which === 'home' || which === 'stats') {
       // These load their own data.
     } else if (which === 'library') {
       const [r, status, s, rg] = await Promise.all([
@@ -325,10 +323,6 @@
 {:else if id === 'stats'}
   <StatsPanel />
   <SearchesWishes />
-{:else if id === 'problems'}
-  <ScheduledCheck />
-  <LibraryProblems />
-  <LibraryDuplicates />
 {:else if id === 'library'}
   {@render subtabs('library', adminSubtabs('library'))}
   <div data-subtab="folders" hidden={sub.library !== 'folders'}>
@@ -372,7 +366,13 @@
     <button onclick={() => attempt(api.openArtFolder)}>{t('admin.open_image_folder')}</button>
   </section>
   </div>
-  <p class="small muted">{t('admin.problems_note')} <a href="#/admin/problems">{t('admin.problems_link')}</a>.</p>
+  <p class="small muted">{t('admin.problems_note')} <a
+      href="#/editor?tab=problems"
+      onclick={(e) => {
+        e.preventDefault()
+        openProblems()
+      }}>{t('admin.problems_link')}</a
+    >.</p>
   </div>
 
   <div data-subtab="settings" hidden={sub.library !== 'settings'}>
@@ -631,7 +631,7 @@
               {#if layout === 'page'}
                 <button class="nav-item" class:active={inView === item.id} onclick={() => jump(document.getElementById(`admin-${item.id}`))}>
                   {item.label}
-                  {#if item.id === 'problems' && trouble > 0}<span class="badge">{trouble.toLocaleString(locale.code)}</span>{/if}
+                  {#if item.id === 'editor' && trouble > 0}<span class="badge">{trouble.toLocaleString(locale.code)}</span>{/if}
                   {#if changedTabs.has(item.id)}<span class="changed-dot" title={t('admin.has_changed')}></span>{/if}
                 </button>
                 {#if (cards[item.id]?.length ?? 0) > 1}
@@ -645,7 +645,7 @@
                 <a href="#/admin/{item.id}" class:active={tab === item.id} aria-current={tab === item.id ? 'page' : undefined}>
                   <Icon name={item.icon} size={20} />
                   {item.label}
-                  {#if item.id === 'problems' && trouble > 0}<span class="badge">{trouble.toLocaleString(locale.code)}</span>{/if}
+                  {#if item.id === 'editor' && trouble > 0}<span class="badge">{trouble.toLocaleString(locale.code)}</span>{/if}
                   {#if changedTabs.has(item.id)}<span class="changed-dot" title={t('admin.has_changed')}></span>{/if}
                 </a>
               {/if}

@@ -185,9 +185,9 @@ export const adminEntries: AdminEntry[] = [
   { label: 'YouTube playlist links', text: 'libx.youtube', tab: 'library', keywords: 'youtube import api key' },
   { label: 'Image cache', text: 'admin.image_cache', tab: 'library', keywords: 'art covers folder' },
   // Problems
-  { label: 'Problems', text: 'admin.home.problems', tab: 'problems', keywords: 'broken missing unsupported tags reported diagnostics' },
-  { label: 'Possible duplicates', text: 'dup.title', tab: 'problems', keywords: 'copies duplicate same song' },
-  { label: 'Check the library every night', text: 'sc.on', tab: 'problems', keywords: 'nightly scheduled check summary', key: 'scheduled_check' },
+  { label: 'Problems', text: 'admin.home.problems', tab: 'editor', keywords: 'broken missing unsupported tags reported diagnostics' },
+  { label: 'Possible duplicates', text: 'dup.title', tab: 'editor', keywords: 'copies duplicate same song' },
+  { label: 'Check the library every night', text: 'sc.on', tab: 'editor', keywords: 'nightly scheduled check summary', key: 'scheduled_check' },
   // AI
   { label: 'Listen to songs with AI', text: 'ai.listen_on', tab: 'ai', keywords: 'ai listening clap genres' },
   {
