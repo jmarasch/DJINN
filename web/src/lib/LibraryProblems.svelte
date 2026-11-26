@@ -190,6 +190,16 @@
     {#if open === k.kind}
       <div class="detail">
         <p class="small muted">{about(k.kind).hint}</p>
+        <!-- This list's tools, at the top so they're seen before a long list. -->
+        <div class="actions tools">
+          {#if k.kind === 'no_loudness'}
+            <button class="small-button" onclick={measure}>{t('prob.measure')}</button>
+          {/if}
+          {#if k.kind === 'no_length_header'}
+            <button class="small-button" onclick={mp3Again}>{t('prob.read_again')}</button>
+          {/if}
+          <button class="small-button" onclick={() => setHidden(k.kind, true)}>{t('prob.hide')}</button>
+        </div>
         <ul class="items">
           {#each items as item, i (i)}
             <li>
@@ -269,18 +279,11 @@
             </li>
           {/each}
         </ul>
-        <div class="actions">
-          {#if items.length < openCount}
+        {#if items.length < openCount}
+          <div class="actions">
             <button class="small-button" disabled={loading} onclick={more}>{t('common.show_more')}</button>
-          {/if}
-          {#if k.kind === 'no_loudness'}
-            <button class="small-button" onclick={measure}>{t('prob.measure')}</button>
-          {/if}
-          {#if k.kind === 'no_length_header'}
-            <button class="small-button" onclick={mp3Again}>{t('prob.read_again')}</button>
-          {/if}
-          <button class="small-button" onclick={() => setHidden(k.kind, true)}>{t('prob.hide')}</button>
-        </div>
+          </div>
+        {/if}
       </div>
     {/if}
   </div>
@@ -455,6 +458,10 @@
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
+  }
+
+  .actions.tools {
+    margin-bottom: 10px;
   }
 
   .link {
