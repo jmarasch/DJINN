@@ -87,6 +87,7 @@
         new_songs: work.new_songs,
         sync_plain: work.sync_plain,
         vocals_for_nodes: work.vocals_for_nodes,
+        second_opinion: work.second_opinion,
         min_match: minMatch ?? work.min_match,
         skip_genres: skipGenres ?? work.skip_genres,
       })
@@ -213,8 +214,9 @@
     </form>
     <p class="small">
       {t('aw.waiting', { listen: n(work.counts.waiting_listen), sync: n(work.counts.waiting_sync) })}
-      {t('aw.working', { n: n(work.counts.working) })}{#if work.counts.prepared}
-        {t('aw.prepared', { n: n(work.counts.prepared) })}{/if}
+      {t('aw.working', { n: n(work.counts.working) })}
+      {#if work.counts.prepared}{t('aw.prepared', { n: n(work.counts.prepared) })}{/if}
+      {#if work.waiting_second}{t('aw.waiting_second', { n: n(work.waiting_second) })}{/if}
       {t('aw.done_failed', { done: n(work.counts.done), failed: n(work.counts.failed) })}
       {#if work.counts.failed}<button class="link" onclick={() => act(api.retryAiWork, t('aw.retry'))}
           >{t('common.try_again')}</button
@@ -275,6 +277,11 @@
           {t('aw.vocals_needs')}
         {/if}
       </p>
+      <label class="switch">
+        <input type="checkbox" bind:checked={work.second_opinion} onchange={saveWork} />
+        {t('aw.second_opinion')}
+      </label>
+      <p class="small muted sub">{t('aw.second_opinion_note')}</p>
     {/if}
     <div class="actions">
       <button onclick={() => act(api.installAiListener)} disabled={listener.installing}>

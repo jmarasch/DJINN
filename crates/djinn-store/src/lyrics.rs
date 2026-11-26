@@ -484,6 +484,20 @@ impl Store {
         Ok(done.rows_affected())
     }
 
+    /// Marks a song the AI listener heard no singing in as an instrumental
+    /// (only while it has no lyrics).
+    pub async fn mark_instrumental(&self, track_id: i64) -> Result<()> {
+        sqlx::query(
+            "UPDATE lyrics SET instrumental = 1, updated_at = ?
+             WHERE track_id = ? AND source = 'none'",
+        )
+        .bind(now_ms())
+        .bind(track_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
     pub async fn lyrics_counts(&self) -> Result<LyricsCounts> {
         Ok(sqlx::query_as(
             "SELECT

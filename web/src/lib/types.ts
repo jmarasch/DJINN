@@ -1752,6 +1752,10 @@ export interface AiWorkStatus {
   sync_plain: boolean
   /** Main isolates vocals for helping nodes when it can. */
   vocals_for_nodes: boolean
+  /** Songs a node wasn't sure of go to this computer's listener. */
+  second_opinion: boolean
+  /** Songs waiting for that second opinion. */
+  waiting_second: number
   /** The least an AI's lyrics must score to be kept, in percent. */
   min_match: number
   /** Genres whose songs get no AI lyrics. */

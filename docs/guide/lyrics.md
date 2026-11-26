@@ -174,6 +174,13 @@ those, so every song gets the cleaner listen. **Listen on** chooses where its
 own listening runs: the graphics card beside the vocal separation (faster),
 or the processor, leaving the card to the separation.
 
+**Give songs a node wasn't sure of to this computer's model** (on by
+default): nodes run smaller models, which are less sure of what they hear.
+When a node's lyrics score under the minimum, this computer's listener tries
+the song with its bigger model before giving up, using the vocals already
+separated. Songs a listener hears no singing in are marked as instrumentals,
+so they no longer count as missing lyrics.
+
 **Nodes Helping** lists every node switched on to help, with a light:
 
 - **Green:** working, and the song it's on.

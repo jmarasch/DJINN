@@ -204,6 +204,12 @@ export const adminEntries: AdminEntry[] = [
     keywords: 'ai lyrics nodes vocals demucs',
     key: 'ai_vocals_for_nodes',
   },
+  {
+    label: "Give songs a node wasn't sure of to this computer's model", text: 'aw.second_opinion',
+    tab: 'ai',
+    keywords: 'ai lyrics nodes second opinion low score bigger model retry',
+    key: 'ai_second_opinion',
+  },
   { label: 'Spotify account for album lookups', text: 'libx.spotify', tab: 'library', keywords: 'spotify client id secret album lookup' },
   { label: 'Help with AI lyrics', text: 'nai.help', tab: 'nodes', keywords: 'ai lyrics node whisper helper' },
   // System

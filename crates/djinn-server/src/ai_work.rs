@@ -239,6 +239,16 @@ const NODE_WAIT_SECS: u64 = 15;
 const VOCALS_MAX_BYTES: usize = 40 << 20;
 /// Setting key: Main isolates vocals for nodes when it can.
 pub const VOCALS_FOR_NODES: &str = "ai_vocals_for_nodes";
+/// Setting key: a song a node's model wasn't sure enough of goes to this
+/// computer's listener (a bigger model) for a second opinion.
+pub const SECOND_OPINION: &str = "ai_second_opinion";
+
+/// Whether songs a node wasn't sure of go to this computer's listener: the
+/// setting is on and the listener is installed here to take them.
+async fn second_opinions(state: &AppState) -> anyhow::Result<bool> {
+    Ok(settings::flag(&state.store, SECOND_OPINION, true).await?
+        && crate::ai_listener::installed(&crate::ai_listener::dir(state)))
+}
 
 // --- Admin ---
 
@@ -248,9 +258,12 @@ struct Status {
     new_songs: bool,
     sync_plain: bool,
     vocals_for_nodes: bool,
+    second_opinion: bool,
     min_match: i64,
     skip_genres: Vec<String>,
     counts: AiCounts,
+    /// Songs a node wasn't sure of, waiting for this computer's listener.
+    waiting_second: i64,
     /// Why handing out work is paused (music playing, outside the hours).
     held: Option<crate::background::Held>,
     keys: Vec<String>,
@@ -334,6 +347,8 @@ async fn status(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json<S
         new_songs: settings::flag(&state.store, WORK_NEW, true).await?,
         sync_plain: settings::flag(&state.store, WORK_SYNC, false).await?,
         vocals_for_nodes: settings::flag(&state.store, VOCALS_FOR_NODES, true).await?,
+        second_opinion: settings::flag(&state.store, SECOND_OPINION, true).await?,
+        waiting_second: state.store.ai_second_count().await?,
         min_match: min_match(&state).await?,
         skip_genres: skip_genres(&state).await?,
         counts: state
@@ -358,6 +373,8 @@ struct Settings {
     sync_plain: bool,
     #[serde(default = "yes")]
     vocals_for_nodes: bool,
+    #[serde(default = "yes")]
+    second_opinion: bool,
     #[serde(default)]
     min_match: Option<i64>,
     #[serde(default)]
@@ -377,6 +394,7 @@ async fn put_settings(
     settings::set_flag(&state.store, WORK_NEW, body.new_songs).await?;
     settings::set_flag(&state.store, WORK_SYNC, body.sync_plain).await?;
     settings::set_flag(&state.store, VOCALS_FOR_NODES, body.vocals_for_nodes).await?;
+    settings::set_flag(&state.store, SECOND_OPINION, body.second_opinion).await?;
     if let Some(pct) = body.min_match {
         state
             .store
@@ -875,6 +893,10 @@ async fn hand_out(state: &AppState, name: &str, asker: Asker, body: Next) -> Api
                 Vec::new()
             };
             let left = max - i64::try_from(jobs.len()).unwrap_or(max);
+            if background && left > 0 && name == crate::ai_listener::LOCAL_KEY_NAME {
+                jobs.extend(state.store.ai_claim_second(name, left).await?);
+            }
+            let left = max - i64::try_from(jobs.len()).unwrap_or(max);
             if background && left > 0 && shares_vocals {
                 jobs.extend(state.store.ai_claim_prepared(name, left).await?);
             }
@@ -891,6 +913,10 @@ async fn hand_out(state: &AppState, name: &str, asker: Asker, body: Next) -> Api
         }
         Role::All => {
             let mut jobs = claim_imports(state, name, max_usize).await?;
+            let left = max - i64::try_from(jobs.len()).unwrap_or(max);
+            if background && left > 0 && name == crate::ai_listener::LOCAL_KEY_NAME {
+                jobs.extend(state.store.ai_claim_second(name, left).await?);
+            }
             let left = max - i64::try_from(jobs.len()).unwrap_or(max);
             if left > 0 {
                 jobs.extend(
@@ -1060,8 +1086,11 @@ async fn finish_track_result(
     let kind_number = if kind == "sync" { 2 } else { 1 };
     let min = min_match(state).await?;
     let failure = match (&body.lrc, &body.error) {
-        // An instrumental has no lyrics to make: finished, nothing stored.
-        (None, Some(error)) if error == "instrumental" => None,
+        // An instrumental has no lyrics to make: finished, and marked as one.
+        (None, Some(error)) if error == "instrumental" => {
+            state.store.mark_instrumental(id).await?;
+            None
+        }
         (Some(text), _) => match too_unsure(text, min) {
             Some(why) => Some(why),
             None => store_from_worker(state, id, text, kind_number, name)
@@ -1071,14 +1100,30 @@ async fn finish_track_result(
         (None, Some(error)) => Some(error.chars().take(200).collect()),
         (None, None) => Some("sent nothing".to_owned()),
     };
-    // A low score won't change by asking again, so the song isn't retried
-    // (until an admin retries failed songs, say after lowering the minimum).
-    if failure.as_deref().is_some_and(|f| f.starts_with(LOW_SCORE)) {
+    // A low score won't change by asking the same model again, so the song
+    // isn't retried (until an admin retries failed songs, say after
+    // lowering the minimum); one a node's smaller model wasn't sure of goes
+    // to this computer's bigger one first, keeping its separated vocals.
+    let low = failure.as_deref().is_some_and(|f| f.starts_with(LOW_SCORE));
+    let second = low && name.starts_with("node:") && second_opinions(state).await?;
+    if second {
+        tracing::debug!(
+            worker = name,
+            song = id,
+            "a second opinion from this computer"
+        );
+        state
+            .store
+            .ai_second_opinion(id, failure.as_deref())
+            .await?;
+    } else if low {
         state.store.ai_give_up(id, failure.as_deref()).await?;
     } else {
         state.store.ai_finish(id, failure.as_deref()).await?;
     }
-    let _ = tokio::fs::remove_file(vocals_file(state, id)).await;
+    if !second {
+        let _ = tokio::fs::remove_file(vocals_file(state, id)).await;
+    }
     let audio_ms = state
         .store
         .track(id)

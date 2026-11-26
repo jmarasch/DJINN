@@ -445,7 +445,8 @@ macro_rules! name_mismatch_from {
 macro_rules! no_lyrics_from {
     () => {
         "FROM tracks t LEFT JOIN lyrics l ON l.track_id = t.id
-         WHERE t.removed_at IS NULL AND (l.track_id IS NULL OR l.source = 'none')"
+         WHERE t.removed_at IS NULL
+           AND (l.track_id IS NULL OR (l.source = 'none' AND l.instrumental = 0))"
     };
 }
 macro_rules! no_loudness_from {

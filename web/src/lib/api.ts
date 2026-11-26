@@ -296,6 +296,7 @@ export const api = {
     new_songs: boolean
     sync_plain: boolean
     vocals_for_nodes: boolean
+    second_opinion: boolean
     min_match?: number
     skip_genres?: string[]
   }) =>
