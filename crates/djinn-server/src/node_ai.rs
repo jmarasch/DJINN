@@ -174,6 +174,12 @@ async fn tick(node: &Node, helper: &Helper) {
             helper.set("paused", why());
             return;
         }
+        // This node's DJINN's worker program, so an update reaches the
+        // installed listener without installing again.
+        if let Err(e) = ai_listener::write_pack(&helper.dir).await {
+            helper.set("failed", Some(format!("couldn't write the listener: {e}")));
+            return;
+        }
         match start(node, helper, &wanted.model) {
             Ok(started) => {
                 *child = Some(started);

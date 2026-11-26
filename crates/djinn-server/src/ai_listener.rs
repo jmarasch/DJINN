@@ -641,6 +641,9 @@ pub async fn start_worker(state: &AppState) -> anyhow::Result<()> {
     if is_running() {
         return Ok(());
     }
+    // This DJINN's worker program, so an update reaches an installed
+    // listener without installing again (the packages stay as they are).
+    write_pack(&d).await.map_err(anyhow::Error::msg)?;
     let key = local_key(state, &d).await?;
     let model = state
         .store

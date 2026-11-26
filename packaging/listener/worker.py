@@ -53,6 +53,34 @@ MAX_WAIT = 600
 STOP = False
 
 
+def _audio_reader_compat() -> None:
+    """faster-whisper opens files with an option (`metadata_errors`) that
+    newer PyAV releases (19 and on) no longer take, which failed every song;
+    when the reader refuses it, open the file again without it."""
+    try:
+        import av
+    except ImportError:
+        return
+    if getattr(av.open, "_djinn_compat", False):
+        return
+    original = av.open
+
+    def open_compat(*args, **kwargs):
+        try:
+            return original(*args, **kwargs)
+        except TypeError as e:
+            if "metadata_errors" not in str(e) or "metadata_errors" not in kwargs:
+                raise
+            kwargs.pop("metadata_errors")
+            return original(*args, **kwargs)
+
+    open_compat._djinn_compat = True
+    av.open = open_compat
+
+
+_audio_reader_compat()
+
+
 def _stop(*_args):
     global STOP
     STOP = True
