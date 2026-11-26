@@ -148,12 +148,30 @@ impl Store {
     }
 
     /// A song's file moved (a rename): its record follows.
+    ///
+    /// Called once the file is at `path`, so another song still claiming that
+    /// path is out of date (its file was deleted or moved away and no check
+    /// has noticed yet): it's marked removed and its path set aside, so the
+    /// song moved there keeps its own id, plays and likes.
     pub async fn move_track_path(&self, track_id: i64, path: &str) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query(
+            "UPDATE tracks SET path = path || ' (gone, replaced by song ' || ? || ')',
+                removed_at = coalesce(removed_at, ?)
+             WHERE path = ? AND id != ?",
+        )
+        .bind(track_id)
+        .bind(now_ms())
+        .bind(path)
+        .bind(track_id)
+        .execute(&mut *tx)
+        .await?;
         sqlx::query("UPDATE tracks SET path = ? WHERE id = ?")
             .bind(path)
             .bind(track_id)
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await?;
+        tx.commit().await?;
         Ok(())
     }
 }
@@ -223,5 +241,50 @@ mod tests {
         assert!(store.file_batch(batch).await.unwrap()[0]
             .undone_at
             .is_some());
+    }
+
+    #[tokio::test]
+    async fn a_move_onto_a_gone_songs_path_sets_the_old_entry_aside() {
+        let store = Store::open_in_memory().await.unwrap();
+        store
+            .save_scanned(&[
+                ScannedTrack {
+                    path: "/a/x.mp3".into(),
+                    title: "X".into(),
+                    size: 1,
+                    mtime: 1,
+                    ..Default::default()
+                },
+                ScannedTrack {
+                    path: "/b/x.mp3".into(),
+                    title: "X copy".into(),
+                    size: 1,
+                    mtime: 1,
+                    ..Default::default()
+                },
+            ])
+            .await
+            .unwrap();
+        let id_of = |p: &'static str| {
+            let store = store.clone();
+            async move {
+                sqlx::query_scalar::<_, i64>("SELECT id FROM tracks WHERE path = ?")
+                    .bind(p)
+                    .fetch_one(&store.pool)
+                    .await
+                    .unwrap()
+            }
+        };
+        let (moving, stale) = (id_of("/a/x.mp3").await, id_of("/b/x.mp3").await);
+        store.move_track_path(moving, "/b/x.mp3").await.unwrap();
+        assert_eq!(id_of("/b/x.mp3").await, moving);
+        let (path, removed): (String, Option<i64>) =
+            sqlx::query_as("SELECT path, removed_at FROM tracks WHERE id = ?")
+                .bind(stale)
+                .fetch_one(&store.pool)
+                .await
+                .unwrap();
+        assert_ne!(path, "/b/x.mp3");
+        assert!(removed.is_some());
     }
 }

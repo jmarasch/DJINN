@@ -1149,13 +1149,20 @@ pub(crate) async fn relocate(
         }
         // Lyrics beside the song keep its name.
         let lrc = Path::new(&file.from).with_extension("lrc");
-        if lrc.is_file() {
-            let _ = move_file(
-                &lrc.to_string_lossy(),
-                &Path::new(&file.to).with_extension("lrc").to_string_lossy(),
-            );
+        let lrc_to = Path::new(&file.to).with_extension("lrc");
+        let lrc_moved =
+            lrc.is_file() && move_file(&lrc.to_string_lossy(), &lrc_to.to_string_lossy()).is_ok();
+        if let Err(e) = state.store.move_track_path(file.id, &file.to).await {
+            // The file goes back rather than being left where the library
+            // doesn't know it, and the rest carry on.
+            tracing::warn!(error = %e, from = %file.from, to = %file.to, "moving a song's record failed");
+            let _ = move_file(&file.to, &file.from);
+            if lrc_moved {
+                let _ = move_file(&lrc_to.to_string_lossy(), &lrc.to_string_lossy());
+            }
+            file.problem = Some(format!("the library couldn't record the move: {e}"));
+            continue;
         }
-        state.store.move_track_path(file.id, &file.to).await?;
         let (size, mtime) = stat(Path::new(&file.to)).map_err(anyhow::Error::from)?;
         state
             .store
