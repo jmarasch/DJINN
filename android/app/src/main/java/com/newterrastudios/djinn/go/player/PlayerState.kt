@@ -32,6 +32,8 @@ import kotlinx.coroutines.launch
 /** Songs left when a radio asks for more. */
 private const val RADIO_LOW = 5
 private const val RADIO_EXCLUDE = 400
+/** The radio seed that means wild play: random songs from the whole library. */
+private const val WILD_SEED = -1L
 
 private const val ARTIST_ID = "com.newterrastudios.djinn.go.artist_id"
 private const val ALBUM_ID = "com.newterrastudios.djinn.go.album_id"
@@ -190,6 +192,12 @@ class PlayerState(private val api: GoApi) {
         player.play()
     }
 
+    /** Wild play: plays `songs` and keeps adding random ones as it runs low. */
+    fun playWild(songs: List<Track>) {
+        play(songs)
+        radioSeed = WILD_SEED
+    }
+
     /** Turns shuffle on and starts from any of the songs. */
     fun playShuffled(songs: List<Track>) {
         if (songs.isEmpty()) return
@@ -267,8 +275,13 @@ class PlayerState(private val api: GoApi) {
                 val known = (0 until player.mediaItemCount).mapNotNull { player.getMediaItemAt(it).mediaId.toLongOrNull() }
                 // The newest are what matter if the queue has grown very long.
                 val lined = known.takeLast(RADIO_EXCLUDE)
-                var more = api.radio(seed, lined).filter { it.id !in known }
-                if (more.isEmpty()) {
+                var more = if (seed == WILD_SEED) {
+                    // The server leaves out what's lined up, and starts over in a small library.
+                    api.wild(lined)
+                } else {
+                    api.radio(seed, lined).filter { it.id !in known }
+                }
+                if (more.isEmpty() && seed != WILD_SEED) {
                     // Nothing left around the seed: wander on from the last song.
                     more = api.radio(known.last(), lined).filter { it.id !in known }
                 }

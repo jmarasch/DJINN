@@ -1,5 +1,5 @@
 <script lang="ts" module>
-  type MoveKind = 'rename' | 'move' | 'copy' | 'delete' | 'mp3'
+  type MoveKind = 'rename' | 'move' | 'copy' | 'delete'
 </script>
 
 <script lang="ts">
@@ -16,9 +16,10 @@
   import AlbumLayout from './AlbumLayout.svelte'
   import Art from './Art.svelte'
   import CoverWindow from './CoverWindow.svelte'
+  import Mp3FixWindow from './Mp3FixWindow.svelte'
   import { COMMON_TAGS, MORE_TAGS, NUMBER_TAGS, tagLabel } from './editorTags'
   import { autoMatch } from './autoMatch'
-  import { FOLDER_LAYOUTS, folderInfo, fromFileName, type FolderInfo, type FolderLayout } from './importLayout'
+  import { FOLDER_LAYOUTS, albumBase, folderInfo, fromFileName, type FolderInfo, type FolderLayout } from './importLayout'
   import { clearListCache } from './listCache'
   import { askToUnlock, unlocked } from './protected.svelte'
   import { toast } from './state.svelte'
@@ -75,6 +76,8 @@
   let searchText = $state('')
   let songs = $state<EditorSong[]>([])
   let total = $state(0)
+  /** The Fix MP3 Lengths window is open. */
+  let fixingMp3 = $state(false)
   let locked = $state(false)
   let loading = $state(false)
   let busy = $state(false)
@@ -488,6 +491,7 @@
     renames = null
     await loadImports()
     if (imports.length) await openImport(imports[0].batch)
+    void lookUpAll()
   }
 
   /** Each import's changes still waiting, kept while another is open. */
@@ -508,10 +512,10 @@
     picked = {}
     renames = null
     addPlan = null
-    autoNote = null
+    autoNote = noteOf(batch)
     if (!addFolder) addFolder = roots.find((r) => r.editable)?.path ?? ''
     await loadSongs(0)
-    if (importing === batch) void autoLookUp(batch)
+    if (importing === batch) void autoLookUp(batch, songs)
   }
 
   const AUDIO = /\.(mp3|flac|m4a|mp4|aac|ogg|oga|wav)$/i
@@ -607,6 +611,7 @@
       importing = null
       await openImport(batches[0])
     }
+    void lookUpAll()
   }
 
   async function throwAwayImports() {
@@ -740,40 +745,162 @@
     }
   }
 
-  // --- The automatic look-up: an import opened for the first time is looked
-  // up on Deezer, and only a complete match (see autoMatch) fills its tags,
-  // as changes highlighted in the grid.
-  const autoTried = new Set<number>()
+  // --- The automatic look-up: every import is looked up on Deezer in the
+  // background, one at a time, and only a complete match (see autoMatch)
+  // fills its tags, as waiting changes highlighted in the grid when it's
+  // opened. Matched imports are marked in the list on the left, so they can
+  // be picked and approved together (approvePicked).
+  type AutoState = 'looking' | 'matched' | 'none'
+  let autoState = $state<Record<number, AutoState>>({})
+  /** What each matched import was matched to. */
+  const autoFound: Record<number, { album: string; artist: string; changed: boolean }> = {}
   let autoNote = $state<{ text: string; found: boolean } | null>(null)
+  let lookingAll = false
 
-  async function autoLookUp(batch: number) {
-    if (autoTried.has(batch)) return
-    autoTried.add(batch)
-    autoNote = { text: t('ed.auto_looking'), found: false }
+  function noteOf(batch: number): { text: string; found: boolean } | null {
+    const state = autoState[batch]
+    if (state === 'looking') return { text: t('ed.auto_looking'), found: false }
+    if (state === 'none') return { text: t('ed.auto_none'), found: false }
+    const found = autoFound[batch]
+    if (state === 'matched' && found) {
+      const names = { album: found.album, artist: found.artist }
+      return { text: found.changed ? t('ed.auto_found', names) : t('ed.auto_same', names), found: true }
+    }
+    return null
+  }
+
+  async function autoLookUp(batch: number, list: EditorSong[] | null = null) {
+    if (autoState[batch]) return
+    autoState = { ...autoState, [batch]: 'looking' }
+    if (importing === batch) autoNote = noteOf(batch)
+    let result: AutoState = 'none'
     try {
-      const match = await autoMatch(songs)
-      if (importing !== batch) return
-      if (!match) {
-        autoNote = { text: t('ed.auto_none'), found: false }
-        return
-      }
-      for (const c of match.changes) setPending(c.song, c.field, c.value)
-      const names = { album: match.release.title, artist: match.release.artist }
-      autoNote = {
-        text: changeCount ? t('ed.auto_found', names) : t('ed.auto_same', names),
-        found: true,
-      }
-      // A cover only when the files have none.
-      if (match.release.has_cover !== false && songs.every((s) => !s.art_hash)) {
-        const res = await fetch(api.editorReleaseCover(match.hit.source, match.hit.id))
-        if (res.ok && importing === batch) {
-          const blob = await res.blob()
-          const kind = blob.type === 'image/png' ? 'png' : 'jpg'
-          await setCover('set', new File([blob], `cover.${kind}`, { type: blob.type }), songs)
+      const rows = list ?? (await api.editorImportSongs(batch)).songs
+      const match = await autoMatch(rows)
+      if (match) {
+        // The changes go to the import's waiting changes: straight into the
+        // grid when it's open, else kept for when it is. Changes made by hand
+        // meanwhile stay.
+        const byId = new Map(rows.map((r) => [r.id, r]))
+        let changed = false
+        if (importing === batch) {
+          for (const c of match.changes) {
+            if (pending[c.song.id]?.[c.field] !== undefined) continue
+            setPending(c.song, c.field, c.value)
+          }
+          changed = changeCount > 0
+        } else {
+          const waiting = { ...(waitingFor[batch] ?? {}) }
+          for (const c of match.changes) {
+            const song = byId.get(c.song.id) ?? c.song
+            const value = c.value.trim().replace(/\s+/g, ' ')
+            const fields = { ...(waiting[song.id] ?? {}) }
+            if (fields[c.field] !== undefined || value === original(song, c.field)) continue
+            fields[c.field] = value
+            waiting[song.id] = fields
+            changed = true
+          }
+          waitingFor[batch] = waiting
+        }
+        autoFound[batch] = { album: match.release.title, artist: match.release.artist, changed }
+        result = 'matched'
+        // A cover only when the files have none.
+        if (match.release.has_cover !== false && rows.every((s) => !s.art_hash)) {
+          const res = await fetch(api.editorReleaseCover(match.hit.source, match.hit.id))
+          if (res.ok) {
+            const blob = await res.blob()
+            const kind = blob.type === 'image/png' ? 'png' : 'jpg'
+            const file = new File([blob], `cover.${kind}`, { type: blob.type })
+            await unlocked(() => api.editorImportCover(rows.map((s) => s.id), file))
+            if (importing === batch) await loadSongs(0)
+          }
         }
       }
     } catch {
-      if (importing === batch) autoNote = { text: t('ed.auto_none'), found: false }
+      result = autoFound[batch] ? 'matched' : 'none'
+    }
+    autoState = { ...autoState, [batch]: result }
+    if (importing === batch) autoNote = noteOf(batch)
+  }
+
+  /** Looks up every import not looked up yet, one after another. */
+  async function lookUpAll() {
+    if (lookingAll) return
+    lookingAll = true
+    try {
+      for (let next = imports.find((i) => !autoState[i.batch]); next; next = imports.find((i) => !autoState[i.batch])) {
+        await autoLookUp(next.batch)
+      }
+    } finally {
+      lookingAll = false
+    }
+  }
+
+  /** Picks every import matched on Deezer. */
+  function pickMatched() {
+    pickedImports = Object.fromEntries(imports.filter((i) => autoState[i.batch] === 'matched').map((i) => [i.batch, true]))
+  }
+
+  /** Approves every picked import: writes its waiting changes and moves it
+   * into the library folder chosen on the right, as Approve Import does for one. */
+  async function approvePicked() {
+    const batches = pickedImportBatches
+    if (!batches.length || !addFolder || busy) return
+    const unmatched = batches.filter((b) => autoState[b] !== 'matched').length
+    if (!confirm(t('ed.approve_picked_q', { n: batches.length }) + (unmatched ? t('ed.approve_unmatched', { n: unmatched }) : ''))) return
+    const current = importing
+    if (current !== null && batches.includes(current)) waitingFor[current] = pending
+    busy = true
+    let albums = 0
+    let added = 0
+    const problems: string[] = []
+    try {
+      for (const batch of batches) {
+        try {
+          const changes: EditorChange[] = []
+          for (const [id, fields] of Object.entries(waitingFor[batch] ?? {})) {
+            for (const [field, value] of Object.entries(fields)) {
+              changes.push({ id: Number(id), field: field as EditorField, value: value === '' ? null : (value ?? null) })
+            }
+          }
+          if (changes.length) await unlocked(() => api.editorImportApply(changes))
+          delete waitingFor[batch]
+          const done = await unlocked(() => api.editorImportAdd(batch, addFolder, addPattern, false, []))
+          const went = done.files.filter((f) => !f.problem).length
+          if (went) albums++
+          added += went
+          const failed = done.files.find((f) => f.problem)
+          if (failed) problems.push(failed.problem ?? '')
+        } catch (e) {
+          problems.push(e instanceof Error ? e.message : t('ed.add_failed'))
+        }
+      }
+      toast(
+        t('ed.approved_picked', { n: albums, songs: n(added) }) +
+          (problems.length ? t('ed.werent', { n: problems.length, problem: problems[0] }) : ''),
+        problems.length > 0,
+      )
+      pickedImports = {}
+      lastPickedImport = null
+      await loadImports()
+      void loadHistory()
+      if (added > 0) {
+        clearListCache()
+        void refreshTree()
+      }
+      if (current !== null && batches.includes(current)) {
+        pending = waitingFor[current] ?? {}
+        delete waitingFor[current]
+        importing = null
+        songs = []
+        total = 0
+        chosen = null
+        addPlan = null
+        const next = imports.find((i) => i.batch === current) ?? imports[0]
+        if (next) await openImport(next.batch)
+      }
+    } finally {
+      busy = false
     }
   }
 
@@ -1175,8 +1302,9 @@
   function albumMates(song: EditorSong | null): EditorSong[] {
     if (!song) return []
     if (song.album_id != null) return songs.filter((s) => s.album_id === song.album_id)
-    const album = original(song, 'album')
-    if (album) return songs.filter((s) => s.album_id == null && original(s, 'album') === album)
+    // "Album CD 1" and "Album CD 2" are one album's discs.
+    const album = albumBase(original(song, 'album'))
+    if (album) return songs.filter((s) => s.album_id == null && albumBase(original(s, 'album')) === album)
     const folder = folderOf(song)
     return songs.filter((s) => s.album_id == null && !original(s, 'album') && folderOf(s) === folder)
   }
@@ -1269,7 +1397,6 @@
   function relocation(kind: MoveKind, ids: number[], preview: boolean) {
     const after = { remove_empty: removeEmpty, folder_art: folderArt }
     if (kind === 'rename') return api.editorRename(ids, pattern, preview, after)
-    if (kind === 'mp3') return api.editorMp3Length(ids, preview)
     if (kind === 'copy') return api.editorCopy(ids, moveTo, preview)
     if (kind === 'move') return api.editorMove(ids, { folder: moveTo }, preview, after)
     return api.editorMove(ids, { delete: true }, preview, { remove_empty: removeEmpty })
@@ -1315,13 +1442,7 @@
     if ((kind === 'move' || kind === 'copy') && !moveTo.trim()) return
     try {
       moveKind = kind
-      const found = (await unlocked(() => relocation(kind, changeable.map((s) => s.id), true))).files
-      // Only the MP3s that need it are worth listing.
-      renames = kind === 'mp3' ? found.filter((f) => !f.problem) : found
-      if (kind === 'mp3' && !renames.length) {
-        renames = null
-        toast(t('ed.mp3_ok'))
-      }
+      renames = (await unlocked(() => relocation(kind, changeable.map((s) => s.id), true))).files
     } catch (e) {
       toast(e instanceof Error ? e.message : t('ed.where_failed'), true)
     }
@@ -1497,6 +1618,24 @@
                 </button>
               {/if}
             </div>
+            {#if imports.some((i) => autoState[i.batch] === 'matched') || pickedImportBatches.length}
+              <div class="imports-head">
+                {#if imports.some((i) => autoState[i.batch] === 'matched')}
+                  <button class="small-button" disabled={busy} onclick={pickMatched} title={t('ed.pick_matched_title')}
+                    >{t('ed.pick_matched')}</button
+                  >
+                {/if}
+                {#if pickedImportBatches.length}
+                  <button
+                    class="small-button approve-picked"
+                    disabled={busy || !addFolder}
+                    onclick={approvePicked}
+                    title={addFolder ? t('ed.approve_picked_title') : t('ed.approve_picked_no_folder')}
+                    >{t('ed.approve_picked', { n: pickedImportBatches.length })}</button
+                  >
+                {/if}
+              </div>
+            {/if}
             {#each imports as imp, i (imp.batch)}
               <div class="node">
                 <input
@@ -1506,7 +1645,20 @@
                   checked={!!pickedImports[imp.batch]}
                   onclick={(e) => pickImport(imp.batch, i, e)}
                 />
-                <button class="label import-item" class:picked={importing === imp.batch} onclick={() => openImport(imp.batch)}>
+                <button
+                  class="label import-item"
+                  class:picked={importing === imp.batch}
+                  class:matched={autoState[imp.batch] === 'matched'}
+                  title={autoState[imp.batch] === 'matched'
+                    ? t('ed.import_matched')
+                    : autoState[imp.batch] === 'looking'
+                      ? t('ed.auto_looking')
+                      : autoState[imp.batch] === 'none'
+                        ? t('ed.import_unmatched')
+                        : undefined}
+                  onclick={() => openImport(imp.batch)}
+                >
+                  {#if autoState[imp.batch] === 'looking'}<span class="looking" aria-hidden="true">…</span>{/if}
                   {imp.album || t('ed.import_n', { n: imp.batch })}
                   <span class="count">{n(imp.files)}</span>
                   {#if imp.artist}<span class="mode">{imp.artist}</span>{/if}
@@ -1836,7 +1988,7 @@
                   </button>
                   <button
                     class="small-button"
-                    onclick={() => previewMove('mp3')}
+                    onclick={() => (fixingMp3 = true)}
                     title={t('ed.mp3_title')}
                   >
                     {t('ed.fix_mp3')}
@@ -1862,12 +2014,7 @@
               <ul>
                 {#each renames as r (r.id)}
                   <li class="small" class:bad={!!r.problem}>
-                    {#if moveKind === 'mp3'}
-                      <span class="mono">{fileName(r.from)}</span>
-                    {:else}
-                      {@const [from, to] = afterShared(r.from, r.to)}
-                      <span class="mono">{from}</span> → <span class="mono">{to}</span>
-                    {/if}
+                    <span class="mono">{afterShared(r.from, r.to)[0]}</span> → <span class="mono">{afterShared(r.from, r.to)[1]}</span>
                     {#if r.problem}<em>({r.problem})</em>{/if}
                   </li>
                 {/each}
@@ -2062,6 +2209,19 @@
           {t('ed.approve_import', { n: going })}
         </button>
       </div>
+    {/if}
+    {#if fixingMp3}
+      <Mp3FixWindow
+        ids={pickedSongs.filter(rowEditable).map((s) => s.id)}
+        folder={selected}
+        search={searching}
+        onclose={() => (fixingMp3 = false)}
+        ondone={async () => {
+          clearListCache()
+          await loadSongs(0)
+          await loadHistory()
+        }}
+      />
     {/if}
     {#if coverOpen && chosen}
       <CoverWindow
@@ -2675,6 +2835,26 @@
 
   .import-item.picked {
     outline: 1px solid var(--target);
+  }
+
+  /* Matched on Deezer, every song on its track: neon green, ready to approve. */
+  .import-item.matched {
+    --match: light-dark(#0b8a33, #39ff6a);
+    color: var(--match);
+    box-shadow: inset 3px 0 0 var(--match), 0 0 8px rgb(57 255 106 / 0.35);
+  }
+
+  .import-item.matched.picked {
+    outline-color: var(--match);
+  }
+
+  .import-item .looking {
+    opacity: 0.6;
+    margin-right: 4px;
+  }
+
+  .approve-picked {
+    border-color: light-dark(#0b8a33, #39ff6a);
   }
 
   .add label {

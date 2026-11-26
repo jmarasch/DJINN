@@ -1,5 +1,5 @@
 <script lang="ts">
-  // Admin > Library > Genres: similar genres grouped into containers, so
+  // Admin > Genres > Containers: similar genres grouped into containers, so
   // "black metal", "death metal" and "speed metal" show as "Metal". Off by
   // default; the library's own genres are never changed. Auto-group sorts
   // them by how related they are (the slider says about how many

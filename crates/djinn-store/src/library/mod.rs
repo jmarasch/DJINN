@@ -40,6 +40,9 @@ pub struct Track {
     pub lyrics_ai: i64,
     /// 1 when an admin removed lyrics an AI had made or timed (shown as a red microphone).
     pub lyrics_failed: i64,
+    /// 1 for an instrumental (no words to sing), shown as a microphone in a
+    /// "no" circle.
+    pub instrumental: i64,
 }
 
 // Column lists are macros so queries stay `&'static str` (built with
@@ -58,7 +61,8 @@ macro_rules! track_columns {
          coalesce((SELECT CASE WHEN tl.synced IS NOT NULL THEN 2 WHEN tl.plain IS NOT NULL THEN 1 ELSE 0 END \
                    FROM lyrics tl WHERE tl.track_id = t.id), 0) AS lyrics, \
          coalesce((SELECT al.ai FROM lyrics al WHERE al.track_id = t.id), 0) AS lyrics_ai, \
-         coalesce((SELECT fl.ai_removed FROM lyrics fl WHERE fl.track_id = t.id), 0) AS lyrics_failed"
+         coalesce((SELECT fl.ai_removed FROM lyrics fl WHERE fl.track_id = t.id), 0) AS lyrics_failed, \
+         coalesce((SELECT il.instrumental FROM lyrics il WHERE il.track_id = t.id), 0) AS instrumental"
     };
 }
 pub(crate) use track_columns;
@@ -76,6 +80,16 @@ pub struct Album {
     pub genres: Option<String>,
     /// Its folder's name, when another album has the same name and artist.
     pub label: Option<String>,
+    /// When its newest song was added (ms), on the artist page only, so its
+    /// albums can be ordered by when they came in.
+    #[sqlx(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub added: Option<i64>,
+    /// The year it first came out, as MusicBrainz knows it (the tags often
+    /// give a reissue's year), on the artist page only.
+    #[sqlx(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub first_year: Option<i64>,
 }
 
 macro_rules! album_columns {
@@ -84,6 +98,18 @@ macro_rules! album_columns {
     };
 }
 pub(crate) use album_columns;
+
+/// When an album's newest playable song was added, as `added`, and the
+/// year it first came out, as `first_year`.
+macro_rules! album_added {
+    () => {
+        concat!(
+            "(SELECT max(t.added_at) FROM tracks t WHERE t.album_id = al.id AND ",
+            available!(),
+            ") AS added, al.first_year"
+        )
+    };
+}
 
 #[derive(Clone, Debug, PartialEq, Serialize, FromRow)]
 pub struct Artist {
@@ -534,7 +560,7 @@ macro_rules! track_order {
             sort_key!("coalesce(t.album_artist, t.artist)"),
             ", ",
             sort_key!("t.album"),
-            ", t.disc_no, t.track_no, t.title COLLATE NOCASE"
+            ", coalesce(t.disc_no, 1), t.track_no, t.title COLLATE NOCASE"
         )
     };
     (newest) => {
@@ -706,7 +732,7 @@ impl Store {
             " FROM tracks t WHERE t.album_id = ? AND ",
             available!(),
             "
-             ORDER BY t.disc_no, t.track_no, t.title"
+             ORDER BY coalesce(t.disc_no, 1), t.track_no, t.title"
         ))
         .bind(id)
         .fetch_all(&self.pool)
@@ -780,6 +806,8 @@ impl Store {
         let albums = sqlx::query_as(concat!(
             "SELECT ",
             album_columns!(),
+            ", ",
+            album_added!(),
             " FROM albums al JOIN artists ar ON ar.id = al.artist_id
              WHERE al.artist_id = ?
                AND EXISTS (SELECT 1 FROM tracks t WHERE t.album_id = al.id AND ",
@@ -799,7 +827,7 @@ impl Store {
             available!(),
             "
                AND (al.id IS NULL OR al.artist_id != ?)
-             ORDER BY t.album, t.disc_no, t.track_no, t.title"
+             ORDER BY t.album, coalesce(t.disc_no, 1), t.track_no, t.title"
         ))
         .bind(id)
         .bind(id)
@@ -808,6 +836,8 @@ impl Store {
         let appears_on = sqlx::query_as(concat!(
             "SELECT ",
             album_columns!(),
+            ", ",
+            album_added!(),
             " FROM albums al JOIN artists ar ON ar.id = al.artist_id
              WHERE al.artist_id != ?
                AND EXISTS (SELECT 1 FROM tracks t JOIN track_artists ta ON ta.track_id = t.id
@@ -860,7 +890,7 @@ impl Store {
              WHERE EXISTS (SELECT 1 FROM track_artists ta WHERE ta.track_id = t.id AND ta.artist_id = ?)
                AND ",
             available!(),
-            " ORDER BY al.id IS NULL, al.year, al.title, al.id, t.disc_no, t.track_no, t.title, t.id
+            " ORDER BY al.id IS NULL, al.year, al.title, al.id, coalesce(t.disc_no, 1), t.track_no, t.title, t.id
              LIMIT ? OFFSET ?"
         ))
         .bind(id)

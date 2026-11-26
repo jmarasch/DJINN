@@ -1115,7 +1115,7 @@ async fn rename(
 /// its song at the new place and records it as one approval of `kind`
 /// ("rename" or "delete", which also takes the song out of the
 /// library). Returns the approval and how many moved.
-async fn relocate(
+pub(crate) async fn relocate(
     state: &AppState,
     user: &djinn_store::User,
     files: &mut [Renamed],
@@ -1149,13 +1149,20 @@ async fn relocate(
         }
         // Lyrics beside the song keep its name.
         let lrc = Path::new(&file.from).with_extension("lrc");
-        if lrc.is_file() {
-            let _ = move_file(
-                &lrc.to_string_lossy(),
-                &Path::new(&file.to).with_extension("lrc").to_string_lossy(),
-            );
+        let lrc_to = Path::new(&file.to).with_extension("lrc");
+        let lrc_moved =
+            lrc.is_file() && move_file(&lrc.to_string_lossy(), &lrc_to.to_string_lossy()).is_ok();
+        if let Err(e) = state.store.move_track_path(file.id, &file.to).await {
+            // The file goes back rather than being left where the library
+            // doesn't know it, and the rest carry on.
+            tracing::warn!(error = %e, from = %file.from, to = %file.to, "moving a song's record failed");
+            let _ = move_file(&file.to, &file.from);
+            if lrc_moved {
+                let _ = move_file(&lrc_to.to_string_lossy(), &lrc.to_string_lossy());
+            }
+            file.problem = Some(format!("the library couldn't record the move: {e}"));
+            continue;
         }
-        state.store.move_track_path(file.id, &file.to).await?;
         let (size, mtime) = stat(Path::new(&file.to)).map_err(anyhow::Error::from)?;
         state
             .store
@@ -1305,6 +1312,10 @@ struct Mp3Length {
     ids: Vec<i64>,
     #[serde(default)]
     preview: bool,
+    /// The approval an earlier part of the same fix made, so a fix sent in
+    /// parts (for a progress bar) is undone as one.
+    #[serde(default)]
+    batch: Option<i64>,
 }
 
 /// Writes a length header into variable bit rate MP3s that have none, so
@@ -1350,7 +1361,17 @@ async fn mp3_length(
             .collect::<Vec<_>>(),
     )
     .await?;
-    let batch = state.store.next_file_batch().await?;
+    let batch = match body.batch {
+        Some(batch)
+            if state
+                .store
+                .can_add_to_batch(batch, "mp3-length", user.id)
+                .await? =>
+        {
+            batch
+        }
+        _ => state.store.next_file_batch().await?,
+    };
     let mut written = Vec::new();
     for file in &mut files {
         if file.problem.is_some() {
@@ -1387,6 +1408,9 @@ async fn mp3_length(
     }
     if !written.is_empty() {
         crate::library_api::reread(&state, &written).await?;
+        // The thorough check reads the changed files again, so they leave
+        // Library Problems.
+        crate::mp3_check::start(&state);
     }
     audit(
         &state,

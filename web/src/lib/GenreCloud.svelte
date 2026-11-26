@@ -1,68 +1,57 @@
 <script lang="ts">
-  // The genre cloud: each genre a dot sized by its number of songs, with
-  // lines between related genres (songs in common, similar sound). It opens on
-  // the biggest genres. Tap one to center on it, with what's near it and what's
-  // near those; tap the center to open its page, or another dot to move on.
-  // Each view is laid out by a small force simulation from a fixed spiral, so
-  // the same library always looks the same. The top level opens at full size so
-  // labels stay readable on a phone; drag to move around, and pinch, scroll or
-  // use the buttons to zoom, without zooming the page.
+  // The genre map for listeners: DJINN's genre web as a mind map. It opens
+  // on the families (Rock, Metal, Jazz...), joined by lines that sum up how
+  // their genres link. Tap one to put it in the middle, with what it's a kind
+  // of above it, its kinds below, and the genres it grew out of, is close to
+  // or was a reaction against around it, in the same line styles as Admin >
+  // Genres > Map; tap the middle one to open its page, or another to move
+  // there. The trail always leads back up to the top. Each view is laid out
+  // by a small force simulation from fixed starting places, so it looks the
+  // same every time. Drag to move around, and pinch, scroll or use the
+  // buttons to zoom, without zooming the page.
   import { t } from './i18n.svelte'
   import { untrack } from 'svelte'
   import { api } from './api'
   import Icon from './Icon.svelte'
-  import type { GenreMap } from './types'
+  import type { WebTree } from './types'
 
-  const TOP_CHOICES = [50, 100, 200, 300]
-  const LINE_CHOICES = [
-    { get label() { return t('gcl.fewer') }, links: 2 },
-    { get label() { return t('gcl.normal') }, links: 4 },
-    { get label() { return t('gcl.more') }, links: 8 },
-  ]
-  /** A zoomed view's genres near the center, and near each of those. */
-  const NEAR = 14
-  const NEAR_THOSE = 5
-  const MOST_IN_VIEW = 50
+  type Kind = 'tree' | 'from' | 'near' | 'against'
   const MOVE_MS = 350
+  /** At the top, how many of each family's strongest ties to other families are drawn... */
+  const FAMILY_TIES = 1
+  /** And the strongest ties overall. */
+  const TOP_TIES = 12
+  /** A genre view opens no smaller than this, so names stay readable on a phone. */
+  const READABLE = 0.75
 
-  function stored(key: string, choices: number[], fallback: number) {
-    try {
-      const value = Number(localStorage.getItem(key))
-      return choices.includes(value) ? value : fallback
-    } catch {
-      return fallback
-    }
-  }
-
-  function store(key: string, value: number) {
-    try {
-      localStorage.setItem(key, String(value))
-    } catch {
-      // Only a convenience.
-    }
-  }
-
-  let top = $state(stored('djinn-genre-top', TOP_CHOICES, 100))
-  let links = $state(
-    stored(
-      'djinn-genre-lines',
-      LINE_CHOICES.map((c) => c.links),
-      4,
-    ),
-  )
-  let map = $state<GenreMap | null>(null)
+  let web = $state<WebTree | null>(null)
   let failed = $state(false)
+  /** Genres none of the library's songs land on are left out unless asked for. */
+  let everyGenre = $state(storedFlag())
   /** How you got here, from the top level; the last is at the center. Each step is a place in the browser's history. */
   let path = $state<string[]>(history.state?.genreCloud ?? [])
 
+  function storedFlag(): boolean {
+    try {
+      return localStorage.getItem('djinn-genre-every') === '1'
+    } catch {
+      return false
+    }
+  }
+
   $effect(() => {
-    const [t, l] = [top, links]
-    store('djinn-genre-top', t)
-    store('djinn-genre-lines', l)
+    try {
+      localStorage.setItem('djinn-genre-every', everyGenre ? '1' : '0')
+    } catch {
+      // Only a convenience.
+    }
+  })
+
+  $effect(() => {
     api
-      .genres(t, l)
-      .then((m) => {
-        map = m
+      .genreWeb()
+      .then((w) => {
+        web = w
         failed = false
       })
       .catch(() => (failed = true))
@@ -92,21 +81,26 @@
     centerOn(name)
   }
 
-  const empty: GenreMap = { genres: [], links: [], top_links: [] }
-
   interface Dot {
+    id: number
     name: string
     songs: number
     x: number
     y: number
+    hx: number
+    hy: number
     vx: number
     vy: number
     r: number
     font: number
+    /** In the same family as the center (or a family, at the top). */
+    home: boolean
   }
   interface Line {
     a: number
     b: number
+    kind: Kind
+    /** 0 to 1: how many links a top-level line stands for. */
     strength: number
   }
 
@@ -116,7 +110,7 @@
   /** A press that moves further than this (pixels) is a drag, not a tap. */
   const DRAG_PX = 6
   const center = $derived(path.length ? path[path.length - 1] : null)
-  const layout = $derived(lay(map ?? empty, center, top))
+  const layout = $derived(lay(web, center, everyGenre))
   /** Where each dot was last view, and where a new one comes from. */
   let last = new Map<string, { x: number; y: number }>()
   let from = $state(new Map<string, { x: number; y: number }>())
@@ -168,9 +162,11 @@
     const zoomed = path.length > 0
     let frame = 0
     untrack(() => {
-      cx = l.left + l.width / 2
-      cy = l.top + l.height / 2
-      zoom = zoomed ? fit : 1
+      zoom = zoomed ? Math.max(fit, READABLE) : 1
+      // A genre view that doesn't fit opens on the genre in the middle.
+      const middle = zoomed && fit < READABLE ? l.dots[0] : null
+      cx = middle ? middle.x : l.left + l.width / 2
+      cy = middle ? middle.y : l.top + l.height / 2
       hovered = null
       const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches
       from = last
@@ -297,57 +293,134 @@
     }
   })
 
-  /** A genre and what's near it, and near those, strongest first; the genre comes first. */
-  function around(map: GenreMap, at: number) {
-    const near = (g: number) =>
-      map.links
-        .filter((l) => l.a === g || l.b === g)
-        .sort((x, y) => y.strength - x.strength)
-        .map((l) => (l.a === g ? l.b : l.a))
-    const first = near(at).slice(0, NEAR)
-    const shown = new Set([at, ...first])
-    for (const g of first) {
-      for (const next of near(g).slice(0, NEAR_THOSE)) {
-        if (shown.size >= MOST_IN_VIEW) break
-        shown.add(next)
-      }
+  /** Puts dots where they start and where they're pulled back to. */
+  function dot(web: WebTree, id: number, x: number, y: number, most: number, home: boolean, big = false): Dot {
+    const g = web.genres[id]
+    const share = Math.sqrt(g.songs_below / most)
+    return {
+      id,
+      name: g.name,
+      songs: g.songs_below,
+      x,
+      y,
+      hx: x,
+      hy: y,
+      vx: 0,
+      vy: 0,
+      r: big ? 22 : 5 + 14 * Math.min(1, share),
+      font: big ? 17 : 12 + 5 * Math.min(1, share),
+      home,
     }
-    return [...shown]
   }
 
-  function lay(map: GenreMap, center: string | null, biggest: number) {
-    const at = center === null ? -1 : map.genres.findIndex((g) => g.name === center)
-    const shown =
-      at >= 0
-        ? around(map, at)
-        : // The biggest genres, ties by name as on the server.
-          map.genres
-            .map((_, i) => i)
-            .sort((a, b) => map.genres[b].songs - map.genres[a].songs)
-            .slice(0, biggest)
-    const index = new Map(shown.map((g, i) => [g, i]))
-    const most = Math.max(1, ...shown.map((g) => map.genres[g].songs))
-    const dots: Dot[] = shown.map((g, i) => {
-      const share = Math.sqrt(map.genres[g].songs / most)
-      // Golden-angle spiral, biggest in the middle.
-      const angle = i * 2.39996
-      const out = 34 * Math.sqrt(i)
-      return {
-        name: map.genres[g].name,
-        songs: map.genres[g].songs,
-        x: Math.cos(angle) * out,
-        y: Math.sin(angle) * out,
-        vx: 0,
-        vy: 0,
-        r: 5 + 15 * share,
-        font: 12 + 7 * share,
-      }
+  /** Places around an arc, from `from` to `to` (radians, 0 is right, y down). */
+  function arc(count: number, radius: number, from: number, to: number): { x: number; y: number }[] {
+    return Array.from({ length: count }, (_, i) => {
+      const a = count === 1 ? (from + to) / 2 : from + ((to - from) * i) / (count - 1)
+      // Long rows step out and in, so neighbors' labels don't meet.
+      const r = radius + (count > 9 && i % 2 ? 70 : 0)
+      return { x: Math.cos(a) * r, y: Math.sin(a) * r }
     })
-    const lines: Line[] = (at >= 0 ? map.links : map.top_links)
-      .filter((l) => index.has(l.a) && index.has(l.b))
-      .map((l) => ({ a: index.get(l.a)!, b: index.get(l.b)!, strength: l.strength }))
-    simulate(dots, lines)
-    separate(dots)
+  }
+
+  function lay(web: WebTree | null, center: string | null, every: boolean) {
+    const dots: Dot[] = []
+    const lines: Line[] = []
+    if (web) {
+      const genres = web.genres
+      const shows = (i: number) => every || genres[i].songs_below > 0
+      const familyOf = (i: number) => {
+        let at = i
+        while (genres[at].parent !== null) at = genres[at].parent!
+        return at
+      }
+      const at = center === null ? -1 : genres.findIndex((g) => g.name === center)
+      if (at < 0) {
+        // The families, biggest in the middle, and lines for how their genres link.
+        const families = genres
+          .flatMap((g, i) => (g.parent === null && shows(i) ? [i] : []))
+          .sort((a, b) => genres[b].songs_below - genres[a].songs_below)
+        const most = Math.max(1, ...families.map((f) => genres[f].songs_below))
+        families.forEach((f, i) => {
+          const angle = i * 2.39996
+          const out = 60 * Math.sqrt(i)
+          dots.push(dot(web, f, Math.cos(angle) * out, Math.sin(angle) * out, most, true))
+        })
+        const place = new Map(families.map((f, i) => [f, i]))
+        const pairs = new Map<string, { a: number; b: number; kinds: Record<string, number>; total: number }>()
+        genres.forEach((g, i) => {
+          const add = (other: number, kind: Kind) => {
+            const [fa, fb] = [place.get(familyOf(i)), place.get(familyOf(other))]
+            if (fa === undefined || fb === undefined || fa === fb) return
+            // "Grew out of" runs from the older family to the newer one.
+            const [a, b] = kind === 'from' ? [fb, fa] : [fa, fb]
+            const key = `${Math.min(a, b)}-${Math.max(a, b)}`
+            const pair = pairs.get(key) ?? { a, b, kinds: {}, total: 0 }
+            pair.kinds[kind] = (pair.kinds[kind] ?? 0) + 1
+            pair.total++
+            pairs.set(key, pair)
+          }
+          for (const x of g.from) add(x, 'from')
+          for (const x of g.near) add(x, 'near')
+          for (const x of g.against) add(x, 'against')
+        })
+        // Each family's few strongest ties, so the overview stays readable.
+        const all = [...pairs.values()].sort((x, y) => y.total - x.total)
+        const strongest = Math.max(1, all[0]?.total ?? 1)
+        const kept = new Set<(typeof all)[number]>(all.slice(0, TOP_TIES))
+        families.forEach((_, f) => {
+          all.filter((p) => p.a === f || p.b === f).slice(0, FAMILY_TIES).forEach((p) => kept.add(p))
+        })
+        for (const pair of kept) {
+          const kind = (Object.entries(pair.kinds).sort((x, y) => y[1] - x[1])[0]?.[0] ?? 'near') as Kind
+          lines.push({ a: pair.a, b: pair.b, kind, strength: Math.sqrt(pair.total / strongest) })
+        }
+      } else {
+        // The center, what it's a kind of above, its kinds below, and its
+        // links around it.
+        const family = familyOf(at)
+        const most = Math.max(1, ...genres.map((g) => (g.parent === at ? g.songs_below : 0)))
+        dots.push(dot(web, at, 0, 0, most, true, true))
+        const parent = genres[at].parent
+        if (parent !== null) dots.push(dot(web, parent, 0, -200, most, true))
+        const kids = genres.flatMap((g, i) => (g.parent === at && shows(i) ? [i] : []))
+        arc(kids.length, 210, Math.PI * 0.12, Math.PI * 0.88).forEach((p, i) =>
+          dots.push(dot(web, kids[i], p.x, p.y, most, true)),
+        )
+        const shown = new Set(dots.map((d) => d.id))
+        const linked: number[] = []
+        const g = genres[at]
+        const touching = genres.flatMap((h, i) =>
+          h.from.includes(at) || h.near.includes(at) || h.against.includes(at) ? [i] : [],
+        )
+        for (const x of [...g.from, ...g.near, ...g.against, ...touching]) {
+          if (!shown.has(x) && !linked.includes(x) && shows(x)) linked.push(x)
+        }
+        // Around the top half, either side of the parent.
+        const left = linked.filter((_, i) => i % 2 === 0)
+        const right = linked.filter((_, i) => i % 2 === 1)
+        arc(left.length, 270, Math.PI * 0.95, Math.PI * 1.38).forEach((p, i) =>
+          dots.push(dot(web, left[i], p.x, p.y, most, familyOf(left[i]) === family)),
+        )
+        arc(right.length, 270, Math.PI * 1.62, Math.PI * 2.05).forEach((p, i) =>
+          dots.push(dot(web, right[i], p.x, p.y, most, familyOf(right[i]) === family)),
+        )
+        // Only the lines to and from the genre in the middle (dot 0).
+        const index = new Map(dots.map((d, i) => [d.id, i]))
+        const add = (a: number, b: number, kind: Kind) => {
+          if (a === 0 || b === 0) lines.push({ a, b, kind, strength: 1 })
+        }
+        for (const [i, d] of dots.entries()) {
+          const h = genres[d.id]
+          if (h.parent !== null && index.has(h.parent)) add(index.get(h.parent)!, i, 'tree')
+          for (const x of h.from) if (index.has(x)) add(index.get(x)!, i, 'from')
+          for (const x of h.near) if (index.has(x)) add(i, index.get(x)!, 'near')
+          for (const x of h.against) if (index.has(x)) add(i, index.get(x)!, 'against')
+        }
+      }
+      simulate(dots, lines, at >= 0)
+      separate(dots, at >= 0)
+    }
 
     // Fit the drawing to the dots and their labels.
     const pad = 24
@@ -375,7 +448,7 @@
 
   /** Nudges apart dots whose labels still overlap after the layout, each
    * time along the shorter way out. */
-  function separate(dots: Dot[]) {
+  function separate(dots: Dot[], pinFirst: boolean) {
     for (let round = 0; round < 200; round++) {
       let moved = false
       for (let i = 0; i < dots.length; i++) {
@@ -385,14 +458,16 @@
           const tall = Math.min(a[3], b[3]) - Math.max(a[1], b[1])
           if (wide <= 0 || tall <= 0) continue
           moved = true
+          // The genre in the middle stays put; the other one moves the whole way.
+          const [mine, theirs] = pinFirst && i === 0 ? [0, 2] : [1, 1]
           if (wide < tall) {
             const step = (wide / 2 + 0.5) * (dots[i].x < dots[j].x ? -1 : 1)
-            dots[i].x += step
-            dots[j].x -= step
+            dots[i].x += step * mine
+            dots[j].x -= step * theirs
           } else {
             const step = (tall / 2 + 0.5) * (dots[i].y < dots[j].y ? -1 : 1)
-            dots[i].y += step
-            dots[j].y -= step
+            dots[i].y += step * mine
+            dots[j].y -= step * theirs
           }
         }
       }
@@ -400,7 +475,7 @@
     }
   }
 
-  function simulate(dots: Dot[], lines: Line[]) {
+  function simulate(dots: Dot[], lines: Line[], centered: boolean) {
     for (let step = 0; step < STEPS; step++) {
       const heat = 1 - step / STEPS
       for (let i = 0; i < dots.length; i++) {
@@ -421,24 +496,29 @@
           b.vy += dy * push
         }
       }
-      // Related genres pull together, the more related the closer.
+      // Linked genres pull together a little; each dot is drawn back toward
+      // its starting place, so the shape (parent above, kinds below) holds.
       for (const l of lines) {
         const [a, b] = [dots[l.a], dots[l.b]]
         const dx = b.x - a.x
         const dy = b.y - a.y
         const dist = Math.max(Math.hypot(dx, dy), 0.01)
-        const rest = 170 - 70 * l.strength + a.r + b.r
-        const pull = (dist - rest) * 0.012 * (0.4 + l.strength)
+        const rest = 190 + a.r + b.r
+        const pull = (dist - rest) * 0.004 * (0.4 + l.strength)
         a.vx += (dx / dist) * pull
         a.vy += (dy / dist) * pull
         b.vx -= (dx / dist) * pull
         b.vy -= (dy / dist) * pull
       }
-      for (const d of dots) {
-        // A gentle pull to the middle keeps loners nearby; sideways a bit
-        // harder, so the cloud comes out taller than wide, like a phone.
-        d.vx -= d.x * 0.01
-        d.vy -= d.y * 0.004
+      for (const [i, d] of dots.entries()) {
+        if (centered && i === 0) {
+          // The genre in the middle stays there.
+          d.vx = 0
+          d.vy = 0
+          continue
+        }
+        d.vx += (d.hx - d.x) * (centered ? 0.08 : 0.03)
+        d.vy += (d.hy - d.y) * (centered ? 0.08 : 0.03)
         d.vx *= 0.82
         d.vy *= 0.82
         const speed = Math.hypot(d.vx, d.vy)
@@ -449,39 +529,58 @@
       }
     }
   }
+
+  /** The center's place in the tree, from its family down to it. */
+  const lineage = $derived.by(() => {
+    if (!web || center === null) return []
+    const genres = web.genres
+    let at: number | null = genres.findIndex((g) => g.name === center)
+    const up: string[] = []
+    while (at !== null && at >= 0) {
+      up.unshift(genres[at].name)
+      at = genres[at].parent
+    }
+    return up
+  })
+
+  /** A line from dot a to dot b, ending at b's edge so its arrow shows. */
+  function ends(a: { x: number; y: number }, b: { x: number; y: number }, r: number) {
+    const dx = b.x - a.x
+    const dy = b.y - a.y
+    const dist = Math.max(Math.hypot(dx, dy), 0.01)
+    const cut = Math.min(r + 3, dist / 2)
+    return { x1: a.x, y1: a.y, x2: b.x - (dx / dist) * cut, y2: b.y - (dy / dist) * cut }
+  }
+
+  const color: Record<Kind, string> = {
+    tree: 'var(--text)',
+    from: 'var(--accent-2)',
+    near: 'var(--accent)',
+    against: '#ff5c7a',
+  }
+  const dash: Record<Kind, string | undefined> = { tree: undefined, from: undefined, near: '2 4', against: '7 4' }
 </script>
 
 {#if failed}
   <p class="small muted">{t('gcl.failed')}</p>
 {/if}
 <nav class="trail small" aria-label={t('gcl.where')}>
-  {#if path.length}
+  {#if center !== null}
     <button class="link" onclick={() => go([])}>{t('gcl.top')}</button>
-    {#each path as name, i (name)}
-      <span class="muted">/</span>
-      {#if i === path.length - 1}
+    {#each lineage as name, i (name)}
+      <span class="muted">›</span>
+      {#if i === lineage.length - 1}
         <strong>{name}</strong>
       {:else}
-        <button class="link" onclick={() => go(path.slice(0, i + 1))}>{name}</button>
+        <button class="link" onclick={() => centerOn(name)}>{name}</button>
       {/if}
     {/each}
-  {:else if map}
-    <span class="muted">{t('gcl.top_of', { shown: layout.dots.length, total: map.genres.length })}</span>
+  {:else if web}
+    <span class="muted">{t('gcl.families', { n: layout.dots.length })}</span>
   {/if}
 </nav>
 <div class="choices small">
-  <label>
-    {t('gcl.at_top')}
-    <select bind:value={top}>
-      {#each TOP_CHOICES as choice (choice)}<option value={choice}>{choice}</option>{/each}
-    </select>
-  </label>
-  <label>
-    {t('gcl.lines')}
-    <select bind:value={links}>
-      {#each LINE_CHOICES as choice (choice.links)}<option value={choice.links}>{choice.label}</option>{/each}
-    </select>
-  </label>
+  <label class="switch"><input type="checkbox" bind:checked={everyGenre} /> {t('gcl.every')}</label>
 </div>
 
 <div class="cloud" bind:clientWidth={boxWidth} bind:clientHeight={boxHeight}>
@@ -497,19 +596,30 @@
     onpointercancel={up}
     onclickcapture={click}
   >
+    <defs>
+      {#each ['from', 'against'] as const as kind (kind)}
+        <marker id="gc-arrow-{kind}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill={color[kind]} />
+        </marker>
+      {/each}
+    </defs>
     {#each layout.lines as line, i (i)}
       {@const a = drawn[line.a]}
       {@const b = drawn[line.b]}
       {#if a && b}
+        {@const e = ends(a, b, layout.dots[line.b].r)}
         <line
-          x1={a.x}
-          y1={a.y}
-          x2={b.x}
-          y2={b.y}
-          stroke-width={1 + 2.5 * line.strength}
+          class="kind-{line.kind}"
+          {...e}
+          stroke={color[line.kind]}
+          stroke-dasharray={dash[line.kind]}
+          stroke-width={line.kind === 'tree' ? 1.5 : 1.4 + 2.4 * line.strength}
+          marker-end={line.kind === 'from' || line.kind === 'against' ? `url(#gc-arrow-${line.kind})` : undefined}
           opacity={near && !(near.has(line.a) && near.has(line.b) && (line.a === hovered || line.b === hovered))
-            ? 0.05
-            : 0.15 + 0.5 * line.strength}
+            ? 0.06
+            : line.kind === 'tree'
+              ? 0.35
+              : 0.4 + 0.5 * line.strength}
         />
       {/if}
     {/each}
@@ -519,6 +629,8 @@
         href="#/genre/{encodeURIComponent(dot.name)}"
         class:dim={near !== null && !near.has(i)}
         class:center={dot.name === center}
+        class:away={!dot.home}
+        class:empty={dot.songs === 0}
         onclick={(e) => pressed(e, dot.name)}
         onpointerenter={() => (hovered = i)}
         onpointerleave={() => (hovered = null)}
@@ -538,10 +650,14 @@
   <button class="corner bottom-left" aria-label={t('gcl.zoom_in')} onclick={() => zoomBy(1.4)}><Icon name="plus" size={20} /></button>
   <button class="corner bottom-right" aria-label={t('gcl.zoom_out')} onclick={() => zoomBy(1 / 1.4)}><Icon name="minus" size={20} /></button>
 </div>
+<p class="legend small">
+  <span class="key"><svg width="26" height="10"><line x1="1" y1="5" x2="25" y2="5" stroke={color.tree} stroke-opacity="0.5" stroke-width="1.5" /></svg>{t('gcl.key_kind')}</span>
+  <span class="key"><svg width="26" height="10"><line x1="1" y1="5" x2="25" y2="5" stroke={color.from} stroke-width="2" /></svg>{t('gw.grew_from')}</span>
+  <span class="key"><svg width="26" height="10"><line x1="1" y1="5" x2="25" y2="5" stroke={color.near} stroke-width="2" stroke-dasharray="2 3" /></svg>{t('gw.close_to')}</span>
+  <span class="key"><svg width="26" height="10"><line x1="1" y1="5" x2="25" y2="5" stroke={color.against} stroke-width="2" stroke-dasharray="6 3" /></svg>{t('gw.against')}</span>
+</p>
 <p class="hint small muted">
-  {center
-    ? t('gcl.showing', { name: center })
-    : t('gcl.tap')}
+  {center ? t('gcl.showing', { name: center }) : t('gcl.tap')}
   {t('gcl.drag')}
 </p>
 
@@ -619,6 +735,15 @@
     gap: 6px;
   }
 
+  a:focus {
+    outline: none;
+  }
+
+  a:focus-visible circle {
+    stroke: var(--accent-2);
+    stroke-width: 3;
+  }
+
   a.center circle {
     stroke: var(--text);
     stroke-width: 2;
@@ -642,8 +767,36 @@
   }
 
   line {
-    stroke: var(--accent);
     transition: opacity 0.15s;
+  }
+
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 1rem;
+    align-items: center;
+    margin: 8px 0 0;
+  }
+
+  .key {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+  }
+
+  .key svg {
+    width: 26px;
+    height: 10px;
+    touch-action: auto;
+    cursor: default;
+  }
+
+  a.away circle {
+    fill: var(--accent-2);
+  }
+
+  a.empty circle {
+    fill-opacity: 0.3;
   }
 
   circle {

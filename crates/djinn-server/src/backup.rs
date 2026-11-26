@@ -27,8 +27,9 @@ use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
 
-use crate::auth::AdminUser;
+use crate::auth::{AdminUser, Device};
 use crate::error::{ApiError, ApiResult};
+use crate::protected::{self, Elevated};
 use crate::state::AppState;
 
 /// Bumped when a backup's layout changes in a way older code can't read.
@@ -139,7 +140,20 @@ pub fn data_dir(state: &AppState) -> PathBuf {
 /// Setting key: when a backup was last downloaded in full (Unix ms).
 pub const LAST_BACKUP: &str = "last_backup";
 
-async fn download(_: AdminUser, State(state): State<AppState>) -> ApiResult<Response> {
+/// Takes the protected areas unlocked: a backup holds every account's secrets.
+async fn download(
+    Elevated(admin): Elevated,
+    device: Device,
+    State(state): State<AppState>,
+) -> ApiResult<Response> {
+    protected::audit(
+        &state,
+        &admin,
+        device.ip.as_deref(),
+        "backup_downloaded",
+        "",
+    )
+    .await;
     let work = WorkDir(data_dir(&state).join(format!("backup-{}", now_ms())));
     private_dir(&work.0).map_err(anyhow::Error::from)?;
     let zip = make_backup(&state, &work.0).await?;
@@ -266,8 +280,10 @@ struct Folder {
 
 /// Takes an uploaded backup (the zip as the request body), checks it, and
 /// keeps it until the admin starts the restore.
+/// Takes the protected areas unlocked: a restore replaces every account and
+/// setting, the lock's own included.
 async fn upload(
-    _: AdminUser,
+    _: Elevated,
     State(state): State<AppState>,
     body: Body,
 ) -> ApiResult<Json<Uploaded>> {
@@ -359,7 +375,8 @@ struct Start {
 
 /// Starts the restore: DJINN restarts and puts the backup in place.
 async fn start(
-    _: AdminUser,
+    Elevated(admin): Elevated,
+    device: Device,
     State(state): State<AppState>,
     Json(body): Json<Start>,
 ) -> ApiResult<StatusCode> {
@@ -384,6 +401,7 @@ async fn start(
     tokio::fs::write(dir.join(PLAN), plan)
         .await
         .map_err(anyhow::Error::from)?;
+    protected::audit(&state, &admin, device.ip.as_deref(), "backup_restored", "").await;
     tracing::info!("restoring a backup; restarting");
     state.update.restart(&state.shutdown_request);
     Ok(StatusCode::ACCEPTED)
@@ -650,6 +668,23 @@ mod tests {
 
         let (status, _) = send_bytes(&state, Method::GET, "/api/backup", Vec::new(), &user).await;
         assert_eq!(status, StatusCode::FORBIDDEN);
+        // A backup holds every secret: not with the protected areas locked.
+        let (status, _) = send_bytes(&state, Method::GET, "/api/backup", Vec::new(), &admin).await;
+        assert_eq!(status, StatusCode::LOCKED);
+        let (status, _) = send_bytes(
+            &state,
+            Method::POST,
+            "/api/backup/restore",
+            b"zip".to_vec(),
+            &admin,
+        )
+        .await;
+        assert_eq!(status, StatusCode::LOCKED);
+        state
+            .store
+            .set_setting(crate::protected::LEVEL, "off")
+            .await
+            .unwrap();
         let (status, zip) =
             send_bytes(&state, Method::GET, "/api/backup", Vec::new(), &admin).await;
         assert_eq!(status, StatusCode::OK);

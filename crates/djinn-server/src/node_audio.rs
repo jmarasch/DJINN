@@ -3,14 +3,17 @@
 //! listening, plus the clock nodes match theirs to.
 //!
 //! One thread drains the engine's tap while any node listens and hands the
-//! same frames to all of them. A node that joins late first hears the
-//! current volume and whether playback is paused.
+//! same frames to all of them. The mix comes before the equalizer and
+//! volume: each node applies its own equalizer, and its stream carries its
+//! own room's volume instead of the player's, so a room that follows Main
+//! (or any room) keeps its own level. A node that joins late first hears
+//! that volume and whether playback is paused.
 //!
 //! Frames: a little-endian u32 length, then a type byte and its payload:
 //! `A` audio (i64 play-at µs, u32 frames, then frames × 2 i16 samples), `P`
 //! pause, `R` resume, `F` flush, `V` volume (f32).
 
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -126,8 +129,8 @@ pub fn decode(buffer: &mut Vec<u8>) -> Option<Vec<Piece>> {
 pub struct Hub {
     tx: broadcast::Sender<Bytes>,
     listeners: Arc<AtomicUsize>,
-    /// The last volume and pause state seen, for nodes that join late.
-    state: Arc<Mutex<(f32, bool)>>,
+    /// Whether the player is paused, for nodes that join late.
+    state: Arc<Mutex<bool>>,
     rate: u32,
     /// What its speakers play, measured while a screen shows a visualizer
     /// (`/api/levels`).
@@ -140,7 +143,7 @@ impl Default for Hub {
         Hub {
             tx: broadcast::channel(BACKLOG).0,
             listeners: Arc::default(),
-            state: Arc::new(Mutex::new((1.0, false))),
+            state: Arc::new(Mutex::new(false)),
             rate: 48_000,
             levels: djinn_engine::Levels::new(),
         }
@@ -184,11 +187,10 @@ impl Hub {
                 }
                 if wanted {
                     for piece in reader.read() {
-                        if let Ok(mut s) = state.lock() {
+                        if let Ok(mut paused) = state.lock() {
                             match piece.mark {
-                                Mark::Volume(v) => s.0 = v,
-                                Mark::Pause => s.1 = true,
-                                Mark::Resume => s.1 = false,
+                                Mark::Pause => *paused = true,
+                                Mark::Resume => *paused = false,
                                 _ => {}
                             }
                         }
@@ -209,12 +211,12 @@ impl Hub {
         &self.levels
     }
 
-    /// Starts listening: the current volume and pause state, then the live
-    /// frames.
-    pub fn listen(&self) -> (Vec<Bytes>, Listening) {
+    /// Starts listening: `volume` (the node's room's) and the pause state,
+    /// then the live frames.
+    pub fn listen(&self, volume: f32) -> (Vec<Bytes>, Listening) {
         let frames = self.tx.subscribe();
         self.listeners.fetch_add(1, Ordering::AcqRel);
-        let (volume, paused) = self.state.lock().map(|s| *s).unwrap_or((1.0, false));
+        let paused = self.state.lock().map(|s| *s).unwrap_or(false);
         let mut first = vec![encode(&Piece {
             mark: Mark::Volume(volume),
             samples: Vec::new(),
@@ -263,10 +265,13 @@ pub async fn stream(
         return Err(ApiError::forbidden());
     }
     let hub = state.hub_for(node.room_id);
-    let (first, listening) = hub.listen();
+    // The node's own room's volume (its leader's when linked), not the
+    // volume of the player it hears.
+    let gain = state.jukebox_for(node.room_id).lock().await.node_gain();
+    let (first, listening) = hub.listen(read_gain(&gain));
     let rate = hub.rate();
     tracing::info!(node = %node.name, "node listening");
-    let live = frames_for(first, listening, hub);
+    let live = frames_for(first, listening, gain);
     let body = Body::from_stream(futures_util::StreamExt::map(
         live,
         Ok::<_, std::convert::Infallible>,
@@ -285,34 +290,61 @@ pub async fn stream(
         .into_response())
 }
 
-/// The first frames, then each live one; a node that falls behind skips
-/// ahead (the next chunk's time says where it belongs). While nothing plays,
-/// the volume goes out every few seconds so the node knows Main is still
-/// there and doesn't take a quiet room for a lost server.
+fn read_gain(gain: &AtomicU32) -> f32 {
+    f32::from_bits(gain.load(Ordering::Acquire))
+}
+
+fn volume_frame(volume: f32) -> Bytes {
+    encode(&Piece {
+        mark: Mark::Volume(volume),
+        samples: Vec::new(),
+    })
+}
+
+/// True for the player's own volume marks, which nodes don't follow.
+fn is_volume(frame: &Bytes) -> bool {
+    frame.get(4) == Some(&b'V')
+}
+
+/// How soon a node hears its room's volume change.
+const VOLUME_CHECK: std::time::Duration = std::time::Duration::from_millis(100);
+
+/// The first frames, then each live one with the player's volume marks
+/// swapped for the room's (`gain`); a node that falls behind skips ahead
+/// (the next chunk's time says where it belongs). While nothing plays, the
+/// volume goes out every few seconds so the node knows Main is still there
+/// and doesn't take a quiet room for a lost server.
 fn frames_for(
     first: Vec<Bytes>,
     listening: Listening,
-    hub: std::sync::Arc<Hub>,
+    gain: Arc<AtomicU32>,
 ) -> impl futures_util::Stream<Item = Bytes> {
     let first = futures_util::stream::iter(first);
+    let sent = read_gain(&gain);
     // The stream owns `listening`, so the node counts until it's gone.
-    let live = futures_util::stream::unfold((listening, hub), |(mut listening, hub)| async move {
-        loop {
-            match tokio::time::timeout(STILL_HERE_EVERY, listening.frames.recv()).await {
-                Ok(Ok(frame)) => return Some((frame, (listening, hub))),
-                Ok(Err(broadcast::error::RecvError::Lagged(_))) => continue,
-                Ok(Err(broadcast::error::RecvError::Closed)) => return None,
-                Err(_) => {
-                    let volume = hub.state.lock().map(|s| s.0).unwrap_or(1.0);
-                    let frame = encode(&Piece {
-                        mark: Mark::Volume(volume),
-                        samples: Vec::new(),
-                    });
-                    return Some((frame, (listening, hub)));
+    let live = futures_util::stream::unfold(
+        (listening, gain, sent, tokio::time::Instant::now()),
+        |(mut listening, gain, mut sent, mut last)| async move {
+            loop {
+                let volume = read_gain(&gain);
+                if volume != sent || last.elapsed() >= STILL_HERE_EVERY {
+                    sent = volume;
+                    last = tokio::time::Instant::now();
+                    return Some((volume_frame(volume), (listening, gain, sent, last)));
+                }
+                match tokio::time::timeout(VOLUME_CHECK, listening.frames.recv()).await {
+                    Ok(Ok(frame)) if is_volume(&frame) => continue,
+                    Ok(Ok(frame)) => {
+                        last = tokio::time::Instant::now();
+                        return Some((frame, (listening, gain, sent, last)));
+                    }
+                    Ok(Err(broadcast::error::RecvError::Lagged(_))) => continue,
+                    Ok(Err(broadcast::error::RecvError::Closed)) => return None,
+                    Err(_) => continue,
                 }
             }
-        }
-    });
+        },
+    );
     futures_util::StreamExt::chain(first, live)
 }
 
@@ -418,16 +450,40 @@ mod tests {
         assert!(decode(&mut buffer).is_none());
     }
 
+    #[tokio::test]
+    async fn nodes_hear_their_rooms_volume_not_the_players() {
+        use futures_util::StreamExt;
+        let hub = Hub::default();
+        let gain = Arc::new(AtomicU32::new(0.25f32.to_bits()));
+        let (first, listening) = hub.listen(read_gain(&gain));
+        let mut live = Box::pin(frames_for(first, listening, Arc::clone(&gain)));
+        let next = |frame: Bytes| decode(&mut frame.to_vec()).unwrap()[0].mark;
+        assert_eq!(next(live.next().await.unwrap()), Mark::Volume(0.25));
+        // The player's own volume is left out; its audio comes through.
+        hub.tx.send(volume_frame(0.9)).unwrap();
+        hub.tx
+            .send(encode(&Piece {
+                mark: Mark::Flush,
+                samples: Vec::new(),
+            }))
+            .unwrap();
+        assert_eq!(next(live.next().await.unwrap()), Mark::Flush);
+        // A change of the room's volume reaches the node.
+        gain.store(0.5f32.to_bits(), Ordering::Release);
+        assert_eq!(next(live.next().await.unwrap()), Mark::Volume(0.5));
+    }
+
     #[test]
     fn late_listeners_hear_volume_and_pause_first() {
         let hub = Hub::default();
         if let Ok(mut s) = hub.state.lock() {
-            *s = (0.3, true);
+            *s = true;
         }
-        let (first, _listening) = hub.listen();
+        // The node's room's volume, not the player's.
+        let (first, _listening) = hub.listen(0.6);
         let mut buffer: Vec<u8> = first.iter().flat_map(|b| b.to_vec()).collect();
         let pieces = decode(&mut buffer).unwrap();
-        assert_eq!(pieces[0].mark, Mark::Volume(0.3));
+        assert_eq!(pieces[0].mark, Mark::Volume(0.6));
         assert_eq!(pieces[1].mark, Mark::Pause);
         assert_eq!(hub.listeners.load(Ordering::Acquire), 1);
         drop(_listening);

@@ -85,6 +85,8 @@ struct KindCount {
     /// Rows are albums.
     per_album: bool,
     hidden: bool,
+    /// Its songs can be quarantined (moved or copied to another library folder).
+    songs: bool,
 }
 
 #[derive(Serialize)]
@@ -146,6 +148,7 @@ async fn summary(
             trouble: kind.is_trouble(),
             per_album: kind.per_album(),
             hidden: hidden.contains(&kind),
+            songs: crate::quarantine::has_songs(kind),
         })
         .collect();
     let trouble = kinds

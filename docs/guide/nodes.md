@@ -44,7 +44,8 @@ Click a node (in either place) for its settings window:
 ### Speaker and Screen
 
 - **Speaker:** which of the box's sound devices plays, its **Delay** and its
-  **Volume trim**. **Add Another Speaker** plays through more than one device
+  **Volume trim** (on top of its room's volume; the node's own equalizer
+  shapes its sound, not the main DJINN's). **Add Another Speaker** plays through more than one device
   on the node, each in step. A speaker that isn't connected is skipped.
 - **Keep in step with the main DJINN:** on by default. The node eases its
   speed very slightly to stay with the main speakers, and only jumps if it

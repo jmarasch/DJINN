@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { openProblems } from '../lib/editorJump.svelte'
   import { api } from '../lib/api'
   import FolderPicker from '../lib/FolderPicker.svelte'
   import Icon from '../lib/Icon.svelte'
@@ -6,9 +7,6 @@
   import BackupPanel from '../lib/BackupPanel.svelte'
   import LibraryExtras from '../lib/LibraryExtras.svelte'
   import LibraryProgress from '../lib/LibraryProgress.svelte'
-  import LibraryProblems from '../lib/LibraryProblems.svelte'
-  import LibraryDuplicates from '../lib/LibraryDuplicates.svelte'
-  import ScheduledCheck from '../lib/ScheduledCheck.svelte'
   import { clearListCache } from '../lib/listCache'
   import LogViewer from '../lib/LogViewer.svelte'
   import SignInLog from '../lib/SignInLog.svelte'
@@ -21,6 +19,8 @@
   import UpdatePanel from '../lib/UpdatePanel.svelte'
   import AiPanel from '../lib/AiPanel.svelte'
   import GenreGroupsPanel from '../lib/GenreGroupsPanel.svelte'
+  import GenreWebPanel from '../lib/GenreWebPanel.svelte'
+  import GenreMapPanel from '../lib/GenreMapPanel.svelte'
   import CastPanel from '../lib/CastPanel.svelte'
   import CrossfadePanel from '../lib/CrossfadePanel.svelte'
   import EqualizerPanel from '../lib/EqualizerPanel.svelte'
@@ -148,7 +148,7 @@
   })
 
   async function loadAll() {
-    await Promise.all([load('library'), load('log')]).catch((e) => toast(e.message, true))
+    await Promise.all([load('library'), load('stats')]).catch((e) => toast(e.message, true))
   }
 
   // Finding a setting: what's typed, the setting to highlight once its
@@ -213,7 +213,7 @@
 
   // Tabs inside the longest sections; the others stay in the page, hidden,
   // so Find a setting can still reach them.
-  let sub = $state<Record<string, string>>({ library: 'folders', smart: 'play', audio: 'sound', ai: 'search' })
+  let sub = $state<Record<string, string>>({ stats: 'stats', library: 'folders', genres: 'map', smart: 'play', audio: 'sound', ai: 'search' })
 
   function openSub(group: string, id: string) {
     sub[group] = id
@@ -232,8 +232,11 @@
   })
 
   async function load(which: AdminTab) {
-    if (which === 'home' || which === 'problems' || which === 'stats') {
-      // These load their own data.
+    if (which === 'home') {
+      // It loads its own data.
+    } else if (which === 'stats') {
+      // The panels load their own; the request log is here.
+      log = await api.requestLog(200)
     } else if (which === 'library') {
       const [r, status, s, rg] = await Promise.all([
         api.libraryRoots(),
@@ -249,8 +252,6 @@
       if (status.last_scan) app.scan = status.last_scan
     } else if (which === 'audio' || which === 'smart' || which === 'users' || which === 'go') {
       // These panels load their own data.
-    } else if (which === 'log') {
-      log = await api.requestLog(200)
     } else {
       settings = await api.settings()
     }
@@ -321,12 +322,32 @@
 {:else if id === 'guide'}
   <GuidePanel />
 {:else if id === 'stats'}
-  <StatsPanel />
-  <SearchesWishes />
-{:else if id === 'problems'}
-  <ScheduledCheck />
-  <LibraryProblems />
-  <LibraryDuplicates />
+  {@render subtabs('stats', adminSubtabs('stats'))}
+  <div data-subtab="stats" hidden={sub.stats !== 'stats'}>
+    <StatsPanel />
+    <SearchesWishes />
+  </div>
+  <div data-subtab="log" hidden={sub.stats !== 'log'}>
+  <section class="card">
+    <div class="log-head">
+      <h2>{t('admin.request_log')}</h2>
+      <button class="small-button" disabled={!log.length} onclick={clearLog}>{t('common.clear')}</button>
+    </div>
+    {#each log as entry, i (i)}
+      <div class="log">
+        <span class="muted small at">{time(entry.at)}</span>
+        <div class="grow">
+          <div class="ellipsis">{entry.title ?? t('admin.removed_song')}{entry.artist ? ` · ${entry.artist}` : ''}</div>
+          <div class="muted small ellipsis">
+            {entry.name ?? t('admin.unknown')} · <span class="mono">{entry.mac ?? entry.ip ?? t('admin.no_address')}</span>
+          </div>
+        </div>
+      </div>
+    {:else}
+      <p class="muted">{t('admin.no_requests')}</p>
+    {/each}
+  </section>
+  </div>
 {:else if id === 'library'}
   {@render subtabs('library', adminSubtabs('library'))}
   <div data-subtab="folders" hidden={sub.library !== 'folders'}>
@@ -370,7 +391,13 @@
     <button onclick={() => attempt(api.openArtFolder)}>{t('admin.open_image_folder')}</button>
   </section>
   </div>
-  <p class="small muted">{t('admin.problems_note')} <a href="#/admin/problems">{t('admin.problems_link')}</a>.</p>
+  <p class="small muted">{t('admin.problems_note')} <a
+      href="#/editor?tab=problems"
+      onclick={(e) => {
+        e.preventDefault()
+        openProblems()
+      }}>{t('admin.problems_link')}</a
+    >.</p>
   </div>
 
   <div data-subtab="settings" hidden={sub.library !== 'settings'}>
@@ -432,10 +459,6 @@
   {/if}
   </div>
 
-  <div data-subtab="genres" hidden={sub.library !== 'genres'}>
-    <div class="cards-2"><GenreGroupsPanel /></div>
-  </div>
-
   <div data-subtab="online" hidden={sub.library !== 'online'}>
   {#if settings}
     <div class="cards-2"><LibraryExtras bind:settings /></div>
@@ -448,6 +471,13 @@
       <FolderPicker onpick={addRoot} />
     </Sheet>
   {/if}
+{:else if id === 'genres'}
+  {@render subtabs('genres', adminSubtabs('genres'))}
+  <div data-subtab="map" hidden={sub.genres !== 'map'}><div class="cards-2"><GenreMapPanel /></div></div>
+  <div data-subtab="tree" hidden={sub.genres !== 'tree'}><div class="cards-2"><GenreWebPanel /></div></div>
+  <div data-subtab="containers" hidden={sub.genres !== 'containers'}>
+    <div class="cards-2"><GenreGroupsPanel /></div>
+  </div>
 {:else if id === 'audio'}
   {@render subtabs('audio', adminSubtabs('audio'))}
   <div data-subtab="sound" hidden={sub.audio !== 'sound'}>
@@ -483,26 +513,6 @@
   <VisualsPanel />
 {:else if id === 'rooms'}
   <div class="cards-2"><RoomsPanel /></div>
-{:else if id === 'log'}
-  <section class="card">
-    <div class="log-head">
-      <h2>{t('admin.request_log')}</h2>
-      <button class="small-button" disabled={!log.length} onclick={clearLog}>{t('common.clear')}</button>
-    </div>
-    {#each log as entry, i (i)}
-      <div class="log">
-        <span class="muted small at">{time(entry.at)}</span>
-        <div class="grow">
-          <div class="ellipsis">{entry.title ?? t('admin.removed_song')}{entry.artist ? ` · ${entry.artist}` : ''}</div>
-          <div class="muted small ellipsis">
-            {entry.name ?? t('admin.unknown')} · <span class="mono">{entry.mac ?? entry.ip ?? t('admin.no_address')}</span>
-          </div>
-        </div>
-      </div>
-    {:else}
-      <p class="muted">{t('admin.no_requests')}</p>
-    {/each}
-  </section>
 {:else if id === 'rules' && settings}
   <section class="card">
     <h2>{t('admin.rules')}</h2>
@@ -626,7 +636,7 @@
               {#if layout === 'page'}
                 <button class="nav-item" class:active={inView === item.id} onclick={() => jump(document.getElementById(`admin-${item.id}`))}>
                   {item.label}
-                  {#if item.id === 'problems' && trouble > 0}<span class="badge">{trouble.toLocaleString(locale.code)}</span>{/if}
+                  {#if item.id === 'editor' && trouble > 0}<span class="badge">{trouble.toLocaleString(locale.code)}</span>{/if}
                   {#if changedTabs.has(item.id)}<span class="changed-dot" title={t('admin.has_changed')}></span>{/if}
                 </button>
                 {#if (cards[item.id]?.length ?? 0) > 1}
@@ -640,7 +650,7 @@
                 <a href="#/admin/{item.id}" class:active={tab === item.id} aria-current={tab === item.id ? 'page' : undefined}>
                   <Icon name={item.icon} size={20} />
                   {item.label}
-                  {#if item.id === 'problems' && trouble > 0}<span class="badge">{trouble.toLocaleString(locale.code)}</span>{/if}
+                  {#if item.id === 'editor' && trouble > 0}<span class="badge">{trouble.toLocaleString(locale.code)}</span>{/if}
                   {#if changedTabs.has(item.id)}<span class="changed-dot" title={t('admin.has_changed')}></span>{/if}
                 </a>
               {/if}
@@ -1033,7 +1043,13 @@
     }
   }
 
-  .item,
+  .item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--line);
+  }
 
   .grow {
     flex: 1;

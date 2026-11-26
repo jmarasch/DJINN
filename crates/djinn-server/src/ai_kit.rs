@@ -13,7 +13,6 @@ use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use tokio::process::Command;
 
 use crate::ai_listener;
 use crate::state::AppState;
@@ -232,7 +231,7 @@ async fn fetch_wheels(
         .map_err(|e| e.to_string())?;
     let platforms = platforms(os, arch).unwrap_or_default();
     let download = |offline: Option<PathBuf>| {
-        let mut c = Command::new(ai_listener::venv_python(d));
+        let mut c = crate::ai_listener::command(ai_listener::venv_python(d));
         c.current_dir(d)
             .args([
                 "-m",
@@ -302,7 +301,7 @@ async fn ensure_model(d: &Path, model: &str) -> Result<(), String> {
         }
     }
     tracing::info!(model, "downloading a Whisper model for a node (once)");
-    let ok = Command::new(ai_listener::venv_python(d))
+    let ok = crate::ai_listener::command(ai_listener::venv_python(d))
         .current_dir(d)
         .args(["worker.py", "--setup", "--model", model, "--vocals", "off"])
         .stdout(Stdio::null())

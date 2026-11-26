@@ -1,0 +1,81 @@
+# Metal. See README.md for how these files are written.
+
+Metal = heavy metal, metal music, heavy metal music [1968-] < hard rock, blues rock
+  Traditional heavy metal = traditional metal, trad metal, classic metal, classic heavy metal [1969-1985]
+    New wave of british heavy metal = nwobhm [1978-1985] ~ punk rock
+    Epic heavy metal = epic metal [1980-]
+  Glam metal = hair metal, pop metal, hair band, hair bands, hair rock [1980-1992] < glam rock, hard rock ~ arena rock, sleaze rock
+  Speed metal = fast metal [1980-] < new wave of british heavy metal ~ thrash metal, power metal
+  Power metal = heavy power metal [1985-] ~ symphonic metal
+    US power metal = uspm [1983-]
+    Neoclassical metal = neo classical metal, shred [1984-] ~ classical
+  Thrash metal = thrash, trash metal [1981-] < new wave of british heavy metal, hardcore punk
+    Crossover thrash = crossover, hardcore thrash [1983-] < hardcore punk
+    Technical thrash metal = technical thrash [1986-] ~ progressive metal
+    Groove metal = post thrash, neo thrash, power groove [1990-] ~ nu metal
+  Extreme metal [1982-]
+    Death metal [1984-] < thrash metal
+      Melodic death metal = melodeath, mdm, gothenburg metal [1990-] ~ melodic metalcore
+      Technical death metal = tech death [1988-] ~ progressive metal
+        Dissonant death metal [1998-]
+      Brutal death metal [1990-]
+        Slam death metal = slam, slamming death metal
+      Old school death metal = osdm
+      Death n roll = death and roll [1992-] ~ rock and roll
+      Blackened death metal = black death metal ~ black metal
+      Deathgrind = death grind [1988-] ~ grindcore
+    Black metal [1984-] < thrash metal ! death metal
+      Symphonic black metal [1994-] ~ symphonic metal
+      Melodic black metal = meloblack [1992-]
+      Atmospheric black metal = atmo black [1993-]
+        Blackgaze [2005-] ~ shoegaze, post metal
+      Depressive black metal = dsbm, depressive suicidal black metal [1995-]
+      War metal = bestial black metal [1989-]
+      Black n roll = black and roll [2001-]
+      Dissonant black metal [2001-]
+    Grindcore = grind [1985-] < hardcore punk ~ crust punk
+      Goregrind [1988-]
+        Pornogrind = porngrind
+      Cybergrind = electrogrind
+      Noisegrind = noisecore
+  Doom metal = doom [1980-] < traditional heavy metal
+    Traditional doom metal = trad doom, classic doom [1981-]
+    Epic doom metal = epic doom [1985-]
+    Funeral doom metal = funeral doom [1991-]
+    Death doom = death doom metal [1990-] ~ death metal
+    Stoner metal = stoner doom [1990-] ~ stoner rock
+    Sludge metal = sludge [1988-] < hardcore punk ~ southern metal
+      Atmospheric sludge metal = atmospheric sludge [1995-] ~ post metal
+    Drone metal = drone doom [1991-]
+  Stoner rock = desert rock [1990-] < heavy psych ~ doom metal
+    Palm desert scene
+  Gothic metal = goth metal [1991-] < doom metal ~ gothic rock, symphonic metal
+  Symphonic metal [1995-] ~ classical
+  Progressive metal = prog metal, technical metal [1985-] < progressive rock
+    Djent = djent metal [2008-] ~ progressive metalcore
+      Thall
+    Avant garde metal = experimental metal, avant metal, art metal [1985-]
+  Folk metal [1990-] < folk
+    Celtic metal = celtic folk metal [1994-] ~ celtic
+    Medieval metal = mittelalter metal [1995-]
+    Pagan metal [1990-]
+      Pagan black metal ~ black metal
+    Viking metal [1988-] ~ black metal
+  Alternative metal = alt metal [1985-] < alternative rock
+    Funk metal = funkcore, thrash funk [1985-1995] < funk rock
+    Nu metal = new metal, neo metal, aggro metal [1994-2005] ~ groove metal
+      Rap metal = hip hop metal [1990-] < rap rock ~ hip hop
+    Neue deutsche harte = ndh, tanzmetall [1994-] ~ industrial metal
+  Industrial metal [1988-] < industrial
+    Cyber metal [1995-]
+  Metalcore = metallic hardcore, nwoahm, hardcore metal [1990-] < hardcore punk, thrash metal ! nu metal
+    Melodic metalcore [1996-]
+    Deathcore [2004-] ~ death metal
+      Downtempo deathcore
+    Mathcore [1992-] < post hardcore
+    Progressive metalcore = technical metalcore [2005-]
+    Electronicore = trancecore, synthcore [2005-] ~ trance
+  Post metal = metalgaze [1997-] < sludge metal ~ post rock, shoegaze
+  Southern metal [1990-] ~ southern rock
+  Christian metal = white metal, jesus metal [1985-] ~ christian rock
+  Kawaii metal = idol metal [2010-] ~ j pop

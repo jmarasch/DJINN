@@ -1,6 +1,7 @@
 <script lang="ts">
   // Admin > Home: how DJINN is doing at a glance. Each line says whether
   // it's fine, worth a look, or wrong, and links to where to fix it.
+  import { openProblems } from './editorJump.svelte'
   import { api } from './api'
   import Icon from './Icon.svelte'
   import { locale, t } from './i18n.svelte'
@@ -182,7 +183,7 @@
         level: problems.trouble ? 'warn' : 'ok',
         label: t('admin.home.problems'),
         detail: problems.trouble ? t('admin.home.need_a_look', { n: problems.trouble }) : t('admin.home.nothing_to_look'),
-        href: '#/admin/problems',
+        href: '#/editor?tab=problems',
       })
     }
     if (lock?.recovery_used) {
@@ -221,7 +222,7 @@
           added: n(nightly.last.added),
           removed: n(nightly.last.removed),
         }),
-        href: '#/admin/problems',
+        href: '#/editor?tab=problems',
       })
     }
     return lines
@@ -268,7 +269,13 @@
                   : t('admin.home.wrong')}
             ></span>
             <div class="grow">
-              {#if line.href}<a href={line.href}>{line.label}</a>{:else}<span>{line.label}</span>{/if}
+              {#if line.href?.startsWith('#/editor')}<a
+                  href={line.href}
+                  onclick={(e) => {
+                    e.preventDefault()
+                    openProblems()
+                  }}>{line.label}</a
+                >{:else if line.href}<a href={line.href}>{line.label}</a>{:else}<span>{line.label}</span>{/if}
               <div class="small muted">{line.detail}</div>
             </div>
           </li>

@@ -3,7 +3,7 @@
   // Admin > Nodes and in a node's settings window on the Rooms page.
   import { locale, t } from './i18n.svelte'
   import { api } from './api'
-  import { aiPhase } from './nodeInfo'
+  import { aiPhase, aiWhy } from './nodeInfo'
   import { toast } from './state.svelte'
   import type { HouseNode } from './types'
 
@@ -47,7 +47,7 @@
   </p>
   {#if node.ai_help}
     <p class="small" class:bad={node.ai.phase === 'failed'}>
-      {aiPhase(node.ai.phase) ?? t('ni.waiting_node')}{node.ai.detail ? `: ${node.ai.detail}` : ''}
+      {aiPhase(node.ai.phase) ?? t('ni.waiting_node')}{node.ai.detail ? `: ${aiWhy(node.ai.detail)}` : ''}
     </p>
   {/if}
 </div>

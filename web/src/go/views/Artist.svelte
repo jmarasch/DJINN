@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { t } from '../../lib/i18n.svelte'
+  import { locale, t } from '../../lib/i18n.svelte'
   import { api } from '../../lib/api'
   import Art from '../../lib/Art.svelte'
   import ScrollRow from '../../lib/ScrollRow.svelte'
@@ -9,6 +9,8 @@
   import { likes, playList, startRadio, toggleLike } from '../player.svelte'
   import SongList from '../SongList.svelte'
   import LikeButton from '../LikeButton.svelte'
+  import SortChoice from '../../lib/SortChoice.svelte'
+  import { albumOrders, releaseYear, sortAlbums, type AlbumSort } from '../../lib/albumSort'
 
   let { id }: { id: number } = $props()
   let artist = $state<ArtistDetail | null>(null)
@@ -50,6 +52,7 @@
   })
 
   const songs = $derived(artist ? artist.top_tracks : [])
+  let albumSort = $state<AlbumSort>('release')
 </script>
 
 {#if error}<p class="error">{error}</p>{/if}
@@ -72,21 +75,26 @@
     </button>
   </div>
   {#if songs.length}
-    <h2>Songs{#if songTotal}<span class="muted small">{` (${songTotal.toLocaleString()})`}</span>{/if}</h2>
+    <h2>{t('library.songs')}{#if songTotal}<span class="muted small">{` (${songTotal.toLocaleString(locale.code)})`}</span>{/if}</h2>
     <SongList tracks={songs} />
     {#if songs.length < songTotal}
-      <a class="more button" href="#/artist/{artist.id}/songs">Show all {songTotal.toLocaleString()} songs</a>
+      <a class="more button" href="#/artist/{artist.id}/songs">{t('go.show_all_songs', { n: songTotal })}</a>
     {/if}
   {/if}
   {#if artist.albums.length}
-    <h2>{t('library.albums')}</h2>
+    <div class="section-head">
+      <h2>{t('library.albums')}</h2>
+      {#if artist.albums.length > 1}
+        <SortChoice options={albumOrders()} bind:value={albumSort} storageKey="djinn-go-artist-album-sort" label={t('av.sort_albums')} />
+      {/if}
+    </div>
     <ScrollRow gap={12}>
-      {#each artist.albums as album (album.id)}
+      {#each sortAlbums(artist.albums, albumSort) as album (album.id)}
         <div class="tile-wrap">
           <a class="tile" href="#/album/{album.id}">
             <Art hash={album.art_hash} size={120} />
             <span class="small">{album.title}</span>
-            {#if album.year}<span class="muted small">{album.year}</span>{/if}
+            {#if releaseYear(album)}<span class="muted small">{releaseYear(album)}</span>{/if}
           </a>
           <div class="corner"><LikeButton kind="album" id={album.id} name={album.title} size={18} /></div>
         </div>
@@ -125,6 +133,13 @@
 {/if}
 
 <style>
+  .section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
   .more {
     display: flex;
     justify-content: center;

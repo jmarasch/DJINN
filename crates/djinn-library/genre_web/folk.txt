@@ -1,0 +1,27 @@
+# Folk. See README.md for how these files are written.
+
+Folk = folk music [1900-]
+  Traditional folk = trad folk [1900-]
+  American folk [1920-]
+    Appalachian folk [1920-]
+    Cajun = cajun music [1920-]
+    Zydeco [1930-] ~ blues
+  British folk = english folk [1900-]
+  Celtic = celtic music, celtic folk [1960-]
+    Irish folk = irish traditional, irish celtic [1900-]
+    Scottish folk [1900-]
+  Nordic folk [1900-]
+  Contemporary folk = folk revival [1960-]
+    Protest song = protest music [1960-]
+    Progressive folk [1965-] ~ progressive rock
+  Singer songwriter = singer and songwriter [1965-] ~ soft rock
+  Folk pop [1965-] ~ pop
+  Psychedelic folk = psych folk, acid folk [1965-]
+  Chamber folk [1965-] ~ chamber pop
+  Indie folk = alternative folk [2000-] ~ indie rock
+    Freak folk [2003-] ~ psychedelic folk
+    Stomp and holler [2010-]
+  Anti folk [1985-] ~ punk rock
+  Neofolk = dark folk [1980-] ~ post punk
+  Polka [1830-]
+  Skiffle [1950-1960] ~ rock and roll

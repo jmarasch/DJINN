@@ -439,7 +439,9 @@ label {
     break-inside: avoid;
   }
 
-  .cards-2 > .wide {
+  .cards-2 > .wide,
+  /* A page with one card uses the whole width. */
+  .cards-2 > :only-child {
     column-span: all;
   }
 }

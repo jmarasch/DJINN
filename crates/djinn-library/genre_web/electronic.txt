@@ -1,0 +1,182 @@
+# Electronic. See README.md for how these files are written.
+
+Electronic = electronic music, electronica, electronica and dance [1950-]
+  Electroacoustic = electroacoustic music, acousmatic music, tape music [1948-] ~ musique concrete, modern classical
+  Progressive electronic = berlin school [1970-] ~ krautrock, ambient
+  Electronic dance music = edm, dance, dance music, club, club music [1980-]
+    House = house music [1984-] < disco
+      Chicago house [1984-]
+        Ghetto house [1992-]
+        Juke [1995-] ~ ghettotech
+          Footwork [2005-] ~ drum and bass
+      Garage house = new jersey sound [1984-] ~ uk garage
+      Deep house [1986-]
+        Lo fi house [2015-]
+      Acid house [1987-]
+      Italo house [1988-] ~ italo disco
+      Diva house = handbag house [1990-] ~ hi nrg
+      Hip house [1987-] ~ hip hop
+      Vocal house [1988-]
+      Ambient house [1989-] ~ ambient
+      Gospel house [1987-] ~ gospel
+      Jazz house [1990-] ~ nu jazz
+      Funky house [1998-]
+      Progressive house [1992-] ~ progressive trance
+        Melodic house = organic house [2009-] ~ melodic techno
+      Tech house [1995-] ~ techno
+        Minimal house = microhouse [1998-] ~ minimal techno
+      French house = filter house [1996-] ~ nu disco
+      Electro house [2000-] ~ electro
+        Big room = big room house [2012-]
+        Complextro [2008-]
+        Fidget house [2007-]
+        Dutch house [2008-]
+        Melbourne bounce [2011-]
+      Tribal house [1990-]
+        Guaracha [2016-]
+      Hard house [1995-] ~ hard trance
+      Euro house [1990-] ~ eurodance
+      Bass house [2012-] ~ uk garage
+      Future house [2014-]
+        Slap house = brazilian bass [2017-]
+      Tropical house [2013-] ~ dance pop
+      Afro house [2010-] ~ afrobeats
+        Kwaito [1990-]
+        Amapiano [2012-] ~ kwaito
+        Gqom [2012-]
+      Baltimore club = bmore club [1988-] ~ hip hop
+        Jersey club [2002-]
+      Moombahton [2009-] ~ reggaeton
+    Techno [1985-] < electro
+      Detroit techno [1985-]
+      Acid techno [1990-]
+      Minimal techno [1994-]
+      Hard techno [1995-]
+        Schranz [1994-]
+      Industrial techno [1994-] ~ industrial
+      Dub techno [1993-] ~ dub
+      Melodic techno [2013-]
+      Bleep techno [1988-1992]
+      Free tekno = teknival [1991-]
+      Ghettotech [1994-] ~ miami bass
+    Trance [1990-] < techno
+      Acid trance [1990-] ~ acid house
+      Progressive trance [1993-]
+      Uplifting trance = epic trance [1997-]
+      Vocal trance [1995-]
+      Hard trance [1993-]
+      Euro trance [1998-] ~ eurodance
+      Tech trance [1998-]
+      Dream trance [1994-1998]
+      Hands up [2001-] ~ eurodance
+      Goa trance [1990-]
+        Psytrance = psychedelic trance, psy trance [1996-]
+          Full on [1998-]
+          Dark psytrance = darkpsy [1996-]
+            Hi tech psytrance = hi tech [2005-]
+          Progressive psytrance [1998-]
+          Forest psytrance [1998-]
+          Suomisaundi [1996-]
+    Balearic beat = balearic [1987-] ~ downtempo
+    Eurodance [1990-2000] ~ dance pop
+      Bubblegum dance [1995-2002]
+      Italo dance [1998-]
+      Eurobeat [1988-] ~ italo disco
+    UK garage = 2 step, two step, speed garage [1994-] < house
+      Bassline = bassline house [2000-]
+      UK funky [2004-]
+      Future garage [2009-] ~ dubstep
+      Grime [2002-] ~ hip hop
+    Breakbeat = breaks [1990-]
+      Big beat [1995-2002] ~ alternative dance
+      Nu skool breaks [1998-]
+      Florida breaks [1988-] ~ freestyle
+    Breakbeat hardcore = rave, hardcore rave, oldskool rave [1990-1993]
+      Darkcore [1992-1994]
+    Jungle [1991-] < breakbeat hardcore
+      Ragga jungle [1993-] ~ ragga
+    Drum and bass = dnb, drum n bass, d and b [1993-] < jungle
+      Liquid funk = liquid dnb, liquid drum and bass [2000-]
+      Neurofunk [1997-]
+      Jump up [1996-]
+      Techstep [1995-]
+        Darkstep [1995-]
+      Jazzstep [1997-] ~ jazz
+      Atmospheric drum and bass = intelligent drum and bass, intelligent dnb [1993-]
+      Dancefloor drum and bass [2004-]
+      Halftime [2011-]
+      Drumfunk [1994-]
+      Sambass [2001-] ~ samba
+    Dubstep [2002-] < uk garage ~ dub
+      Brostep [2008-]
+        Riddim [2012-]
+        Drumstep [2007-] ~ drum and bass
+      Melodic dubstep [2010-]
+      Chillstep = chill step [2009-] ~ downtempo
+      Post dubstep [2009-]
+    Future bass [2009-]
+      Kawaii future bass [2013-]
+    Bass music = bass, uk bass [2010-]
+      Wave [2012-] ~ witch house
+    EDM trap = trap edm, festival trap, hybrid trap [2012-] ~ trap
+    Hardcore techno = hardcore electronic [1990-]
+      Gabber [1992-]
+      Happy hardcore [1993-]
+        UK hardcore [1999-]
+      Frenchcore [1996-]
+      Speedcore [1996-]
+      Industrial hardcore [1990-] ~ industrial
+      Terrorcore [1996-]
+      Mainstream hardcore [2002-]
+      Breakcore [1997-] ~ jungle
+      Digital hardcore [1994-] ~ punk rock
+    Hardstyle [2000-] ~ hard trance
+      Rawstyle [2008-]
+      Euphoric hardstyle [2008-]
+      Jumpstyle [2000-]
+    Electro = electro funk [1982-] ~ hip hop
+      Electroclash [1998-2006] ~ synth pop
+      Electro swing [2000-] ~ swing
+      Freestyle = latin freestyle, freestyle music [1983-] ~ synth pop, latin
+    Deconstructed club = experimental club [2010-]
+  Ambient = ambient music [1975-] ~ new age
+    Dark ambient [1984-] ~ industrial
+    Ambient techno [1990-] ~ techno
+    Space ambient = space music [1975-]
+    Ambient dub [1991-] ~ dub
+    Tribal ambient [1990-] ~ world
+    Psybient = psychill, psydub [1993-] ~ psytrance
+  Downtempo = chill out, chillout, chill [1990-]
+    Trip hop [1991-] ~ hip hop
+    Chillwave [2009-] ~ indietronica
+    Illbient [1995-]
+  IDM = intelligent dance music [1991-]
+    Glitch [1994-]
+      Glitch hop [2005-] ~ hip hop
+    Drill and bass [1995-]
+    Wonky [2005-] ~ hip hop
+  Synthwave = retrowave, outrun [2005-] ~ synth pop
+    Darksynth [2010-]
+    Sovietwave [2010-]
+    Dreamwave [2010-] ~ chillwave
+  Vaporwave [2010-]
+    Future funk [2012-] ~ nu disco
+    Mallsoft [2012-]
+  Chiptune = 8 bit, chip music, bitpop [1985-] ~ video game music
+  Witch house [2009-] ~ dark wave
+  Dungeon synth [1991-] ~ dark ambient, black metal
+  Nightcore [2002-]
+  Livetronica [1997-] ~ jam band
+  Folktronica [2000-] ~ folk
+  Leftfield = leftfield electronic
+  Industrial = industrial music [1975-] ~ experimental
+    EBM = electronic body music [1981-]
+      Futurepop = future pop [1998-] ~ synth pop
+      New beat [1987-1990]
+    Electro industrial [1988-]
+      Aggrotech = harsh ebm, hellektro [1995-]
+      Dark electro [1989-]
+    Power electronics [1980-] ~ noise
+    Martial industrial [1985-]
+    Post industrial [1985-]
+    Cyberpunk [1990-] ~ industrial metal, synthwave

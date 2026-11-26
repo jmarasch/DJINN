@@ -33,7 +33,12 @@
       <span class="number muted">{number ?? ''}</span>
     {/if}
     <span class="text">
-      <span class="title-line"><span class="title">{track.title}</span><LyricsMark lyrics={track.lyrics} ai={track.lyrics_ai} failed={track.lyrics_failed} /></span>
+      <span class="title-line"><span class="title">{track.title}</span><LyricsMark
+          lyrics={track.lyrics}
+          ai={track.lyrics_ai}
+          failed={track.lyrics_failed}
+          instrumental={track.instrumental}
+        /></span>
       <span class="muted small"
         >{line}<Counts plays={track.plays} likes={track.likes} lead={!!line} /></span
       >

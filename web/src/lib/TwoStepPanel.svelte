@@ -12,6 +12,8 @@
   let setup = $state<TwoStepSetup | null>(null)
   let code = $state('')
   let password = $state('')
+  /** A current code from the app (or a recovery code), when two-step is on. */
+  let current = $state('')
   let recovery = $state<string[] | null>(null)
   let error = $state('')
   let busy = $state(false)
@@ -44,8 +46,9 @@
   const begin = (e: SubmitEvent) => {
     e.preventDefault()
     return run(async () => {
-      setup = await api.startTwoStep(password)
+      setup = await api.startTwoStep(password, current)
       password = ''
+      current = ''
       starting = false
     })
   }
@@ -64,8 +67,9 @@
   const turnOff = (e: SubmitEvent) => {
     e.preventDefault()
     return run(async () => {
-      await api.turnOffTwoStep(password)
+      await api.turnOffTwoStep(password, current)
       password = ''
+      current = ''
       turningOff = false
       await load()
       onchange?.(false)
@@ -110,11 +114,13 @@
     {#if starting}
       <form class="actions" onsubmit={begin}>
         <input type="password" bind:value={password} autocomplete="current-password" placeholder={t('ts.your_password')} required aria-label={t('ts.your_password')} />
+        <input bind:value={current} autocomplete="one-time-code" maxlength="12" placeholder={t('ts.code_label')} required aria-label={t('ts.code_label')} />
         <button class="primary" disabled={busy}>{t('ts.continue')}</button>
       </form>
     {:else if turningOff}
       <form class="actions" onsubmit={turnOff}>
         <input type="password" bind:value={password} autocomplete="current-password" placeholder={t('ts.your_password')} required aria-label={t('ts.your_password')} />
+        <input bind:value={current} autocomplete="one-time-code" maxlength="12" placeholder={t('ts.code_label')} required aria-label={t('ts.code_label')} />
         <button class="danger" disabled={busy}>{t('ts.turn_off')}</button>
       </form>
       {#if status.required}<p class="small muted">{t('ts.go_needs_off')}</p>{/if}

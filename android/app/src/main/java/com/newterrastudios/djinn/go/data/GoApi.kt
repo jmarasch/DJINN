@@ -215,6 +215,9 @@ class GoApi(private val account: Account) {
         get("/api/albums/jumps?sort=$sort&filter=$filter")
     suspend fun songJumps(sort: String): List<Jump> = get("/api/tracks/jumps?sort=$sort")
     suspend fun genres(top: Int, lines: Int): GenreList = get("/api/genres?top=$top&lines=$lines")
+
+    /** The genre web, for the genre map. */
+    suspend fun genreWeb(): GenreWeb = get("/api/genre-web")
     suspend fun genre(name: String): GenrePage = get(genrePath(name))
     suspend fun genreSongs(name: String, offset: Int): Page<Track> = get(genrePath(name) + "/songs?offset=$offset")
     suspend fun genreArtists(name: String, offset: Int): Page<ArtistSummary> =
@@ -241,6 +244,9 @@ class GoApi(private val account: Account) {
     /** Songs like this one, leaving out any already lined up. */
     suspend fun radio(id: Long, exclude: Collection<Long> = emptyList()): List<Track> =
         get("/api/go/radio/$id" + if (exclude.isEmpty()) "" else "?exclude=" + exclude.joinToString(","))
+    /** Wild play: songs at random from the whole library, leaving out `exclude`. */
+    suspend fun wild(exclude: Collection<Long> = emptyList()): List<Track> =
+        get("/api/go/wild" + if (exclude.isEmpty()) "" else "?exclude=" + exclude.joinToString(","))
     suspend fun resume(): GoResume? = home().resume
     suspend fun search(query: String): SearchResults =
         get("/api/search?q=${URLEncoder.encode(query, "UTF-8")}")

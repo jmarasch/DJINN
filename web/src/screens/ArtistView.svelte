@@ -14,7 +14,7 @@
   import SortChoice from '../lib/SortChoice.svelte'
   import TagEditor from '../lib/TagEditor.svelte'
   import TrackRow from '../lib/TrackRow.svelte'
-  import { byName } from '../lib/format'
+  import { albumOrders, releaseYear, sortAlbums, type AlbumSort } from '../lib/albumSort'
   import { isAdmin, toast } from '../lib/state.svelte'
   import type { Album, ArtistDetail, ArtistPicture, ArtistSummary, TagFields, Track } from '../lib/types'
 
@@ -77,17 +77,8 @@
       .catch(() => {})
   })
 
-  let albumSort = $state<'year' | 'name'>('year')
-  /** Newest first (unknown years last), or A to Z. */
-  function sorted(albums: Album[]): Album[] {
-    const list = [...albums]
-    if (albumSort === 'name') return list.sort(byName((a) => a.title))
-    return list.sort((a, b) => (b.year ?? -Infinity) - (a.year ?? -Infinity) || byName<Album>((x) => x.title)(a, b))
-  }
-  const albumOrders: { value: 'year' | 'name'; label: string }[] = $derived([
-    { value: 'year', label: t('av.newest') },
-    { value: 'name', label: t('av.az') },
-  ])
+  let albumSort = $state<AlbumSort>('release')
+  const sorted = (albums: Album[]) => sortAlbums(albums, albumSort)
 </script>
 
 {#if error}
@@ -164,7 +155,7 @@
       <div class="section-head">
         <h2>{t('av.albums')}</h2>
         {#if artist.albums.length > 1}
-          <SortChoice options={albumOrders} bind:value={albumSort} storageKey="djinn-artist-album-sort" label={t('av.sort_albums')} />
+          <SortChoice options={albumOrders()} bind:value={albumSort} storageKey="djinn-artist-album-sort" label={t('av.sort_albums')} />
         {/if}
       </div>
       <div class="albums">
@@ -173,7 +164,7 @@
             <a class="album" href="#/album/{album.id}">
               <div class="cover"><Art hash={album.art_hash} size={160} round={10} /></div>
               <span class="ellipsis">{album.title}</span>
-              {#if album.year}<span class="muted small">{album.year}</span>{/if}
+              {#if releaseYear(album)}<span class="muted small">{releaseYear(album)}</span>{/if}
             </a>
             <div class="corner"><Heart kind="album" id={album.id} name={album.title} size={18} /></div>
           </div>

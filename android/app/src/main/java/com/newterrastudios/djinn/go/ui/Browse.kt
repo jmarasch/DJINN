@@ -13,7 +13,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.BubbleChart
-import androidx.compose.runtime.mutableIntStateOf
 import kotlinx.coroutines.Dispatchers
 import com.newterrastudios.djinn.go.data.importText
 import com.newterrastudios.djinn.go.data.ShareTarget
@@ -81,6 +80,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.media3.common.util.UnstableApi
 import com.newterrastudios.djinn.go.data.Album
 import androidx.compose.ui.draw.clip
@@ -100,6 +101,7 @@ import com.newterrastudios.djinn.go.data.Page
 import com.newterrastudios.djinn.go.data.SearchResults
 import com.newterrastudios.djinn.go.data.Track
 import com.newterrastudios.djinn.go.data.GenreList
+import com.newterrastudios.djinn.go.data.GenreWeb
 import com.newterrastudios.djinn.go.data.GenrePage
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -361,13 +363,14 @@ fun HomeScreen(nav: Nav) {
             Column(Modifier.fillMaxSize()) {
                 HomeBar(nav)
                 Note("$reason Here's what's on this phone.")
-                KeptSongs(nav)
+                KeptSongs(nav, wild = true)
             }
         },
     ) { home: GoHome ->
         LazyColumn(Modifier.fillMaxSize()) {
             item { HomeBar(nav) }
             item { UpdateOffer(nav) }
+            item { WildPlayRow(nav) }
             home.resume?.let { resume ->
                 resume.songs.getOrNull(resume.position)?.let { song ->
                     item {
@@ -410,10 +413,34 @@ private fun HomeBar(nav: Nav) {
     PageTitle(t("go.your_music"), t("go.home_hint"))
 }
 
-/** Everything on the phone, which needs no server. */
+/** Wild play: songs at random from the whole library, more as it runs low. */
 @UnstableApi
 @Composable
-private fun KeptSongs(nav: Nav) {
+private fun WildPlayRow(nav: Nav) {
+    val scope = rememberCoroutineScope()
+    Row2(
+        title = t("pls.wild"),
+        subtitle = t("gh.wild_note"),
+        art = { Icon(Icons.Default.Shuffle, null, Modifier.size(44.dp), tint = MaterialTheme.colorScheme.primary) },
+        onClick = {
+            scope.launch {
+                try {
+                    val songs = nav.api.wild()
+                    if (songs.isEmpty()) nav.message = t("gh.wild_failed") else nav.player.playWild(songs)
+                } catch (_: IOException) {
+                    nav.message = t("gh.wild_failed")
+                }
+            }
+        },
+        end = { Icon(Icons.Default.PlayArrow, contentDescription = t("pls.wild")) },
+    )
+}
+
+/** Everything on the phone, which needs no server. With `wild`, a Wild play
+ * row first shuffles them. */
+@UnstableApi
+@Composable
+private fun KeptSongs(nav: Nav, wild: Boolean = false) {
     val flow = remember(nav.server) { nav.offline.dao.songsFlow(nav.server) }
     val kept by flow.collectAsState(emptyList())
     val locked = nav.offline.isLocked()
@@ -425,6 +452,17 @@ private fun KeptSongs(nav: Nav) {
             }
         } else if (songs.isEmpty()) {
             item { Note(t("kept.nothing")) }
+        }
+        if (wild && songs.isNotEmpty()) {
+            item {
+                Row2(
+                    title = t("pls.wild"),
+                    subtitle = t("gh.wild_note_kept"),
+                    art = { Icon(Icons.Default.Shuffle, null, Modifier.size(44.dp), tint = MaterialTheme.colorScheme.primary) },
+                    onClick = { nav.player.playShuffled(songs) },
+                    end = { Icon(Icons.Default.PlayArrow, contentDescription = t("pls.wild")) },
+                )
+            }
         }
         itemsIndexed(songs) { index, song ->
             SongRow(song, nav) { nav.player.play(songs, index) }
@@ -1052,6 +1090,64 @@ val ALBUM_SORTS = listOf(
     "year" to "library.newest",
     "oldest" to "library.oldest",
 )
+/**
+ * How an artist's albums are ordered on the artist screen, as on the web:
+ * a button per order (value, its reverse, translation key of the label);
+ * tapping the chosen one again reverses it.
+ */
+val ARTIST_ALBUM_SORTS = listOf(
+    Triple("release", "release_old", "av.sort_release"),
+    Triple("added", "added_old", "av.sort_added"),
+    Triple("name", "name_rev", "av.az"),
+)
+
+/**
+ * An artist's albums by release year (MusicBrainz's first release when
+ * it knows it, else the tags'; "release" newest first,
+ * "release_old" oldest first), by when they were added ("added",
+ * "added_old"), or by title ("name", "name_rev" Z to A). Albums with no
+ * year or added time go last either way, and ties go A to Z.
+ */
+fun sortArtistAlbums(albums: List<Album>, sort: String): List<Album> {
+    val az = compareBy<Album, String>(String.CASE_INSENSITIVE_ORDER) { it.title }
+    if (sort == "name") return albums.sortedWith(az)
+    if (sort == "name_rev") return albums.sortedWith(az.reversed())
+    val key: (Album) -> Long? = if (sort.startsWith("added")) {
+        { it.added }
+    } else {
+        { (it.firstYear ?: it.year)?.toLong() }
+    }
+    val order = if (sort.endsWith("_old")) nullsLast<Long>() else nullsLast(reverseOrder())
+    return albums.sortedWith(compareBy(order, key).then(az))
+}
+
+/** The sort buttons above an artist's albums; the chosen one shows which way it runs. */
+@Composable
+private fun AlbumSortChoices(chosen: String, choose: (String) -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        ARTIST_ALBUM_SORTS.forEach { (value, reverse, label) ->
+            val on = chosen == value || chosen == reverse
+            val hint = when {
+                !on -> null
+                value == "name" -> t(if (chosen == reverse) "av.z_to_a" else "av.a_to_z")
+                else -> t(if (chosen == reverse) "av.oldest_first" else "av.newest_first")
+            }
+            FilterChip(
+                selected = on,
+                onClick = { choose(if (chosen == value) reverse else value) },
+                label = { Text(if (on) "${t(label)} ${if (chosen == reverse) "↑" else "↓"}" else t(label)) },
+                modifier = if (hint != null) Modifier.semantics { stateDescription = hint } else Modifier,
+            )
+        }
+    }
+}
+
 val ALBUM_FILTERS = listOf("all" to "library.all_albums", "various" to "library.various", "soundtracks" to "library.soundtracks")
 val SONG_SORTS = listOf(
     "title" to "library.sort_title",
@@ -1258,7 +1354,13 @@ fun ArtistScreen(id: Long, nav: Nav) {
             }
             if (artist.albums.isNotEmpty()) {
                 item { Heading(t("library.albums")) }
-                items(artist.albums) { AlbumRow(it, nav) }
+                if (artist.albums.size > 1) {
+                    item { AlbumSortChoices(nav.artistAlbumSort) { nav.artistAlbumSort = it } }
+                }
+                items(sortArtistAlbums(artist.albums, nav.artistAlbumSort), key = { "album-${it.id}" }) {
+                    // The year it came out, as the order goes.
+                    AlbumRow(it.copy(year = it.firstYear ?: it.year), nav)
+                }
             }
             if (artist.appearsOn.isNotEmpty()) {
                 item { Heading(t("go.appears_on")) }
@@ -1354,48 +1456,49 @@ fun ArtistSongsScreen(id: Long, nav: Nav) {
 /** Genre names are stored in lower case. */
 private fun genreTitle(name: String) = name.replaceFirstChar { it.uppercase() }
 
+/** The genre list's request: the list itself is every genre either way. */
+private const val GENRE_LIST_TOP = 100
+private const val GENRE_LIST_LINES = 4
+
 /** Every genre in the library. */
 @UnstableApi
 @Composable
 private fun GenresTab(nav: Nav) {
     var cloud by remember { mutableStateOf(nav.prefs.genreCloud) }
-    var top by remember { mutableIntStateOf(nav.prefs.genreTop) }
-    var lines by remember { mutableIntStateOf(nav.prefs.genreLines) }
-    Loaded(key = "genres-$top-$lines", load = { nav.api.genres(top, lines) }) { list: GenreList ->
+    val toggle = {
+        cloud = !cloud
+        nav.prefs.genreCloud = cloud
+    }
+    if (cloud) {
+        // The map: DJINN's genre web.
+        var every by remember { mutableStateOf(nav.prefs.genreEvery) }
+        Loaded(key = "genre-web", load = { nav.api.genreWeb() }) { web: GenreWeb ->
+            Column(Modifier.fillMaxSize()) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    IconButton(onClick = toggle) { Icon(Icons.AutoMirrored.Filled.List, t("genres.as_list")) }
+                }
+                GenreCloud(
+                    web,
+                    nav,
+                    every,
+                    onEvery = {
+                        every = it
+                        nav.prefs.genreEvery = it
+                    },
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+        return
+    }
+    Loaded(key = "genres", load = { nav.api.genres(GENRE_LIST_TOP, GENRE_LIST_LINES) }) { list: GenreList ->
         val entries = remember(list) { jumpEntries(letterJumps(list.genres.map { it.name }), "name") }
         val state = rememberLazyListState()
         val scope = rememberCoroutineScope()
         var pressedLabel by remember { mutableStateOf<String?>(null) }
         Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-            IconButton(onClick = {
-                cloud = !cloud
-                nav.prefs.genreCloud = cloud
-            }) {
-                if (cloud) {
-                    Icon(Icons.AutoMirrored.Filled.List, t("genres.as_list"))
-                } else {
-                    Icon(Icons.Default.BubbleChart, t("genres.as_cloud"))
-                }
-            }
-        }
-        if (cloud && list.genres.isNotEmpty()) {
-            GenreCloud(
-                list,
-                nav,
-                top,
-                lines,
-                onTop = {
-                    top = it
-                    nav.prefs.genreTop = it
-                },
-                onLines = {
-                    lines = it
-                    nav.prefs.genreLines = it
-                },
-                modifier = Modifier.weight(1f),
-            )
-            return@Column
+            IconButton(onClick = toggle) { Icon(Icons.Default.BubbleChart, t("genres.as_cloud")) }
         }
         Box(
             Modifier

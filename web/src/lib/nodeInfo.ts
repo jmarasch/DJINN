@@ -43,6 +43,15 @@ export function aiPhase(phase: string): string | null {
   return AI_PHASE_KEYS.includes(phase) ? t(`ni.ai_${phase}`) : null
 }
 
+const AI_WHY_KEYS = ['music', 'held', 'offline', 'screen']
+
+/** Why a node's AI helper is paused, from the word it reports (older nodes
+ * send a sentence, shown as it is). */
+export function aiWhy(detail: string | null | undefined): string | null {
+  if (!detail) return null
+  return AI_WHY_KEYS.includes(detail) ? t(`ni.ai_why_${detail}`) : detail
+}
+
 /** The AI helper in a few words, for its button. */
 export function aiName(node: HouseNode): string {
   if (!node.ai_help) return t('ni.ai_off')

@@ -9,17 +9,29 @@
   import { api } from '../lib/api'
   import EditorWorkspace from '../lib/EditorWorkspace.svelte'
   import LibraryCompare from '../lib/LibraryCompare.svelte'
+  import LibraryDuplicates from '../lib/LibraryDuplicates.svelte'
   import LibraryFolders from '../lib/LibraryFolders.svelte'
+  import LibraryProblems from '../lib/LibraryProblems.svelte'
+  import ScheduledCheck from '../lib/ScheduledCheck.svelte'
+  import type { EditorTab } from '../lib/editorJump.svelte'
   import { route } from '../lib/router.svelte'
   import Tabs from '../lib/Tabs.svelte'
   import UnlockForm from '../lib/UnlockForm.svelte'
   import UnlockHost from '../lib/UnlockHost.svelte'
 
   let stage = $state<'starting' | 'locked' | 'open'>('starting')
-  let view = $state<'editor' | 'folders' | 'compare'>('editor')
+  let view = $state<EditorTab>('editor')
 
-  /** A folder or words another page asked the editor to start with. */
+  /** A folder or words another page asked the editor to start with, or a tab. */
   const ask = $derived(new URLSearchParams(route.path.split('?')[1] ?? ''))
+  const TABS: EditorTab[] = ['editor', 'folders', 'compare', 'problems']
+
+  // A tab asked for opens; a folder or words to find open the editor.
+  $effect(() => {
+    const tab = ask.get('tab') as EditorTab | null
+    if (tab && TABS.includes(tab)) view = tab
+    else if (ask.get('folder') || ask.get('search')) view = 'editor'
+  })
 
   onMount(() => {
     // Every time the window opens, whatever was unlocked is locked again first.
@@ -52,9 +64,10 @@
           ['editor', t('ew.editor')],
           ['folders', t('ew.folders')],
           ['compare', t('ew.compare')],
+          ['problems', t('admin.menu.problems')],
         ]}
         active={view}
-        onselect={(id) => (view = id as 'editor' | 'folders' | 'compare')}
+        onselect={(id) => (view = id as EditorTab)}
       />
     {/if}
     <span class="spacer"></span>
@@ -72,7 +85,15 @@
         {/key}
       {:else}
         <div class="page">
-          {#if view === 'folders'}<LibraryFolders />{:else}<LibraryCompare />{/if}
+          {#if view === 'folders'}
+            <LibraryFolders />
+          {:else if view === 'compare'}
+            <LibraryCompare />
+          {:else}
+            <ScheduledCheck />
+            <LibraryProblems />
+            <LibraryDuplicates />
+          {/if}
         </div>
       {/if}
     {:else if stage === 'locked'}
@@ -112,7 +133,14 @@
   }
 
   header :global(.subtabs) {
-    flex: 0 1 520px;
+    flex: 0 1 auto;
+    flex-wrap: nowrap;
+    min-width: 0;
+  }
+
+  /* Each tab's name on one line; the bar grows to fit them. */
+  header :global(.subtabs button) {
+    white-space: nowrap;
   }
 
   .spacer {

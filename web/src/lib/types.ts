@@ -349,6 +349,8 @@ export interface Track {
   /** 0 not AI, 1 the words were made by an AI, 2 a person's words timed by an AI. */
   lyrics_ai?: number
   lyrics_failed?: number
+  /** 1 for an instrumental: no words to sing. */
+  instrumental?: number
 }
 
 export type LyricsFilter = 'all' | 'words' | 'timed'
@@ -382,6 +384,11 @@ export interface Album {
   likes?: number
   /** In the album list: how many songs it has. */
   songs?: number
+  /** On the artist page: when its newest song was added (ms). */
+  added?: number | null
+  /** On the artist page: the year it first came out, from MusicBrainz
+   * (the tags often give a reissue's year). */
+  first_year?: number | null
 }
 
 export interface Artist {
@@ -867,7 +874,7 @@ export type ProblemKind =
   | 'no_length_header'
   | 'messy_genres'
 
-/** A genre and how many songs have it (Admin > Library > Genres). */
+/** A genre and how many songs have it (Admin > Genres > Containers). */
 export interface GenreCountRow {
   genre: string
   songs: number
@@ -876,6 +883,33 @@ export interface GenreCountRow {
 }
 
 /** Genre containers: similar genres shown under one name. */
+/** One genre of DJINN's genre web (Admin > Genres > Family tree). */
+export interface WebGenre {
+  name: string
+  aliases: string[]
+  /** Places in the list. */
+  parent: number | null
+  depth: number
+  from_year: number | null
+  until_year: number | null
+  /** What it grew out of besides its parent. */
+  from: number[]
+  /** Genres it's close to or crosses over with. */
+  near: number[]
+  /** What it was a reaction against. */
+  against: number[]
+  /** Songs in the library that land here. */
+  songs: number
+  /** Songs that land here or below it, each counted once. */
+  songs_below: number
+}
+
+export interface WebTree {
+  genres: WebGenre[]
+  /** The library's genres the web doesn't know yet, with their songs. */
+  unplaced: [string, number][]
+}
+
 export interface GenreGroups {
   enabled: boolean
   containers: { id: number; name: string; auto: boolean; genres: GenreCountRow[] }[]
@@ -907,6 +941,8 @@ export interface ProblemCount {
   /** Rows are albums. */
   per_album: boolean
   hidden: boolean
+  /** Its songs can be quarantined (moved or copied to another library folder). */
+  songs: boolean
 }
 
 export interface ProblemSummary {
@@ -1398,6 +1434,15 @@ export interface ServerPorts {
 export interface LogSettings {
   level: 'trace' | 'warn' | 'error'
   keep_days: number
+  /** When full tracing goes back to warnings and errors (ms since 1970). */
+  trace_until?: number | null
+}
+
+export interface SaveLogSettings {
+  level: 'trace' | 'warn' | 'error'
+  keep_days: number
+  /** How long full tracing runs for; left out keeps the time it ends. */
+  trace_minutes?: number
 }
 
 /** What Admin > System can clear out. */
@@ -1645,6 +1690,16 @@ export interface CompareDiff {
   why: CompareWhy
 }
 
+/** What a quarantine would do (or did): each file from and to, why some can't go. */
+export interface QuarantinePlan {
+  files: EditorRenamed[]
+  /** The size of the files that go. */
+  bytes: number
+  /** Space free in the library folder they go to, when the system says. */
+  free: number | null
+  batch: number | null
+}
+
 export interface EditableFolder {
   path: string
   name: string
@@ -1711,6 +1766,12 @@ export interface AiWorkStatus {
   sync_plain: boolean
   /** Main isolates vocals for helping nodes when it can. */
   vocals_for_nodes: boolean
+  /** Songs a node wasn't sure of go to this computer's listener. */
+  second_opinion: boolean
+  /** Songs waiting for that second opinion. */
+  waiting_second: number
+  /** While nodes wait for work, this computer's listener leaves new songs to them. */
+  nodes_first: boolean
   /** The least an AI's lyrics must score to be kept, in percent. */
   min_match: number
   /** Genres whose songs get no AI lyrics. */
@@ -1722,6 +1783,9 @@ export interface AiWorkStatus {
     /** Vocals isolated here, waiting for a node. */
     prepared: number
     done: number
+    /** Results under the minimum score. */
+    low_score: number
+    /** Songs that failed: an error, or nothing sent back. */
     failed: number
   }
   held: { reason: 'music' } | { reason: 'hours'; from: number; until: number } | null
@@ -1736,6 +1800,42 @@ export interface AiWorkStatus {
     /** Seconds of work per minute of song. */
     secs_per_minute: number | null
   }[]
+  /** Every node switched on to help, and what it's doing. */
+  helpers: AiHelper[]
+  /** What this computer is working on: vocals it's separating, and what it listens to. */
+  this_computer: (AiHeldSong & { what: 'strip' | 'listen' | 'second' })[]
+  /** Songs lined up for a listener: second opinions first, then separated vocals (up to 50). */
+  lined_up: { track_id: number; kind: string; artist: string | null; title: string; second: boolean; since: number | null }[]
+}
+
+/** A song a worker is working on. */
+export interface AiHeldSong {
+  worker: string
+  track_id: number
+  kind: 'listen' | 'sync'
+  artist: string | null
+  title: string
+  taken_at: number
+}
+
+/** A node switched on to help with AI lyrics. */
+export interface AiHelper {
+  node_id: number
+  name: string
+  /** When it last checked in. */
+  last_seen: number | null
+  /** What it says about its helper: phase "off", "installing", "ready",
+   * "working", "paused" or "failed", and why (for "paused", a word such as
+   * "music"). */
+  report: { phase: string; detail: string | null; model: string | null }
+  /** When it last asked for work, and what this computer answered. */
+  asked_at: number | null
+  answer: 'given' | 'no_songs' | 'waiting_vocals' | 'work_off' | null
+  done: number
+  low: number
+  failed: number
+  secs_per_minute: number | null
+  working_on: AiHeldSong[]
 }
 
 export interface AiListenerStatus {
@@ -1750,6 +1850,12 @@ export interface AiListenerStatus {
   model: string
   vocals: boolean
   auto_start: boolean
+  /** Where the listener runs while vocals are stripped: beside the stripper on the graphics card, or on the processor. */
+  listen_on: 'gpu' | 'cpu'
+  /** Songs whose vocals are separated at once (1 to 3). */
+  strippers: number
+  /** The vocal stripper is running beside the listener. */
+  stripping: boolean
   error: string | null
   log: string[]
 }

@@ -21,7 +21,7 @@ use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use sha2::{Digest, Sha256};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{Child, Command};
+use tokio::process::Child;
 
 use crate::ai_kit::KitFile;
 use crate::ai_listener;
@@ -159,7 +159,10 @@ async fn tick(node: &Node, helper: &Helper) {
             }
         }
     }
-    let busy = node.busy();
+    let busy_with = node.busy_with();
+    let busy = busy_with.is_some();
+    // The reason is a word Main's page puts into words.
+    let why = || busy_with.map(str::to_owned);
     let mut child = helper.child.lock().await;
     let running = child
         .as_mut()
@@ -168,7 +171,13 @@ async fn tick(node: &Node, helper: &Helper) {
         *child = None;
         helper.paused.store(false, Ordering::Release);
         if busy {
-            helper.set("paused", Some("playing or showing visuals".into()));
+            helper.set("paused", why());
+            return;
+        }
+        // This node's DJINN's worker program, so an update reaches the
+        // installed listener without installing again.
+        if let Err(e) = ai_listener::write_pack(&helper.dir).await {
+            helper.set("failed", Some(format!("couldn't write the listener: {e}")));
             return;
         }
         match start(node, helper, &wanted.model) {
@@ -184,13 +193,16 @@ async fn tick(node: &Node, helper: &Helper) {
     if busy && !paused {
         if pause(child.as_mut(), true).await {
             helper.paused.store(true, Ordering::Release);
-            helper.set("paused", Some("playing or showing visuals".into()));
+            helper.set("paused", why());
         } else if let Some(mut c) = child.take() {
             // Can't pause it here: stop it, it starts again when free.
             let _ = c.kill().await;
-            helper.set("paused", Some("playing or showing visuals".into()));
+            helper.set("paused", why());
         }
-    } else if !busy && paused && pause(child.as_mut(), false).await {
+    } else if busy {
+        // Still paused, perhaps for another reason now.
+        helper.set("paused", why());
+    } else if paused && pause(child.as_mut(), false).await {
         helper.paused.store(false, Ordering::Release);
         helper.set("working", None);
     }
@@ -203,7 +215,7 @@ async fn pause(child: Option<&mut Child>, stop: bool) -> bool {
         let Some(pid) = child.and_then(|c| c.id()) else {
             return false;
         };
-        Command::new("kill")
+        crate::ai_listener::command("kill")
             .arg(if stop { "-STOP" } else { "-CONT" })
             .arg(pid.to_string())
             .status()
@@ -235,7 +247,7 @@ fn start(node: &Node, helper: &Helper, model: &str) -> std::io::Result<Child> {
     let python = ai_listener::venv_python(&helper.dir);
     #[cfg(unix)]
     let mut command = {
-        let mut command = Command::new("nice");
+        let mut command = crate::ai_listener::command("nice");
         command.args(["-n", "19"]).arg(&python);
         command
     };
@@ -243,8 +255,8 @@ fn start(node: &Node, helper: &Helper, model: &str) -> std::io::Result<Child> {
     let mut command = {
         /// Windows' IDLE_PRIORITY_CLASS.
         const IDLE_PRIORITY: u32 = 0x40;
-        let mut command = Command::new(&python);
-        command.creation_flags(IDLE_PRIORITY);
+        let mut command = crate::ai_listener::command(&python);
+        command.creation_flags(IDLE_PRIORITY | crate::ai_listener::CREATE_NO_WINDOW);
         command
     };
     command
@@ -285,7 +297,7 @@ fn start(node: &Node, helper: &Helper, model: &str) -> std::io::Result<Child> {
 /// The node's Python version ("3.11") and processor ("x86_64"; Windows and
 /// Python call the same processors "AMD64" and "ARM64").
 async fn python_kind(py: &Path) -> Result<(String, String), String> {
-    let out = Command::new(py)
+    let out = crate::ai_listener::command(py)
         .args([
             "-c",
             "import sys, platform; print('%d.%d %s' % (sys.version_info[0], sys.version_info[1], platform.machine()))",
@@ -407,7 +419,7 @@ async fn install(node: &Node, helper: &Helper, model: &str) -> Result<(), String
                 })
             })
             .ok_or("Main's kit has no pip; update Main and try again")?;
-        let ok = Command::new(&py)
+        let ok = crate::ai_listener::command(&py)
             .arg(wheel.join("pip"))
             .args([
                 "install",
@@ -431,7 +443,7 @@ async fn install(node: &Node, helper: &Helper, model: &str) -> Result<(), String
         "installing",
         Some("installing the listener's packages".into()),
     );
-    let ok = Command::new(&py)
+    let ok = crate::ai_listener::command(&py)
         .current_dir(d)
         .args([
             "-m",
@@ -470,7 +482,7 @@ async fn install(node: &Node, helper: &Helper, model: &str) -> Result<(), String
 
 /// The speed test: how long the model takes to hear 30 seconds.
 async fn bench(py: &Path, d: &Path, model: &str) -> Option<u64> {
-    let out = Command::new(py)
+    let out = crate::ai_listener::command(py)
         .current_dir(d)
         .args(["worker.py", "--bench", "--model", model, "--device", "cpu"])
         .env("HF_HUB_OFFLINE", "1")

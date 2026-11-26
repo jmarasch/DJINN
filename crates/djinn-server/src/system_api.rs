@@ -14,7 +14,7 @@ use djinn_library::ScanProgress;
 use djinn_store::Store;
 use serde::{Deserialize, Serialize};
 
-use crate::auth::AdminUser;
+use crate::auth::{AdminUser, CurrentSession, Device};
 use crate::config::Config;
 use crate::error::{ApiError, ApiResult};
 use crate::events::{OutputStatus, PlayState};
@@ -490,23 +490,38 @@ async fn log(_: AdminUser, Query(query): Query<LogQuery>) -> Json<LogLines> {
     })
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Serialize)]
 struct LogSettings {
     level: String,
     keep_days: u16,
+    /// When full tracing goes back to warnings and errors (ms since 1970).
+    trace_until: Option<i64>,
+}
+
+fn log_settings_now() -> LogSettings {
+    LogSettings {
+        level: logs::record_level().to_owned(),
+        keep_days: logs::keep_days(),
+        trace_until: logs::trace_until(),
+    }
+}
+
+#[derive(Deserialize)]
+struct SaveLogSettings {
+    level: String,
+    keep_days: u16,
+    /// How long full tracing runs for.
+    trace_minutes: Option<u32>,
 }
 
 async fn log_settings(_: AdminUser) -> Json<LogSettings> {
-    Json(LogSettings {
-        level: logs::record_level().to_owned(),
-        keep_days: logs::keep_days(),
-    })
+    Json(log_settings_now())
 }
 
 async fn save_log_settings(
     _: AdminUser,
     State(state): State<AppState>,
-    Json(body): Json<LogSettings>,
+    Json(body): Json<SaveLogSettings>,
 ) -> ApiResult<Json<LogSettings>> {
     if !logs::valid_level(&body.level) {
         return Err(ApiError::bad_request(
@@ -516,18 +531,25 @@ async fn save_log_settings(
     if !(1..=logs::MAX_DAYS).contains(&body.keep_days) {
         return Err(ApiError::bad_request("keep logs for 1 to 365 days"));
     }
-    state
-        .store
-        .set_setting(logs::LEVEL_SETTING, &body.level)
-        .await?;
+    let minutes = body.trace_minutes.unwrap_or(logs::DEFAULT_TRACE_MINUTES);
+    if body.level == "trace" && !logs::TRACE_MINUTES.contains(&minutes) {
+        return Err(ApiError::bad_request(
+            "trace for 15 minutes, an hour, 4 hours or a day",
+        ));
+    }
+    // Saving again while tracing keeps the time it ends.
+    let keep_tracing =
+        body.level == "trace" && body.trace_minutes.is_none() && logs::trace_until().is_some();
+    if !keep_tracing {
+        logs::set_level(&state.store, &body.level, minutes).await?;
+    }
     state
         .store
         .set_setting(logs::DAYS_SETTING, &body.keep_days.to_string())
         .await?;
-    logs::set_record_level(&body.level);
     logs::set_keep_days(body.keep_days)?;
     tracing::warn!(level = %body.level, keep_days = body.keep_days, "log settings changed");
-    Ok(Json(body))
+    Ok(Json(log_settings_now()))
 }
 
 /// The log file (its last few megabytes), or the lines kept in memory.
@@ -629,10 +651,27 @@ struct ResetDone {
 }
 
 async fn reset(
-    _: AdminUser,
+    session: CurrentSession,
+    device: Device,
     State(state): State<AppState>,
     Json(body): Json<ResetRequest>,
 ) -> ApiResult<Json<ResetDone>> {
+    // Emptying the queue is everyday; the rest take the protected areas
+    // unlocked (starting over would even let a stranger set DJINN up anew).
+    if !session.user.is_admin() {
+        return Err(ApiError::forbidden());
+    }
+    if !matches!(body.what, Reset::Queue) {
+        crate::protected::require_open(&state, &session).await?;
+        crate::protected::audit(
+            &state,
+            &session.user,
+            device.ip.as_deref(),
+            "reset",
+            &format!("{:?}", body.what),
+        )
+        .await;
+    }
     tracing::info!(what = ?body.what, "reset from Admin > System");
     let restarting = match body.what {
         Reset::Queue => {

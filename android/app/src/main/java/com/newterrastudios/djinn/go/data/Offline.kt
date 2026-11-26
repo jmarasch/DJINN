@@ -261,16 +261,14 @@ class Prefs(context: Context, private val scope: () -> String = { "" }) {
         get() = prefs.getLong("update_declined", 0)
         set(value) = prefs.edit { putLong("update_declined", value) }
 
-    /** Genres as a cloud rather than a list, and how much of it to show. */
+    /** Genres as a map rather than a list. */
     var genreCloud: Boolean
         get() = prefs.getBoolean("genre_cloud", false)
         set(value) = prefs.edit { putBoolean("genre_cloud", value) }
-    var genreTop: Int
-        get() = prefs.getInt("genre_top", 100)
-        set(value) = prefs.edit { putInt("genre_top", value) }
-    var genreLines: Int
-        get() = prefs.getInt("genre_lines", 4)
-        set(value) = prefs.edit { putInt("genre_lines", value) }
+    /** The genre map shows genres none of your songs are in too. */
+    var genreEvery: Boolean
+        get() = prefs.getBoolean("genre_every", false)
+        set(value) = prefs.edit { putBoolean("genre_every", value) }
 
     /** Bit rate to convert lossless songs to; 0 keeps full quality. */
     var kbps: Int

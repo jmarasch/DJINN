@@ -53,6 +53,7 @@ pub fn router() -> Router<AppState> {
         )
         .route("/go/playlists/{id}/songs", post(add_songs).put(set_songs))
         .route("/go/radio/{id}", get(radio))
+        .route("/go/wild", get(wild))
         .route("/go/party/{id}", post(send_to_party))
 }
 
@@ -454,6 +455,98 @@ async fn radio(
     Ok(Json(songs))
 }
 
+/// Songs wild play hands out at a time.
+const WILD_SONGS: usize = 30;
+
+/// Wild play: songs from the whole library, drawn at random, more often the
+/// ones you like or play through and less often ones you said "play less"
+/// to, leaving out what you heard in the last few hours and what's already
+/// lined up (`exclude`).
+async fn wild(
+    me: GoUser,
+    State(state): State<AppState>,
+    Query(query): Query<RadioQuery>,
+) -> ApiResult<Json<Vec<Track>>> {
+    let now = djinn_store::now_ms();
+    let (fresh_played, fresh_skipped) = state
+        .store
+        .go_listening_since(me.user.id, now - RADIO_FRESH_MS)
+        .await?;
+    let lined: Vec<i64> = query
+        .exclude
+        .split(',')
+        .filter_map(|t| t.parse().ok())
+        .collect();
+    let heard: HashSet<i64> = fresh_played.into_iter().chain(fresh_skipped).collect();
+    let library = state.store.library_track_ids().await?;
+    let library = wild_pool(&library, &heard, &lined);
+    let history = state.store.go_song_history(me.user.id).await?;
+    let liked: HashSet<i64> = state
+        .store
+        .liked_ids(me.user.id)
+        .await?
+        .tracks
+        .into_iter()
+        .collect();
+    let ids = wild_draw(&library, &history, &liked, WILD_SONGS, rand::random::<f32>);
+    Ok(Json(state.store.tracks_by_ids(&ids).await?))
+}
+
+/// What wild play may draw from: the library less what you heard lately and
+/// what's lined up (newest last). A small library that has all played starts
+/// over, leaving out only the newer half of what's lined up, so it never stops.
+fn wild_pool(library: &[i64], heard: &HashSet<i64>, lined: &[i64]) -> Vec<i64> {
+    let lined_set: HashSet<i64> = lined.iter().copied().collect();
+    let fresh: Vec<i64> = library
+        .iter()
+        .copied()
+        .filter(|id| !heard.contains(id) && !lined_set.contains(id))
+        .collect();
+    if !fresh.is_empty() {
+        return fresh;
+    }
+    let recent: HashSet<i64> = lined[lined.len() / 2..].iter().copied().collect();
+    library
+        .iter()
+        .copied()
+        .filter(|id| !recent.contains(id))
+        .collect()
+}
+
+/// How much a song weighs in your wild play: a liked song twice as much,
+/// played through more (up to 4x after ten), marked "play less" less (down
+/// to 0.1x). Songs you never played weigh 1.
+fn wild_weight(finished: i64, play_less: i64, liked: bool) -> f32 {
+    let played = 1.0 + 0.3 * finished.clamp(0, 10) as f32;
+    let kept = (finished.max(0) as f32 + 1.0)
+        / (finished.max(0) as f32 + 1.0 + 3.0 * play_less.max(0) as f32);
+    let liked = if liked { 2.0 } else { 1.0 };
+    (played * kept * liked).clamp(0.1, 8.0)
+}
+
+/// `count` of `library` in a weighted random order.
+fn wild_draw(
+    library: &[i64],
+    history: &[(i64, i64, i64)],
+    liked: &HashSet<i64>,
+    count: usize,
+    mut random: impl FnMut() -> f32,
+) -> Vec<i64> {
+    let heard: std::collections::HashMap<i64, (i64, i64)> =
+        history.iter().map(|&(id, f, l)| (id, (f, l))).collect();
+    let mut keyed: Vec<(f32, i64)> = library
+        .iter()
+        .map(|&id| {
+            let (finished, less) = heard.get(&id).copied().unwrap_or((0, 0));
+            let weight = wild_weight(finished, less, liked.contains(&id));
+            let roll = random().clamp(1e-6, 1.0);
+            (-roll.ln() / weight, id)
+        })
+        .collect();
+    keyed.sort_by(|a, b| a.0.total_cmp(&b.0));
+    keyed.into_iter().take(count).map(|(_, id)| id).collect()
+}
+
 /// Same artist, then same genre, shuffled: radio without sound analysis.
 async fn fallback_radio(state: &AppState, seed: &Track) -> ApiResult<Vec<i64>> {
     let mut ids = Vec::new();
@@ -518,4 +611,59 @@ async fn send_to_party(
         .await
         .map_err(crate::player_api::queue_error)?;
     Ok(Json(SentToParty { outcome }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wild_weights_follow_what_you_did() {
+        assert_eq!(wild_weight(0, 0, false), 1.0);
+        assert!(wild_weight(0, 0, true) > wild_weight(0, 0, false));
+        assert!(wild_weight(5, 0, false) > wild_weight(1, 0, false));
+        assert!(wild_weight(0, 1, false) < 0.5);
+        assert!(wild_weight(0, 3, true) >= 0.1);
+        assert!(wild_weight(50, 0, true) <= 8.0);
+    }
+
+    #[test]
+    fn wild_draw_takes_each_song_once_and_favors_liked_ones() {
+        let library: Vec<i64> = (1..=100).collect();
+        let liked: HashSet<i64> = [1].into();
+        let history = [(2, 0, 5)];
+        let mut seed = 7_u32;
+        let mut random = move || {
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            (seed >> 8) as f32 / (1 << 24) as f32
+        };
+        let (mut liked_first, mut less_first) = (0, 0);
+        for _ in 0..400 {
+            let drawn = wild_draw(&library, &history, &liked, 30, &mut random);
+            assert_eq!(drawn.len(), 30);
+            let unique: HashSet<i64> = drawn.iter().copied().collect();
+            assert_eq!(unique.len(), 30);
+            liked_first += usize::from(drawn.contains(&1));
+            less_first += usize::from(drawn.contains(&2));
+        }
+        // Out of 100 even songs each lands in 30 about 30% of the time.
+        assert!(liked_first > 160, "liked {liked_first}");
+        assert!(less_first < 60, "play less {less_first}");
+    }
+
+    #[test]
+    fn wild_play_starts_over_when_everything_played() {
+        let library = [1, 2, 3, 4];
+        let heard: HashSet<i64> = [1].into();
+        assert_eq!(wild_pool(&library, &heard, &[2]), vec![3, 4]);
+        // All lined up or heard: the older half of the queue comes back.
+        assert_eq!(wild_pool(&library, &heard, &[2, 3, 4, 1]), vec![2, 3]);
+        assert_eq!(wild_pool(&library, &HashSet::new(), &[]), vec![1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn wild_draw_with_a_small_library_gives_what_there_is() {
+        let drawn = wild_draw(&[4, 5], &[], &HashSet::new(), 30, || 0.5);
+        assert_eq!(drawn.len(), 2);
+    }
 }

@@ -21,6 +21,7 @@ import type {
   EditorApplied,
   EditorBatch,
   EditorRenamed,
+  QuarantinePlan,
   EditorAfterMove,
   Release,
   ReleaseHit,
@@ -88,6 +89,7 @@ import type {
   LibraryStatus,
   LibraryRoot,
   LogSettings,
+  SaveLogSettings,
   Mode,
   NowPlaying,
   OutputConfig,
@@ -140,6 +142,7 @@ import type {
   User,
   Mp3Check,
   GenreGroups,
+  WebTree,
   GenreGroupChoice,
 } from './types'
 
@@ -206,9 +209,10 @@ export const api = {
   changeUsername: (username: string, currentPassword: string) =>
     post<User>('/me/username', { username, current_password: currentPassword }),
   twoStep: () => get<TwoStepStatus>('/me/two-step'),
-  startTwoStep: (password: string) => post<TwoStepSetup>('/me/two-step/start', { password }),
+  /** `code` is a current (or recovery) code, needed when two-step is already on. */
+  startTwoStep: (password: string, code = '') => post<TwoStepSetup>('/me/two-step/start', { password, code }),
   confirmTwoStep: (code: string) => post<{ recovery_codes: string[] }>('/me/two-step/confirm', { code }),
-  turnOffTwoStep: (password: string) => post<void>('/me/two-step/off', { password }),
+  turnOffTwoStep: (password: string, code: string) => post<void>('/me/two-step/off', { password, code }),
   myDevices: () => get<Device[]>('/me/sessions'),
   appPassword: () => get<{ exists: boolean }>('/me/app-password'),
   newAppPassword: (password: string) => post<{ password: string }>('/me/app-password', { password }),
@@ -247,6 +251,7 @@ export const api = {
   goSetPlaylistSongs: (id: number, songs: number[]) => put<void>(`/go/playlists/${id}/songs`, { songs }),
   goRadio: (trackId: number, exclude: number[] = []) =>
     get<Track[]>(`/go/radio/${trackId}${exclude.length ? `?exclude=${exclude.join(',')}` : ''}`),
+  goWild: (exclude: number[] = []) => get<Track[]>(`/go/wild${exclude.length ? `?exclude=${exclude.join(',')}` : ''}`),
   mySubmissions: () => get<Submission[]>('/go/submissions'),
   withdrawSubmission: (id: number) => del<void>(`/go/submissions/${id}`),
   waitingSubmissions: () => get<Submission[]>('/submissions'),
@@ -293,6 +298,8 @@ export const api = {
     new_songs: boolean
     sync_plain: boolean
     vocals_for_nodes: boolean
+    second_opinion: boolean
+    nodes_first: boolean
     min_match?: number
     skip_genres?: string[]
   }) =>
@@ -301,7 +308,14 @@ export const api = {
   removeAiWorkerKey: (name: string) => del<void>(`/ai-work/keys/${encodeURIComponent(name)}`),
   retryAiWork: () => post<void>('/ai-work/retry'),
   aiListener: () => get<AiListenerStatus>('/ai-listener'),
-  setAiListener: (s: { model: string; vocals: boolean; auto_start: boolean }) => put<void>('/ai-listener/settings', s),
+  setAiListener: (s: {
+    model: string
+    vocals: boolean
+    auto_start: boolean
+    listen_on: 'gpu' | 'cpu'
+    strippers: number
+  }) =>
+    put<void>('/ai-listener/settings', s),
   installAiListener: () => post<void>('/ai-listener/install'),
   startAiListener: () => post<void>('/ai-listener/start'),
   stopAiListener: () => post<void>('/ai-listener/stop'),
@@ -351,13 +365,14 @@ export const api = {
   /** Writes folder.jpg in these songs' folders from their album cover. */
   editorFolderArt: (ids: number[], replace: boolean) => post<EditorApplied>('/editor/folder-art', { ids, replace }),
   /** Writes a length header into variable bit rate MP3s that have none. */
-  editorMp3Length: (ids: number[], preview: boolean) =>
-    post<{ files: EditorRenamed[]; batch: number | null }>('/editor/mp3-length', { ids, preview }),
+  editorMp3Length: (ids: number[], preview: boolean, batch: number | null = null) =>
+    post<{ files: EditorRenamed[]; batch: number | null }>('/editor/mp3-length', { ids, preview, batch }),
   /** Starts measuring songs with no loudness data (with the sound analysis). */
   measureLoudness: () => post<{ started: boolean }>('/library/problems/measure'),
   mp3Check: () => get<Mp3Check>('/library/mp3-check'),
   genreFold: () => get<Record<string, string>>('/genre-groups/fold'),
   genreGroups: () => get<GenreGroups>('/genre-groups'),
+  genreWeb: () => get<WebTree>('/genre-web'),
   setGenreGroupsOn: (on: boolean) => put<void>('/genre-groups/enabled', { on }),
   genreGroupChoices: () => get<{ choices: GenreGroupChoice[] }>('/genre-groups/choices'),
   autoGenreGroups: (containers: number) =>
@@ -725,7 +740,7 @@ export const api = {
   systemLog: (level: string, q: string) =>
     get<{ lines: string[] }>(`/system/log?level=${level}&q=${encodeURIComponent(q)}`),
   logSettings: () => get<LogSettings>('/system/log/settings'),
-  saveLogSettings: (settings: LogSettings) => put<LogSettings>('/system/log/settings', settings),
+  saveLogSettings: (settings: SaveLogSettings) => put<LogSettings>('/system/log/settings', settings),
   logFiles: () => get<string[]>('/system/log/files'),
   restart: () => post<void>('/system/restart'),
   quit: () => post<void>('/system/quit'),
@@ -773,6 +788,9 @@ export const api = {
   /** `cached`: counts a few minutes old will do (badges), so it rarely counts. */
   libraryProblems: (cached = false) =>
     get<ProblemSummary>(cached ? '/library/problems?cached=true' : '/library/problems'),
+  /** Moves or copies every song of these problems into a library folder, keeping their places. */
+  quarantine: (kinds: ProblemKind[], to: string, copy: boolean, preview: boolean) =>
+    post<QuarantinePlan>('/library/problems/quarantine', { kinds, to, copy, preview }),
   libraryProblemList: (kind: ProblemKind, offset = 0) =>
     get<ProblemItem[]>(`/library/problems/${kind}?offset=${offset}&limit=100`),
   setDuplicatesAcrossAlbums: (acrossAlbums: boolean) =>

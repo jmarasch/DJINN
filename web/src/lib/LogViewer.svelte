@@ -4,13 +4,13 @@
   import { onMount } from 'svelte'
   import { api } from './api'
   import { toast } from './state.svelte'
-  import { t } from './i18n.svelte'
-  import type { LogSettings } from './types'
+  import { locale, t } from './i18n.svelte'
+  import type { LogSettings, SaveLogSettings } from './types'
 
   const levels = $derived([
     { value: 'error', label: t('lv.errors') },
     { value: 'warn', label: t('lv.warnings') },
-    { value: 'info', label: t('lv.everything') },
+    { value: 'trace', label: t('lv.everything') },
   ])
   let level = $state('warn')
   let search = $state('')
@@ -20,6 +20,18 @@
   let settings = $state<LogSettings | null>(null)
   let days = $state<string[]>([])
   let saving = $state(false)
+  // Full tracing always ends on its own; this is how long it runs.
+  const traceLengths = [15, 60, 240, 1440]
+  let traceMinutes = $state(60)
+  // Tracing that's running keeps its end unless a length is picked again.
+  let traceTouched = $state(false)
+  const tracing = $derived(settings?.level === 'trace' && settings.trace_until != null)
+  const until = $derived(
+    settings?.trace_until
+      ? new Date(settings.trace_until).toLocaleString(locale.code, { weekday: 'short', hour: 'numeric', minute: '2-digit' })
+      : '',
+  )
+  const lengthLabel = (m: number) => (m < 60 ? t('lv.minutes', { n: m }) : t('lv.hours', { n: m / 60 }))
 
   onMount(() => {
     api.logSettings().then((value) => (settings = value)).catch((e) => toast(e.message, true))
@@ -30,7 +42,10 @@
     if (!settings) return
     saving = true
     try {
-      settings = await api.saveLogSettings(settings)
+      const body: SaveLogSettings = { level: settings.level, keep_days: settings.keep_days }
+      if (settings.level === 'trace' && (!tracing || traceTouched)) body.trace_minutes = traceMinutes
+      settings = await api.saveLogSettings(body)
+      traceTouched = false
       toast(t('lv.saved'))
       await load()
       days = await api.logFiles()
@@ -87,12 +102,28 @@
           <option value="error">{t('lv.errors_only')}</option>
         </select>
       </label>
+      {#if settings.level === 'trace'}
+        <label>
+          {t('lv.trace_for')}
+          <select bind:value={traceMinutes} onchange={() => (traceTouched = true)}>
+            {#each traceLengths as m (m)}
+              <option value={m}>{lengthLabel(m)}</option>
+            {/each}
+          </select>
+        </label>
+      {/if}
       <label>
         {t('lv.keep_days')}
         <input type="number" min="1" max="365" step="1" bind:value={settings.keep_days} />
       </label>
       <button class="small-button" onclick={saveSettings} disabled={saving || !Number.isInteger(settings.keep_days) || settings.keep_days < 1 || settings.keep_days > 365}>{t('lv.save')}</button>
     </div>
+    {#if settings.level === 'trace'}
+      <p class="trace-warning small" role="alert">
+        {t('lv.trace_warning')}
+        {#if tracing && !traceTouched}{t('lv.trace_until', { time: until })}{/if}
+      </p>
+    {/if}
     <p class="small muted">{t('lv.daily_note')}</p>
   {/if}
   <div class="filters">
@@ -107,7 +138,7 @@
   </div>
   <pre bind:this={box} class="lines">{#if lines === null}{t('common.loading')}{:else if lines.length}{lines.map(short).join(
         '\n',
-      )}{:else}{search.trim() ? t('lv.no_match') : level === 'info' ? t('lv.nothing_yet') : t('lv.nothing_worry')}{/if}</pre>
+      )}{:else}{search.trim() ? t('lv.no_match') : level === 'trace' ? t('lv.nothing_yet') : t('lv.nothing_worry')}{/if}</pre>
   <div class="actions">
     <label class="switch small">
       <input type="checkbox" bind:checked={follow} />
@@ -127,6 +158,11 @@
 </section>
 
 <style>
+  .trace-warning {
+    border-left: 3px solid var(--bad);
+    padding: 6px 10px;
+    margin: 8px 0;
+  }
   .record-settings {
     display: flex;
     flex-wrap: wrap;

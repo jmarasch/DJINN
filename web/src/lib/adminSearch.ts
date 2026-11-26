@@ -72,7 +72,7 @@ export const adminEntries: AdminEntry[] = [
     key: 'wishlist_everyone',
   },
   // Request Log
-  { label: 'Request Log', text: 'admin.menu.log', tab: 'log', keywords: 'requests history who asked' },
+  { label: 'Request Log', text: 'admin.menu.log', tab: 'stats', keywords: 'requests history who asked' },
   // Users
   { label: 'Accounts', text: 'up.accounts', tab: 'users', keywords: 'users people add password' },
   { label: 'Roles', text: 'up.roles', tab: 'users', keywords: 'permissions listener downloads' },
@@ -175,17 +175,19 @@ export const adminEntries: AdminEntry[] = [
   { label: 'MusicBrainz', tab: 'library', keywords: 'covers genres lookup contact' },
   {
     label: 'Show genres in their containers', text: 'gg.on',
-    tab: 'library',
+    tab: 'genres',
     keywords: 'genre containers group similar genres auto metal combine',
     key: 'genre_containers',
   },
+  { label: 'Genre map', text: 'gm.title', tab: 'genres', keywords: 'genre map drawing relations links influences web graph' },
+  { label: 'Genre family tree', text: 'gw.title', tab: 'genres', keywords: 'genre tree family web map relations parent subgenre related' },
   { label: 'Identify songs by sound', text: 'libx.identify', tab: 'library', keywords: 'acoustid fingerprint identify' },
   { label: 'YouTube playlist links', text: 'libx.youtube', tab: 'library', keywords: 'youtube import api key' },
   { label: 'Image cache', text: 'admin.image_cache', tab: 'library', keywords: 'art covers folder' },
   // Problems
-  { label: 'Problems', text: 'admin.home.problems', tab: 'problems', keywords: 'broken missing unsupported tags reported diagnostics' },
-  { label: 'Possible duplicates', text: 'dup.title', tab: 'problems', keywords: 'copies duplicate same song' },
-  { label: 'Check the library every night', text: 'sc.on', tab: 'problems', keywords: 'nightly scheduled check summary', key: 'scheduled_check' },
+  { label: 'Problems', text: 'admin.home.problems', tab: 'editor', keywords: 'broken missing unsupported tags reported diagnostics' },
+  { label: 'Possible duplicates', text: 'dup.title', tab: 'editor', keywords: 'copies duplicate same song' },
+  { label: 'Check the library every night', text: 'sc.on', tab: 'editor', keywords: 'nightly scheduled check summary', key: 'scheduled_check' },
   // AI
   { label: 'Listen to songs with AI', text: 'ai.listen_on', tab: 'ai', keywords: 'ai listening clap genres' },
   {
@@ -201,6 +203,24 @@ export const adminEntries: AdminEntry[] = [
     tab: 'ai',
     keywords: 'ai lyrics nodes vocals demucs',
     key: 'ai_vocals_for_nodes',
+  },
+  {
+    label: "Give songs a node wasn't sure of to this computer's model", text: 'aw.second_opinion',
+    tab: 'ai',
+    keywords: 'ai lyrics nodes second opinion low score bigger model retry',
+    key: 'ai_second_opinion',
+  },
+  {
+    label: 'Let nodes go first', text: 'aw.nodes_first',
+    tab: 'ai',
+    keywords: 'ai lyrics nodes priority first share work',
+    key: 'ai_nodes_first',
+  },
+  {
+    label: 'Songs to separate at once', text: 'aw.strippers',
+    tab: 'ai',
+    keywords: 'ai lyrics vocals strippers demucs separate parallel',
+    key: 'ai_listener_strippers',
   },
   { label: 'Spotify account for album lookups', text: 'libx.spotify', tab: 'library', keywords: 'spotify client id secret album lookup' },
   { label: 'Help with AI lyrics', text: 'nai.help', tab: 'nodes', keywords: 'ai lyrics node whisper helper' },

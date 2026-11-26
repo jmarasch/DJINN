@@ -1,0 +1,58 @@
+# Hip hop. See README.md for how these files are written.
+
+Hip hop = hip hop music, rap, rap music, hip hop rap, rap and hip hop, hiphop [1973-] < funk, disco ~ electro
+  Old school hip hop = old school rap [1979-1986]
+  Golden age hip hop [1986-1996]
+  Boom bap [1986-]
+  East coast hip hop = east coast rap [1980-]
+    Mafioso rap [1994-]
+  West coast hip hop = west coast rap [1985-]
+    G funk [1992-1999] ~ p funk
+    Hyphy [2000-]
+    Chicano rap [1990-] ~ latin
+  Gangsta rap [1986-]
+  Hardcore hip hop = hardcore rap [1986-]
+    Horrorcore [1990-]
+  Southern hip hop = dirty south, southern rap [1990-]
+    Crunk [1996-2008]
+      Crunkcore [2005-] ~ emo, electropop
+    Snap = snap music [2005-2010]
+    Bounce = bounce music, new orleans bounce [1988-]
+    Chopped and screwed = screw [1990-]
+    Memphis rap [1990-]
+      Phonk [2010-] ~ trap
+        Drift phonk [2018-]
+    Trap = trap music [2003-]
+      Drill [2010-]
+        Chicago drill [2010-]
+        UK drill [2013-] ~ grime
+        Brooklyn drill = new york drill [2018-]
+      Rage [2017-]
+      Plugg [2013-]
+        Pluggnb [2017-] ~ contemporary r and b
+      Trap metal = scream rap [2015-] ~ nu metal
+      Latin trap [2010-] ~ reggaeton
+  Miami bass = booty bass [1985-] ~ electro
+  Conscious hip hop = conscious rap, political hip hop [1988-]
+  Alternative hip hop = alt hip hop [1988-]
+    Jazz rap = jazz hip hop [1988-] ~ jazz
+    Experimental hip hop = abstract hip hop [1995-]
+      Industrial hip hop [1985-] ~ industrial
+    Underground hip hop [1990-]
+    Instrumental hip hop [1995-] ~ downtempo
+    Cloud rap [2010-]
+    Nerdcore [1995-] ~ geek rock
+  Pop rap [1986-] ~ pop
+  Emo rap = sad rap [2013-] ~ emo
+    Digicore [2018-] ~ hyperpop
+  Lo fi hip hop = lofi, lo fi, lofi hip hop, chillhop [2010-] ~ downtempo
+  UK hip hop = british hip hop [1985-]
+    Afroswing [2014-] ~ afrobeats
+  Latin hip hop [1985-] ~ latin
+  Christian hip hop = christian rap [1985-] ~ contemporary christian
+  Comedy hip hop = comedy rap [1985-] ~ comedy
+  Country rap = hick hop [2000-] ~ country
+  Punk rap [2010-] ~ punk rock
+  Turntablism [1990-]
+  Beatboxing = beatbox [1980-]
+  Battle rap = freestyle rap [1980-]

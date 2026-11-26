@@ -5,6 +5,7 @@ pub mod compare;
 pub mod credits;
 pub mod duplicates;
 pub mod genre_groups;
+pub mod genre_web;
 pub mod genres;
 pub mod identify;
 pub mod lyrics;

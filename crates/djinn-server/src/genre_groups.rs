@@ -1,4 +1,4 @@
-//! Genre containers (Admin > Library > Genres): similar genres grouped under
+//! Genre containers (Admin > Genres > Containers): similar genres grouped under
 //! one name, so "black metal", "death metal" and "speed metal" show as
 //! "Metal". Off by default (`genre_containers`). While on, genre lists, the
 //! genre cloud and genre pages show containers in place of their genres, and
@@ -10,6 +10,7 @@ use std::collections::{HashMap, HashSet};
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
+use axum::response::IntoResponse;
 use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use djinn_library::genre_groups as clusters;
@@ -39,6 +40,7 @@ pub fn router() -> Router<AppState> {
         .route("/genre-groups/place", put(place))
         .route("/genre-groups/{id}", put(rename).delete(remove))
         .route("/genre-groups/free/{genre}", delete(free))
+        .route("/genre-web", get(web_tree))
 }
 
 /// Reads the containers into memory (empty while they're off), and drops
@@ -83,6 +85,121 @@ fn genre_counts(state: &AppState) -> Vec<(String, usize)> {
         .collect();
     out.sort_by(|a, b| a.0.cmp(&b.0));
     out
+}
+
+/// One genre of DJINN's genre web, for Admin > Genres > Family tree.
+#[derive(Serialize)]
+struct WebGenre {
+    name: String,
+    aliases: Vec<String>,
+    /// Places in `genres`.
+    parent: Option<usize>,
+    depth: u8,
+    from_year: Option<i32>,
+    until_year: Option<i32>,
+    from: Vec<usize>,
+    near: Vec<usize>,
+    against: Vec<usize>,
+    /// Songs in the library whose genres land here.
+    songs: usize,
+    /// Songs that land here or on any genre below it, each counted once.
+    songs_below: usize,
+}
+
+#[derive(Serialize)]
+struct WebTree {
+    genres: Vec<WebGenre>,
+    /// The library's genres the web doesn't know yet, most songs first.
+    unplaced: Vec<(String, usize)>,
+}
+
+/// How long a worked-out genre web is served before it's counted again.
+const WEB_TREE_KEEP: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// The last genre web worked out, as JSON, and when.
+static WEB_TREE: std::sync::Mutex<Option<(std::time::Instant, axum::body::Bytes)>> =
+    std::sync::Mutex::new(None);
+
+/// The whole genre web, with how many of the library's songs land on each
+/// genre: Admin > Genres, and the genre map in the party app, GO and the
+/// phone app. Counting takes a moment on a big library, so it's kept for a
+/// few minutes.
+async fn web_tree(_: CurrentUser, State(state): State<AppState>) -> ApiResult<impl IntoResponse> {
+    let kept = WEB_TREE.lock().ok().and_then(|k| {
+        k.as_ref()
+            .filter(|(at, _)| at.elapsed() < WEB_TREE_KEEP)
+            .map(|(_, json)| json.clone())
+    });
+    let json = match kept {
+        Some(json) => json,
+        None => {
+            let state = state.clone();
+            let (tree, counted) = tokio::task::spawn_blocking(move || count_web(&state)).await?;
+            let json = axum::body::Bytes::from(serde_json::to_vec(&tree)?);
+            // Not before the library is loaded, or the empty counts would stick.
+            if counted {
+                if let Ok(mut k) = WEB_TREE.lock() {
+                    *k = Some((std::time::Instant::now(), json.clone()));
+                }
+            }
+            json
+        }
+    };
+    Ok((
+        [(axum::http::header::CONTENT_TYPE, "application/json")],
+        json,
+    ))
+}
+
+/// Counts the library's songs on the genre web; false when no song landed.
+fn count_web(state: &AppState) -> (WebTree, bool) {
+    let web = djinn_library::genre_web::Web::builtin();
+    let mut songs = vec![0usize; web.genres().len()];
+    let mut below = vec![0usize; web.genres().len()];
+    let mut unplaced: HashMap<String, usize> = HashMap::new();
+    if let Ok(catalog) = state.catalog.read() {
+        for names in catalog.song_tags().values() {
+            let mut landed = HashSet::new();
+            for name in names {
+                let found = web.find_all(name);
+                if found.is_empty() {
+                    *unplaced.entry(name.clone()).or_default() += 1;
+                }
+                landed.extend(found);
+            }
+            let mut lines = HashSet::new();
+            for &id in &landed {
+                songs[id] += 1;
+                lines.extend(web.lineage(id));
+            }
+            for id in lines {
+                below[id] += 1;
+            }
+        }
+    }
+    let genres = web
+        .genres()
+        .iter()
+        .zip(songs.into_iter().zip(below))
+        .map(|(g, (songs, songs_below))| WebGenre {
+            name: g.name.clone(),
+            aliases: g.aliases.clone(),
+            parent: g.parent,
+            depth: g.depth,
+            from_year: g.years.map(|y| y.0),
+            until_year: g.years.and_then(|y| y.1),
+            from: g.from.clone(),
+            near: g.near.clone(),
+            against: g.against.clone(),
+            songs,
+            songs_below,
+        })
+        .collect();
+    let mut unplaced: Vec<(String, usize)> = unplaced.into_iter().collect();
+    unplaced.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    let tree = WebTree { genres, unplaced };
+    let counted = tree.genres.iter().any(|g| g.songs > 0);
+    (tree, counted)
 }
 
 #[derive(Serialize)]
@@ -182,7 +299,9 @@ async fn set_enabled(
 
 /// The genres Auto-group sorts: all but the ones placed by hand or in a
 /// container someone made or changed.
-async fn clustered(state: &AppState) -> anyhow::Result<clusters::Tree> {
+/// The library's genres grouped by DJINN's genre web, leaving out the ones
+/// placed by hand and those in containers made or changed by hand.
+async fn grouped(state: &AppState) -> anyhow::Result<djinn_library::genre_web::Containers> {
     let (groups, members) = state.store.genre_groups().await?;
     let kept: HashSet<i64> = groups.iter().filter(|g| !g.auto).map(|g| g.id).collect();
     let skip: HashSet<String> = members
@@ -190,11 +309,11 @@ async fn clustered(state: &AppState) -> anyhow::Result<clusters::Tree> {
         .filter(|m| m.pinned || m.group_id.is_some_and(|id| kept.contains(&id)))
         .map(|m| m.genre)
         .collect();
-    let (Ok(catalog), Ok(index)) = (state.catalog.read(), state.sound.read()) else {
-        return Ok(clusters::Tree::default());
-    };
-    let map = clusters::full_map(catalog.song_tags(), &index);
-    Ok(clusters::tree(&map, &skip))
+    let genres: Vec<(String, usize)> = genre_counts(state)
+        .into_iter()
+        .filter(|(name, _)| !skip.contains(name))
+        .collect();
+    Ok(djinn_library::genre_web::Web::builtin().containers(&genres))
 }
 
 #[derive(Serialize)]
@@ -206,9 +325,9 @@ struct Choices {
 /// The ways Auto-group can sort the genres, for the slider: worked out once
 /// when the page opens.
 async fn choices(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json<Choices>> {
-    let tree = clustered(&state).await?;
+    let groups = grouped(&state).await?;
     Ok(Json(Choices {
-        choices: tree.choices(),
+        choices: groups.choices(djinn_library::genre_web::Web::builtin()),
     }))
 }
 
@@ -231,13 +350,14 @@ async fn auto(
     State(state): State<AppState>,
     Json(body): Json<Auto>,
 ) -> ApiResult<Json<Made>> {
-    let tree = clustered(&state).await?;
-    let Some(choice) = tree.nearest(body.containers) else {
+    let web = djinn_library::genre_web::Web::builtin();
+    let grouping = grouped(&state).await?;
+    let Some(choice) = grouping.nearest(web, body.containers) else {
         return Err(ApiError::bad_request(
             "There aren't enough related genres to group yet",
         ));
     };
-    let groups = tree.named(choice.step);
+    let groups = grouping.named(web, choice.step);
     state.store.replace_auto_genre_groups(&groups).await?;
     reload(&state).await;
     Ok(Json(Made {
@@ -400,6 +520,82 @@ mod tests {
             .iter()
             .map(|g| g["name"].as_str().unwrap_or_default().to_owned())
             .collect()
+    }
+
+    #[tokio::test]
+    async fn auto_group_follows_the_genre_web() {
+        let state = AppState::for_tests().await;
+        let song = |n: &str, genre: &str| ScannedTrack {
+            path: format!("/m/{n}.flac"),
+            title: n.into(),
+            artist: Some(format!("Band {n}")),
+            genre: Some(genre.into()),
+            duration_ms: Some(200_000),
+            ..Default::default()
+        };
+        state
+            .store
+            .save_scanned(&[
+                song("a", "Black Metal"),
+                song("b", "Death Metal"),
+                song("c", "Hair Metal"),
+                song("d", "Deep House"),
+                song("e", "Acid House"),
+                song("f", "Not A Genre At All"),
+            ])
+            .await
+            .unwrap();
+        crate::smart::refresh(&state).await;
+        let admin = session(&state, "ana", Role::Admin).await;
+        let (_, body) = get_body(&state, "/api/genre-groups/choices", &admin).await;
+        let choices: serde_json::Value = serde_json::from_str(&body).unwrap();
+        // The broadest choice is the families.
+        assert_eq!(choices["choices"][0]["containers"], 2, "{body}");
+        assert_eq!(choices["choices"][0]["grouped"], 5, "{body}");
+        let (status, _) = call(
+            &state,
+            Method::POST,
+            "/api/genre-groups/auto",
+            Some(r#"{"containers":2}"#),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let (_, body) = get_body(&state, "/api/genre-groups", &admin).await;
+        let overview: serde_json::Value = serde_json::from_str(&body).unwrap();
+        let mut found: Vec<(String, Vec<String>)> = overview["containers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| {
+                let mut genres: Vec<String> = c["genres"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|g| g["genre"].as_str().unwrap().to_owned())
+                    .collect();
+                genres.sort();
+                (c["name"].as_str().unwrap().to_owned(), genres)
+            })
+            .collect();
+        found.sort();
+        assert_eq!(
+            found,
+            vec![
+                (
+                    "Electronic".to_owned(),
+                    vec!["acid house".to_owned(), "deep house".to_owned()]
+                ),
+                (
+                    "Metal".to_owned(),
+                    vec![
+                        "black metal".to_owned(),
+                        "death metal".to_owned(),
+                        "hair metal".to_owned()
+                    ]
+                ),
+            ]
+        );
     }
 
     #[tokio::test]

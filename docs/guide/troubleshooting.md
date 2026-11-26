@@ -91,7 +91,7 @@ See [Speakers and sound](speakers-and-sound.md) and
   folder marked "Not found right now" is unplugged or offline.
 - Tap **Check for Changes**.
 - DJINN reads MP3, FLAC, AAC/M4A, Ogg Vorbis and WAV. Other formats are
-  listed under **Admin > Library Problems** as "Formats DJINN doesn't play",
+  listed on the Library Editor's **Library Problems** tab as "Formats DJINN doesn't play",
   along with files it couldn't open or read. See
   [Library problems](library-problems.md).
 - One artist split into two, or two artists merged? See

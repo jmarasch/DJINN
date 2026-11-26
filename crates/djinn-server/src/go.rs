@@ -444,6 +444,7 @@ const ROUTES: &[(Method, &str, Access)] = &[
     (Method::GET, "/api/genres/*", Access::Listener),
     (Method::GET, "/api/genres/*/songs", Access::Listener),
     (Method::GET, "/api/genres/*/artists", Access::Listener),
+    (Method::GET, "/api/genre-web", Access::Listener),
     (Method::GET, "/api/go/play/*", Access::Listener),
     (Method::GET, "/api/go/offline/*", Access::Listener),
     (Method::POST, "/api/go/offline/versions", Access::Listener),
@@ -489,6 +490,7 @@ const ROUTES: &[(Method, &str, Access)] = &[
         Access::Listener,
     ),
     (Method::GET, "/api/go/radio/*", Access::Listener),
+    (Method::GET, "/api/go/wild", Access::Listener),
     (Method::POST, "/api/go/party/*", Access::Listener),
     (Method::GET, "/api/go/submissions", Access::Listener),
     (Method::POST, "/api/go/submissions", Access::Listener),
@@ -2157,8 +2159,17 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         let (status, _, _) = go(&state, Method::POST, start, Some("{}"), Some(&sam)).await;
         assert!(status.is_client_error());
+        // Now the password alone isn't enough: a code from the old phone too.
         let (status, _, _) = go(&state, Method::POST, start, Some(right), Some(&sam)).await;
+        assert!(status.is_client_error(), "{status}");
+        let next = format!("{:06}", two_step::code_at(&key, step + 1).unwrap());
+        let with_code = format!(r#"{{"password":"correct horse","code":"{next}"}}"#);
+        let (status, _, _) = go(&state, Method::POST, start, Some(&with_code), Some(&sam)).await;
         assert_eq!(status, StatusCode::OK);
+        // Turning it off takes a code as well.
+        let off = "/api/me/two-step/off";
+        let (status, _, _) = go(&state, Method::POST, off, Some(right), Some(&sam)).await;
+        assert!(status.is_client_error(), "{status}");
     }
 
     #[tokio::test]
@@ -2698,6 +2709,24 @@ mod tests {
         assert_eq!(radio[0], ids[3]);
         assert!(!radio.contains(&ids[0]), "heard just now");
         assert!(radio.contains(&ids[1]));
+
+        // Wild play: anything in the library but what was just heard or is
+        // lined up.
+        let (status, text, _) = call(
+            Method::GET,
+            format!("/api/go/wild?exclude={}", ids[1]),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{text}");
+        let wild: Vec<i64> = serde_json::from_str::<Vec<serde_json::Value>>(&text)
+            .unwrap()
+            .iter()
+            .map(|t| t["id"].as_i64().unwrap())
+            .collect();
+        assert!(!wild.is_empty());
+        assert!(!wild.contains(&ids[0]), "heard just now");
+        assert!(!wild.contains(&ids[1]), "lined up");
 
         // Away from home (tests have no address), the party is out of reach.
         let (status, _, _) = call(Method::POST, format!("/api/go/party/{}", ids[1]), None).await;

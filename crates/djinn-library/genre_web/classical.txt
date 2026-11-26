@@ -1,0 +1,31 @@
+# Classical. See README.md for how these files are written.
+
+Classical = classical music, western classical, art music [1000-]
+  Medieval = medieval music, early music [500-1400]
+    Gregorian chant = plainchant, chant [800-]
+  Renaissance = renaissance music [1400-1600]
+  Baroque = baroque music [1600-1750]
+  Classical period = classical era [1730-1820]
+  Romantic = romantic era, romantic classical [1800-1910]
+  Modern classical = 20th century classical, contemporary classical [1900-]
+    Impressionism = impressionist [1890-1920]
+    Neoclassicism [1920-1950]
+    Serialism = twelve tone [1920-]
+    Minimalism = minimalist, minimal music [1960-]
+      Post minimalism [1980-]
+    Neoclassical = neo classical, post classical, modern classical piano [1990-] ~ ambient
+  Opera [1600-]
+    Operetta [1850-] ~ musical
+  Orchestral = orchestra, symphonic, symphony [1600-]
+    Concerto [1600-]
+    Sonata [1600-]
+  Chamber music = chamber [1600-]
+  Choral = choir, choral music [1000-]
+    Mass [1000-]
+    Cantata [1600-]
+    Oratorio [1600-]
+    Choral symphony [1800-]
+  Art song = lied, lieder [1800-]
+  Ballet [1600-]
+  Classical crossover = crossover classical [1980-] ~ pop
+    Operatic pop = popera [1990-]

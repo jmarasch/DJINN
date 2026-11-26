@@ -8,7 +8,7 @@
   let { onopened, onclose }: { onopened: () => void; onclose: () => void } = $props()
 </script>
 
-<Sheet title={t('us.title')} {onclose}>
+<Sheet title={t('us.title')} {onclose} above>
   <UnlockForm
     {onopened}
     note={t('us.note')}

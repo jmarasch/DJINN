@@ -332,6 +332,8 @@ impl Store {
                         art_hash,
                         genres,
                         label,
+                        added: None,
+                        first_year: None,
                     };
                     (album, key)
                 },

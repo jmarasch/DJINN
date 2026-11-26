@@ -1,0 +1,91 @@
+# The smaller families. See README.md for how these files are written.
+
+Soundtrack = soundtracks, ost, original soundtrack [1930-]
+  Film score = score, film scores, film music, movie soundtrack [1930-] ~ orchestral
+    Epic music = cinematic classical, trailer music [2000-] ~ orchestral
+  Video game music = game music, vgm, video game soundtrack [1980-]
+  Television music = tv soundtrack, tv music [1950-]
+  Anime music = anime soundtrack, anison [1970-] ~ j pop
+  Musical = musical theatre, musical theater, show tunes, broadway [1900-]
+  Library music = production music, stock music [1950-]
+
+Easy listening = easy listening music [1950-]
+  Lounge [1950-]
+  Exotica [1955-1965]
+  Space age pop [1955-1965]
+  Beautiful music [1960-]
+  Cabaret [1880-]
+  Vaudeville [1880-1930] ~ musical
+
+New age = new age music [1970-] ~ ambient
+  Relaxation = meditation, healing [1970-]
+  Celtic new age [1985-] ~ celtic
+  Neoclassical new age [1975-] ~ neoclassical
+
+Experimental = avant garde, avantgarde, experimental music [1910-]
+  Noise = noise music [1975-] ~ industrial
+    Harsh noise [1980-]
+      Harsh noise wall = hnw [2000-]
+    Japanoise [1980-]
+  Musique concrete [1948-]
+  Sound collage = plunderphonics [1950-]
+  Drone = drone music [1960-] ~ drone metal
+  Free improvisation = free improv [1960-]
+  Field recording = field recordings, soundscape [1950-]
+  Lowercase [2000-] ~ glitch
+
+Religious = religious music, church music, sacred music [1000-]
+  Gospel = gospel music [1920-]
+    Southern gospel [1920-]
+    Country gospel [1930-] ~ country
+    Urban contemporary gospel = contemporary gospel [1970-] ~ contemporary r and b
+  Contemporary christian = ccm, christian, christian pop, christian music, contemporary christian music [1970-]
+    Praise and worship = worship, worship music [1970-]
+  Hymns = hymn [1500-]
+  Spirituals = negro spirituals [1800-] ~ gospel
+  Devotional = bhajan, kirtan [1500-]
+
+Holiday = holiday music, holidays
+  Christmas = christmas music, xmas
+  Halloween
+
+Comedy = comedy music, humor, humour [1900-]
+  Parody = parody music, song parody
+  Novelty = novelty song, novelty music
+  Stand up comedy = stand up, sketch comedy
+
+Spoken word = spoken, speech
+  Audiobook = audio book
+  Audio drama = radio drama, radio play
+  Poetry
+  Interview = interviews
+
+Children's music = childrens, children, kids, kids music
+  Lullaby = lullabies
+  Nursery rhymes = nursery rhyme
+
+World = world music [1980-]
+  Worldbeat [1985-] ~ pop
+  African = african music
+    Afrobeat [1970-] ~ funk, jazz
+    Afrobeats = afropop [2010-] ~ dancehall
+    Highlife [1920-]
+    Juju [1920-]
+    Soukous [1960-]
+    Mbalax [1970-]
+    Desert blues = tishoumaren [1980-] ~ blues
+  Asian = asian music
+    Bollywood = filmi [1930-]
+    Indian classical = hindustani, carnatic [1200-]
+    Qawwali [1300-] ~ devotional
+    Gamelan [1500-]
+    Enka [1960-]
+  Middle Eastern = middle eastern music, arabic
+    Rai [1920-]
+    Klezmer [1600-]
+  European folk = european
+    Flamenco [1800-]
+    Fado [1820-]
+    Chanson = french chanson, chanson francaise [1900-]
+    Rebetiko [1920-]
+    Balkan brass = balkan [1900-]

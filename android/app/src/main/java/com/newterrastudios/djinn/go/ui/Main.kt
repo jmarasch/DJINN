@@ -112,6 +112,7 @@ class Nav(
     var albumFilter by mutableStateOf(ALBUM_FILTERS.first().first)
     var songSort by mutableStateOf(SONG_SORTS.first().first)
     var keptView by mutableStateOf(KEPT_VIEWS.first().first)
+    var artistAlbumSort by mutableStateOf(ARTIST_ALBUM_SORTS.first().first)
     /** Library lists as picture tiles rather than rows. */
     var libraryGrid by mutableStateOf(prefs.libraryGrid)
     /** The house's background picture. */

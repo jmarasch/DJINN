@@ -26,6 +26,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Shape
@@ -147,7 +149,7 @@ fun SongRow(track: Track, nav: Nav, note: String? = null, onClick: () -> Unit) {
         title = track.title,
         subtitle = line,
         art = { Art(nav.api.artUrl(track.artHash), 44.dp) },
-        titleMark = { LyricsMark(track.lyrics, track.lyricsAi, track.lyricsFailed) },
+        titleMark = { LyricsMark(track.lyrics, track.lyricsAi, track.lyricsFailed, track.instrumental) },
         onClick = {
             // With nothing playing a tap always plays.
             when {
@@ -186,9 +188,32 @@ fun SongRow(track: Track, nav: Nav, note: String? = null, onClick: () -> Unit) {
     )
 }
 
-/** Beside a song's title: a hollow microphone for lyrics, a filled one when they're timed. */
+/**
+ * Beside a song's title: a hollow microphone for lyrics, a filled one when
+ * they're timed, and a microphone in a "no" circle for an instrumental.
+ */
 @Composable
-fun LyricsMark(lyrics: Int, ai: Int = 0, failed: Int = 0) {
+fun LyricsMark(lyrics: Int, ai: Int = 0, failed: Int = 0, instrumental: Int = 0) {
+    if (lyrics <= 0 && instrumental > 0) {
+        val color = MaterialTheme.colorScheme.onSurfaceVariant
+        Box(
+            Modifier
+                .padding(start = 4.dp)
+                .size(14.dp)
+                .semantics { contentDescription = t("lyrics.instrumental_mark") },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Outlined.MicNone, contentDescription = null, tint = color, modifier = Modifier.size(8.dp))
+            Canvas(Modifier.size(14.dp)) {
+                val line = 1.2.dp.toPx()
+                val r = size.minDimension / 2 - line / 2
+                drawCircle(color, r, style = androidx.compose.ui.graphics.drawscope.Stroke(line))
+                val d = r * 0.7071f
+                drawLine(color, Offset(center.x - d, center.y - d), Offset(center.x + d, center.y + d), line)
+            }
+        }
+        return
+    }
     if (lyrics <= 0) {
         // Red when an AI's lyrics for the song were removed as bad.
         if (failed > 0) {

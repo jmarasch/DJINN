@@ -3,6 +3,7 @@
   // file, or put a backup back, here or on another computer with the music
   // in a different place.
   import { api } from './api'
+  import { downloadUnlocked, unlocked } from './protected.svelte'
   import { reloadAfterRestart } from './restart'
   import FolderPicker from './FolderPicker.svelte'
   import { toast } from './state.svelte'
@@ -23,7 +24,7 @@
     if (!file) return
     uploading = true
     try {
-      backup = await api.uploadBackup(file)
+      backup = await unlocked(() => api.uploadBackup(file))
       targets = backup.folders.map((f) => (f.here ? f.from : ''))
     } catch (e) {
       toast(e instanceof Error ? e.message : t('bk.read_failed'), true)
@@ -47,7 +48,8 @@
     )
       return
     try {
-      await api.startRestore(backup.folders.map((f, i) => [f.from, targets[i].trim()]))
+      const moves = backup.folders.map((f, i): [string, string] => [f.from, targets[i].trim()])
+      await unlocked(() => api.startRestore(moves))
       restarting = true
     } catch (e) {
       toast(e instanceof Error ? e.message : t('bk.restore_failed'), true)
@@ -105,7 +107,7 @@
       {t('bk.about')}
     </p>
     <div class="actions">
-      <a class="button" href="/api/backup" download>{t('bk.download')}</a>
+      <a class="button" href="/api/backup" download onclick={(e) => { e.preventDefault(); downloadUnlocked('/api/backup') }}>{t('bk.download')}</a>
       <label class="button" class:disabled={uploading}>
         {uploading ? t('bk.reading') : t('bk.restore_from')}
         <input type="file" accept=".zip,application/zip" hidden disabled={uploading} onchange={upload} />

@@ -202,9 +202,20 @@ impl Store {
     ) -> Result<Vec<(i64, String, Option<i64>)>> {
         Ok(sqlx::query_as(
             "SELECT id, title, duration_ms FROM tracks
-             WHERE album_id = ? AND removed_at IS NULL ORDER BY disc_no, track_no, path",
+             WHERE album_id = ? AND removed_at IS NULL ORDER BY coalesce(disc_no, 1), track_no, path",
         )
         .bind(album_id)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
+    /// Every song of these albums.
+    pub async fn album_song_ids(&self, albums: &[i64]) -> Result<Vec<i64>> {
+        Ok(sqlx::query_scalar(
+            "SELECT id FROM tracks WHERE removed_at IS NULL
+               AND album_id IN (SELECT value FROM json_each(?1))",
+        )
+        .bind(crate::library::json_ids(albums))
         .fetch_all(&self.pool)
         .await?)
     }

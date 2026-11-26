@@ -95,7 +95,7 @@ The **...** button next to a song opens its menu:
 - **Add to Playlist** (accounts, not guests).
 - **Report a Problem:** tell the host the title, artist or album is wrong, the
   cover is wrong, it sounds bad or cuts off, or it plays a different song.
-  Reports land in **Admin > Library Problems**.
+  Reports land on the Library Editor's **Library Problems** tab.
 
 ![A song's menu, with its genres, More Like This and Report a Problem](images/phone-song-menu.webp)
 
@@ -145,7 +145,7 @@ On the Queue tab admins can remove any request and move songs up or down.
 Songs that the same number of people asked for can be reordered; a song more
 people asked for stays ahead.
 
-**Admin > Request Log** lists every request with who made it and from which
+**Admin > Stats > Request Log** lists every request with who made it and from which
 device. **Clear** empties the log; artist pages keep counting their top songs.
 
 ## Guests and accounts

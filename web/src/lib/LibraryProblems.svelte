@@ -8,6 +8,7 @@
   import { app, toast } from './state.svelte'
   import { locale, t } from './i18n.svelte'
   import { parseReports, reportShort } from './reports'
+  import QuarantineWindow from './QuarantineWindow.svelte'
   import type { Mp3Check, ProblemCount, ProblemItem, ProblemKind, ProblemSummary } from './types'
 
   /** A problem kind's name and what to do about it (`prob.<kind>`, `prob.<kind>_hint`). */
@@ -17,6 +18,8 @@
   let open = $state<ProblemKind | null>(null)
   let items = $state<ProblemItem[]>([])
   let loading = $state(false)
+  /** The Quarantine window is open. */
+  let quarantining = $state(false)
 
   const shown = (k: ProblemCount) => k.count > 0 && !k.hidden
   const trouble = $derived(summary?.kinds.filter((k) => k.trouble && shown(k)) ?? [])
@@ -187,6 +190,16 @@
     {#if open === k.kind}
       <div class="detail">
         <p class="small muted">{about(k.kind).hint}</p>
+        <!-- This list's tools, at the top so they're seen before a long list. -->
+        <div class="actions tools">
+          {#if k.kind === 'no_loudness'}
+            <button class="small-button" onclick={measure}>{t('prob.measure')}</button>
+          {/if}
+          {#if k.kind === 'no_length_header'}
+            <button class="small-button" onclick={mp3Again}>{t('prob.read_again')}</button>
+          {/if}
+          <button class="small-button" onclick={() => setHidden(k.kind, true)}>{t('prob.hide')}</button>
+        </div>
         <ul class="items">
           {#each items as item, i (i)}
             <li>
@@ -266,22 +279,26 @@
             </li>
           {/each}
         </ul>
-        <div class="actions">
-          {#if items.length < openCount}
+        {#if items.length < openCount}
+          <div class="actions">
             <button class="small-button" disabled={loading} onclick={more}>{t('common.show_more')}</button>
-          {/if}
-          {#if k.kind === 'no_loudness'}
-            <button class="small-button" onclick={measure}>{t('prob.measure')}</button>
-          {/if}
-          {#if k.kind === 'no_length_header'}
-            <button class="small-button" onclick={mp3Again}>{t('prob.read_again')}</button>
-          {/if}
-          <button class="small-button" onclick={() => setHidden(k.kind, true)}>{t('prob.hide')}</button>
-        </div>
+          </div>
+        {/if}
       </div>
     {/if}
   </div>
 {/snippet}
+
+{#if quarantining && summary}
+  <QuarantineWindow
+    problems={summary.kinds.filter((k) => k.songs && k.count > 0)}
+    onclose={() => (quarantining = false)}
+    ondone={() => {
+      load()
+      if (open) show(open, true)
+    }}
+  />
+{/if}
 
 <section class="card">
   <h2>
@@ -323,6 +340,9 @@
     {/if}
     <div class="actions">
       <a class="button small-button" href="/api/library/problems.csv" download>{t('prob.csv')}</a>
+      <button class="small-button" title={t('prob.quarantine_title')} onclick={() => (quarantining = true)}
+        >{t('prob.quarantine')}</button
+      >
       <button class="small-button" onclick={checkAgain}>{t('prob.check_again')}</button>
     </div>
   {/if}
@@ -438,6 +458,10 @@
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
+  }
+
+  .actions.tools {
+    margin-bottom: 10px;
   }
 
   .link {

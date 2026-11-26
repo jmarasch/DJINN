@@ -53,6 +53,34 @@ MAX_WAIT = 600
 STOP = False
 
 
+def _audio_reader_compat() -> None:
+    """faster-whisper opens files with an option (`metadata_errors`) that
+    newer PyAV releases (19 and on) no longer take, which failed every song;
+    when the reader refuses it, open the file again without it."""
+    try:
+        import av
+    except ImportError:
+        return
+    if getattr(av.open, "_djinn_compat", False):
+        return
+    original = av.open
+
+    def open_compat(*args, **kwargs):
+        try:
+            return original(*args, **kwargs)
+        except TypeError as e:
+            if "metadata_errors" not in str(e) or "metadata_errors" not in kwargs:
+                raise
+            kwargs.pop("metadata_errors")
+            return original(*args, **kwargs)
+
+    open_compat._djinn_compat = True
+    av.open = open_compat
+
+
+_audio_reader_compat()
+
+
 def _stop(*_args):
     global STOP
     STOP = True
@@ -73,8 +101,9 @@ class Djinn:
             req.add_header("Content-Type", "application/json")
         return urllib.request.urlopen(req, timeout=timeout)
 
-    def next(self, count: int, can_isolate: bool) -> dict:
-        with self._request("POST", "/api/ai-work/next", {"max": count, "can_isolate": can_isolate}) as res:
+    def next(self, count: int, can_isolate: bool, role: str = "all") -> dict:
+        body = {"max": count, "can_isolate": can_isolate, "role": role}
+        with self._request("POST", "/api/ai-work/next", body) as res:
             return json.load(res)
 
     def audio(self, track_id: int, dest: Path) -> None:
@@ -214,14 +243,18 @@ def run(args) -> int:
         models_dir=Path(args.models_dir),
     )
     can_isolate = args.vocals != "off" and detect_available_backends().get("demucs", False)
-    print(
-        f"Listener ready: backend={engine.resolved_backend} model={engine.model_name} "
-        f"device={engine.resolved_device} isolates={can_isolate}",
-        flush=True,
-    )
+    if args.role == "prepare":
+        # Only separates vocals, so the listening model is never loaded.
+        print(f"Vocal stripper ready: device={engine.resolved_device}", flush=True)
+    else:
+        print(
+            f"Listener ready: backend={engine.resolved_backend} model={engine.model_name} "
+            f"device={engine.resolved_device} isolates={can_isolate} role={args.role}",
+            flush=True,
+        )
     while not STOP:
         try:
-            batch = djinn.next(1, can_isolate)
+            batch = djinn.next(1, can_isolate, args.role)
         except (urllib.error.URLError, OSError, ValueError) as e:
             print(f"DJINN isn't answering ({e}); trying again soon", flush=True)
             time.sleep(30)
@@ -252,7 +285,7 @@ def run(args) -> int:
                     djinn.audio(job["track_id"], audio)
                     if job.get("prepare"):
                         djinn.vocals(job["track_id"], prepare(engine, audio, Path(tmp)))
-                        print(f"vocals for a node: {job.get('artist')} - {job.get('title')} ({time.time() - started:.0f}s)", flush=True)
+                        print(f"vocals ready: {job.get('artist')} - {job.get('title')} ({time.time() - started:.0f}s)", flush=True)
                         continue
                     listened = time.time()
                     lrc = listen(engine, job, audio, min_similarity)
@@ -318,6 +351,10 @@ def main() -> int:
     p.add_argument("--model", default="medium", help="whisper model: tiny, base, small, medium, large-v3-turbo")
     p.add_argument("--device", default="auto", help="auto, cuda or cpu")
     p.add_argument("--vocals", choices=["auto", "on", "off"], default="auto", help="isolate vocals with Demucs first")
+    p.add_argument(
+        "--role", choices=["all", "prepare", "listen"], default="all",
+        help="all: whole songs; prepare: only separate vocals ahead; listen: take songs whose vocals are ready",
+    )
     p.add_argument("--models-dir", default=str(DEFAULT_MODELS_DIR))
     p.add_argument(
         "--min-similarity", type=float, default=0.85,

@@ -31,6 +31,15 @@ export function discOf(name: string): number | null {
   return m ? Number(m[1]) : null
 }
 
+const DISC_SUFFIX = /[\s,:_-]*[([]?\s*(?:cd|disc|disk)\s*[-_.]?\s*\d{1,2}(?:\s*(?:of|\/)\s*\d{1,2})?\s*[)\]]?\s*$/i
+
+/** An album name without a disc note at its end, so the discs of one album
+ * go together: "Album CD 1", "Album (Disc 2)", "Album [CD2]", "Album - Disc 1 of 2". */
+export function albumBase(name: string): string {
+  const base = name.replace(DISC_SUFFIX, '').trim()
+  return base || name.trim()
+}
+
 const realYear = (y: number) => y >= 1900 && y <= 2100
 
 /** An album folder's name without a year at its start or end, and the year:

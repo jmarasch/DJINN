@@ -16,6 +16,10 @@ and API keys, which are as good as the real thing to whoever has the file.
 Only restore backups you made yourself. A backup replaces every account, so
 restoring someone else's hands them this DJINN.
 
+Backing up and restoring both need the
+[protected areas](accounts-and-roles.md#protected-areas) unlocked; DJINN asks
+for your password (and a code at Max) first.
+
 ## Make a backup
 
 Tap **Download a Backup**. Your browser saves a file named like

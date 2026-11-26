@@ -198,18 +198,23 @@ the files themselves aren't changed.
 ## Genres
 
 The Library's **Genres** tab lists every genre with its number of songs, or
-shows them as a cloud, where bigger means more songs and lines join related
-genres.
+shows them as a map of DJINN's genre family tree, where bigger means more of
+your songs.
 
-![The genre cloud](images/genre-cloud.webp)
+![The genre map](images/genre-cloud.webp)
 
-The cloud opens on your 100 biggest genres. Tap one to center on it, with what's
-near it and what's near those; tap it again to open its page, or tap another to
-move there. That way every genre can be reached, however small. **Home** goes
-back to the top from anywhere, and your back button goes back a step. Drag to
-move around, and pinch, scroll or use the buttons to zoom. You can choose how
-many genres the top shows (**Fewer**, **Normal**, **More**), and how many
-**Lines** to draw.
+The map opens on the families (Rock, Metal, Electronic, Jazz and so on), with
+lines for how their genres link. Tap a family to put it in the middle: what
+it's a kind of sits above it, its kinds below, and the genres it's linked to
+around it. Green arrows run from a genre to what grew out of it, dotted purple
+lines join close genres, and dashed red arrows point from a genre to what it
+was a reaction against. Genres from another family are teal. Tap another genre
+to move there, or the one in the middle to open its page. That way you can
+cross from one family into another and find your way back: the trail above
+the map always shows where you are, from the top down, and each step in it
+takes you there. **Home** goes back to the top, and your back button goes
+back a step. Drag to move around, and pinch, scroll or use the buttons to
+zoom. **Show genres with none of your songs** adds the rest of the tree.
 
 Each genre's page shows related genres, a row of its artists, a radio button,
 and all its songs, loading more as you scroll. They come in a shuffled order
@@ -218,20 +223,39 @@ The same order stays for a while, so you can come back to it. **Admin > Library 
 Library Settings** sets how many load at a time (100 by default) and how many
 hours until it's shuffled again (24 by default; 0 shuffles on every visit).
 
+### The genre family tree
+
+**Admin > Genres > Family Tree** shows DJINN's own map of genres, the one it
+is learning to use for playing by description, radio and containers. Families
+(Rock, Metal, Electronic and so on) open into genres, and genres into styles.
+Pick a genre to see its other names, what it grew out of, what it's close to,
+what it was a reaction against, and how many of your songs land on it.
+**Only genres in my library** hides the rest. Under the tree are your
+library's genres the tree doesn't know yet.
+
+**Admin > Genres > Map** draws one family at a time. Each genre sits under the
+genre it's a kind of; green lines with arrows run from a genre to what grew out
+of it, dotted purple lines join close genres, and dashed red lines point from a
+genre to what it was a reaction against. Tags on the right lead into other
+families. Tap a circle to open or close a branch (a closed branch carries the
+lines of everything in it), and tap a name to light up its lines.
+
 ### Genre containers
 
 A big library can have hundreds of genres, many of them close cousins
 ("black metal", "death metal", "speed metal"). **Genre containers** (off by
-default, **Admin > Library > Genres**) group similar genres under one name,
+default, **Admin > Genres > Containers**) group similar genres under one name,
 so they all show as "Metal", without changing anything in your library.
 
-![Admin > Library > Genres, with genre containers](images/admin-library-genres.webp)
+![Admin > Genres > Containers](images/admin-library-genres.webp)
 
-1. Tap **Auto-group**. DJINN works out how genres relate: songs they share,
-   and how alike their songs sound (so it works better after
-   [sound analysis](your-library.md#sound-analysis)).
-2. Slide **How many containers** toward **Broader** for fewer, bigger
-   containers, or **Closer** for more, smaller ones.
+1. Tap **Auto-group**. DJINN groups your genres by its
+   [genre family tree](#the-genre-family-tree): all the way to **Broader**,
+   each family is one container (Rock, Metal, Electronic...), and each step
+   toward **Closer** splits the container with the most songs into its
+   branches, so Rock becomes Hard rock, Punk rock, Alternative rock and so on.
+   Genres the tree doesn't know stay loose for you to place.
+2. Slide **How many containers** to the grouping you like.
 3. Rename a container, drag genres between containers (or tap one and
    choose **Move Here**), or make your own with **Make It**. Genres you
    place by hand stay put when you Auto-group again.

@@ -5,6 +5,7 @@
   import { api } from './api'
   import { deviceName } from './format'
   import Icon from './Icon.svelte'
+  import { unlocked } from './protected.svelte'
   import Sheet from './Sheet.svelte'
   import { app, toast } from './state.svelte'
   import { locale, t } from './i18n.svelte'
@@ -62,9 +63,11 @@
     ])
   }
 
+  // Changes to an admin's account (and making one) need the protected areas
+  // unlocked; the server says so and the unlock box opens.
   async function attempt(action: () => Promise<unknown>, done?: string) {
     try {
-      await action()
+      await unlocked(action)
       if (done) toast(done)
       return true
     } catch (e) {

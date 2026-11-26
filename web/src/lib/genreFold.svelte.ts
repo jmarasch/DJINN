@@ -1,4 +1,4 @@
-// Genre containers (Admin > Library > Genres): which container each genre
+// Genre containers (Admin > Genres > Containers): which container each genre
 // is in, while they're on, so genre chips can show the container first.
 // Empty while containers are off.
 

@@ -369,6 +369,18 @@ impl Store {
         .await?)
     }
 
+    /// What a person did with each song they played in GO: (song, times
+    /// played through, times marked "play less").
+    pub async fn go_song_history(&self, user_id: i64) -> Result<Vec<(i64, i64, i64)>> {
+        Ok(sqlx::query_as(
+            "SELECT track_id, sum(skipped = 0), sum(play_less > 0) FROM go_plays
+             WHERE user_id = ? GROUP BY track_id",
+        )
+        .bind(user_id)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
     pub async fn save_resume(&self, user_id: i64, resume: &Resume) -> Result<()> {
         let ids: Vec<String> = resume.queue.iter().map(i64::to_string).collect();
         let queue = format!("[{}]", ids.join(","));

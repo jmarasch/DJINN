@@ -45,6 +45,26 @@
   /** How much later (+) or earlier (-) the words show, for speakers that run
    * behind; kept on this screen. */
   let shift = $state(readShift())
+  /** Timed lyrics in a box on the left while the visual shows: asked for
+   * with `?lyrics=side` (the visualizer page passes it on), or switched on
+   * this screen with its button and remembered here. */
+  let sideLyrics = $state(new URLSearchParams(location.search).get('lyrics') === 'side' || readSide())
+
+  function readSide(): boolean {
+    try {
+      return localStorage.getItem('djinn-visual-lyrics') === 'side'
+    } catch {
+      return false
+    }
+  }
+  function toggleSide() {
+    sideLyrics = !sideLyrics
+    try {
+      localStorage.setItem('djinn-visual-lyrics', sideLyrics ? 'side' : '')
+    } catch {
+      // Not remembered.
+    }
+  }
 
   let basePosition = 0
   let baseAt = 0
@@ -85,6 +105,8 @@
     order.length && settled ? choose({ playing: !!current, timed: hasTimed }) : (order[0] ?? 'lyrics'),
   )
   const visual = $derived(page === 'visual')
+  /** The lyrics box beside the visual: only for timed words. */
+  const beside = $derived(visual && sideLyrics && !!timed?.lines?.length)
 
   $effect(() => {
     if (!settled) return
@@ -251,6 +273,11 @@
         <LyricsView lyrics={timed} {position} big empty={t('lp.no_timed')} />
       {/if}
     </main>
+    {#if beside}
+      <div class="beside">
+        <LyricsView lyrics={timed} {position} big />
+      </div>
+    {/if}
     {#if comingUp.length}
       <aside class="faded">
         <h2>{t('playing.coming_up')}</h2>
@@ -277,7 +304,12 @@
     {/if}
   {/if}
   <div class="tools">
-    {#if timed?.lines && !visual}
+    {#if visual}
+      <button onclick={toggleSide} aria-pressed={sideLyrics} title={t('lp.beside_title')}
+        >{sideLyrics ? t('lp.beside_off') : t('lp.beside_on')}</button
+      >
+    {/if}
+    {#if timed?.lines && (!visual || beside)}
       <button onclick={() => nudge(-250)} title={t('lp.earlier_title')}>{t('lp.earlier')}</button>
       <span
         >{shift === 0
@@ -486,6 +518,34 @@
     color: rgb(255 255 255 / 0.7);
   }
 
+  /* Timed lyrics on the left over the visual, on a dark glass so the
+     words read over any style; never faded. */
+  .beside {
+    position: absolute;
+    top: calc(var(--edge) + clamp(56px, 7vw, 96px) + 16px);
+    bottom: calc(var(--edge) + clamp(72px, 9vw, 140px) + 16px);
+    left: var(--edge);
+    width: min(40vw, 720px);
+    display: flex;
+    padding: 8px 4px;
+    border-radius: 16px;
+    background: rgb(10 8 18 / 0.55);
+    backdrop-filter: blur(6px);
+    /* Light words on the dark glass in either theme. */
+    --text: #fff;
+    --muted: rgb(255 255 255 / 0.55);
+    color: #fff;
+  }
+
+  .beside > :global(*) {
+    flex: 1;
+    min-height: 0;
+  }
+
+  .beside :global(p) {
+    font-size: clamp(1.1rem, 2.4vw, 2.2rem);
+  }
+
   /* Never faded: anything showing through can stop phones reading it. */
   .qr {
     position: absolute;
@@ -538,6 +598,11 @@
 
     aside {
       display: none;
+    }
+
+    .beside {
+      width: auto;
+      right: var(--edge);
     }
 
     main {

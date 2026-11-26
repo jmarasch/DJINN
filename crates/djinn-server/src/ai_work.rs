@@ -162,9 +162,14 @@ struct Seen {
     last_seen: i64,
     /// When it last asked for work while free to do it (a node that's
     /// playing doesn't ask).
-    #[serde(skip)]
     asked_at: i64,
+    /// What Main last answered a node that asked: "given", "no_songs"
+    /// (nothing waiting) or "work_off" (AI work is switched off).
+    answer: Option<String>,
     done: u64,
+    /// Results under the minimum score: listened to, but not sure enough.
+    low: u64,
+    /// Songs that failed: an error, or nothing sent back.
     failed: u64,
     /// Time spent listening and the length of the songs it listened to,
     /// for its speed.
@@ -177,6 +182,30 @@ struct Seen {
 }
 
 static WORKERS: Mutex<Option<HashMap<String, Seen>>> = Mutex::new(None);
+
+/// What this computer took each song it holds for (its strippers and its
+/// listener share one name), for its status on the Lyrics tab.
+static MAIN_DOING: std::sync::LazyLock<Mutex<HashMap<i64, MainWork>>> =
+    std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum MainWork {
+    /// Separating its vocals.
+    Strip,
+    /// Listening to it.
+    Listen,
+    /// Listening to it for a second opinion on a node's low score.
+    Second,
+}
+
+/// A song this computer is working on, and for what.
+#[derive(Serialize)]
+struct MainJob {
+    what: MainWork,
+    #[serde(flatten)]
+    song: djinn_store::AiHeld,
+}
 
 fn seen(name: &str, f: impl FnOnce(&mut Seen)) {
     if let Ok(mut guard) = WORKERS.lock() {
@@ -197,28 +226,101 @@ pub fn speed_of(name: &str) -> Option<f64> {
     WORKERS.lock().ok()?.as_ref()?.get(name)?.secs_per_minute
 }
 
-/// Nodes that asked for work lately, while free to do it.
-fn helping_nodes() -> usize {
-    let cut = djinn_store::now_ms() - HELPER_FRESH_MS;
-    WORKERS
+/// Nodes free to help right now: switched on, checked in lately, and with
+/// their listener running, not paused for music or a screen. This
+/// computer's listener gets songs ready for them while there are any, and
+/// does the work itself when there are none.
+async fn free_nodes(state: &AppState) -> anyhow::Result<usize> {
+    let cut = djinn_store::now_ms() - NODE_QUIET_MS;
+    Ok(state
+        .store
+        .nodes()
+        .await?
+        .iter()
+        .filter(|n| n.status == "approved" && n.ai_help && n.last_seen.is_some_and(|s| s > cut))
+        .filter(|n| matches!(NodeAiReport::of(n).phase.as_str(), "working" | "ready"))
+        .count())
+}
+
+/// How many songs with their vocals separated this computer keeps ready:
+/// one for every listener that may take one (each node free to help, while
+/// nodes get them, and this computer's own), and one spare.
+async fn vocals_wanted(state: &AppState) -> anyhow::Result<i64> {
+    let nodes = if settings::flag(&state.store, VOCALS_FOR_NODES, true).await? {
+        i64::try_from(free_nodes(state).await?).unwrap_or(0)
+    } else {
+        0
+    };
+    Ok(nodes + 2)
+}
+
+/// How soon this computer's stripper and listener ask again when there's
+/// nothing to do (the other one may make or take a song any moment).
+const STRIPPING_WAIT_SECS: u64 = 5;
+/// Nodes waiting for work right now: free to help, holding no song, and
+/// asking lately (a node free on paper that stopped asking doesn't count).
+/// While any wait, this computer's listener leaves new songs to them
+/// (`NODES_FIRST`), doing second opinions only.
+async fn nodes_waiting(state: &AppState) -> anyhow::Result<usize> {
+    let now = djinn_store::now_ms();
+    let held = state.store.ai_held(now - LEASE_MS).await?;
+    let asked: HashMap<String, i64> = WORKERS
         .lock()
         .ok()
         .and_then(|g| {
             g.as_ref()
-                .map(|m| m.values().filter(|s| s.node && s.asked_at > cut).count())
+                .map(|m| m.iter().map(|(k, v)| (k.clone(), v.asked_at)).collect())
         })
-        .unwrap_or(0)
+        .unwrap_or_default();
+    Ok(state
+        .store
+        .nodes()
+        .await?
+        .iter()
+        .filter(|n| {
+            let worker = node_worker(n);
+            n.status == "approved"
+                && n.ai_help
+                && n.last_seen.is_some_and(|s| s > now - NODE_QUIET_MS)
+                && matches!(NodeAiReport::of(n).phase.as_str(), "working" | "ready")
+                && asked.get(&worker).is_some_and(|&a| a > now - NODE_ASKED_MS)
+                && !held.iter().any(|h| h.worker == worker)
+        })
+        .count())
 }
 
-/// A node that asked within this long counts as helping.
-const HELPER_FRESH_MS: i64 = 10 * 60 * 1000;
-/// Songs with isolated vocals kept waiting per helping node, and at most.
-const PREPARED_PER_NODE: i64 = 2;
-const PREPARED_MAX: i64 = 8;
+/// A node that asked for work within this long is still asking.
+const NODE_ASKED_MS: i64 = 60 * 1000;
+/// A node that hasn't checked in for this long isn't free to help.
+const NODE_QUIET_MS: i64 = 30 * 1000;
+/// How soon a node that got nothing asks again, so a song made ready for
+/// it is picked up quickly.
+const NODE_WAIT_SECS: u64 = 15;
 /// The largest isolated vocals file taken (16 kHz mono FLAC is a few MB).
 const VOCALS_MAX_BYTES: usize = 40 << 20;
 /// Setting key: Main isolates vocals for nodes when it can.
 pub const VOCALS_FOR_NODES: &str = "ai_vocals_for_nodes";
+/// Setting key: while nodes wait for work, this computer's listener leaves
+/// new songs to them (doing second opinions only).
+pub const NODES_FIRST: &str = "ai_nodes_first";
+/// Setting key: a song a node's model wasn't sure enough of goes to this
+/// computer's listener (a bigger model) for a second opinion.
+pub const SECOND_OPINION: &str = "ai_second_opinion";
+
+/// Whether this computer's listener leaves new songs to nodes waiting for
+/// work right now (the setting is on and at least one waits).
+async fn leaves_to_nodes(state: &AppState, name: &str) -> anyhow::Result<bool> {
+    Ok(name == crate::ai_listener::LOCAL_KEY_NAME
+        && settings::flag(&state.store, NODES_FIRST, true).await?
+        && nodes_waiting(state).await? > 0)
+}
+
+/// Whether songs a node wasn't sure of go to this computer's listener: the
+/// setting is on and the listener is installed here to take them.
+async fn second_opinions(state: &AppState) -> anyhow::Result<bool> {
+    Ok(settings::flag(&state.store, SECOND_OPINION, true).await?
+        && crate::ai_listener::installed(&crate::ai_listener::dir(state)))
+}
 
 // --- Admin ---
 
@@ -228,13 +330,43 @@ struct Status {
     new_songs: bool,
     sync_plain: bool,
     vocals_for_nodes: bool,
+    second_opinion: bool,
+    nodes_first: bool,
     min_match: i64,
     skip_genres: Vec<String>,
     counts: AiCounts,
+    /// Songs a node wasn't sure of, waiting for this computer's listener.
+    waiting_second: i64,
     /// Why handing out work is paused (music playing, outside the hours).
     held: Option<crate::background::Held>,
     keys: Vec<String>,
     workers: Vec<WorkerView>,
+    /// Every node switched on to help, and what it's doing.
+    helpers: Vec<Helping>,
+    /// What this computer is working on: vocals it's separating, and the
+    /// song it's listening to (and whether for a second opinion).
+    this_computer: Vec<MainJob>,
+    /// Songs lined up for a listener: second opinions, then separated vocals.
+    lined_up: Vec<djinn_store::AiLinedUp>,
+}
+
+/// A node switched on to help: what it says about itself, what Main last
+/// answered it, and the songs it's working on.
+#[derive(Serialize)]
+struct Helping {
+    node_id: i64,
+    name: String,
+    /// When the node last checked in; a node gone quiet isn't helping,
+    /// whatever its last report said.
+    last_seen: Option<i64>,
+    report: NodeAiReport,
+    asked_at: Option<i64>,
+    answer: Option<String>,
+    done: u64,
+    low: u64,
+    failed: u64,
+    secs_per_minute: Option<f64>,
+    working_on: Vec<djinn_store::AiHeld>,
 }
 
 #[derive(Serialize)]
@@ -248,6 +380,9 @@ async fn lookups_off(state: &AppState) -> anyhow::Result<bool> {
     Ok(!settings::flag(&state.store, crate::lyrics::LYRICS_LOOKUP, true).await?)
 }
 
+/// How many lined-up songs the status lists.
+const LINED_UP_SHOWN: i64 = 50;
+
 async fn status(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json<Status>> {
     let mut workers: Vec<WorkerView> = WORKERS
         .lock()
@@ -258,11 +393,67 @@ async fn status(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json<S
         .map(|(name, seen)| WorkerView { name, seen })
         .collect();
     workers.sort_by_key(|w| std::cmp::Reverse(w.seen.last_seen));
+    let held = state
+        .store
+        .ai_held(djinn_store::now_ms() - LEASE_MS)
+        .await?;
+    let this_computer: Vec<MainJob> = {
+        let mine: Vec<&djinn_store::AiHeld> = held
+            .iter()
+            .filter(|h| h.worker == crate::ai_listener::LOCAL_KEY_NAME)
+            .collect();
+        let mut doing = MAIN_DOING
+            .lock()
+            .map_err(|_| anyhow::anyhow!("status lock"))?;
+        // Forget songs it no longer holds.
+        doing.retain(|id, _| mine.iter().any(|h| h.track_id == *id));
+        let mut jobs: Vec<MainJob> = mine
+            .into_iter()
+            .map(|h| MainJob {
+                what: doing.get(&h.track_id).copied().unwrap_or(MainWork::Listen),
+                song: h.clone(),
+            })
+            .collect();
+        // Separating first, then listening; oldest first within each.
+        jobs.sort_by_key(|j| j.what != MainWork::Strip);
+        jobs
+    };
+    let helpers = state
+        .store
+        .nodes()
+        .await?
+        .into_iter()
+        .filter(|n| n.status == "approved" && n.ai_help)
+        .map(|node| {
+            let worker = node_worker(&node);
+            let seen = workers.iter().find(|w| w.name == worker).map(|w| &w.seen);
+            Helping {
+                node_id: node.id,
+                name: node.name.clone(),
+                last_seen: node.last_seen,
+                report: NodeAiReport::of(&node),
+                asked_at: seen.map(|s| s.asked_at).filter(|&a| a > 0),
+                answer: seen.and_then(|s| s.answer.clone()),
+                done: seen.map_or(0, |s| s.done),
+                low: seen.map_or(0, |s| s.low),
+                failed: seen.map_or(0, |s| s.failed),
+                secs_per_minute: seen.and_then(|s| s.secs_per_minute),
+                working_on: held
+                    .iter()
+                    .filter(|h| h.worker == worker)
+                    .cloned()
+                    .collect(),
+            }
+        })
+        .collect();
     Ok(Json(Status {
         on: settings::flag(&state.store, WORK_ON, false).await?,
         new_songs: settings::flag(&state.store, WORK_NEW, true).await?,
         sync_plain: settings::flag(&state.store, WORK_SYNC, false).await?,
         vocals_for_nodes: settings::flag(&state.store, VOCALS_FOR_NODES, true).await?,
+        second_opinion: settings::flag(&state.store, SECOND_OPINION, true).await?,
+        nodes_first: settings::flag(&state.store, NODES_FIRST, true).await?,
+        waiting_second: state.store.ai_second_count().await?,
         min_match: min_match(&state).await?,
         skip_genres: skip_genres(&state).await?,
         counts: state
@@ -276,6 +467,9 @@ async fn status(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json<S
         held: crate::background::held(&state).await,
         keys: keys(&state).await?.into_iter().map(|k| k.name).collect(),
         workers,
+        helpers,
+        this_computer,
+        lined_up: state.store.ai_lined_up(LINED_UP_SHOWN).await?,
     }))
 }
 
@@ -286,6 +480,10 @@ struct Settings {
     sync_plain: bool,
     #[serde(default = "yes")]
     vocals_for_nodes: bool,
+    #[serde(default = "yes")]
+    second_opinion: bool,
+    #[serde(default = "yes")]
+    nodes_first: bool,
     #[serde(default)]
     min_match: Option<i64>,
     #[serde(default)]
@@ -305,6 +503,8 @@ async fn put_settings(
     settings::set_flag(&state.store, WORK_NEW, body.new_songs).await?;
     settings::set_flag(&state.store, WORK_SYNC, body.sync_plain).await?;
     settings::set_flag(&state.store, VOCALS_FOR_NODES, body.vocals_for_nodes).await?;
+    settings::set_flag(&state.store, SECOND_OPINION, body.second_opinion).await?;
+    settings::set_flag(&state.store, NODES_FIRST, body.nodes_first).await?;
     if let Some(pct) = body.min_match {
         state
             .store
@@ -392,6 +592,21 @@ struct Next {
     /// nodes.
     #[serde(default)]
     can_isolate: bool,
+    /// What the worker does; older workers don't say.
+    #[serde(default)]
+    role: Role,
+}
+
+/// This computer runs two workers while it strips vocals: one separating
+/// vocals ahead ("prepare"), one listening to songs whose vocals are ready
+/// ("listen"), at the same time. Other workers do whole songs ("all").
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum Role {
+    #[default]
+    All,
+    Prepare,
+    Listen,
 }
 
 /// A song for a worker, and what to do with it.
@@ -453,6 +668,41 @@ fn too_unsure(text: &str, min: i64) -> Option<String> {
         .ai_info()?
         .match_pct?;
     (pct < min).then(|| format!("{LOW_SCORE} ({pct}%, under {min}%)"))
+}
+
+/// A helping node's result, as a line for the listener's log.
+fn node_outcome(
+    who: &str,
+    song: &str,
+    kind: &str,
+    body: &Outcome,
+    failure: Option<&str>,
+    second: bool,
+) -> String {
+    match failure {
+        Some(why) if why.starts_with(LOW_SCORE) && second => {
+            format!("{who}: {song} {why}; passed to this computer for a second opinion")
+        }
+        Some(why) if why.starts_with(LOW_SCORE) => format!("{who}: {song} {why}; given up"),
+        Some(why) => format!("{who}: {song} failed: {why}"),
+        None => match &body.lrc {
+            None => format!("{who}: {song} is an instrumental"),
+            Some(text) => {
+                let made = if kind == "sync" {
+                    "lyrics timed"
+                } else {
+                    "lyrics made"
+                };
+                match djinn_library::lyrics_import::header(text)
+                    .ai_info()
+                    .and_then(|i| i.match_pct)
+                {
+                    Some(pct) => format!("{who}: {song}, {made} ({pct}% sure)"),
+                    None => format!("{who}: {song}, {made}"),
+                }
+            }
+        },
+    }
 }
 
 /// The start of the reason a result scored too low (also the worker's skip).
@@ -728,7 +978,13 @@ async fn hand_out(state: &AppState, name: &str, asker: Asker, body: Next) -> Api
     let min_match = min_match(state).await?;
     let nothing = |held| Batch {
         jobs: Vec::new(),
-        wait_secs: Some(WAIT_SECS),
+        wait_secs: Some(if asker == Asker::Node {
+            NODE_WAIT_SECS
+        } else if body.role == Role::All && name != crate::ai_listener::LOCAL_KEY_NAME {
+            WAIT_SECS
+        } else {
+            STRIPPING_WAIT_SECS
+        }),
         held,
         min_match,
     };
@@ -748,49 +1004,117 @@ async fn hand_out(state: &AppState, name: &str, asker: Asker, body: Next) -> Api
     let lookups_off = lookups_off(state).await?;
     let mut prepare = false;
     let skip = skipped_songs(state).await?;
-    let jobs = if asker == Asker::Node {
-        let mut jobs = if background {
-            state.store.ai_claim_prepared(name, max).await?
-        } else {
-            Vec::new()
-        };
-        if jobs.is_empty() {
-            jobs = state
-                .store
-                .ai_claim(name, listen, sync, lookups_off, max, LEASE_MS, &skip)
-                .await?;
-        }
-        jobs
+    // While this computer strips vocals ahead, the listeners (its own and
+    // the nodes') take only songs whose vocals are ready, so every song gets
+    // the cleaner listen; with no stripper they take whole songs.
+    // Nodes left out of the vocals (the setting) keep taking whole songs.
+    let shares_vocals =
+        asker == Asker::Keyed || settings::flag(&state.store, VOCALS_FOR_NODES, true).await?;
+    let stripping = crate::ai_listener::stripper_running() && shares_vocals;
+    let role = if asker == Asker::Node {
+        Role::Listen
     } else {
-        let mut jobs = claim_imports(state, name, max_usize).await?;
-        let left = max - i64::try_from(jobs.len()).unwrap_or(max);
-        if left > 0 {
-            // This computer's own listener isolates vocals for helping nodes
-            // first, keeping a few songs ready for each.
-            if background && name == crate::ai_listener::LOCAL_KEY_NAME && body.can_isolate {
-                sweep_vocals(state).await?;
-                let nodes = i64::try_from(helping_nodes()).unwrap_or(0);
-                prepare = nodes > 0
-                    && settings::flag(&state.store, VOCALS_FOR_NODES, true).await?
-                    && state.store.ai_prepared_count().await?
-                        < (nodes * PREPARED_PER_NODE).min(PREPARED_MAX);
-            }
-            let more = state
-                .store
-                .ai_claim(
-                    name,
-                    listen,
-                    sync,
-                    lookups_off,
-                    if prepare { 1 } else { left },
-                    LEASE_MS,
-                    &skip,
-                )
-                .await?;
-            jobs.extend(more);
-        }
-        jobs
+        body.role
     };
+    // Songs taken for a second opinion, for this computer's status.
+    let mut seconds: Vec<i64> = Vec::new();
+    let jobs = match role {
+        Role::Prepare => {
+            if background && body.can_isolate {
+                sweep_vocals(state).await?;
+                prepare = state.store.ai_prepared_count().await? < vocals_wanted(state).await?;
+            }
+            if prepare {
+                state
+                    .store
+                    .ai_claim(name, listen, sync, lookups_off, 1, LEASE_MS, &skip)
+                    .await?
+            } else {
+                Vec::new()
+            }
+        }
+        Role::Listen => {
+            let mut jobs = if asker == Asker::Keyed {
+                claim_imports(state, name, max_usize).await?
+            } else {
+                Vec::new()
+            };
+            let left = max - i64::try_from(jobs.len()).unwrap_or(max);
+            if background && left > 0 && name == crate::ai_listener::LOCAL_KEY_NAME {
+                let claimed = state.store.ai_claim_second(name, left).await?;
+                seconds.extend(claimed.iter().map(|j| j.track_id));
+                jobs.extend(claimed);
+            }
+            // Second opinions first; new songs only when no node waits.
+            let step_back = jobs.is_empty() && leaves_to_nodes(state, name).await?;
+            let left = max - i64::try_from(jobs.len()).unwrap_or(max);
+            if background && left > 0 && shares_vocals && !step_back {
+                jobs.extend(state.store.ai_claim_prepared(name, left).await?);
+            }
+            let left = max - i64::try_from(jobs.len()).unwrap_or(max);
+            if left > 0 && !stripping && !step_back {
+                jobs.extend(
+                    state
+                        .store
+                        .ai_claim(name, listen, sync, lookups_off, left, LEASE_MS, &skip)
+                        .await?,
+                );
+            }
+            jobs
+        }
+        Role::All => {
+            let mut jobs = claim_imports(state, name, max_usize).await?;
+            let left = max - i64::try_from(jobs.len()).unwrap_or(max);
+            if background && left > 0 && name == crate::ai_listener::LOCAL_KEY_NAME {
+                let claimed = state.store.ai_claim_second(name, left).await?;
+                seconds.extend(claimed.iter().map(|j| j.track_id));
+                jobs.extend(claimed);
+            }
+            let step_back = jobs.is_empty() && leaves_to_nodes(state, name).await?;
+            let left = max - i64::try_from(jobs.len()).unwrap_or(max);
+            if left > 0 && !step_back {
+                jobs.extend(
+                    state
+                        .store
+                        .ai_claim(name, listen, sync, lookups_off, left, LEASE_MS, &skip)
+                        .await?,
+                );
+            }
+            jobs
+        }
+    };
+    if name == crate::ai_listener::LOCAL_KEY_NAME && !jobs.is_empty() {
+        if let Ok(mut doing) = MAIN_DOING.lock() {
+            for job in &jobs {
+                let what = if prepare {
+                    MainWork::Strip
+                } else if seconds.contains(&job.track_id) {
+                    MainWork::Second
+                } else {
+                    MainWork::Listen
+                };
+                doing.insert(job.track_id, what);
+            }
+        }
+    }
+    if asker == Asker::Node {
+        let answer = if !jobs.is_empty() {
+            "given"
+        } else if !work_on {
+            "work_off"
+        } else if stripping {
+            "waiting_vocals"
+        } else {
+            "no_songs"
+        };
+        tracing::debug!(
+            worker = name,
+            answer,
+            songs = jobs.len(),
+            "a node asked for AI work"
+        );
+        seen(name, |s| s.answer = Some(answer.to_owned()));
+    }
     if jobs.is_empty() {
         if !work_on && name == crate::ai_listener::LOCAL_KEY_NAME && !worker_busy(state, name).await
         {
@@ -900,15 +1224,36 @@ struct Outcome {
     elapsed_ms: Option<u64>,
 }
 
-fn record_seen(name: &str, failed: bool, elapsed_ms: Option<u64>, audio_ms: Option<u64>) {
-    seen(name, |s| {
-        if failed {
-            s.failed += 1;
-        } else {
-            s.done += 1;
+/// How a song a worker sent back went, for its counts.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Tally {
+    Done,
+    /// Listened to, but under the minimum score.
+    Low,
+    /// An error, or nothing sent back.
+    Failed,
+}
+
+impl Tally {
+    fn of(failure: Option<&str>) -> Tally {
+        match failure {
+            None => Tally::Done,
+            Some(why) if why.starts_with(LOW_SCORE) => Tally::Low,
+            Some(_) => Tally::Failed,
         }
+    }
+}
+
+fn record_seen(name: &str, tally: Tally, elapsed_ms: Option<u64>, audio_ms: Option<u64>) {
+    seen(name, |s| {
+        match tally {
+            Tally::Done => s.done += 1,
+            Tally::Low => s.low += 1,
+            Tally::Failed => s.failed += 1,
+        }
+        // A low score was a whole listen, so it counts toward the speed.
         if let (Some(work), Some(audio)) = (elapsed_ms, audio_ms) {
-            if !failed && audio > 0 {
+            if tally != Tally::Failed && audio > 0 {
                 s.work_ms += work;
                 s.audio_ms += audio;
                 #[allow(clippy::cast_precision_loss)]
@@ -930,8 +1275,11 @@ async fn finish_track_result(
     let kind_number = if kind == "sync" { 2 } else { 1 };
     let min = min_match(state).await?;
     let failure = match (&body.lrc, &body.error) {
-        // An instrumental has no lyrics to make: finished, nothing stored.
-        (None, Some(error)) if error == "instrumental" => None,
+        // An instrumental has no lyrics to make: finished, and marked as one.
+        (None, Some(error)) if error == "instrumental" => {
+            state.store.mark_instrumental(id).await?;
+            None
+        }
         (Some(text), _) => match too_unsure(text, min) {
             Some(why) => Some(why),
             None => store_from_worker(state, id, text, kind_number, name)
@@ -941,23 +1289,64 @@ async fn finish_track_result(
         (None, Some(error)) => Some(error.chars().take(200).collect()),
         (None, None) => Some("sent nothing".to_owned()),
     };
-    // A low score won't change by asking again, so the song isn't retried
-    // (until an admin retries failed songs, say after lowering the minimum).
-    if failure.as_deref().is_some_and(|f| f.starts_with(LOW_SCORE)) {
+    // A low score won't change by asking the same model again, so the song
+    // isn't retried (until an admin retries failed songs, say after
+    // lowering the minimum); one a node's smaller model wasn't sure of goes
+    // to this computer's bigger one first, keeping its separated vocals.
+    let low = failure.as_deref().is_some_and(|f| f.starts_with(LOW_SCORE));
+    let second = low && name.starts_with("node:") && second_opinions(state).await?;
+    if second {
+        tracing::debug!(
+            worker = name,
+            song = id,
+            "a second opinion from this computer"
+        );
+        state
+            .store
+            .ai_second_opinion(id, failure.as_deref())
+            .await?;
+    } else if low {
         state.store.ai_give_up(id, failure.as_deref()).await?;
     } else {
         state.store.ai_finish(id, failure.as_deref()).await?;
     }
-    let _ = tokio::fs::remove_file(vocals_file(state, id)).await;
-    let audio_ms = state
-        .store
-        .track(id)
-        .await
-        .ok()
-        .flatten()
+    if !second {
+        let _ = tokio::fs::remove_file(vocals_file(state, id)).await;
+    }
+    let track = state.store.track(id).await.ok().flatten();
+    if name.starts_with("node:") {
+        // What a helping node did, in the listener's log beside this
+        // computer's own work.
+        let who = WORKERS
+            .lock()
+            .ok()
+            .and_then(|g| g.as_ref()?.get(name).map(|s| s.label.clone()))
+            .unwrap_or_else(|| name.to_owned());
+        let song = track.as_ref().map_or_else(
+            || format!("song {id}"),
+            |t| match &t.artist {
+                Some(artist) => format!("{artist} - {}", t.title),
+                None => t.title.clone(),
+            },
+        );
+        crate::ai_listener::log_line(node_outcome(
+            &who,
+            &song,
+            kind,
+            body,
+            failure.as_deref(),
+            second,
+        ));
+    }
+    let audio_ms = track
         .and_then(|t| t.duration_ms)
         .and_then(|d| u64::try_from(d).ok());
-    record_seen(name, failure.is_some(), body.elapsed_ms, audio_ms);
+    record_seen(
+        name,
+        Tally::of(failure.as_deref()),
+        body.elapsed_ms,
+        audio_ms,
+    );
     Ok(())
 }
 
@@ -1049,7 +1438,12 @@ async fn take_result(
                 .ok()
                 .flatten()
                 .and_then(|d| u64::try_from(d).ok());
-        record_seen(name, failure.is_some(), body.elapsed_ms, audio_ms);
+        record_seen(
+            name,
+            Tally::of(failure.as_deref()),
+            body.elapsed_ms,
+            audio_ms,
+        );
         return Ok(StatusCode::NO_CONTENT);
     }
     let Some((holder, kind)) = state.store.ai_holder(id).await? else {
@@ -1293,6 +1687,65 @@ mod tests {
     use tower::ServiceExt;
 
     #[test]
+    fn a_nodes_results_read_plainly_in_the_log() {
+        let outcome = |lrc: Option<&str>, error: Option<&str>| Outcome {
+            lrc: lrc.map(str::to_owned),
+            error: error.map(str::to_owned),
+            elapsed_ms: None,
+        };
+        let made = "[ar:A]\n[ti:T]\n[by:lyrics-listener (AI-generated; model=base; match=96%)]\n[00:01.00]la\n";
+        assert_eq!(
+            node_outcome(
+                "Kitchen",
+                "A - T",
+                "listen",
+                &outcome(Some(made), None),
+                None,
+                false
+            ),
+            "Kitchen: A - T, lyrics made (96% sure)"
+        );
+        assert_eq!(
+            node_outcome(
+                "Kitchen",
+                "A - T",
+                "listen",
+                &outcome(None, Some("instrumental")),
+                None,
+                false
+            ),
+            "Kitchen: A - T is an instrumental"
+        );
+        let low = "scored too low (72%, under 85%)";
+        assert_eq!(
+            node_outcome("Kitchen", "A - T", "listen", &outcome(Some(made), None), Some(low), true),
+            "Kitchen: A - T scored too low (72%, under 85%); passed to this computer for a second opinion"
+        );
+        assert_eq!(
+            node_outcome(
+                "Kitchen",
+                "A - T",
+                "listen",
+                &outcome(Some(made), None),
+                Some(low),
+                false
+            ),
+            "Kitchen: A - T scored too low (72%, under 85%); given up"
+        );
+        assert_eq!(
+            node_outcome(
+                "Kitchen",
+                "A - T",
+                "listen",
+                &outcome(None, Some("boom")),
+                Some("boom"),
+                false
+            ),
+            "Kitchen: A - T failed: boom"
+        );
+    }
+
+    #[test]
     fn lyrics_scoring_under_the_minimum_are_refused() {
         let lrc = |by: &str| format!("[ar:A]\n[ti:T]\n[by:{by}]\n[00:01.00]la la\n");
         let made = lrc("lyrics-listener (AI-generated; model=small; match=84%)");
@@ -1305,6 +1758,94 @@ mod tests {
         // No score given (an older worker, or timing alone): kept.
         let plain = lrc("lyrics-listener (AI-generated; model=small)");
         assert_eq!(too_unsure(&plain, 100), None);
+    }
+
+    #[tokio::test]
+    async fn a_stripper_prepares_ahead_and_listeners_take_songs() {
+        let state = AppState::for_tests().await;
+        let admin = session(&state, "admin", djinn_store::Role::Admin).await;
+        let songs: Vec<ScannedTrack> = ["One", "Two", "Three"]
+            .iter()
+            .map(|t| ScannedTrack {
+                path: format!("/m/{t}.mp3"),
+                title: (*t).into(),
+                artist: Some("Band".into()),
+                duration_ms: Some(30_000),
+                ..Default::default()
+            })
+            .collect();
+        state.store.save_scanned(&songs).await.unwrap();
+        for row in state.store.compare_rows().await.unwrap() {
+            state
+                .store
+                .save_read_lyrics(row.id, 1, &NewLyrics::NONE)
+                .await
+                .unwrap();
+            state
+                .store
+                .save_looked_up_lyrics(row.id, None)
+                .await
+                .unwrap();
+        }
+        crate::settings::set_flag(&state.store, WORK_ON, true)
+            .await
+            .unwrap();
+        let made = axum::http::Request::builder()
+            .method(Method::POST)
+            .uri("/api/ai-work/keys")
+            .header("cookie", &admin)
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"name":"pc"}"#))
+            .unwrap();
+        let response = crate::app(state.clone()).oneshot(made).await.unwrap();
+        let bytes = axum::body::to_bytes(response.into_body(), 1 << 20)
+            .await
+            .unwrap();
+        let text = String::from_utf8_lossy(&bytes).into_owned();
+        let key = text
+            .split("\"key\":\"")
+            .nth(1)
+            .and_then(|b| b.split('"').next())
+            .unwrap()
+            .to_owned();
+        let ask = |body: &'static str| {
+            let state = state.clone();
+            let key = key.clone();
+            async move {
+                let request = axum::http::Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/ai-work/next")
+                    .header("authorization", format!("Worker {key}"))
+                    .header("content-type", "application/json")
+                    .extension(axum::extract::ConnectInfo(std::net::SocketAddr::from((
+                        [192, 168, 1, 20],
+                        4000,
+                    ))))
+                    .body(Body::from(body))
+                    .unwrap();
+                let response = crate::app(state).oneshot(request).await.unwrap();
+                let bytes = axum::body::to_bytes(response.into_body(), 1 << 20)
+                    .await
+                    .unwrap();
+                serde_json::from_slice::<serde_json::Value>(&bytes).unwrap()
+            }
+        };
+        // The stripper takes one song at a time to separate its vocals.
+        let batch = ask(r#"{"max":1,"can_isolate":true,"role":"prepare"}"#).await;
+        assert_eq!(batch["jobs"].as_array().unwrap().len(), 1, "{batch}");
+        assert_eq!(batch["jobs"][0]["prepare"], true, "{batch}");
+        // A stripper that can't separate vocals gets nothing, and asks again soon.
+        let batch = ask(r#"{"max":1,"can_isolate":false,"role":"prepare"}"#).await;
+        assert_eq!(batch["jobs"].as_array().unwrap().len(), 0, "{batch}");
+        assert_eq!(batch["wait_secs"], STRIPPING_WAIT_SECS, "{batch}");
+        // With no stripper running here, a listener takes a whole song.
+        let batch = ask(r#"{"max":1,"role":"listen"}"#).await;
+        assert_eq!(batch["jobs"].as_array().unwrap().len(), 1, "{batch}");
+        assert_eq!(batch["jobs"][0]["prepare"], false, "{batch}");
+        assert_eq!(batch["jobs"][0]["vocals"], false, "{batch}");
+        // An older worker that doesn't say its role does whole songs.
+        let batch = ask(r#"{"max":2}"#).await;
+        assert_eq!(batch["jobs"].as_array().unwrap().len(), 1, "{batch}");
     }
 
     #[tokio::test]

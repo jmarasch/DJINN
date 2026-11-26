@@ -1,0 +1,43 @@
+# R&B and soul. See README.md for how these files are written.
+
+R&B and soul = r and b, rnb, soul and r and b [1940-]
+  Rhythm and blues [1945-1965] < jump blues ~ gospel
+    Doo wop [1950-1962]
+    New Orleans R&B = new orleans rhythm and blues [1945-]
+    Swamp pop [1955-] ~ cajun
+  Soul = soul music [1958-] < rhythm and blues, gospel
+    Southern soul [1960-]
+      Memphis soul [1960-]
+      Deep soul [1960-]
+      Country soul [1965-] ~ country
+    Motown = motown sound, detroit soul [1960-]
+    Chicago soul [1960-]
+    Northern soul [1968-]
+    Philly soul = philadelphia soul [1968-]
+    Psychedelic soul [1967-] ~ psychedelic rock
+    Progressive soul [1968-]
+    Blue eyed soul [1964-]
+    Smooth soul [1970-] ~ quiet storm
+    Neo soul [1995-] ~ contemporary r and b
+    Retro soul = soul revival [2000-]
+  Funk [1965-] < soul
+    P funk = p-funk [1970-]
+    Deep funk [1970-]
+    Afro funk [1970-] ~ afrobeat
+    Brit funk [1978-]
+    Go go [1975-]
+    Synth funk [1979-]
+      Minneapolis sound [1979-] ~ new wave
+    Boogie = post disco [1979-] ~ disco
+  Disco [1972-1984] < soul, funk ~ dance pop, house
+    Eurodisco = euro disco [1975-]
+    Italo disco [1977-] ~ synth pop
+    Space disco [1976-]
+    Hi nrg = high energy [1977-]
+    Nu disco [2005-] ~ house
+  Contemporary R&B = contemporary r and b, urban, urban contemporary, modern r and b [1980-]
+    New jack swing [1987-1995] ~ hip hop
+    Hip hop soul [1992-] ~ hip hop
+    Alternative R&B = alternative r and b, alt r and b [2010-]
+    Trap soul [2013-] ~ trap
+  Quiet storm [1976-] ~ smooth jazz, soft rock

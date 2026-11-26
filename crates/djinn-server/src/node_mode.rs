@@ -309,11 +309,28 @@ impl Node {
     /// processor the song needed when it carried on). A quiet room isn't
     /// busy, though the node stays connected to Main's feed.
     pub(crate) fn busy(&self) -> bool {
+        self.busy_with().is_some()
+    }
+
+    /// What keeps AI work waiting, if anything, for the node's report:
+    /// "music" (Main's music is playing here), "held" (Main's song is
+    /// paused), "offline" (playing its own kept songs while Main is away) or
+    /// "screen" (a screen is drawing the visualizer). A screen showing the
+    /// node's page with nothing playing has no sound to draw, so it doesn't
+    /// hold the work.
+    pub(crate) fn busy_with(&self) -> Option<&'static str> {
         let now = djinn_engine::clock::now_micros();
-        self.music_arriving(now)
-            || self.held.load(Ordering::Acquire)
-            || self.status().offline
-            || self.levels.watched(now)
+        if self.music_arriving(now) {
+            Some("music")
+        } else if self.held.load(Ordering::Acquire) {
+            Some("held")
+        } else if self.status().offline {
+            Some("offline")
+        } else if self.levels.watched(now) && self.levels.sounding(now) {
+            Some("screen")
+        } else {
+            None
+        }
     }
 
     /// Whether music from Main arrived in the last few seconds.

@@ -47,6 +47,12 @@ speakers, in step with what you hear, with the song and what's coming up.
 It switches to the TV page when there's nothing to draw. It uses the same
 styles as the screens on nodes, below.
 
+**Show Lyrics** (move the mouse to see the buttons) puts the song's timed
+lyrics in a box on the left, over the visual; a song with no timed lyrics
+shows no box. The screen remembers the choice. To set it up once, for a
+screen plugged in here, open the visualizer's address with `?lyrics=side`
+on the end, for example `http://<server>:8066/visualizer?lyrics=side`.
+
 
 ### Styles
 

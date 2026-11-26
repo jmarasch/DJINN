@@ -1,9 +1,13 @@
 # Library problems
 
-**Admin > Library Problems** shows what the last library check couldn't add or
-found broken, and gaps in your tags, so you can tidy your library. Only music
-files are checked; pictures, playlists and other files in your folders are
-left alone. The menu shows a count when something needs a look.
+**Library Problems** is the last tab of the Library Editor's window
+(**Admin > Library Editor > Open the Library Editor**), so it's behind the
+same lock as the tools that fix what it finds. It shows what the last library
+check couldn't add or found broken, and gaps in your tags, so you can tidy
+your library. Only music files are checked; pictures, playlists and other
+files in your folders are left alone. **Library Editor** in the Admin menu
+shows a count when something needs a look, and Admin's Overview links
+straight to the tab.
 
 DJINN never deletes or changes anything from here by itself. Each kind of
 problem has a way to fix it: a button that opens the
@@ -21,7 +25,7 @@ Problems come in two groups:
 - **Worth a Look:** things that work but could be better, like gaps in tags,
   messy titles or missing lyrics.
 
-![Admin > Library Problems](images/admin-problems.webp)
+![Library Problems](images/admin-problems.webp)
 
 Open a kind to see its songs. **Hide This Kind** tucks away a kind you know
 about and don't care to fix; hidden kinds are listed at the bottom, and
@@ -140,6 +144,33 @@ runs.
 After each nightly check, the card compares with the one before: songs
 added and gone, problems needing a look, songs with copies, and songs
 listeners reported, each with how it changed.
+
+## Quarantine
+
+**Quarantine...** (beside **Download as a Spreadsheet**) moves or copies every
+song the problems you tick list into another library folder, for example a
+folder where you fix songs before they go back. Each keeps its place under its own library folder, so
+`Artist/Album/song.mp3` in one library folder becomes `Artist/Album/song.mp3`
+in the other. A problem that lists albums takes every song of each album.
+
+The window asks:
+
+- **Problems to take songs from:** tick one or more (each shows how many it
+  lists). A song under two problems goes once.
+- **Move them** or **Copy them.** Moving takes them out of where they are, so
+  it only works from library folders that are **Read and Write** (in the
+  Library Editor's **Library Folders** tab); folders left with no songs go to
+  the trash. Copying leaves the originals in place, so it works from a read
+  only folder too, and the copies become songs of their own.
+- **Library folder to put them in:** only Read and Write folders can be
+  picked.
+
+Before anything happens it shows how many files would go, how much space
+they take, how much is free there, and an example of where one lands. Songs
+that can't go (already in that folder, a file of that name there already, or
+a read only folder when moving) stay where they are and are counted. Like
+the editor's own moves and copies, it asks for your password and can be
+undone from the editor's history.
 
 ## MP3 lengths
 

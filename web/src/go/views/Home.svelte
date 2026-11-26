@@ -13,7 +13,8 @@
   import LikeButton from '../LikeButton.svelte'
   import SongRow from '../SongRow.svelte'
   import SongTile from '../SongTile.svelte'
-  import { playList, playRadio, tapSong } from '../player.svelte'
+  import { playList, playRadio, playWild, tapSong } from '../player.svelte'
+  import Icon from '../../lib/Icon.svelte'
   import type { Track } from '../../lib/types'
 
   let home = $state<GoHome | null>(null)
@@ -47,6 +48,14 @@
     </button>
   {/if}
 
+  <button class="carry-on card wild" onclick={playWild}>
+    <span class="wild-icon"><Icon name="shuffle" size={28} /></span>
+    <span class="text">
+      <b>{t('pls.wild')}</b>
+      <span class="muted small">{t('gh.wild_note')}</span>
+    </span>
+  </button>
+
   {#if home.playlists.length}
     <h2>{t('nav.playlists')}</h2>
     <div class="chips">
@@ -78,6 +87,21 @@
     width: 100%;
     text-align: left;
     color: inherit;
+  }
+
+  .wild {
+    margin-top: 10px;
+  }
+
+  .wild-icon {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 56px;
+    height: 56px;
+    border-radius: 8px;
+    color: var(--accent);
+    box-shadow: var(--glow);
   }
 
   .text {

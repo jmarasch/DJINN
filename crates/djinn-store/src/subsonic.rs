@@ -221,7 +221,7 @@ impl Store {
         let ids = sqlx::query_scalar(
             "SELECT t.id FROM tracks t
              WHERE t.removed_at IS NULL AND t.genre = ? COLLATE NOCASE
-             ORDER BY t.artist COLLATE NOCASE, t.album COLLATE NOCASE, t.disc_no, t.track_no
+             ORDER BY t.artist COLLATE NOCASE, t.album COLLATE NOCASE, coalesce(t.disc_no, 1), t.track_no
              LIMIT ? OFFSET ?",
         )
         .bind(genre)

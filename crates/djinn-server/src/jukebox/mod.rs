@@ -16,6 +16,7 @@ mod mood;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -230,6 +231,9 @@ pub struct Jukebox {
     ending: Vec<Playing>,
     state: PlayState,
     volume: u8,
+    /// The room's volume as a gain (f32 bits), for its nodes: they play the
+    /// house's sound but at their own room's volume (`node_audio::stream`).
+    node_gain: Arc<AtomicU32>,
     crossfade: u8,
     skip_requested_by: Option<i64>,
     /// The skip asked for also counts against the song: 0 no, 1 someone chose
@@ -379,6 +383,7 @@ impl Jukebox {
             ending: Vec::new(),
             state: PlayState::Idle,
             volume,
+            node_gain: Arc::new(AtomicU32::new(gain(volume).to_bits())),
             crossfade,
             skip_requested_by: None,
             skip_play_less: 0,
@@ -519,6 +524,16 @@ impl Jukebox {
         });
         self.top_up_plan().await?;
         Ok(self.planned.iter().map(|p| p.track.id).collect())
+    }
+
+    /// The room's own volume, 0 to 100.
+    pub fn volume(&self) -> u8 {
+        self.volume
+    }
+
+    /// The room's volume as a gain, kept current, for its nodes.
+    pub fn node_gain(&self) -> Arc<AtomicU32> {
+        Arc::clone(&self.node_gain)
     }
 
     pub fn player_state(&self) -> PlayerState {
@@ -813,6 +828,8 @@ impl Jukebox {
     pub async fn set_volume(&mut self, volume: u8) -> anyhow::Result<()> {
         self.volume = volume.min(100);
         (self.engine)(Command::SetVolume(gain(self.volume)));
+        self.node_gain
+            .store(gain(self.volume).to_bits(), Ordering::Release);
         self.store
             .set_setting(&room_key(self.room, VOLUME), &self.volume.to_string())
             .await?;

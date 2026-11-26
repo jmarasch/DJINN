@@ -2,7 +2,7 @@
 // them first (password, and a two-step code at the strictest level). A
 // request the server refuses with 423 opens the unlock sheet, and carries on
 // once it's open.
-import { ApiError } from './api'
+import { api, ApiError } from './api'
 
 type Ask = { resolve: (opened: boolean) => void }
 
@@ -14,6 +14,14 @@ export function askToUnlock(): Promise<boolean> {
     unlockAsk.current?.resolve(false)
     unlockAsk.current = { resolve }
   })
+}
+
+/** For a plain link to a protected download (a backup): asks to unlock first
+ * unless the areas are already open, then follows it. */
+export async function downloadUnlocked(href: string): Promise<void> {
+  const status = await api.protectedStatus().catch(() => null)
+  if (status && !status.open && !(await askToUnlock())) return
+  location.href = href
 }
 
 /** Runs a protected request, asking to unlock first if the server says it's locked. */

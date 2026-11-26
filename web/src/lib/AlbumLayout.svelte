@@ -11,6 +11,7 @@
   import { api } from './api'
   import { tagLabel } from './editorTags'
   import { releaseChanges } from './autoMatch'
+  import { albumBase } from './importLayout'
   import { unlocked } from './protected.svelte'
   import { toast } from './state.svelte'
   import type { EditorField, EditorSong, Release, ReleaseHit, ReleaseSource } from './types'
@@ -39,7 +40,7 @@
   const first = songs[0]
   let source = $state<ReleaseSource>('musicbrainz')
   let artist = $state(first?.album_artist || first?.artist || '')
-  let album = $state(first?.album || '')
+  let album = $state(albumBase(first?.album || ''))
   let hits = $state<ReleaseHit[]>([])
   let hitsAbout = $state('')
   let searching = $state(false)
@@ -236,7 +237,7 @@
 <section class="layout">
   <header>
     <strong>{t('al.title')}</strong>
-    <span class="small muted">{t('count.songs', { n: songs.length })}{first?.album ? t('al.from', { album: first.album }) : ''}</span>
+    <span class="small muted">{t('count.songs', { n: songs.length })}{first?.album ? t('al.from', { album: albumBase(first.album) }) : ''}</span>
     <button class="small-button close" onclick={onclose}>{t('common.close')}</button>
   </header>
 

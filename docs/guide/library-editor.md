@@ -20,7 +20,8 @@ window, press **Lock and Close**, or leave it ten minutes.
 [Library problems](library-problems.md) open the editor straight on the songs
 involved with **Fix in the Editor**.
 
-The window has three tabs: **Editor**, **Library Folders** and **Compare**.
+The window has four tabs: **Editor**, **Library Folders**, **Compare** and
+**[Library Problems](library-problems.md)**.
 
 ## Library folders: what may be changed
 
@@ -257,6 +258,25 @@ other players and phones (DJINN works out their real length already).
 **Fix MP3 Lengths...** writes the header, as the LAME encoder does; the sound
 isn't touched, and it can be undone from the history. If every MP3 shown
 already has one, it says so.
+
+To fix them:
+
+1. On the **Library Problems** tab, open **MP3s with no length header** and
+   select **Fix in the Editor** beside a song. The Editor tab opens on its
+   folder.
+2. The first time, go to the **Library Folders** tab and make the folder that
+   holds the songs **Read and Write**. Every folder is read only until you do.
+3. Back on the **Editor** tab, choose **Library** at the top (the files, not
+   only DJINN's database).
+4. Pick the MP3s in the grid, or pick none to fix every song in the folder
+   (all of them, not only the ones loaded in the grid).
+5. Select **Fix MP3 Lengths...** under the grid. A window checks the files
+   and says how many need a header; select **Continue**. A progress bar shows
+   the files being fixed, and **Stop** keeps what's done so far.
+
+To fix a whole artist at once, open a folder higher up in the tree on the
+left. The whole fix is one entry in the history, so one **Undo** takes it
+back.
 
 ## Compare
 

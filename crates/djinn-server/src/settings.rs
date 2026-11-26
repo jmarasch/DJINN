@@ -65,6 +65,12 @@ pub const DEFAULTS: &[(&str, Default)] = &[
     (crate::duplicates::ACROSS_ALBUMS, Default::Flag(false)),
     (crate::lyrics::LYRICS_AI_NOTE, Default::Flag(true)),
     (crate::ai_work::VOCALS_FOR_NODES, Default::Flag(true)),
+    (crate::ai_work::SECOND_OPINION, Default::Flag(true)),
+    (crate::ai_work::NODES_FIRST, Default::Flag(true)),
+    (
+        crate::ai_listener::STRIPPERS,
+        Default::Number(crate::ai_listener::STRIPPERS_DEFAULT),
+    ),
     (crate::genre_groups::GENRE_CONTAINERS, Default::Flag(false)),
     (
         crate::ai_work::MIN_MATCH,

@@ -1,0 +1,33 @@
+# Jazz. See README.md for how these files are written.
+
+Jazz = jazz music [1910-] < blues
+  Ragtime [1895-1920]
+    Stride = stride piano [1920-1940]
+  New Orleans jazz = dixieland, trad jazz, traditional jazz, early jazz [1910-]
+  Swing = swing music [1930-1950]
+    Big band [1930-]
+    Swing revival = neo swing [1990-] ~ rockabilly
+  Gypsy jazz = jazz manouche [1930-]
+  Bebop = bop [1940-]
+    Hard bop [1955-]
+      Post bop [1960-]
+      Soul jazz [1958-] ~ soul
+  Cool jazz [1949-]
+    West coast jazz [1950-]
+    Third stream [1957-] ~ classical
+  Modal jazz [1958-]
+  Free jazz = avant garde jazz [1958-] ~ free improvisation
+    Spiritual jazz [1965-]
+  Latin jazz [1945-] ~ latin
+    Afro Cuban jazz [1940-]
+    Samba jazz [1960-] ~ bossa nova
+  Ethio jazz [1960-] ~ world
+  Vocal jazz = jazz vocal [1930-]
+  Jazz fusion = fusion [1969-] ~ funk
+    Jazz funk [1970-] ~ funk
+  Smooth jazz [1980-] ~ adult contemporary
+  Acid jazz [1987-] ~ funk
+  Nu jazz [1995-] ~ downtempo
+  Contemporary jazz [1980-]
+  Jazz pop [1990-] ~ pop
+  Dark jazz = doom jazz, jazz noir [1990-] ~ dark ambient
