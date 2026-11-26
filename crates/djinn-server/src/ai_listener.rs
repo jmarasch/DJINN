@@ -20,6 +20,21 @@ use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 
+/// Windows' flag for a program started with no console window.
+#[cfg(windows)]
+pub(crate) const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+/// A program to run, with no console window on Windows. DJINN has no
+/// console of its own there, so Windows would open one for every program
+/// it starts (a window flashing up while the AI page checks the computer).
+pub(crate) fn command(program: impl AsRef<std::ffi::OsStr>) -> Command {
+    #[allow(unused_mut)]
+    let mut c = Command::new(program);
+    #[cfg(windows)]
+    c.creation_flags(CREATE_NO_WINDOW);
+    c
+}
+
 use crate::auth::AdminUser;
 use crate::backup::data_dir;
 use crate::error::{ApiError, ApiResult};
@@ -222,7 +237,7 @@ pub async fn find_python() -> Option<String> {
         "python3",
         "python",
     ] {
-        let ok = Command::new(name)
+        let ok = command(name)
             .arg("--version")
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -237,7 +252,7 @@ pub async fn find_python() -> Option<String> {
 }
 
 async fn has_nvidia() -> bool {
-    Command::new("nvidia-smi")
+    command("nvidia-smi")
         .arg("-L")
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -247,7 +262,7 @@ async fn has_nvidia() -> bool {
 }
 
 pub async fn has_ffmpeg() -> bool {
-    Command::new("ffmpeg")
+    command("ffmpeg")
         .arg("-version")
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -496,7 +511,7 @@ pub async fn make_venv(d: &Path, log: impl Fn(&str), need_ffmpeg: bool) -> Resul
     )?;
     if !venv_python(d).exists() {
         log("Making a private Python environment...");
-        let ok = Command::new(&python)
+        let ok = command(&python)
             .args(["-m", "venv"])
             .arg(d.join(".venv"))
             .stdout(Stdio::null())
@@ -510,7 +525,7 @@ pub async fn make_venv(d: &Path, log: impl Fn(&str), need_ffmpeg: bool) -> Resul
         if !ok {
             // Debian without python3-venv: no pip in it, but it can be made.
             let _ = tokio::fs::remove_dir_all(d.join(".venv")).await;
-            let bare = Command::new(&python)
+            let bare = command(&python)
                 .args(["-m", "venv", "--without-pip"])
                 .arg(d.join(".venv"))
                 .stdout(Stdio::null())
@@ -528,7 +543,7 @@ pub async fn make_venv(d: &Path, log: impl Fn(&str), need_ffmpeg: bool) -> Resul
 
 /// Whether the environment in `d` has pip.
 pub async fn has_pip(d: &Path) -> bool {
-    Command::new(venv_python(d))
+    command(venv_python(d))
         .args(["-m", "pip", "--version"])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -551,7 +566,7 @@ async fn install_into(d: &Path, model: &str, vocals: bool) -> Result<(), String>
     }
     // Each set installs from the keepsake's folder for it when there is one.
     let pip = |file: &str, set: &str, extra: &[&str]| {
-        let mut c = Command::new(&py);
+        let mut c = command(&py);
         c.current_dir(d).args([
             "-m",
             "pip",
@@ -621,7 +636,7 @@ async fn install_into(d: &Path, model: &str, vocals: bool) -> Result<(), String>
         }
     }
     note(format!("Downloading the {model} model (once)..."));
-    let mut c = Command::new(&py);
+    let mut c = command(&py);
     c.current_dir(d)
         .args(["worker.py", "--setup", "--model", model])
         .args(["--vocals", if vocals { "auto" } else { "off" }]);
@@ -693,7 +708,7 @@ pub async fn start_worker(state: &AppState) -> anyhow::Result<()> {
         "auto"
     };
     let spawn = |role: &str, device: &str| -> std::io::Result<Child> {
-        let mut command = Command::new(venv_python(&d));
+        let mut command = command(venv_python(&d));
         command
             .current_dir(&d)
             .args(["worker.py", "--server"])
