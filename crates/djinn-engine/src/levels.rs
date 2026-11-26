@@ -32,6 +32,8 @@ const KEPT: usize = 128;
 const STALE_US: i64 = 150_000;
 /// How long after the last ask the meter keeps measuring (µs).
 const WATCHED_FOR_US: i64 = 3_000_000;
+/// A measurement this recent means there is sound to draw.
+const SOUNDING_FOR_US: i64 = 2_000_000;
 
 /// One measurement. Levels are 0 to 1; the wave is -1 to 1.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -93,6 +95,18 @@ impl Levels {
     pub fn watched(&self, now: i64) -> bool {
         let asked = self.asked_at.load(Ordering::Acquire);
         asked != 0 && now - asked < WATCHED_FOR_US
+    }
+
+    /// Whether there's sound to draw: a measurement heard within the last
+    /// moment (or still to come), and not paused.
+    pub fn sounding(&self, now: i64) -> bool {
+        self.inner.lock().is_ok_and(|inner| {
+            !inner.paused
+                && inner
+                    .frames
+                    .back()
+                    .is_some_and(|f| now - f.0 < SOUNDING_FOR_US)
+        })
     }
 
     pub(crate) fn clear(&self) {
@@ -453,6 +467,20 @@ mod tests {
         );
         // Long after the last block: playback stopped, so nothing.
         assert_eq!(levels.at(block_us * 2 + STALE_US), Frame::default());
+    }
+
+    #[test]
+    fn a_screen_with_nothing_playing_has_no_sound_to_draw() {
+        let (levels, mut meter) = watched();
+        // A screen watching, but nothing measured yet.
+        assert!(!levels.sounding(1_000_000));
+        meter.take(&tone(200.0, 48_000, BLOCK * 2, 0.8), 1_000_000);
+        assert!(levels.sounding(1_100_000));
+        // The music stopped a while ago.
+        assert!(!levels.sounding(1_000_000 + SOUNDING_FOR_US + 100_000));
+        // Paused: nothing to draw either.
+        levels.pause();
+        assert!(!levels.sounding(1_100_000));
     }
 
     #[test]

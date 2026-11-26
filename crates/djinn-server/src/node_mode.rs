@@ -315,7 +315,9 @@ impl Node {
     /// What keeps AI work waiting, if anything, for the node's report:
     /// "music" (Main's music is playing here), "held" (Main's song is
     /// paused), "offline" (playing its own kept songs while Main is away) or
-    /// "screen" (a screen is drawing the visualizer).
+    /// "screen" (a screen is drawing the visualizer). A screen showing the
+    /// node's page with nothing playing has no sound to draw, so it doesn't
+    /// hold the work.
     pub(crate) fn busy_with(&self) -> Option<&'static str> {
         let now = djinn_engine::clock::now_micros();
         if self.music_arriving(now) {
@@ -324,7 +326,7 @@ impl Node {
             Some("held")
         } else if self.status().offline {
             Some("offline")
-        } else if self.levels.watched(now) {
+        } else if self.levels.watched(now) && self.levels.sounding(now) {
             Some("screen")
         } else {
             None
