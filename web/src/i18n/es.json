@@ -483,6 +483,7 @@
   "lyrics.ai_made_mark": "Letra hecha por una IA",
   "lyrics.ai_timed_mark": "Sincronización hecha por una IA",
   "lyrics.ai_failed_mark": "Se quitó una letra hecha por una IA por estar mal",
+  "lyrics.instrumental_mark": "Instrumental: sin letra que cantar",
   "lyrics.remove": "Quitar la letra",
   "menu.remove_lyrics": "Quitar la letra",
   "lyrics.removed": "Letra quitada. No volverá de la misma fuente.",

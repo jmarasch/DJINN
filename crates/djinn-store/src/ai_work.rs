@@ -526,6 +526,7 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!((instrumental, source.as_str()), (1, "none"));
+        assert_eq!(store.track(ids[1]).await.unwrap().unwrap().instrumental, 1);
         let missing = store
             .problem_counts()
             .await

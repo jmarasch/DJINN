@@ -483,6 +483,7 @@
   "lyrics.ai_made_mark": "Songtext von einer KI erstellt",
   "lyrics.ai_timed_mark": "Timing von einer KI erstellt",
   "lyrics.ai_failed_mark": "Ein von einer KI erstellter Songtext wurde als falsch entfernt",
+  "lyrics.instrumental_mark": "Instrumental: kein Text zum Singen",
   "lyrics.remove": "Songtext entfernen",
   "menu.remove_lyrics": "Songtext entfernen",
   "lyrics.removed": "Songtext entfernt. Er kommt nicht aus derselben Quelle zurück.",

@@ -349,6 +349,8 @@ export interface Track {
   /** 0 not AI, 1 the words were made by an AI, 2 a person's words timed by an AI. */
   lyrics_ai?: number
   lyrics_failed?: number
+  /** 1 for an instrumental: no words to sing. */
+  instrumental?: number
 }
 
 export type LyricsFilter = 'all' | 'words' | 'timed'

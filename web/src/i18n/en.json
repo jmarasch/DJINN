@@ -483,6 +483,7 @@
   "lyrics.ai_made_mark": "Lyrics made by an AI",
   "lyrics.ai_timed_mark": "Timing made by an AI",
   "lyrics.ai_failed_mark": "Lyrics an AI made were removed as wrong",
+  "lyrics.instrumental_mark": "Instrumental: no words to sing",
   "lyrics.remove": "Remove lyrics",
   "menu.remove_lyrics": "Remove Lyrics",
   "lyrics.removed": "Lyrics removed. They won't come back from the same source.",
