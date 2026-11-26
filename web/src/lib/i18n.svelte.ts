@@ -144,11 +144,19 @@ export function t(key: string, params: Record<string, string | number> = {}): st
   void revision.n
   let entry = lookup(locale.code, key) ?? lookup('en', key) ?? key
   if (typeof entry === 'object') {
-    const n = Number(params.n ?? 0)
+    const n = countOf(params.n ?? 0)
     const form = new Intl.PluralRules(locale.code).select(n)
     entry = entry[form] ?? entry.other ?? Object.values(entry)[0] ?? key
   }
   return entry.replace(/\{(\w+)\}/g, (match, name: string) =>
-    name in params ? String(name === 'n' ? Number(params[name]).toLocaleString(locale.code) : params[name]) : match,
+    name in params ? String(name === 'n' && typeof params.n === 'number' ? params.n.toLocaleString(locale.code) : params[name]) : match,
   )
+}
+
+/** The number in `n` for choosing a plural: a number, or one already written
+    out for showing ("1,234", "1.234"), whose separators are dropped. */
+function countOf(value: string | number): number {
+  if (typeof value === 'number') return value
+  const plain = Number(value.replace(/[^\d-]/g, ''))
+  return Number.isNaN(plain) ? 0 : plain
 }
