@@ -38,6 +38,21 @@ pub struct AiHeld {
     pub taken_at: i64,
 }
 
+/// A song waiting for a listener: its vocals separated, or a node's low
+/// score waiting for a second opinion.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, FromRow)]
+pub struct AiLinedUp {
+    pub track_id: i64,
+    /// "listen" or "sync".
+    pub kind: String,
+    pub artist: Option<String>,
+    pub title: String,
+    /// Waiting for a second opinion (else its vocals are ready).
+    pub second: bool,
+    /// When it was separated or sent back.
+    pub since: Option<i64>,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, FromRow)]
 pub struct AiCounts {
     pub waiting_listen: i64,
@@ -240,6 +255,25 @@ impl Store {
              ORDER BY j.taken_at",
         )
         .bind(since)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
+    /// Songs lined up for a listener, in the order they'll be taken: those
+    /// waiting for a second opinion first, then those with their vocals
+    /// separated, waiting for a node or this computer. At most `limit`.
+    pub async fn ai_lined_up(&self, limit: i64) -> Result<Vec<AiLinedUp>> {
+        Ok(sqlx::query_as(
+            "SELECT j.track_id, j.kind, t.artist, t.title, 1 AS second, j.finished_at AS since
+             FROM ai_jobs j JOIN tracks t ON t.id = j.track_id
+             WHERE j.second_opinion = 1 AND j.status = 'failed' AND t.removed_at IS NULL
+             UNION ALL
+             SELECT j.track_id, j.kind, t.artist, t.title, 0 AS second, j.taken_at AS since
+             FROM ai_jobs j JOIN tracks t ON t.id = j.track_id
+             WHERE j.status = 'prepared' AND t.removed_at IS NULL
+             ORDER BY second DESC, since LIMIT ?1",
+        )
+        .bind(limit)
         .fetch_all(&self.pool)
         .await?)
     }
@@ -502,6 +536,15 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(store.ai_second_count().await.unwrap(), 1);
+        // It's listed as lined up for a second opinion.
+        let lined = store.ai_lined_up(50).await.unwrap();
+        assert_eq!(
+            lined
+                .iter()
+                .map(|l| (l.track_id, l.second))
+                .collect::<Vec<_>>(),
+            [(ids[0], true)]
+        );
         assert!(store
             .ai_claim("node:b", true, false, false, 10, lease, &[])
             .await

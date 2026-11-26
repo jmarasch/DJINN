@@ -214,16 +214,33 @@
       </datalist>
       <button class="small-button" type="submit" disabled={!genreText.trim()}>{t('aw.leave_out')}</button>
     </form>
-    <p class="small">
-      {t('aw.waiting', { listen: n(work.counts.waiting_listen), sync: n(work.counts.waiting_sync) })}
-      {t('aw.working', { n: n(work.counts.working) })}
-      {#if work.counts.prepared}{t('aw.prepared', { n: n(work.counts.prepared) })}{/if}
-      {#if work.waiting_second}{t('aw.waiting_second', { n: n(work.waiting_second) })}{/if}
-      {t('aw.done_low_failed', { done: n(work.counts.done), low: n(work.counts.low_score), failed: n(work.counts.failed) })}
-      {#if work.counts.failed || work.counts.low_score}<button class="link" onclick={() => act(api.retryAiWork, t('aw.retry'))}
-          >{t('common.try_again')}</button
-        >{/if}
-    </p>
+    <ul class="counts small">
+      <li>{t('aw.waiting', { listen: n(work.counts.waiting_listen), sync: n(work.counts.waiting_sync) })}</li>
+      <li>{t('aw.working', { n: n(work.counts.working) })}</li>
+      <li>{t('aw.prepared', { n: n(work.counts.prepared) })}</li>
+      <li>{t('aw.waiting_second', { n: n(work.waiting_second) })}</li>
+      <li>{t('aw.done', { n: n(work.counts.done) })}</li>
+      <li>{t('aw.low_score', { n: n(work.counts.low_score) })}</li>
+      <li>
+        {t('aw.failed', { n: n(work.counts.failed) })}
+        {#if work.counts.failed || work.counts.low_score}<button class="link" onclick={() => act(api.retryAiWork, t('aw.retry'))}
+            >{t('common.try_again')}</button
+          >{/if}
+      </li>
+    </ul>
+    {#if work.lined_up.length}
+      <details class="lined-up">
+        <summary class="small">{t('aw.lined_up', { count: n(work.lined_up.length) })}</summary>
+        <ol class="small">
+          {#each work.lined_up as song (song.track_id)}
+            <li>
+              {song.artist ? `${song.artist} - ${song.title}` : song.title}
+              <span class="muted">{song.second ? t('aw.lined_second') : t('aw.lined_vocals')}</span>
+            </li>
+          {/each}
+        </ol>
+      </details>
+    {/if}
   {/if}
 
   <h4>{t('aw.computer')}</h4>
@@ -346,7 +363,6 @@
         </li>
       {/each}
     </ul>
-    {#if listener.log.length}<pre class="log small">{listener.log.join('\n')}</pre>{/if}
   {/if}
 
   {#if work?.helpers.length}
@@ -407,6 +423,12 @@
         {t('aw.key_once', { name: madeKey.name })} <code>{madeKey.key}</code>
       </p>
     {/if}
+  {/if}
+  {#if listener?.log.length}
+    <details class="log-box">
+      <summary>{t('aw.log')}</summary>
+      <pre class="log small">{listener.log.join('\n')}</pre>
+    </details>
   {/if}
 </section>
 
@@ -491,6 +513,45 @@
   .bad {
     color: var(--danger, #d33);
   }
+  .counts {
+    list-style: none;
+    margin: 0.5rem 0;
+    padding: 0;
+    display: grid;
+    gap: 0.15rem;
+  }
+
+  .counts li {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    min-height: 1.6rem;
+  }
+
+  .log-box {
+    margin-top: 1rem;
+  }
+
+  .log-box summary,
+  .lined-up summary {
+    cursor: pointer;
+  }
+
+  .counts button {
+    min-height: 0;
+  }
+
+  .lined-up ol {
+    margin: 0.4rem 0;
+    padding-left: 1.6rem;
+    max-height: 16rem;
+    overflow-y: auto;
+  }
+
+  .lined-up .muted {
+    margin-left: 0.4rem;
+  }
+
   .helpers {
     list-style: none;
     margin: 0.5rem 0;

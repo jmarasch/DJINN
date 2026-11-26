@@ -1792,6 +1792,8 @@ export interface AiWorkStatus {
   helpers: AiHelper[]
   /** What this computer is working on: vocals it's separating, and what it listens to. */
   this_computer: (AiHeldSong & { what: 'strip' | 'listen' | 'second' })[]
+  /** Songs lined up for a listener: second opinions first, then separated vocals (up to 50). */
+  lined_up: { track_id: number; kind: string; artist: string | null; title: string; second: boolean; since: number | null }[]
 }
 
 /** A song a worker is working on. */

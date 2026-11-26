@@ -346,6 +346,8 @@ struct Status {
     /// What this computer is working on: vocals it's separating, and the
     /// song it's listening to (and whether for a second opinion).
     this_computer: Vec<MainJob>,
+    /// Songs lined up for a listener: second opinions, then separated vocals.
+    lined_up: Vec<djinn_store::AiLinedUp>,
 }
 
 /// A node switched on to help: what it says about itself, what Main last
@@ -377,6 +379,9 @@ struct WorkerView {
 async fn lookups_off(state: &AppState) -> anyhow::Result<bool> {
     Ok(!settings::flag(&state.store, crate::lyrics::LYRICS_LOOKUP, true).await?)
 }
+
+/// How many lined-up songs the status lists.
+const LINED_UP_SHOWN: i64 = 50;
 
 async fn status(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json<Status>> {
     let mut workers: Vec<WorkerView> = WORKERS
@@ -464,6 +469,7 @@ async fn status(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json<S
         workers,
         helpers,
         this_computer,
+        lined_up: state.store.ai_lined_up(LINED_UP_SHOWN).await?,
     }))
 }
 
