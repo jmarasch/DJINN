@@ -2358,8 +2358,8 @@ mod tests {
         .await;
         let first: serde_json::Value = serde_json::from_str(&body).unwrap();
         assert_eq!(first["jobs"][0]["vocals"], false, "{body}");
-        // This computer's listener, able to isolate vocals, is asked to
-        // prepare the other for the node that is helping.
+        // This computer's vocal stripper prepares the other, for the node
+        // that is helping.
         let key = crate::ai_work::replace_key(&state, crate::ai_listener::LOCAL_KEY_NAME)
             .await
             .unwrap();
@@ -2369,7 +2369,7 @@ mod tests {
             &state,
             Method::POST,
             "/api/ai-work/next",
-            Some(r#"{"max":1,"can_isolate":true}"#),
+            Some(r#"{"max":1,"can_isolate":true,"role":"prepare"}"#),
             local,
         )
         .await;

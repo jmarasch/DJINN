@@ -1777,6 +1777,37 @@ export interface AiWorkStatus {
     /** Seconds of work per minute of song. */
     secs_per_minute: number | null
   }[]
+  /** Every node switched on to help, and what it's doing. */
+  helpers: AiHelper[]
+}
+
+/** A song a worker is working on. */
+export interface AiHeldSong {
+  worker: string
+  track_id: number
+  kind: 'listen' | 'sync'
+  artist: string | null
+  title: string
+  taken_at: number
+}
+
+/** A node switched on to help with AI lyrics. */
+export interface AiHelper {
+  node_id: number
+  name: string
+  /** When it last checked in. */
+  last_seen: number | null
+  /** What it says about its helper: phase "off", "installing", "ready",
+   * "working", "paused" or "failed", and why (for "paused", a word such as
+   * "music"). */
+  report: { phase: string; detail: string | null; model: string | null }
+  /** When it last asked for work, and what this computer answered. */
+  asked_at: number | null
+  answer: 'given' | 'no_songs' | 'waiting_vocals' | 'work_off' | null
+  done: number
+  failed: number
+  secs_per_minute: number | null
+  working_on: AiHeldSong[]
 }
 
 export interface AiListenerStatus {
@@ -1791,6 +1822,10 @@ export interface AiListenerStatus {
   model: string
   vocals: boolean
   auto_start: boolean
+  /** Where the listener runs while vocals are stripped: beside the stripper on the graphics card, or on the processor. */
+  listen_on: 'gpu' | 'cpu'
+  /** The vocal stripper is running beside the listener. */
+  stripping: boolean
   error: string | null
   log: string[]
 }

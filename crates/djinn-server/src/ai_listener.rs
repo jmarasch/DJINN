@@ -28,6 +28,10 @@ use crate::state::AppState;
 pub const MODEL: &str = "ai_listener_model";
 const VOCALS: &str = "ai_listener_vocals";
 const AUTO: &str = "ai_listener_auto";
+/// Where this computer's listener runs while vocals are stripped on the
+/// graphics card: "gpu" (beside the stripper) or "cpu" (the processor,
+/// leaving the card to the stripper).
+const LISTEN_ON: &str = "ai_listener_listen_on";
 pub const LOCAL_KEY_NAME: &str = "this computer";
 /// The pack's version: a new one is written over the old on install.
 const PACK_VERSION: &str = "1";
@@ -98,6 +102,9 @@ struct Inner {
     installing: bool,
     log: Vec<String>,
     child: Option<Child>,
+    /// The vocal stripper, running beside the listener while vocals are
+    /// stripped ahead.
+    stripper: Option<Child>,
     error: Option<String>,
 }
 
@@ -115,9 +122,21 @@ fn child_running(inner: &mut Inner) -> bool {
         .is_some_and(|c| matches!(c.try_wait(), Ok(None)))
 }
 
-/// Whether the local lyrics listener child process is currently running.
+/// Whether the local lyrics listener (or its vocal stripper) is running.
 pub fn is_running() -> bool {
-    with(child_running)
+    with(|i| child_running(i) || stripper_alive(i))
+}
+
+fn stripper_alive(inner: &mut Inner) -> bool {
+    inner
+        .stripper
+        .as_mut()
+        .is_some_and(|c| matches!(c.try_wait(), Ok(None)))
+}
+
+/// Whether this computer strips vocals ahead for the listeners.
+pub fn stripper_running() -> bool {
+    with(stripper_alive)
 }
 
 fn note(line: impl Into<String>) {
@@ -239,15 +258,25 @@ struct Status {
     model: String,
     vocals: bool,
     auto_start: bool,
+    /// "gpu" or "cpu".
+    listen_on: String,
+    /// The vocal stripper is running beside the listener.
+    stripping: bool,
     error: Option<String>,
     log: Vec<String>,
 }
 
 async fn status(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json<Status>> {
     let d = dir(&state);
-    let (installing, running, error, log) = with(|i| {
-        let running = child_running(i);
-        (i.installing, running, i.error.clone(), i.log.clone())
+    let (installing, running, stripping, error, log) = with(|i| {
+        let running = child_running(i) || stripper_alive(i);
+        (
+            i.installing,
+            running,
+            stripper_alive(i),
+            i.error.clone(),
+            i.log.clone(),
+        )
     });
     let lines: Vec<String> = log.iter().rev().take(40).rev().cloned().collect();
     Ok(Json(Status {
@@ -265,6 +294,8 @@ async fn status(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json<S
             .unwrap_or_else(|| "small".into()),
         vocals: crate::settings::flag(&state.store, VOCALS, false).await?,
         auto_start: crate::settings::flag(&state.store, AUTO, true).await?,
+        listen_on: listen_on(&state).await?,
+        stripping,
         error,
         log: lines,
     }))
@@ -275,6 +306,17 @@ struct Choices {
     model: String,
     vocals: bool,
     auto_start: bool,
+    #[serde(default)]
+    listen_on: Option<String>,
+}
+
+async fn listen_on(state: &AppState) -> anyhow::Result<String> {
+    Ok(state
+        .store
+        .get_setting(LISTEN_ON)
+        .await?
+        .filter(|v| v == "cpu")
+        .unwrap_or_else(|| "gpu".into()))
 }
 
 pub const MODELS: [&str; 6] = [
@@ -294,9 +336,32 @@ async fn put_settings(
     if !MODELS.contains(&body.model.as_str()) {
         return Err(ApiError::bad_request("unknown model"));
     }
+    let before = (
+        state.store.get_setting(MODEL).await?,
+        crate::settings::flag(&state.store, VOCALS, false).await?,
+        listen_on(&state).await?,
+    );
     state.store.set_setting(MODEL, &body.model).await?;
     crate::settings::set_flag(&state.store, VOCALS, body.vocals).await?;
     crate::settings::set_flag(&state.store, AUTO, body.auto_start).await?;
+    if let Some(on) = body.listen_on.as_deref() {
+        if !matches!(on, "gpu" | "cpu") {
+            return Err(ApiError::bad_request("listen on gpu or cpu"));
+        }
+        state.store.set_setting(LISTEN_ON, on).await?;
+    }
+    let after = (
+        Some(body.model.clone()),
+        body.vocals,
+        listen_on(&state).await?,
+    );
+    // A running listener takes changes that shape how it runs at once.
+    if before != after && is_running() {
+        stop_worker().await;
+        if let Err(e) = start_worker(&state).await {
+            tracing::warn!(error = %e, "couldn't restart the lyrics listener");
+        }
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -583,29 +648,52 @@ pub async fn start_worker(state: &AppState) -> anyhow::Result<()> {
         .await?
         .unwrap_or_else(|| "small".into());
     let vocals = crate::settings::flag(&state.store, VOCALS, false).await?;
-    let mut command = Command::new(venv_python(&d));
-    command
-        .current_dir(&d)
-        .args(["worker.py", "--server"])
-        .arg(format!(
-            "http://127.0.0.1:{}",
-            crate::system_api::party_port()
-        ))
-        .args(["--model", &model])
-        .args(["--vocals", if vocals { "auto" } else { "off" }])
-        .env("DJINN_WORKER_KEY", key)
-        .env("PYTHONUNBUFFERED", "1")
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
-    let mut child = command.spawn()?;
-    if let Some(o) = child.stdout.take() {
-        tokio::spawn(log_lines(o));
-    }
-    if let Some(e) = child.stderr.take() {
-        tokio::spawn(log_lines(e));
-    }
-    with(|i| i.child = Some(child));
+    // With vocal stripping, two workers at once: the stripper separates
+    // vocals ahead (on the graphics card when there is one) while the
+    // listener hears songs whose vocals are ready.
+    let strip = vocals && can_isolate(&d);
+    let device = if listen_on(state).await? == "cpu" {
+        "cpu"
+    } else {
+        "auto"
+    };
+    let spawn = |role: &str, device: &str| -> std::io::Result<Child> {
+        let mut command = Command::new(venv_python(&d));
+        command
+            .current_dir(&d)
+            .args(["worker.py", "--server"])
+            .arg(format!(
+                "http://127.0.0.1:{}",
+                crate::system_api::party_port()
+            ))
+            .args(["--model", &model])
+            .args(["--vocals", if vocals { "auto" } else { "off" }])
+            .args(["--role", role])
+            .args(["--device", device])
+            .env("DJINN_WORKER_KEY", &key)
+            .env("PYTHONUNBUFFERED", "1")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+        let mut child = command.spawn()?;
+        if let Some(o) = child.stdout.take() {
+            tokio::spawn(log_lines(o));
+        }
+        if let Some(e) = child.stderr.take() {
+            tokio::spawn(log_lines(e));
+        }
+        Ok(child)
+    };
+    let stripper = if strip {
+        Some(spawn("prepare", "auto")?)
+    } else {
+        None
+    };
+    let child = spawn(if strip { "listen" } else { "all" }, device)?;
+    with(|i| {
+        i.child = Some(child);
+        i.stripper = stripper;
+    });
     tracing::info!("lyrics listener started");
     Ok(())
 }
@@ -616,9 +704,12 @@ async fn stop(_: AdminUser) -> StatusCode {
 }
 
 pub async fn stop_worker() {
-    let child = with(|i| i.child.take());
-    if let Some(mut child) = child {
-        let _ = child.kill().await;
+    let (child, stripper) = with(|i| (i.child.take(), i.stripper.take()));
+    let stopped = child.is_some() || stripper.is_some();
+    for mut c in child.into_iter().chain(stripper) {
+        let _ = c.kill().await;
+    }
+    if stopped {
         tracing::info!("lyrics listener stopped");
     }
 }

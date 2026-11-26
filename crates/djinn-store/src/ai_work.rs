@@ -26,6 +26,18 @@ pub struct AiJob {
 }
 
 /// How the work stands.
+/// A song a worker is working on.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, FromRow)]
+pub struct AiHeld {
+    pub worker: String,
+    pub track_id: i64,
+    /// "listen" or "sync".
+    pub kind: String,
+    pub artist: Option<String>,
+    pub title: String,
+    pub taken_at: i64,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, FromRow)]
 pub struct AiCounts {
     pub waiting_listen: i64,
@@ -212,6 +224,20 @@ impl Store {
                 .fetch_one(&self.pool)
                 .await?,
         )
+    }
+
+    /// The songs workers are working on now (taken since `since`), oldest
+    /// first, for the status page.
+    pub async fn ai_held(&self, since: i64) -> Result<Vec<AiHeld>> {
+        Ok(sqlx::query_as(
+            "SELECT j.worker, j.track_id, j.kind, t.artist, t.title, j.taken_at
+             FROM ai_jobs j JOIN tracks t ON t.id = j.track_id
+             WHERE j.status = 'working' AND j.taken_at > ? AND j.worker IS NOT NULL
+             ORDER BY j.taken_at",
+        )
+        .bind(since)
+        .fetch_all(&self.pool)
+        .await?)
     }
 
     /// Songs a worker holds or that wait prepared: their isolated vocals

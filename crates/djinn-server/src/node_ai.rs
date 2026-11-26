@@ -159,7 +159,10 @@ async fn tick(node: &Node, helper: &Helper) {
             }
         }
     }
-    let busy = node.busy();
+    let busy_with = node.busy_with();
+    let busy = busy_with.is_some();
+    // The reason is a word Main's page puts into words.
+    let why = || busy_with.map(str::to_owned);
     let mut child = helper.child.lock().await;
     let running = child
         .as_mut()
@@ -168,7 +171,7 @@ async fn tick(node: &Node, helper: &Helper) {
         *child = None;
         helper.paused.store(false, Ordering::Release);
         if busy {
-            helper.set("paused", Some("playing or showing visuals".into()));
+            helper.set("paused", why());
             return;
         }
         match start(node, helper, &wanted.model) {
@@ -184,13 +187,16 @@ async fn tick(node: &Node, helper: &Helper) {
     if busy && !paused {
         if pause(child.as_mut(), true).await {
             helper.paused.store(true, Ordering::Release);
-            helper.set("paused", Some("playing or showing visuals".into()));
+            helper.set("paused", why());
         } else if let Some(mut c) = child.take() {
             // Can't pause it here: stop it, it starts again when free.
             let _ = c.kill().await;
-            helper.set("paused", Some("playing or showing visuals".into()));
+            helper.set("paused", why());
         }
-    } else if !busy && paused && pause(child.as_mut(), false).await {
+    } else if busy {
+        // Still paused, perhaps for another reason now.
+        helper.set("paused", why());
+    } else if paused && pause(child.as_mut(), false).await {
         helper.paused.store(false, Ordering::Release);
         helper.set("working", None);
     }

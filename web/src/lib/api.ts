@@ -304,7 +304,8 @@ export const api = {
   removeAiWorkerKey: (name: string) => del<void>(`/ai-work/keys/${encodeURIComponent(name)}`),
   retryAiWork: () => post<void>('/ai-work/retry'),
   aiListener: () => get<AiListenerStatus>('/ai-listener'),
-  setAiListener: (s: { model: string; vocals: boolean; auto_start: boolean }) => put<void>('/ai-listener/settings', s),
+  setAiListener: (s: { model: string; vocals: boolean; auto_start: boolean; listen_on: 'gpu' | 'cpu' }) =>
+    put<void>('/ai-listener/settings', s),
   installAiListener: () => post<void>('/ai-listener/install'),
   startAiListener: () => post<void>('/ai-listener/start'),
   stopAiListener: () => post<void>('/ai-listener/stop'),

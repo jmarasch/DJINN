@@ -166,6 +166,24 @@ the voice from the music, and sends the node only the voice (a few
 megabytes), which the node deletes when done. Without it, nodes listen to
 whole songs.
 
+With **Isolate the vocals first** on, this computer runs two jobs at once:
+one separates the vocals of the next songs, the other listens to songs whose
+vocals are ready. It keeps one song ready for each listener that's free (each
+node free to help, and its own) and one spare, and every listener takes from
+those, so every song gets the cleaner listen. **Listen on** chooses where its
+own listening runs: the graphics card beside the vocal separation (faster),
+or the processor, leaving the card to the separation.
+
+**Nodes Helping** lists every node switched on to help, with a light:
+
+- **Green:** working, and the song it's on.
+- **Yellow:** waiting for a song (none ready yet, or none need lyrics).
+- **Red:** not available now: playing music, its song paused on this
+  computer, playing its own songs while this computer is away, its screen
+  showing the visualizer, or stopped by a problem.
+- **Grey:** not able to help: not connected, not started yet, still
+  installing, or AI lyrics work switched off here.
+
 ### Installing without internet
 
 The listener's packages and models can come from an offline copy (the
