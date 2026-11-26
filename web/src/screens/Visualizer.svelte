@@ -12,7 +12,9 @@
 
   const room = new URLSearchParams(location.search).get('room')
   const roomPart = room ? `room=${encodeURIComponent(room)}&` : ''
-  const page = `${location.origin}/lyrics?${roomPart}order=visual,tv`
+  // `?lyrics=side` puts timed lyrics beside the visual; passed on.
+  const side = new URLSearchParams(location.search).get('lyrics') === 'side' ? '&lyrics=side' : ''
+  const page = `${location.origin}/lyrics?${roomPart}order=visual,tv${side}`
   const levels = `/api/tv/levels${room ? `?room=${encodeURIComponent(room)}` : ''}`
 
   let visuals = $state<Visuals | null>(null)
