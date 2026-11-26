@@ -167,6 +167,9 @@ struct Seen {
     /// (nothing waiting) or "work_off" (AI work is switched off).
     answer: Option<String>,
     done: u64,
+    /// Results under the minimum score: listened to, but not sure enough.
+    low: u64,
+    /// Songs that failed: an error, or nothing sent back.
     failed: u64,
     /// Time spent listening and the length of the songs it listened to,
     /// for its speed.
@@ -179,6 +182,30 @@ struct Seen {
 }
 
 static WORKERS: Mutex<Option<HashMap<String, Seen>>> = Mutex::new(None);
+
+/// What this computer took each song it holds for (its strippers and its
+/// listener share one name), for its status on the Lyrics tab.
+static MAIN_DOING: std::sync::LazyLock<Mutex<HashMap<i64, MainWork>>> =
+    std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum MainWork {
+    /// Separating its vocals.
+    Strip,
+    /// Listening to it.
+    Listen,
+    /// Listening to it for a second opinion on a node's low score.
+    Second,
+}
+
+/// A song this computer is working on, and for what.
+#[derive(Serialize)]
+struct MainJob {
+    what: MainWork,
+    #[serde(flatten)]
+    song: djinn_store::AiHeld,
+}
 
 fn seen(name: &str, f: impl FnOnce(&mut Seen)) {
     if let Ok(mut guard) = WORKERS.lock() {
@@ -316,6 +343,9 @@ struct Status {
     workers: Vec<WorkerView>,
     /// Every node switched on to help, and what it's doing.
     helpers: Vec<Helping>,
+    /// What this computer is working on: vocals it's separating, and the
+    /// song it's listening to (and whether for a second opinion).
+    this_computer: Vec<MainJob>,
 }
 
 /// A node switched on to help: what it says about itself, what Main last
@@ -331,6 +361,7 @@ struct Helping {
     asked_at: Option<i64>,
     answer: Option<String>,
     done: u64,
+    low: u64,
     failed: u64,
     secs_per_minute: Option<f64>,
     working_on: Vec<djinn_store::AiHeld>,
@@ -361,6 +392,27 @@ async fn status(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json<S
         .store
         .ai_held(djinn_store::now_ms() - LEASE_MS)
         .await?;
+    let this_computer: Vec<MainJob> = {
+        let mine: Vec<&djinn_store::AiHeld> = held
+            .iter()
+            .filter(|h| h.worker == crate::ai_listener::LOCAL_KEY_NAME)
+            .collect();
+        let mut doing = MAIN_DOING
+            .lock()
+            .map_err(|_| anyhow::anyhow!("status lock"))?;
+        // Forget songs it no longer holds.
+        doing.retain(|id, _| mine.iter().any(|h| h.track_id == *id));
+        let mut jobs: Vec<MainJob> = mine
+            .into_iter()
+            .map(|h| MainJob {
+                what: doing.get(&h.track_id).copied().unwrap_or(MainWork::Listen),
+                song: h.clone(),
+            })
+            .collect();
+        // Separating first, then listening; oldest first within each.
+        jobs.sort_by_key(|j| j.what != MainWork::Strip);
+        jobs
+    };
     let helpers = state
         .store
         .nodes()
@@ -378,6 +430,7 @@ async fn status(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json<S
                 asked_at: seen.map(|s| s.asked_at).filter(|&a| a > 0),
                 answer: seen.and_then(|s| s.answer.clone()),
                 done: seen.map_or(0, |s| s.done),
+                low: seen.map_or(0, |s| s.low),
                 failed: seen.map_or(0, |s| s.failed),
                 secs_per_minute: seen.and_then(|s| s.secs_per_minute),
                 working_on: held
@@ -410,6 +463,7 @@ async fn status(_: AdminUser, State(state): State<AppState>) -> ApiResult<Json<S
         keys: keys(&state).await?.into_iter().map(|k| k.name).collect(),
         workers,
         helpers,
+        this_computer,
     }))
 }
 
@@ -956,6 +1010,8 @@ async fn hand_out(state: &AppState, name: &str, asker: Asker, body: Next) -> Api
     } else {
         body.role
     };
+    // Songs taken for a second opinion, for this computer's status.
+    let mut seconds: Vec<i64> = Vec::new();
     let jobs = match role {
         Role::Prepare => {
             if background && body.can_isolate {
@@ -979,7 +1035,9 @@ async fn hand_out(state: &AppState, name: &str, asker: Asker, body: Next) -> Api
             };
             let left = max - i64::try_from(jobs.len()).unwrap_or(max);
             if background && left > 0 && name == crate::ai_listener::LOCAL_KEY_NAME {
-                jobs.extend(state.store.ai_claim_second(name, left).await?);
+                let claimed = state.store.ai_claim_second(name, left).await?;
+                seconds.extend(claimed.iter().map(|j| j.track_id));
+                jobs.extend(claimed);
             }
             // Second opinions first; new songs only when no node waits.
             let step_back = jobs.is_empty() && leaves_to_nodes(state, name).await?;
@@ -1002,7 +1060,9 @@ async fn hand_out(state: &AppState, name: &str, asker: Asker, body: Next) -> Api
             let mut jobs = claim_imports(state, name, max_usize).await?;
             let left = max - i64::try_from(jobs.len()).unwrap_or(max);
             if background && left > 0 && name == crate::ai_listener::LOCAL_KEY_NAME {
-                jobs.extend(state.store.ai_claim_second(name, left).await?);
+                let claimed = state.store.ai_claim_second(name, left).await?;
+                seconds.extend(claimed.iter().map(|j| j.track_id));
+                jobs.extend(claimed);
             }
             let step_back = jobs.is_empty() && leaves_to_nodes(state, name).await?;
             let left = max - i64::try_from(jobs.len()).unwrap_or(max);
@@ -1017,6 +1077,20 @@ async fn hand_out(state: &AppState, name: &str, asker: Asker, body: Next) -> Api
             jobs
         }
     };
+    if name == crate::ai_listener::LOCAL_KEY_NAME && !jobs.is_empty() {
+        if let Ok(mut doing) = MAIN_DOING.lock() {
+            for job in &jobs {
+                let what = if prepare {
+                    MainWork::Strip
+                } else if seconds.contains(&job.track_id) {
+                    MainWork::Second
+                } else {
+                    MainWork::Listen
+                };
+                doing.insert(job.track_id, what);
+            }
+        }
+    }
     if asker == Asker::Node {
         let answer = if !jobs.is_empty() {
             "given"
@@ -1144,15 +1218,36 @@ struct Outcome {
     elapsed_ms: Option<u64>,
 }
 
-fn record_seen(name: &str, failed: bool, elapsed_ms: Option<u64>, audio_ms: Option<u64>) {
-    seen(name, |s| {
-        if failed {
-            s.failed += 1;
-        } else {
-            s.done += 1;
+/// How a song a worker sent back went, for its counts.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Tally {
+    Done,
+    /// Listened to, but under the minimum score.
+    Low,
+    /// An error, or nothing sent back.
+    Failed,
+}
+
+impl Tally {
+    fn of(failure: Option<&str>) -> Tally {
+        match failure {
+            None => Tally::Done,
+            Some(why) if why.starts_with(LOW_SCORE) => Tally::Low,
+            Some(_) => Tally::Failed,
         }
+    }
+}
+
+fn record_seen(name: &str, tally: Tally, elapsed_ms: Option<u64>, audio_ms: Option<u64>) {
+    seen(name, |s| {
+        match tally {
+            Tally::Done => s.done += 1,
+            Tally::Low => s.low += 1,
+            Tally::Failed => s.failed += 1,
+        }
+        // A low score was a whole listen, so it counts toward the speed.
         if let (Some(work), Some(audio)) = (elapsed_ms, audio_ms) {
-            if !failed && audio > 0 {
+            if tally != Tally::Failed && audio > 0 {
                 s.work_ms += work;
                 s.audio_ms += audio;
                 #[allow(clippy::cast_precision_loss)]
@@ -1240,7 +1335,12 @@ async fn finish_track_result(
     let audio_ms = track
         .and_then(|t| t.duration_ms)
         .and_then(|d| u64::try_from(d).ok());
-    record_seen(name, failure.is_some(), body.elapsed_ms, audio_ms);
+    record_seen(
+        name,
+        Tally::of(failure.as_deref()),
+        body.elapsed_ms,
+        audio_ms,
+    );
     Ok(())
 }
 
@@ -1332,7 +1432,12 @@ async fn take_result(
                 .ok()
                 .flatten()
                 .and_then(|d| u64::try_from(d).ok());
-        record_seen(name, failure.is_some(), body.elapsed_ms, audio_ms);
+        record_seen(
+            name,
+            Tally::of(failure.as_deref()),
+            body.elapsed_ms,
+            audio_ms,
+        );
         return Ok(StatusCode::NO_CONTENT);
     }
     let Some((holder, kind)) = state.store.ai_holder(id).await? else {

@@ -1771,6 +1771,9 @@ export interface AiWorkStatus {
     /** Vocals isolated here, waiting for a node. */
     prepared: number
     done: number
+    /** Results under the minimum score. */
+    low_score: number
+    /** Songs that failed: an error, or nothing sent back. */
     failed: number
   }
   held: { reason: 'music' } | { reason: 'hours'; from: number; until: number } | null
@@ -1787,6 +1790,8 @@ export interface AiWorkStatus {
   }[]
   /** Every node switched on to help, and what it's doing. */
   helpers: AiHelper[]
+  /** What this computer is working on: vocals it's separating, and what it listens to. */
+  this_computer: (AiHeldSong & { what: 'strip' | 'listen' | 'second' })[]
 }
 
 /** A song a worker is working on. */
@@ -1813,6 +1818,7 @@ export interface AiHelper {
   asked_at: number | null
   answer: 'given' | 'no_songs' | 'waiting_vocals' | 'work_off' | null
   done: number
+  low: number
   failed: number
   secs_per_minute: number | null
   working_on: AiHeldSong[]

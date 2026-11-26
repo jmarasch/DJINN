@@ -189,6 +189,14 @@ waiting for work, so the nodes stay busy and this computer keeps separating
 vocals. Switch it off to have everyone take songs, which finishes the most
 songs.
 
+Under the listener's buttons, a light for each song this computer is working
+on says what it's doing: separating the vocals of a song (one line per
+separation), listening to one, or giving a second opinion on a song a node
+wasn't sure of. Yellow means it's waiting for a song, grey that it isn't
+running. The counts keep **low scores** (listened to, but not sure enough to
+keep) apart from **failures** (something went wrong, or nothing came back);
+**Try again** gives both another go, say after lowering the minimum.
+
 **Nodes Helping** lists every node switched on to help, with a light:
 
 - **Green:** working, and the song it's on.

@@ -219,8 +219,8 @@
       {t('aw.working', { n: n(work.counts.working) })}
       {#if work.counts.prepared}{t('aw.prepared', { n: n(work.counts.prepared) })}{/if}
       {#if work.waiting_second}{t('aw.waiting_second', { n: n(work.waiting_second) })}{/if}
-      {t('aw.done_failed', { done: n(work.counts.done), failed: n(work.counts.failed) })}
-      {#if work.counts.failed}<button class="link" onclick={() => act(api.retryAiWork, t('aw.retry'))}
+      {t('aw.done_low_failed', { done: n(work.counts.done), low: n(work.counts.low_score), failed: n(work.counts.failed) })}
+      {#if work.counts.failed || work.counts.low_score}<button class="link" onclick={() => act(api.retryAiWork, t('aw.retry'))}
           >{t('common.try_again')}</button
         >{/if}
     </p>
@@ -321,6 +321,31 @@
       >
     </div>
     {#if listener.error}<p class="small bad">{listener.error}</p>{/if}
+    <ul class="helpers">
+      {#each work?.this_computer ?? [] as job (job.track_id)}
+        {@const name = job.artist ? `${job.artist} - ${job.title}` : job.title}
+        <li>
+          <span class="light green" role="img" aria-label={t('aw.light_green')} title={t('aw.light_green')}></span>
+          <span class="small">
+            {job.what === 'strip'
+              ? t('aw.main_strip', { song: name })
+              : job.what === 'second'
+                ? t('aw.main_second', { song: name })
+                : t('aw.main_listen', { song: name })}
+          </span>
+        </li>
+      {:else}
+        <li>
+          {#if listener.running}
+            <span class="light yellow" role="img" aria-label={t('aw.light_yellow')} title={t('aw.light_yellow')}></span>
+            <span class="small">{t('aw.main_waiting')}</span>
+          {:else}
+            <span class="light grey" role="img" aria-label={t('aw.light_grey')} title={t('aw.light_grey')}></span>
+            <span class="small">{t('aw.main_not_running')}</span>
+          {/if}
+        </li>
+      {/each}
+    </ul>
     {#if listener.log.length}<pre class="log small">{listener.log.join('\n')}</pre>{/if}
   {/if}
 
@@ -335,7 +360,7 @@
             <strong>{h.name}</strong>
             <span class="small">{shown.text}</span>
             <span class="small muted">
-              {t('aw.h_counts', { done: n(h.done), failed: n(h.failed) })}{#if h.asked_at}
+              {t('aw.h_counts', { done: n(h.done), low: n(h.low), failed: n(h.failed) })}{#if h.asked_at}
                 · {t('aw.h_asked', { when: new Date(h.asked_at).toLocaleTimeString(locale.code) })}{/if}{h.secs_per_minute
                 ? t('aw.per_minute', { n: Math.round(h.secs_per_minute) })
                 : ''}

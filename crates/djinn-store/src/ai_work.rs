@@ -46,6 +46,9 @@ pub struct AiCounts {
     /// Vocals isolated on Main, waiting for a node.
     pub prepared: i64,
     pub done: i64,
+    /// Results under the minimum score (not waiting for a second opinion).
+    pub low_score: i64,
+    /// Songs that failed: an error, or nothing sent back.
     pub failed: i64,
 }
 
@@ -440,7 +443,10 @@ impl Store {
                (SELECT count(*) FROM ai_jobs WHERE status = 'working') AS working,
                (SELECT count(*) FROM ai_jobs WHERE status = 'prepared') AS prepared,
                (SELECT count(*) FROM ai_jobs WHERE status = 'done') AS done,
-               (SELECT count(*) FROM ai_jobs WHERE status = 'failed') AS failed"
+               (SELECT count(*) FROM ai_jobs WHERE status = 'failed' AND second_opinion = 0
+                  AND error LIKE 'scored too low%') AS low_score,
+               (SELECT count(*) FROM ai_jobs WHERE status = 'failed'
+                  AND (error IS NULL OR error NOT LIKE 'scored too low%')) AS failed"
         ))
         .bind(cut)
         .bind(lookups_off)
@@ -535,6 +541,14 @@ mod tests {
             .find(|(k, _)| *k == crate::ProblemKind::NoLyrics)
             .map(|(_, n)| n);
         assert_eq!(missing, Some(1), "only the unsure one still has no lyrics");
+
+        // Unsure again: a low score, counted apart from failures.
+        store
+            .ai_give_up(ids[0], Some("scored too low (70%, under 85%)"))
+            .await
+            .unwrap();
+        let counts = store.ai_counts(true, lease, &[]).await.unwrap();
+        assert_eq!((counts.done, counts.low_score, counts.failed), (1, 1, 0));
     }
 
     #[tokio::test]
