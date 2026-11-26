@@ -18,8 +18,8 @@
   let open = $state<ProblemKind | null>(null)
   let items = $state<ProblemItem[]>([])
   let loading = $state(false)
-  /** The kind whose songs the Quarantine window is open for. */
-  let quarantining = $state<ProblemKind | null>(null)
+  /** The Quarantine window is open. */
+  let quarantining = $state(false)
 
   const shown = (k: ProblemCount) => k.count > 0 && !k.hidden
   const trouble = $derived(summary?.kinds.filter((k) => k.trouble && shown(k)) ?? [])
@@ -279,11 +279,6 @@
           {#if k.kind === 'no_length_header'}
             <button class="small-button" onclick={mp3Again}>{t('prob.read_again')}</button>
           {/if}
-          {#if k.songs}
-            <button class="small-button" title={t('prob.quarantine_title')} onclick={() => (quarantining = k.kind)}
-              >{t('prob.quarantine')}</button
-            >
-          {/if}
           <button class="small-button" onclick={() => setHidden(k.kind, true)}>{t('prob.hide')}</button>
         </div>
       </div>
@@ -291,12 +286,10 @@
   </div>
 {/snippet}
 
-{#if quarantining}
-  {@const kind = quarantining}
+{#if quarantining && summary}
   <QuarantineWindow
-    {kind}
-    label={about(kind).label}
-    onclose={() => (quarantining = null)}
+    problems={summary.kinds.filter((k) => k.songs && k.count > 0)}
+    onclose={() => (quarantining = false)}
     ondone={() => {
       load()
       if (open) show(open, true)
@@ -344,6 +337,9 @@
     {/if}
     <div class="actions">
       <a class="button small-button" href="/api/library/problems.csv" download>{t('prob.csv')}</a>
+      <button class="small-button" title={t('prob.quarantine_title')} onclick={() => (quarantining = true)}
+        >{t('prob.quarantine')}</button
+      >
       <button class="small-button" onclick={checkAgain}>{t('prob.check_again')}</button>
     </div>
   {/if}

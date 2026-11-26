@@ -143,14 +143,16 @@ listeners reported, each with how it changed.
 
 ## Quarantine
 
-**Quarantine...** under a problem's list moves or copies every song it lists
-into another library folder, for example a folder where you fix songs before
-they go back. Each keeps its place under its own library folder, so
+**Quarantine...** (beside **Download as a Spreadsheet**) moves or copies every
+song the problems you tick list into another library folder, for example a
+folder where you fix songs before they go back. Each keeps its place under its own library folder, so
 `Artist/Album/song.mp3` in one library folder becomes `Artist/Album/song.mp3`
 in the other. A problem that lists albums takes every song of each album.
 
 The window asks:
 
+- **Problems to take songs from:** tick one or more (each shows how many it
+  lists). A song under two problems goes once.
 - **Move them** or **Copy them.** Moving takes them out of where they are, so
   it only works from library folders that are **Read and Write** (in the
   Library Editor's **Library Folders** tab); folders left with no songs go to

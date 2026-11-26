@@ -10,7 +10,7 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use axum::extract::{Path as RoutePath, State};
+use axum::extract::State;
 use axum::routing::post;
 use axum::{Json, Router};
 use djinn_store::ProblemKind;
@@ -29,7 +29,7 @@ const MOST_SONGS: usize = 20_000;
 const ITEMS_AT_ONCE: i64 = 1_000;
 
 pub fn router() -> Router<AppState> {
-    Router::new().route("/library/problems/{kind}/quarantine", post(quarantine))
+    Router::new().route("/library/problems/quarantine", post(quarantine))
 }
 
 /// Kinds whose items aren't songs in the library (folders, files DJINN
@@ -50,6 +50,8 @@ pub fn has_songs(kind: ProblemKind) -> bool {
 
 #[derive(Deserialize)]
 struct Quarantine {
+    /// The problem kinds whose songs go.
+    kinds: Vec<String>,
     /// The library folder they go to.
     to: String,
     /// Copy them (else move them).
@@ -73,19 +75,29 @@ async fn quarantine(
     Elevated(user): Elevated,
     device: Device,
     State(state): State<AppState>,
-    RoutePath(kind): RoutePath<String>,
     Json(body): Json<Quarantine>,
 ) -> ApiResult<Json<Answer>> {
-    let kind = ProblemKind::parse(&kind).ok_or_else(ApiError::not_found)?;
-    if !has_songs(kind) {
-        return Err(ApiError::bad_request("these problems aren't songs"));
+    let mut kinds = Vec::new();
+    for name in &body.kinds {
+        let kind = ProblemKind::parse(name)
+            .filter(|k| has_songs(*k))
+            .ok_or_else(|| ApiError::bad_request(format!("{name} isn't a problem with songs")))?;
+        kinds.push(kind);
+    }
+    if kinds.is_empty() {
+        return Err(ApiError::bad_request("choose at least one problem"));
     }
     let roots = crate::folders::library_roots(&state).await?;
     let to_root = PathBuf::from(body.to.trim());
     if !roots.contains(&to_root) {
         return Err(ApiError::bad_request("choose one of the library folders"));
     }
-    let ids = songs_of(&state, kind).await?;
+    let mut ids = Vec::new();
+    for &kind in &kinds {
+        ids.extend(songs_of(&state, kind).await?);
+    }
+    ids.sort_unstable();
+    ids.dedup();
     if ids.len() > MOST_SONGS {
         return Err(ApiError::bad_request(format!(
             "that's over {MOST_SONGS} songs; fix some another way first"
@@ -155,7 +167,11 @@ async fn quarantine(
         },
         &format!(
             "{done} files ({}) to {}, approval {batch}",
-            kind.as_str(),
+            kinds
+                .iter()
+                .map(|k| k.as_str())
+                .collect::<Vec<_>>()
+                .join(", "),
             to_root.display()
         ),
     )
@@ -344,13 +360,23 @@ mod tests {
             }])
             .await
             .unwrap();
-        let url = "/api/library/problems/no_album/quarantine";
+        let url = "/api/library/problems/quarantine";
         let ask = |to: &Path, copy: bool, preview: bool| {
             format!(
-                r#"{{"to":{},"copy":{copy},"preview":{preview}}}"#,
+                r#"{{"kinds":["no_album"],"to":{},"copy":{copy},"preview":{preview}}}"#,
                 serde_json::Value::from(to.to_string_lossy().into_owned())
             )
         };
+
+        // Only problems that are songs.
+        let (status, _) = send(
+            &state,
+            url,
+            r#"{"kinds":["vanished"],"to":"/x","preview":true}"#,
+            &admin,
+        )
+        .await;
+        assert_eq!(status, 400);
 
         // A read only folder can't be moved out of.
         let (status, plan) = send(&state, url, &ask(&ready, false, true), &admin).await;

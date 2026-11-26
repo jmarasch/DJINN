@@ -5,14 +5,24 @@
   import type { Snippet } from 'svelte'
   import Icon from './Icon.svelte'
 
-  let { title, onclose, children }: { title: string; onclose: () => void; children: Snippet } =
-    $props()
+  let {
+    title,
+    onclose,
+    children,
+    above = false,
+  }: {
+    title: string
+    onclose: () => void
+    children: Snippet
+    /** Over everything, windows included (asking to unlock can come from a window). */
+    above?: boolean
+  } = $props()
 </script>
 
 <svelte:window onkeydown={(e) => e.key === 'Escape' && onclose()} />
 
-<div class="backdrop" role="presentation" onclick={onclose}></div>
-<div class="sheet" role="dialog" aria-modal="true" aria-label={title}>
+<div class="backdrop" class:above role="presentation" onclick={onclose}></div>
+<div class="sheet" class:above role="dialog" aria-modal="true" aria-label={title}>
   <header>
     <h2>{title}</h2>
     <button class="close" aria-label={t('common.close')} onclick={onclose}><Icon name="close" /></button>
@@ -26,6 +36,14 @@
     inset: 0;
     z-index: 30;
     background: rgb(0 0 0 / 0.5);
+  }
+
+  .backdrop.above {
+    z-index: 60;
+  }
+
+  .sheet.above {
+    z-index: 61;
   }
 
   .sheet {
