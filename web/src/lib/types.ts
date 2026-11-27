@@ -1966,7 +1966,7 @@ export interface NodeAudio {
   /** Plays straight through instead of correcting itself against Main. */
   free_run?: boolean
   /** What a screen plugged into the node shows: 'status', 'off', or pages
-   * to try in order ('lyrics', 'visual', 'tv') joined by commas; '' (or
+   * to try in order ('lyrics', 'visual', 'visual_lyrics', 'tv') joined by commas; '' (or
    * missing) follows its room's display setting. */
   screen?: string
   /** The node's own visualizers, or null to follow the house's. */

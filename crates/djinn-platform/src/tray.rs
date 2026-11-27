@@ -65,6 +65,7 @@ pub const SCREEN_CHOICES: &[(&str, &str)] = &[
     ("lyrics,tv", "Lyrics, else TV page"),
     ("lyrics,visual,tv", "Lyrics, else visualizer, else TV page"),
     ("visual,tv", "Visualizer, else TV page"),
+    ("visual_lyrics,tv", "Visualizer with lyrics, else TV page"),
     ("status", "Node status"),
     ("off", "Off (blank)"),
 ];

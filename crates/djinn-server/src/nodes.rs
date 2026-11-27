@@ -290,8 +290,9 @@ fn default_cache_ahead() -> i64 {
 
 /// Pages a node's screen can show, tried in the order its setting gives:
 /// timed lyrics while the song has them, the visualizer while the node's
-/// speaker is playing, and Main's TV page.
-const SCREEN_PAGES: &[&str] = &["lyrics", "visual", "tv"];
+/// speaker is playing (`visual_lyrics`: with the song's timed lyrics in a
+/// box on the left, when it has them), and Main's TV page.
+const SCREEN_PAGES: &[&str] = &["lyrics", "visual", "visual_lyrics", "tv"];
 
 /// Setting (per room, `room_key`): what the room's screens show unless a
 /// node has its own choice. The TV page when unset.
@@ -645,7 +646,7 @@ fn screen_url(state: &AppState, node: &Node, shown: &str) -> Option<String> {
         node.room_id,
         node.id
     );
-    if order.len() > 1 || order.contains(&"visual") {
+    if order.len() > 1 || order.contains(&"visual") || order.contains(&"visual_lyrics") {
         url.push_str(&format!("&order={}", order.join(",")));
     }
     Some(url)
@@ -1488,6 +1489,7 @@ mod tests {
             "off",
             "lyrics,visual,tv",
             "visual",
+            "visual_lyrics,tv",
         ] {
             assert!(valid_screen(good), "{good}");
         }

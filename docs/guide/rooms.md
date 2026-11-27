@@ -72,7 +72,8 @@ than the rest holds the others back instead (they show "held back").
 
 **Display Settings** chooses what **Every Screen in This Room** shows: the
 node status page, nothing, or pages tried in order, like lyrics when the song
-has timed lyrics, else the visualizer, else the TV page. A node can choose its
+has timed lyrics, else the visualizer (or the visualizer with lyrics), else
+the TV page. A node can choose its
 own instead. See [Screens and visualizers](screens-and-visualizers.md).
 
 **Open This Room's Pages** has links to the room's TV page, lyrics page and

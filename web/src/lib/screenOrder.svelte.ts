@@ -1,16 +1,17 @@
 // A node's screen tries pages in the order its settings give (`?order=`,
 // from Main's Admin > Nodes): timed lyrics while the song has them, the
-// visualizer while the node's speaker is playing, and the TV page. The
+// visualizer while the node's speaker is playing (or the visualizer with the
+// song's timed lyrics in a box on the left), and the TV page. The
 // node's own page holds this one in a frame and draws the visualizer under
 // it, so this page tells it what it shows and hears whether there's sound.
 
-export type ScreenPage = 'lyrics' | 'visual' | 'tv'
+export type ScreenPage = 'lyrics' | 'visual' | 'visual_lyrics' | 'tv'
 
 const params = new URLSearchParams(location.search)
 /** The pages to try, or empty when this isn't a node's screen with an order. */
 export const order: ScreenPage[] = (params.get('order') ?? '')
   .split(',')
-  .filter((p): p is ScreenPage => p === 'lyrics' || p === 'visual' || p === 'tv')
+  .filter((p): p is ScreenPage => p === 'lyrics' || p === 'visual' || p === 'visual_lyrics' || p === 'tv')
 
 const framed = window.parent !== window
 /** Shown on a node's own screen, where there's nowhere else to go. */
@@ -51,7 +52,7 @@ export function choose(song: { playing: boolean; timed: boolean }): ScreenPage {
   for (const page of order) {
     if (page === 'tv') return page
     if (page === 'lyrics' && song.playing && song.timed) return page
-    if (page === 'visual' && song.playing && visualReady()) return page
+    if ((page === 'visual' || page === 'visual_lyrics') && song.playing && visualReady()) return page
   }
   return order[0] ?? 'tv'
 }
@@ -60,7 +61,9 @@ export function choose(song: { playing: boolean; timed: boolean }): ScreenPage {
  * when it's wanted, and the song playing, so its visualizers can take turns
  * with each song. */
 export function announce(page: ScreenPage, song: number | null) {
-  if (framed) window.parent.postMessage({ djinn: 'screen-mode', mode: page, song }, '*')
+  // The node draws the visual for both visualizer pages.
+  const mode = page === 'visual_lyrics' ? 'visual' : page
+  if (framed) window.parent.postMessage({ djinn: 'screen-mode', mode, song }, '*')
 }
 
 /** The same screen as another page (`/tv` or `/lyrics`), keeping its settings. */

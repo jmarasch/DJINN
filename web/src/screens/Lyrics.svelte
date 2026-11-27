@@ -104,9 +104,10 @@
   const page = $derived<ScreenPage>(
     order.length && settled ? choose({ playing: !!current, timed: hasTimed }) : (order[0] ?? 'lyrics'),
   )
-  const visual = $derived(page === 'visual')
-  /** The lyrics box beside the visual: only for timed words. */
-  const beside = $derived(visual && sideLyrics && !!timed?.lines?.length)
+  const visual = $derived(page === 'visual' || page === 'visual_lyrics')
+  /** The lyrics box beside the visual: only for timed words. A screen set to
+   * the visualizer with lyrics always has it, with nobody there to click. */
+  const beside = $derived(visual && (sideLyrics || page === 'visual_lyrics') && !!timed?.lines?.length)
 
   $effect(() => {
     if (!settled) return
@@ -304,7 +305,7 @@
     {/if}
   {/if}
   <div class="tools">
-    {#if visual}
+    {#if visual && page !== 'visual_lyrics'}
       <button onclick={toggleSide} aria-pressed={sideLyrics} title={t('lp.beside_title')}
         >{sideLyrics ? t('lp.beside_off') : t('lp.beside_on')}</button
       >
