@@ -214,8 +214,9 @@ library. They wait in DJINN's own folder until you approve or throw them away.
    the files lack from the folder names (a year in the folder name and CD1
    disc folders are read too), and track numbers from file names like
    `01 song.flac`.
-3. Each file is checked to make sure it plays. The imports are listed on the
-   left; choose one.
+3. Each file is checked to make sure it plays. A window shows how far it has
+   got (**Hide** closes the window and the work carries on). The imports are
+   listed on the left; choose one.
 4. **Opening an import** looks it up on Deezer once. When Deezer knows the
    album exactly (same number of songs, every song on a track, album and
    artist names agreeing), its tags are filled in as highlighted changes, and
@@ -227,7 +228,8 @@ library. They wait in DJINN's own folder until you approve or throw them away.
    in the library folder you chose under **Into**, named from its tags (the
    **Placed as** pattern, where a `/` makes folders).
 7. **Approve Import** writes the changes and moves the songs into the
-   library. The editor stays on Import with the next album. When every import
+   library, with a window showing it at work (approving several picked
+   imports counts the albums). The editor stays on Import with the next album. When every import
    is in, it says "Every import is in the library."
 
 **Take Picked Out** removes songs from an import (their files are deleted),

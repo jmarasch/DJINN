@@ -3665,5 +3665,16 @@
   "guide.load_failed": "No se pudo cargar esa página de la guía",
   "guide.english_only": "Por ahora la guía solo está en inglés.",
   "guide.search": "Buscar en la guía",
-  "guide.no_results": "Nada en la guía coincide con eso."
+  "guide.no_results": "Nada en la guía coincide con eso.",
+  "ip.bring_title": "Trayendo canciones",
+  "ip.filling": "Completando etiquetas con los nombres de las carpetas...",
+  "ip.opening": "Abriendo la importación...",
+  "ip.add_title": "Añadiendo a la biblioteca",
+  "ip.writing": "Escribiendo los cambios de etiquetas...",
+  "ip.moving": {"one": "Moviendo {n} canción a la biblioteca...", "other": "Moviendo {n} canciones a la biblioteca..."},
+  "ip.album": "Álbum {done} de {of}...",
+  "ip.count": "{done} de {of}",
+  "ip.note": "Sigue trabajando aunque ocultes esta ventana.",
+  "ip.hide": "Ocultar",
+  "ip.uploading": "Copiando los archivos de canciones"
 }

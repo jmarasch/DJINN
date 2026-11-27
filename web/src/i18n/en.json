@@ -3665,5 +3665,16 @@
   "guide.load_failed": "Could not load that page of the guide",
   "guide.english_only": "The guide is in English for now.",
   "guide.search": "Search the guide",
-  "guide.no_results": "Nothing in the guide matches that."
+  "guide.no_results": "Nothing in the guide matches that.",
+  "ip.bring_title": "Bringing In Songs",
+  "ip.filling": "Filling in tags from the folder names...",
+  "ip.opening": "Opening the import...",
+  "ip.add_title": "Adding to the Library",
+  "ip.writing": "Writing the tag changes...",
+  "ip.moving": {"one": "Moving {n} song into the library...", "other": "Moving {n} songs into the library..."},
+  "ip.album": "Album {done} of {of}...",
+  "ip.count": "{done} of {of}",
+  "ip.note": "It keeps going if you hide this window.",
+  "ip.hide": "Hide",
+  "ip.uploading": "Copying the song files in"
 }
