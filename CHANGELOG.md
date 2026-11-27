@@ -1,5 +1,53 @@
 # Changelog
 
+## 2026.11.27 (November 27, 2026)
+
+### Library editor
+
+- **Library Problems lives in the editor's window**, as its last tab, behind the same lock as the tools that fix what it lists. An open list's own tools sit at the top under its description.
+- **Quarantine:** move or copy every song a problem lists into another library folder, each keeping its place, with a preview of the files, their size and the room there first. Undo is in the editor's history.
+- **Fix MP3 Lengths** checks every MP3 in the folder or search, says how many need a header, asks once, then fixes them with a progress bar and a Stop button. The fixed files leave Library Problems at once.
+- **Imports are looked up on Deezer in the background.** Exact matches show green, Pick Matches picks them, and one button approves them all. Bringing songs in and approving them now show a progress window.
+- Albums with discs tagged "Album CD 1", "Album CD 2" open in Album layout as one album.
+- Moves and Quarantine no longer stop with an internal error when an old entry is still at the place a song is going.
+
+### Screens and visualizers
+
+- **Visualizer with lyrics:** a fourth page a node's or room's screen can show, the visualizer with the song's timed lyrics in a box on the left. The Visualizer page on the Playing tab has a **Show Lyrics** button for the same thing.
+
+### Genres
+
+- **DJINN's own genre web:** a family tree of 818 genres with what each grew out of, is close to and reacted against. Admin > Genres shows it as a family tree and as a map.
+- **The Library's Genres tab is a genre map** in the party app, web GO and the Android app: families first, then any genre in the middle with its parent, kinds and links around it.
+- **Genre containers** group by the family tree, from broad families down to their branches.
+
+### AI lyrics
+
+- **A second opinion:** when a node isn't sure of a song, this computer's bigger model listens to it before it's given up.
+- **Instrumentals** are marked as such, shown with their own mark in song lists, and no longer count as missing lyrics.
+- With vocal isolation on, this computer separates vocals and listens at once, keeps songs ready for every free node, and lets nodes go first.
+- The Lyrics page shows this computer's work and every helping node's with status lights and a log. The counts sit on lines of their own.
+- Fixed nodes failing every song with a PyAV 19 error, and a node's screen holding AI work while nothing played.
+
+### Listening
+
+- **Wild play in GO:** random songs from your whole library, more often ones you like, leaving out what you heard lately. Web GO and Android.
+- **Artist pages** sort albums by Release (the year the album first came out, from MusicBrainz), Added or A to Z; tap again to reverse.
+- A song with no disc number sorts with disc 1.
+- Nodes keep their own room's volume and equalizer.
+
+### Admin
+
+- **Stats** moves under Overview, with the Request Log as its second tab. Music Folders lists each folder on one line again.
+- **Full tracing in the log is timed** and goes back to warnings and errors on its own.
+
+### Fixes and security
+
+- A stolen admin session can no longer get around the protected areas: making admins, changing another admin, backups, restores and resets need them unlocked.
+- No console windows flashing up on Windows from the AI page.
+- Counts over 999 no longer show as NaN.
+- Dependency update for RUSTSEC-2026-0592.
+
 ## 2026.11.19 (November 19, 2026)
 
 ### Library editor
