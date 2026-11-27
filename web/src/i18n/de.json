@@ -1803,6 +1803,7 @@
   "ni.h_ago": "vor {n} Std.",
   "ni.page_lyrics": "Liedtexte mit Zeiten",
   "ni.page_visual": "Visualisierung",
+  "ni.page_visual_lyrics": "Visualisierung mit Liedtext",
   "ni.page_tv": "TV-Seite",
   "ni.status": "Der Status des Knotens",
   "ni.blank": "Nichts (leer)",
@@ -1969,6 +1970,7 @@
   "nsp.eq_note": "Formt nur die Lautsprecher dieses Knotens, zusätzlich zum Party-Mix.",
   "nss.lyrics_note": "solange der Song Liedtexte mit Zeiten hat",
   "nss.visual_note": "von diesem Knoten aus dem gezeichnet, was sein Lautsprecher spielt",
+  "nss.visual_lyrics_note": "die Visualisierung, mit dem Liedtext mit Zeiten links, wenn der Song einen hat",
   "nss.tv_note": "was läuft und die Warteschlange; geht immer",
   "nss.on_screen": "Auf einem Bildschirm an dieser Box",
   "nss.room": "Was der Raum sagt (Verwaltung > Räume > Anzeige-Einstellungen)",
@@ -3663,5 +3665,16 @@
   "guide.load_failed": "Diese Seite des Handbuchs konnte nicht geladen werden",
   "guide.english_only": "Das Handbuch gibt es vorerst nur auf Englisch.",
   "guide.search": "Im Handbuch suchen",
-  "guide.no_results": "Nichts im Handbuch passt dazu."
+  "guide.no_results": "Nichts im Handbuch passt dazu.",
+  "ip.bring_title": "Songs werden hereingeholt",
+  "ip.filling": "Tags werden aus den Ordnernamen ergänzt...",
+  "ip.opening": "Der Import wird geöffnet...",
+  "ip.add_title": "Zur Bibliothek hinzufügen",
+  "ip.writing": "Die Tag-Änderungen werden geschrieben...",
+  "ip.moving": {"one": "{n} Song wird in die Bibliothek verschoben...", "other": "{n} Songs werden in die Bibliothek verschoben..."},
+  "ip.album": "Album {done} von {of}...",
+  "ip.count": "{done} von {of}",
+  "ip.note": "Es läuft weiter, auch wenn du dieses Fenster ausblendest.",
+  "ip.hide": "Ausblenden",
+  "ip.uploading": "Die Songdateien werden kopiert"
 }

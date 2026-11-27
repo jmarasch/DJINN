@@ -16,6 +16,7 @@
   import AlbumLayout from './AlbumLayout.svelte'
   import Art from './Art.svelte'
   import CoverWindow from './CoverWindow.svelte'
+  import ImportProgress from './ImportProgress.svelte'
   import Mp3FixWindow from './Mp3FixWindow.svelte'
   import { COMMON_TAGS, MORE_TAGS, NUMBER_TAGS, tagLabel } from './editorTags'
   import { autoMatch } from './autoMatch'
@@ -61,6 +62,13 @@
   let imports = $state<EditorImport[]>([])
   /** Files on their way in: done of all, in how many imports. */
   let uploading = $state<{ done: number; of: number; imports: number } | null>(null)
+  /** Import work under way, shown in a window (`ImportProgress`) until it ends. */
+  let work = $state<{ title: string; line: string; done?: number | null; of?: number | null } | null>(null)
+  /** The window was hidden; the work goes on. */
+  let workHidden = $state(false)
+  function startWork(title: string, line: string, done: number | null = null, of: number | null = null) {
+    work = { title, line, done, of }
+  }
   let importInput = $state<HTMLInputElement | null>(null)
   let importFolderInput = $state<HTMLInputElement | null>(null)
   /** Where Add to the library puts an import's files. */
@@ -542,6 +550,15 @@
       groups.set(info.group, group)
     }
     uploading = { done: 0, of: files.length, imports: groups.size }
+    workHidden = false
+    const bringing = () =>
+      startWork(
+        t('ip.bring_title'),
+        t('ip.uploading') + (groups.size > 1 ? t('ed.n_albums', { n: groups.size }) : ''),
+        uploading?.done ?? 0,
+        files.length,
+      )
+    bringing()
     const problems: string[] = []
     const batches: number[] = []
     let filled = 0
@@ -557,10 +574,12 @@
             problems.push(`${file.name}: ${e instanceof Error ? e.message : t('ed.upload_failed')}`)
           }
           uploading = { ...uploading, done: uploading.done + 1 }
+          bringing()
         }
         if (!placed.size) continue
         batches.push(batch)
         if (fromFolder && fillFromFolders && layout !== 'together') {
+          if (work) work = { ...work, line: t('ip.filling') }
           const rows = (await api.editorImportSongs(batch)).songs
           const changes: EditorChange[] = []
           for (const row of rows) {
@@ -596,6 +615,7 @@
       toast(e instanceof Error ? e.message : t('ed.bring_failed'), true)
     }
     uploading = null
+    if (work) work = { title: work.title, line: t('ip.opening') }
     await loadImports()
     const done = files.length - problems.length
     toast(
@@ -606,10 +626,14 @@
         (problems.length ? t('ed.couldnt', { n: problems.length, first: problems[0] }) : ''),
       problems.length > 0,
     )
-    if (batches.length) {
-      pending = {}
-      importing = null
-      await openImport(batches[0])
+    try {
+      if (batches.length) {
+        pending = {}
+        importing = null
+        await openImport(batches[0])
+      }
+    } finally {
+      work = null
     }
     void lookUpAll()
   }
@@ -705,13 +729,16 @@
     if (importing === null || !addFolder || busy) return
     const batch = importing
     busy = true
+    workHidden = false
     try {
       const changes = changeList()
       if (changes.length) {
+        startWork(t('ip.add_title'), t('ip.writing'))
         await unlocked(() => api.editorImportApply(changes))
         pending = {}
       }
       const ids = pickedSongs.map((s) => s.id)
+      startWork(t('ip.add_title'), t('ip.moving', { n: n(going) }))
       const done = await unlocked(() => api.editorImportAdd(batch, addFolder, addPattern, false, ids))
       const added = done.files.filter((f) => !f.problem)
       const failed = done.files.filter((f) => f.problem)
@@ -742,6 +769,7 @@
       toast(e instanceof Error ? e.message : t('ed.add_failed'), true)
     } finally {
       busy = false
+      work = null
     }
   }
 
@@ -851,11 +879,13 @@
     const current = importing
     if (current !== null && batches.includes(current)) waitingFor[current] = pending
     busy = true
+    workHidden = false
     let albums = 0
     let added = 0
     const problems: string[] = []
     try {
-      for (const batch of batches) {
+      for (const [at, batch] of batches.entries()) {
+        startWork(t('ip.add_title'), t('ip.album', { done: at + 1, of: batches.length }), at, batches.length)
         try {
           const changes: EditorChange[] = []
           for (const [id, fields] of Object.entries(waitingFor[batch] ?? {})) {
@@ -901,6 +931,7 @@
       }
     } finally {
       busy = false
+      work = null
     }
   }
 
@@ -2209,6 +2240,9 @@
           {t('ed.approve_import', { n: going })}
         </button>
       </div>
+    {/if}
+    {#if work && !workHidden}
+      <ImportProgress title={work.title} line={work.line} done={work.done} of={work.of} onhide={() => (workHidden = true)} />
     {/if}
     {#if fixingMp3}
       <Mp3FixWindow

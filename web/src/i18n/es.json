@@ -1803,6 +1803,7 @@
   "ni.h_ago": "hace {n} h",
   "ni.page_lyrics": "Letras sincronizadas",
   "ni.page_visual": "Visualizador",
+  "ni.page_visual_lyrics": "Visualizador con letra",
   "ni.page_tv": "Página de TV",
   "ni.status": "El estado del nodo",
   "ni.blank": "Nada (en blanco)",
@@ -1969,6 +1970,7 @@
   "nsp.eq_note": "Solo ajusta los altavoces de este nodo, encima de la mezcla de la fiesta.",
   "nss.lyrics_note": "mientras la canción tenga letra sincronizada",
   "nss.visual_note": "dibujado por este nodo a partir de lo que suena en su altavoz",
+  "nss.visual_lyrics_note": "el visualizador, con la letra sincronizada a la izquierda cuando la canción la tiene",
   "nss.tv_note": "lo que suena y la cola; siempre funciona",
   "nss.on_screen": "En una pantalla conectada a este equipo",
   "nss.room": "Lo que diga la sala (Administración > Salas > Ajustes de pantalla)",
@@ -3663,5 +3665,16 @@
   "guide.load_failed": "No se pudo cargar esa página de la guía",
   "guide.english_only": "Por ahora la guía solo está en inglés.",
   "guide.search": "Buscar en la guía",
-  "guide.no_results": "Nada en la guía coincide con eso."
+  "guide.no_results": "Nada en la guía coincide con eso.",
+  "ip.bring_title": "Trayendo canciones",
+  "ip.filling": "Completando etiquetas con los nombres de las carpetas...",
+  "ip.opening": "Abriendo la importación...",
+  "ip.add_title": "Añadiendo a la biblioteca",
+  "ip.writing": "Escribiendo los cambios de etiquetas...",
+  "ip.moving": {"one": "Moviendo {n} canción a la biblioteca...", "other": "Moviendo {n} canciones a la biblioteca..."},
+  "ip.album": "Álbum {done} de {of}...",
+  "ip.count": "{done} de {of}",
+  "ip.note": "Sigue trabajando aunque ocultes esta ventana.",
+  "ip.hide": "Ocultar",
+  "ip.uploading": "Copiando los archivos de canciones"
 }

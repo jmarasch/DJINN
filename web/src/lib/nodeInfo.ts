@@ -23,7 +23,7 @@ export function seen(ms: number | null): string {
 
 export const online = (node: HouseNode) => !!node.last_seen && Date.now() - node.last_seen < 30_000
 
-const PAGES = ['lyrics', 'visual', 'tv']
+const PAGES = ['lyrics', 'visual', 'visual_lyrics', 'tv']
 
 /** A screen setting in a few words. */
 export function screenName(screen: string | undefined): string {

@@ -99,7 +99,10 @@ it shows:
 - **Lyrics, visualizer or TV page, in an order:** the screen shows the first
   of these that can show now, and switches as songs change. For example
   lyrics while the song has timed lyrics, else the visualizer, else the TV
-  page. The TV page always works.
+  page. The TV page always works. **Visualizer with lyrics** is the
+  visualizer with the song's timed lyrics in a box on the left, shown on its
+  own with nobody needed to click anything; a song without timed lyrics gets
+  the visualizer alone.
 - **This node's status**, or **Nothing (blank screen)**.
 
 Set it for each node in its settings (**Speaker and Screen**), on the node's

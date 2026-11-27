@@ -29,10 +29,11 @@
     onchange: (screen: string, visual: Visuals | null) => void
   } = $props()
 
-  type Page = 'lyrics' | 'visual' | 'tv'
+  type Page = 'lyrics' | 'visual' | 'visual_lyrics' | 'tv'
   const PAGES: { page: Page; label: string; note: string }[] = $derived([
     { page: 'lyrics', label: t('ni.page_lyrics'), note: t('nss.lyrics_note') },
     { page: 'visual', label: t('ni.page_visual'), note: t('nss.visual_note') },
+    { page: 'visual_lyrics', label: t('ni.page_visual_lyrics'), note: t('nss.visual_lyrics_note') },
     { page: 'tv', label: t('ni.page_tv'), note: t('nss.tv_note') },
   ])
   const following = $derived(canFollow && screen === '')
@@ -102,7 +103,7 @@
         </li>
       {/each}
     </ol>
-    {#if order.includes('visual') && !noVisual}
+    {#if (order.includes('visual') || order.includes('visual_lyrics')) && !noVisual}
       <label class="check">
         <input
           type="checkbox"

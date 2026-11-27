@@ -41,7 +41,7 @@ pub struct Node {
     pub free_run: bool,
     /// Empty to follow its room's display setting. Otherwise its own: what a
     /// screen plugged into it shows: "status", "off", or the pages to
-    /// try in order ("lyrics", "visual", "tv"), joined by commas.
+    /// try in order ("lyrics", "visual", "visual_lyrics", "tv"), joined by commas.
     pub screen: String,
     /// Its own visualizer settings as JSON, or empty to follow the house's.
     pub visual: String,
